@@ -911,6 +911,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.permissions",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("为什么不能播放 Apple Music？", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("check desktop permissions", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.permissions",

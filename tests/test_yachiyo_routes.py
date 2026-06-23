@@ -2728,6 +2728,134 @@ async def test_yachiyo_task_route_executes_desktop_permission_diagnosis_without_
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-music-permission-diagnosis.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-music-permission-diagnosis.db",
+        workspace_dir=tmp_path / "agent-runtime-route-music-permission-diagnosis",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-music-permission-diagnosis")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    permission_calls: list[bool] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("music permission diagnosis public task should not call model")
+        ),
+    )
+
+    def fake_missing_by_capability(*, use_cache: bool = True) -> dict[str, list[str]]:
+        permission_calls.append(use_cache)
+        return {"media_control": ["music_app", "automation"]}
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        fake_missing_by_capability,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="为什么不能播放 Apple Music？",
+                conversation_id="chat-main-music-permission-diagnosis",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-music-permission-diagnosis-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-music-permission-diagnosis", limit=10)
+            if message.role == "assistant"
+        )
+        event_types = [event["event_type"] for event in events["events"]]
+        recovery_event = next(
+            event
+            for event in events["events"]
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+        tool_call = started["tool_calls"][-1]
+
+        assert permission_calls == [True]
+        assert started["status"] == "completed"
+        assert "桌面执行权限还缺少：music_app, automation。" in started["summary"]
+        assert "受影响工具：media.apple_music_play, media.apple_music_control。" in started["summary"]
+        assert "可直接打开：打开 Apple Music、打开自动化权限。" in started["summary"]
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert tool_call["tool_name"] == "desktop.permissions"
+        assert tool_call["status"] == "completed"
+        assert tool_call["output_preview"]["permission_error"] is True
+        assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
+        assert tool_call["output_preview"]["affected_tools"] == [
+            "media.apple_music_play",
+            "media.apple_music_control",
+        ]
+        assert tool_call["output_preview"]["recovery_actions"] == [
+            {
+                "label": "打开 Apple Music",
+                "tool": "app.open",
+                "input": {"app_name": "Music"},
+                "permission_target": "music_app",
+                "risk_level": "low",
+            },
+            {
+                "label": "打开自动化权限",
+                "tool": "app.open",
+                "input": {"app_name": "自动化权限"},
+                "permission_target": "automation",
+                "risk_level": "low",
+            },
+        ]
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.permissions"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert recovery_event["payload"]["permission_targets"] == ["music_app", "automation"]
+        assert recovery_event["payload"]["affected_tools"] == [
+            "media.apple_music_play",
+            "media.apple_music_control",
+            "desktop.permissions",
+        ]
+        assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_screen_capture_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
