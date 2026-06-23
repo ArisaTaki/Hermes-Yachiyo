@@ -576,6 +576,49 @@ def test_app_open_success_records_launch_verification(monkeypatch) -> None:
     assert calls[0][0] == ["open", "-a", "Google Chrome"]
 
 
+def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:
+    open_calls = []
+
+    def fake_run(command, **kwargs):
+        open_calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    osascript_calls = []
+
+    def fake_osascript(script, args=None):
+        osascript_calls.append(args)
+        if len(osascript_calls) == 1:
+            return {
+                "ok": False,
+                "action": "osascript",
+                "summary": "osascript failed",
+                "error": "Not authorized to send Apple events to Slack.",
+                "permission_error": True,
+                "fallback_used": False,
+            }
+        return {"ok": True, "stdout": "running", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_focus("Slack")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.focus"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is True
+    assert result["fallback_result"]["action"] == "app.open"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "launch_verified": True,
+        "launch_status": "running",
+        "focus_fallback": "app.open",
+    }
+    assert open_calls[0][0] == ["open", "-a", "Slack"]
+    assert osascript_calls == [["Slack"], ["Slack"]]
+
+
 def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(

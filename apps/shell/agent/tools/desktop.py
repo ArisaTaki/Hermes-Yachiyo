@@ -113,10 +113,29 @@ def app_focus(app_name: str) -> dict[str, Any]:
         [clean_name],
     )
     if not result["ok"]:
-        return _with_permission_metadata(
+        fallback = app_open(clean_name)
+        if fallback.get("ok"):
+            fallback_data = fallback.get("data") if isinstance(fallback.get("data"), dict) else {}
+            return {
+                "ok": True,
+                "action": "app.focus",
+                "summary": f"Focused {clean_name} via app.open fallback",
+                "data": {
+                    "app_name": clean_name,
+                    **fallback_data,
+                    "focus_fallback": "app.open",
+                },
+                "permission_error": False,
+                "fallback_used": True,
+                "fallback_result": fallback,
+            }
+        payload = _with_permission_metadata(
             "app.focus",
             {**result, "action": "app.focus", "summary": "app.focus failed"},
         )
+        payload["fallback_used"] = bool(fallback.get("ok"))
+        payload["fallback_result"] = fallback
+        return payload
     return {
         "ok": True,
         "action": "app.focus",
