@@ -1443,10 +1443,10 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         return {
             "ok": True,
             "action": "desktop.type_into_ui_element",
-            "summary": "Typed into foreground UI element: Address",
+            "summary": "Typed into foreground UI element: Search",
             "data": {
                 "target": target,
-                "matched_label": "Address",
+                "matched_label": "Search",
                 "role_filter": role_filter,
                 "character_count": len(text),
             },
@@ -1459,7 +1459,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         fake_type_into_ui_element,
     )
     try:
-        sent = ChatAPI(app_runtime).send_message("打开 Chrome 并在地址栏输入 github.com")
+        sent = ChatAPI(app_runtime).send_message("打开 Chrome 并在搜索框输入 github.com")
         waiting_task = state.get_task(sent["task_id"])
         waiting_message = session.get_assistant_message_for_task(sent["task_id"])
         waiting_run = service.get_run(sent["run_id"])
@@ -1474,7 +1474,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         assert waiting_run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
         assert waiting_run["pending_approval"]["input_preview"] == {
             "app_name": "Google Chrome",
-            "target": "地址",
+            "target": "搜索",
             "text": "github.com",
             "role_filter": "text",
             "limit": 80,
@@ -1492,11 +1492,11 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         ]
 
         assert approved["status"] == "completed"
-        assert approved["summary"] == "已打开 Google Chrome 并在前台控件 Address 输入文字（10 个字符）。"
+        assert approved["summary"] == "已打开 Google Chrome 并在前台控件 Search 输入文字（10 个字符）。"
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "地址", "github.com", "text", 80),
+            ("type_into_ui", "搜索", "github.com", "text", 80),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -6046,11 +6046,11 @@ async def test_yachiyo_task_route_approves_browser_interaction_intent_without_mo
             "apps.shell.agent.tools.desktop.type_into_ui_element",
         ),
         (
-            "打开 Chrome 并在地址栏输入 github.com",
+            "打开 Chrome 并在搜索框输入 github.com",
             "app.open_and_type_into_ui_element",
             {
                 "app_name": "Google Chrome",
-                "target": "地址",
+                "target": "搜索",
                 "text": "github.com",
                 "role_filter": "text",
                 "limit": 80,

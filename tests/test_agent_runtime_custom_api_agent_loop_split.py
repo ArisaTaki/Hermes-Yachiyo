@@ -806,6 +806,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request(
+        "open Chrome and type github.com into address bar",
+        allowed_tools,
+    ) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request(
+        "open Chrome and type github.com and press enter",
+        allowed_tools,
+    ) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("打开浏览器并访问 GitHub", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("用浏览器打开 Apple Music", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1085,14 +1101,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开 Chrome 并在地址栏输入 github.com", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open_and_type_into_ui_element",
-        "input": {
-            "app_name": "Google Chrome",
-            "target": "地址",
-            "text": "github.com",
-            "role_filter": "text",
-            "limit": 80,
-        },
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并输入 github.com 再回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("切到 Slack 并在消息框输入 hello", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1277,13 +1292,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_type_text",
-            "input": {"app_name": "Google Chrome", "text": "github.com"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
         },
     ]
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 github.com，再按回车", allowed_tools) == [
@@ -1344,6 +1354,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_type_text",
             "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("open Finder and search Downloads", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
         },
     ]
     assert daily_desktop_intent_tool_requests("看一下屏幕，然后点击 120 240", allowed_tools) == [
@@ -1437,14 +1459,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome，然后在地址栏输入 github.com", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_type_into_ui_element",
-            "input": {
-                "app_name": "Google Chrome",
-                "target": "地址",
-                "text": "github.com",
-                "role_filter": "text",
-                "limit": 80,
-            },
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
         }
     ]
     assert daily_desktop_intent_tool_requests("打开 Chrome 并在搜索框输入 yachiyo 并搜索", allowed_tools) == [

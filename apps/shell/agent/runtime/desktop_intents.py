@@ -240,6 +240,9 @@ def daily_desktop_intent_tool_requests(
     """Return structured desktop tool requests for clear daily Chat intents."""
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
+    address_bar_url = _browser_address_bar_url(context)
+    if address_bar_url and "browser.open_url" in allowed:
+        return [_request("browser.open_url", {"url": address_bar_url})]
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
@@ -520,7 +523,8 @@ def _split_daily_desktop_sequence(text: str) -> list[str]:
     )
     parts = re.split(
         r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|"
-        r"\s+and\s+(?=(?:press|type|enter|click|scroll|send|submit|confirm|paste|copy)\b)|"
+        r"\s+and\s+(?=(?:press|type|enter|click|scroll|send|submit|confirm|"
+        r"paste|copy|search|find|look\s+up)\b)|"
         r"(?:然后|接着|之后|随后|并且|并)\s*)",
         protected_text,
         flags=re.IGNORECASE,
@@ -1179,8 +1183,75 @@ def _browser_composite_open_url(text: str) -> str:
     return ""
 
 
+def _browser_address_bar_url(text: str) -> str:
+    browser_name = (
+        r"(?:浏览器|chrome|google\s*chrome|谷歌(?:浏览器)?|safari|firefox|火狐(?:浏览器)?|"
+        r"edge(?:浏览器)?|microsoft\s*edge|arc(?:浏览器)?|brave(?:浏览器)?|browser)"
+    )
+    patterns = (
+        rf"(?:open|launch|start)\s+{browser_name}\s+(?:and\s+)?"
+        rf"(?:type|enter|input)\s+(?P<target>[^!?]+?)\s+"
+        rf"(?:in|into)\s+(?:the\s+)?(?:address\s+bar|url\s+bar|omnibox)"
+        rf"(?:\s+(?:and\s+)?(?:press|hit)\s+(?:enter|return))?\s*$",
+        rf"(?:open|launch|start)\s+{browser_name}\s+(?:and\s+)?"
+        rf"(?:type|enter|input)\s+(?P<target>[^!?]+?)"
+        rf"(?:\s+(?:and\s+)?(?:press|hit)\s+(?:enter|return))?\s*$",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
+        rf"[，,；;。]?\s*"
+        rf"(?:(?:并|然后|后|之后|再)\s*)?"
+        rf"(?:在)?(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?\s*"
+        rf"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
+        rf"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
+        rf"[，,；;。]?\s*"
+        rf"(?:(?:并|然后|后|之后|再)\s*)?"
+        rf"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
+        rf"\s*(?:到|进|在)\s*(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?"
+        rf"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
+        rf"[，,；;。]?\s*"
+        rf"(?:(?:并|然后|后|之后|再)\s*)?"
+        rf"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
+        rf"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_browser_address_bar_target(match.group("target"))
+        url = _browser_target_url(target)
+        if url:
+            return url
+    return ""
+
+
+def _strip_browser_address_bar_target(value: str) -> str:
+    target = _strip_query(value)
+    target = re.sub(
+        r"\s+(?:and\s+)?(?:press|hit)\s+(?:enter|return)\s*$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
+    target = re.sub(
+        r"\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return)\s*$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(target)
+
+
 def _browser_open_target_url(text: str) -> str:
-    return _browser_composite_open_url(text) or _browser_open_url(text) or _browser_named_site_url(text)
+    return (
+        _browser_composite_open_url(text)
+        or _browser_address_bar_url(text)
+        or _browser_open_url(text)
+        or _browser_named_site_url(text)
+    )
 
 
 def _browser_open_url_and_extract_text_request(text: str) -> dict[str, str] | None:
