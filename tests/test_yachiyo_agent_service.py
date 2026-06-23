@@ -331,6 +331,8 @@ def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None
         "status": "planned",
         "tool": "media.apple_music_play",
     }
+    assert task.current_step == "准备执行 · 播放 Apple Music"
+    assert task.progress_text == "准备执行 · 播放 Apple Music"
     assert timeline.events[0].event_type == "agent.desktop.intent_planned"
     assert timeline.events[0].payload["tool"] == "media.apple_music_play"
     assert timeline.tool_calls == []
@@ -526,6 +528,8 @@ def _task_payload(**overrides: Any) -> dict[str, Any]:
 def _desktop_intent_task_payload(**overrides: Any) -> dict[str, Any]:
     return _task_payload(
         status="running",
+        current_step="",
+        progress_text="",
         timeline=[
             {
                 "event": "agent.desktop.intent_planned",

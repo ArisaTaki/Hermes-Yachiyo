@@ -21,6 +21,25 @@ from .contracts import AgentTaskSnapshot, PublicRunEvent
 from .events import public_run_event_from_payload
 from .links import studio_run_url
 
+_ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
+_PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
+_DESKTOP_TOOL_PROGRESS_LABELS = {
+    "screen.capture": "截取屏幕",
+    "desktop.active_window": "读取当前窗口",
+    "app.open": "打开应用",
+    "app.focus": "聚焦应用",
+    "media.apple_music_play": "播放 Apple Music",
+    "desktop.hotkey": "发送快捷键",
+    "desktop.type_text": "输入前台文字",
+    "desktop.click": "点击前台界面",
+    "browser.open_url": "打开网页",
+    "browser.current_page": "读取当前网页",
+    "browser.extract_text": "提取网页文本",
+    "browser.screenshot": "截取网页",
+    "browser.click": "点击网页元素",
+    "browser.type_text": "填写网页输入",
+}
+
 
 def agent_task_snapshot_from_payload(
     payload: Mapping[str, Any] | AgentTaskSnapshot,
@@ -49,15 +68,23 @@ def agent_task_snapshot_from_payload(
         )
         if approval.status == "pending"
     ]
+    status = task_status_from_value(payload.get("status"))
+    current_step = _optional_text(payload.get("current_step"))
+    progress_text = _optional_text(payload.get("progress_text"))
+    derived_progress = _desktop_intent_progress_text(
+        recent_events,
+        task_status=status,
+        has_explicit_progress=bool(current_step or progress_text),
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
         conversation_id=_optional_text(payload.get("conversation_id") or payload.get("session_id")),
         title=_text(payload.get("title") or payload.get("user_goal") or "Yachiyo task"),
-        status=task_status_from_value(payload.get("status")),
+        status=status,
         summary=_optional_text(payload.get("summary") or payload.get("result")),
-        current_step=_optional_text(payload.get("current_step")),
-        progress_text=_optional_text(payload.get("progress_text")),
+        current_step=current_step or derived_progress,
+        progress_text=progress_text or derived_progress,
         needs_user_action=bool(payload.get("needs_user_action") or approvals),
         pending_approvals=approvals,
         recent_events=recent_events,
@@ -155,6 +182,29 @@ def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
         for event in events
         if event.visibility == "user" and event.sensitivity == "public"
     ]
+
+
+def _desktop_intent_progress_text(
+    events: list[PublicRunEvent],
+    *,
+    task_status: str,
+    has_explicit_progress: bool,
+) -> str | None:
+    if has_explicit_progress or task_status not in _ACTIVE_TASK_STATUSES:
+        return None
+
+    for event in reversed(events):
+        if event.event_type != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+            continue
+        tool_name = _event_tool_name(event)
+        label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
+        return f"准备执行 · {label}" if label else "准备执行桌面动作"
+    return None
+
+
+def _event_tool_name(event: PublicRunEvent) -> str:
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    return _text(payload.get("tool") or payload.get("tool_name") or event.detail)
 
 
 def _group_run_id(payload: Mapping[str, Any]) -> str:
