@@ -268,6 +268,13 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
         stripped_clause = _strip_sequence_clause_prefix(clause)
         request = _first_daily_desktop_candidate(stripped_clause)
         if request is None:
+            handled_input_followup, input_followup_requests = _typed_input_followup_requests(
+                stripped_clause,
+                requests,
+            )
+            if handled_input_followup:
+                requests.extend(input_followup_requests)
+                continue
             find_requests = _app_context_find_text_requests(stripped_clause, requests)
             if not find_requests:
                 return []
@@ -642,6 +649,61 @@ def _app_context_find_text_requests(
         _request("desktop.safe_shortcut", {"action": "find"}),
         _request("desktop.safe_type_text", {"text": query}),
     ]
+
+
+def _typed_input_followup_requests(
+    text: str,
+    previous_requests: list[dict[str, Any]],
+) -> tuple[bool, list[dict[str, Any]]]:
+    input_request = _latest_sequence_typed_input_request(previous_requests)
+    if input_request is None:
+        return False, []
+    if _is_input_return_followup(text, input_request):
+        return True, [_request("desktop.hotkey", {"key": "return", "modifiers": []})]
+    if _is_external_submit_followup(text):
+        return True, []
+    return False, []
+
+
+def _latest_sequence_typed_input_request(
+    requests: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for request in reversed(requests):
+        tool = str(request.get("tool") or "").strip()
+        if tool in {
+            "desktop.type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+        }:
+            return request
+        if tool not in {"app.open", "app.focus"}:
+            break
+    return None
+
+
+def _is_input_return_followup(text: str, input_request: dict[str, Any]) -> bool:
+    hotkey = _desktop_hotkey(text)
+    if hotkey == {"key": "return", "modifiers": []}:
+        return True
+    phrase = _normalize_named_hotkey_phrase(text)
+    if phrase in {"确认", "确定", "回车", "enter", "return"}:
+        return True
+    if phrase not in {"搜索", "查找", "检索", "访问", "打开", "search", "find", "go", "visit", "open"}:
+        return False
+    payload = input_request.get("input") if isinstance(input_request.get("input"), dict) else {}
+    target = str(payload.get("target") or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:搜索|查找|检索|地址|网址|url|search|find|query|address)",
+            target,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_external_submit_followup(text: str) -> bool:
+    phrase = _normalize_named_hotkey_phrase(text)
+    return phrase in {"发送", "发出", "提交", "send", "submit", "post"}
 
 
 def _latest_sequence_app_context_is_browser(requests: list[dict[str, Any]]) -> bool:
@@ -3212,6 +3274,20 @@ def _desktop_safe_type_text(text: str) -> str:
 def _strip_typed_text(value: str) -> str:
     text = _strip_query(value)
     text = re.sub(r"\s*(?:进去|到当前窗口|到前台|然后回车|并回车)$", "", text)
+    text = re.sub(
+        r"\s*(?:然后|并且|并|再|接着)\s*(?:按|执行|开始)?"
+        r"(?:回车|确认|确定|搜索|查找|检索|访问|打开|发送|发出|提交)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s*(?:and\s+then|then|and)\s*(?:press\s+)?"
+        r"(?:enter|return|search|find|go|visit|open|send|submit|post)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     return _strip_query(text)
 
 

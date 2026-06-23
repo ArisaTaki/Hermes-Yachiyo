@@ -1373,6 +1373,37 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             },
         }
     ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 并在搜索框输入 yachiyo 并搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "搜索",
+                "text": "yachiyo",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("切到 Slack 并在消息框输入 hello 并发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",
