@@ -1021,6 +1021,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Microsoft Teams"},
     }
+    assert daily_desktop_intent_tool_request("打开网易云音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网易云音乐"},
+    }
+    assert daily_desktop_intent_tool_request("播放网易云音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网易云音乐"},
+    }
+    assert daily_desktop_intent_tool_request("播放 QQ 音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "QQ音乐"},
+    }
+    assert daily_desktop_intent_tool_request("播放 Spotify", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("播放 Spotify", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开音乐播放器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

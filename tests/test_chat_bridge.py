@@ -213,6 +213,44 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_opens_named_music_app_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    open_calls: list[str] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "播放网易云音乐",
+    )
+
+    assert result["ok"] is True
+    assert open_calls == ["网易云音乐"]
+    assert agent_task["summary"] == "已打开网易云音乐。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
     tmp_path,
     monkeypatch,

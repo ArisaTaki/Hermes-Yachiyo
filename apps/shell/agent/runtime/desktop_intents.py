@@ -12,6 +12,12 @@ _APP_ALIASES = {
     "applemusic": "Music",
     "music": "Music",
     "音乐": "Music",
+    "qq音乐": "QQ音乐",
+    "qqmusic": "QQ音乐",
+    "网易云音乐": "网易云音乐",
+    "neteasecloudmusic": "网易云音乐",
+    "neteasemusic": "网易云音乐",
+    "cloudmusic": "网易云音乐",
     "googlechrome": "Google Chrome",
     "chrome": "Google Chrome",
     "chrome浏览器": "Google Chrome",
@@ -172,6 +178,25 @@ _COMMON_REVEAL_PATHS = {
     "应用程序": "/Applications",
     "应用程序文件夹": "/Applications",
     "应用程序目录": "/Applications",
+}
+_MUSIC_APP_COMPACTS = {
+    "applemusic",
+    "music",
+    "musicapp",
+    "musicplayer",
+    "音乐",
+    "音乐app",
+    "音乐应用",
+    "音乐软件",
+    "音乐播放器",
+    "播放器",
+    "spotify",
+    "qq音乐",
+    "qqmusic",
+    "网易云音乐",
+    "neteasecloudmusic",
+    "neteasemusic",
+    "cloudmusic",
 }
 
 _APP_STATUS_PATTERNS = (
@@ -1157,12 +1182,32 @@ def _media_app_open_name(text: str) -> str:
     lowered = text.lower()
     if not re.search(r"(?:播放|放|打开|启动|运行|open|launch|start|play)", lowered):
         return ""
+    for pattern in (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:播放|放|打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+)",
+        r"(?:open|launch|start|play)\s+(?P<app>[^.!?]+)",
+    ):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _known_music_app_name(match.group("app"))
+        if app_name:
+            return app_name
     if re.search(r"apple\s*music", lowered):
         return "Music"
     if re.search(r"(?:播放|放|打开|启动|运行)\s*(?:一下\s*)?(?:音乐|music)(?:应用|app|软件|程序)?\s*$", lowered):
         return "Music"
     if re.search(r"(?:open|launch|start|play)\s+music(?:\s+app)?\s*$", lowered):
         return "Music"
+    return ""
+
+
+def _known_music_app_name(value: str) -> str:
+    app_name = _normalize_app_name(value)
+    raw_compact = re.sub(r"[\s._-]+", "", _strip_app_name(value).lower())
+    app_compact = re.sub(r"[\s._-]+", "", app_name.lower())
+    if raw_compact in _MUSIC_APP_COMPACTS or app_compact in _MUSIC_APP_COMPACTS:
+        return app_name
     return ""
 
 
@@ -1344,6 +1389,8 @@ def _strip_music_query_context(value: str) -> str:
 
 def _is_specific_music_query(query: str) -> bool:
     normalized = re.sub(r"[\s._-]+", "", query.lower())
+    if _known_music_app_name(query):
+        return False
     return normalized not in {
         "下",
         "一下",

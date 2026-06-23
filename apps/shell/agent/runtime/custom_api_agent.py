@@ -467,11 +467,11 @@ class RuntimeCustomApiAgentLoop:
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 if data.get("launch_verified") is False and app_name:
-                    return f"已向 macOS 发送打开 {app_name} 的请求，但未能确认它已启动。"
-                return f"已打开 {app_name}。" if app_name else (result_summary or "已打开应用。")
+                    return f"已向 macOS 发送打开{_display_target_name(app_name, '的请求')}，但未能确认它已启动。"
+                return f"已打开{_display_target_name(app_name)}。" if app_name else (result_summary or "已打开应用。")
             if tool_name == "app.focus":
                 app_name = _payload_text(result, planned_input, "app_name")
-                return f"已切换到 {app_name}。" if app_name else (result_summary or "已切换到应用。")
+                return f"已切换到{_display_target_name(app_name)}。" if app_name else (result_summary or "已切换到应用。")
             if tool_name == "app.focus_window":
                 app_name = _payload_text(result, planned_input, "app_name")
                 title = _payload_text(result, planned_input, "window_title") or _payload_text(
@@ -480,26 +480,26 @@ class RuntimeCustomApiAgentLoop:
                     "title_contains",
                 )
                 if app_name and title:
-                    return f"已切换到 {app_name} 的 {title} 窗口。"
+                    return f"已切换到{_display_target_name(app_name, f'的 {title} 窗口')}。"
                 return result_summary or "已切换到指定窗口。"
             if tool_name == "app.show":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 if data.get("show_status") == "launched" and app_name:
-                    return f"已打开并显示 {app_name}。"
-                return f"已显示 {app_name}。" if app_name else (result_summary or "已显示应用。")
+                    return f"已打开并显示{_display_target_name(app_name)}。"
+                return f"已显示{_display_target_name(app_name)}。" if app_name else (result_summary or "已显示应用。")
             if tool_name == "app.hide":
                 app_name = _payload_text(result, planned_input, "app_name")
-                return f"已隐藏 {app_name}。" if app_name else (result_summary or "已隐藏应用。")
+                return f"已隐藏{_display_target_name(app_name)}。" if app_name else (result_summary or "已隐藏应用。")
             if tool_name == "app.minimize":
                 app_name = _payload_text(result, planned_input, "app_name")
-                return f"已最小化 {app_name}。" if app_name else (result_summary or "已最小化应用。")
+                return f"已最小化{_display_target_name(app_name)}。" if app_name else (result_summary or "已最小化应用。")
             if tool_name == "app.quit":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 if data.get("running") is True and app_name:
-                    return f"已向 {app_name} 发送退出请求，但它可能仍在运行。"
-                return f"已退出 {app_name}。" if app_name else (result_summary or "已退出应用。")
+                    return f"已向{_display_target_name(app_name, '发送退出请求')}，但它可能仍在运行。"
+                return f"已退出{_display_target_name(app_name)}。" if app_name else (result_summary or "已退出应用。")
             if tool_name == "media.apple_music_play":
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 track = str(data.get("track") or "").strip()
@@ -1133,6 +1133,15 @@ def _sentence(value: str) -> str:
     if text.endswith(("。", ".", "!", "！", "?", "？")):
         return text
     return f"{text}。"
+
+
+def _display_target_name(value: str, suffix: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text[0].isascii():
+        return f" {text} {suffix}".rstrip()
+    return f"{text}{suffix}"
 
 
 def _permission_diagnostics(result: dict[str, Any]) -> str:
