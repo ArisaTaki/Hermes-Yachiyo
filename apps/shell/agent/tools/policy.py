@@ -30,6 +30,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.active_window": "desktop_active_window",
     "app.open": "app_open",
     "app.focus": "app_focus",
+    "desktop.reveal_path": "desktop_reveal_path",
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_control": "media_apple_music_control",
     "desktop.hotkey": "desktop_hotkey",
@@ -52,6 +53,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.active_window",
     "app.open",
     "app.focus",
+    "desktop.reveal_path",
     "media.apple_music_play",
     "media.apple_music_control",
 )
@@ -209,6 +211,8 @@ class ToolDescriptor:
                 raise AgentRuntimeError("future_task.cancel 参数 future_task_id 必须是非空字符串")
         if "path" in payload and not isinstance(payload.get("path"), str):
             raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
+        if self.name == "desktop.reveal_path" and not str(payload.get("path") or "").strip():
+            raise AgentRuntimeError("desktop.reveal_path 参数 path 必须是非空字符串")
         if "timeout_seconds" in payload:
             value = payload.get("timeout_seconds")
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 120:
@@ -547,6 +551,20 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Bring a local desktop application to the foreground.",
         properties={"app_name": {"type": "string", "description": "Application name."}},
         required=("app_name",),
+    ),
+    "desktop.reveal_path": ToolDescriptor(
+        name="desktop.reveal_path",
+        description=(
+            "Reveal a local file or folder in Finder without opening or executing it. "
+            "Use this for low-risk 'show in Finder' requests."
+        ),
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Absolute, relative, or ~/ local filesystem path to reveal in Finder.",
+            }
+        },
+        required=("path",),
     ),
     "media.apple_music_play": ToolDescriptor(
         name="media.apple_music_play",

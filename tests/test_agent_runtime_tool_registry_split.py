@@ -269,6 +269,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_active_window",
         "app_open",
         "app_focus",
+        "desktop_reveal_path",
         "media_apple_music_play",
         "media_apple_music_control",
         "desktop_hotkey",
@@ -283,6 +284,16 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
     }.issubset(schemas)
     assert "terminal.run" in HIGH_RISK_AGENT_TOOLS
     assert "workspace.write_patch" in HIGH_RISK_AGENT_TOOLS
+
+
+def test_desktop_reveal_path_schema_accepts_local_path() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.reveal_path",
+        {"path": "~/Downloads/report.pdf"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.reveal_path 参数 path 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.reveal_path", {"path": ""})
 
 
 def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
@@ -392,6 +403,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         lambda x, y, *, click_count=1: calls.append(("click", x, y, click_count))
         or {"ok": True},
     )
+    monkeypatch.setattr(
+        broker,
+        "desktop_reveal_path",
+        lambda path: calls.append(("reveal", path)) or {"ok": True, "path": path},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -413,11 +429,17 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.click",
         {"x": 12, "y": 34, "click_count": 2},
     ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "desktop.reveal_path",
+        {"path": "~/Downloads/report.pdf"},
+    ) == {"ok": True, "path": "~/Downloads/report.pdf"}
     assert calls == [
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
+        ("reveal", "~/Downloads/report.pdf"),
     ]
 
 
@@ -667,6 +689,57 @@ def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
         "open",
         "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
     ]
+
+
+def test_desktop_reveal_path_reveals_existing_path(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "report.md"
+    target.write_text("hello", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.reveal_path(str(target))
+    expanded = str(target.resolve(strict=False))
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.reveal_path"
+    assert result["summary"] == "Revealed report.md in Finder"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "path": str(target),
+        "expanded_path": expanded,
+        "open_target": "finder_reveal",
+        "exists": True,
+        "is_dir": False,
+    }
+    assert calls[0][0] == ["open", "-R", expanded]
+
+
+def test_desktop_reveal_path_reports_missing_path(monkeypatch, tmp_path) -> None:
+    missing = tmp_path / "missing.md"
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+
+    result = desktop_mod.reveal_path(str(missing))
+    expanded = str(missing.resolve(strict=False))
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.reveal_path"
+    assert result["summary"] == "desktop.reveal_path failed"
+    assert result["error_code"] == "path_not_found"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "path": str(missing),
+        "expanded_path": expanded,
+        "open_target": "finder_reveal",
+        "exists": False,
+    }
 
 
 def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:

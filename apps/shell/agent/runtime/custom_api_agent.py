@@ -18,6 +18,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_control",
     "screen.capture",
     "desktop.active_window",
+    "desktop.reveal_path",
     "browser.open_url",
     "browser.current_page",
     "browser.extract_text",
@@ -30,6 +31,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
 _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
+    "desktop.reveal_path": "在 Finder 中显示",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "media.apple_music_play": "播放 Apple Music",
@@ -428,6 +430,9 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.active_window":
                 return result_summary or _active_window_summary(result)
+            if tool_name == "desktop.reveal_path":
+                path = _payload_text(result, planned_input, "path")
+                return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
             if tool_name == "browser.open_url":
                 url = _payload_text(result, planned_input, "url")
                 if result.get("fallback_used") and result.get("fallback") == "system_browser":
@@ -581,13 +586,13 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.active_window, app.open/app.focus, media.apple_music_play, "
+            "desktop.active_window, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
             "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
-            "before answering. "
+            "before answering; map 'show/reveal in Finder' requests to desktop.reveal_path. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "

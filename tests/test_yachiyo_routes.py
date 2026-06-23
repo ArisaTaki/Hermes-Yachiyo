@@ -1557,6 +1557,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["media.apple_music_control"]["missing_permissions"] == ["music_app"]
     assert tools["browser.open_url"]["missing_permissions"] == ["chrome_cdp"]
     assert any("Chrome CDP" in note for note in tools["browser.open_url"]["fallback_notes"])
+    assert tools["desktop.reveal_path"]["capability_id"] == "desktop_execution"
+    assert tools["desktop.reveal_path"]["risk_level"] == "low"
+    assert tools["desktop.reveal_path"]["input_schema"]["required"] == ["path"]
+    assert any("Finder" in note for note in tools["desktop.reveal_path"]["fallback_notes"])
     assert any("fallback_x/fallback_y" in note for note in tools["browser.click"]["fallback_notes"])
     assert tools["terminal.run"]["risk_level"] == "high"
     assert tools["terminal.run"]["approval_required"] is True

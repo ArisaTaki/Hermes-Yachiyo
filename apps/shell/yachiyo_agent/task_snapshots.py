@@ -32,6 +32,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.active_window": "读取当前窗口",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
+    "desktop.reveal_path": "在 Finder 中显示",
     "media.apple_music_play": "播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "desktop.hotkey": "发送快捷键",
@@ -300,6 +301,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.click": "桌面点击",
         "desktop.type_text": "桌面输入",
         "app.open": "打开应用",
+        "desktop.reveal_path": "Finder 定位",
     }
     if fallback:
         return fallback_labels.get(fallback, fallback)

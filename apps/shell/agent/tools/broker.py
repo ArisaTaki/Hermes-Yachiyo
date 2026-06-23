@@ -389,6 +389,9 @@ class ToolBroker:
     def app_focus(self, app_name: str) -> dict[str, Any]:
         return desktop.app_focus(app_name)
 
+    def desktop_reveal_path(self, path: str) -> dict[str, Any]:
+        return desktop.reveal_path(path)
+
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 

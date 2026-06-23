@@ -89,6 +89,27 @@ _APP_ALIASES = {
     "spotify": "Spotify",
 }
 
+_COMMON_REVEAL_PATHS = {
+    "desktop": "~/Desktop",
+    "desktopfolder": "~/Desktop",
+    "桌面": "~/Desktop",
+    "桌面文件夹": "~/Desktop",
+    "downloads": "~/Downloads",
+    "downloadsfolder": "~/Downloads",
+    "下载": "~/Downloads",
+    "下载文件夹": "~/Downloads",
+    "documents": "~/Documents",
+    "documentsfolder": "~/Documents",
+    "文档": "~/Documents",
+    "文档文件夹": "~/Documents",
+    "文稿": "~/Documents",
+    "文稿文件夹": "~/Documents",
+    "home": "~",
+    "homefolder": "~",
+    "主目录": "~",
+    "用户文件夹": "~",
+}
+
 
 def daily_desktop_intent_tool_request(
     context: str,
@@ -133,6 +154,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
+
+    reveal_path = _desktop_reveal_path(text)
+    if reveal_path:
+        candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
 
     music_control = _music_control_action(text)
     if music_control:
@@ -418,6 +443,50 @@ def _is_browser_screenshot_request(text: str) -> bool:
     )
 
 
+def _desktop_reveal_path(text: str) -> str:
+    path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
+    patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:在\s*(?:finder|访达)\s*(?:中|里|内)?\s*)?"
+        rf"(?:显示|显示一下|定位|找一下|找到|打开)\s*(?P<path>{path_token})",
+        rf"(?:show|reveal|locate|open)\s+(?P<path>{path_token})(?:\s+in\s+(?:the\s+)?finder)?",
+        rf"(?P<path>{path_token})\s*(?:在\s*(?:finder|访达)\s*(?:中|里|内)?\s*)?"
+        rf"(?:显示|显示一下|定位|找一下|找到|reveal|show)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"在\s*(?:finder|访达)\s*(?:中|里|内)?\s*"
+        r"(?:显示|显示一下|定位|找一下|找到|打开)\s*(?P<path>[^。！？!?，,]+)",
+        r"(?:show|reveal|locate|open)\s+(?P<path>[^.!?]+?)\s+in\s+(?:the\s+)?finder",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        path = _normalize_reveal_path(match.group("path"))
+        if path:
+            return path
+    return ""
+
+
+def _normalize_reveal_path(value: str) -> str:
+    target = _strip_query(value)
+    target = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", target)
+    if _looks_like_local_path(target):
+        return target
+    target = re.sub(r"\s*(?:文件夹|目录|路径|folder|directory|path)$", "", target, flags=re.IGNORECASE)
+    target = _strip_query(target)
+    if not target:
+        return ""
+    compact = re.sub(r"[\s._-]+", "", target.lower())
+    common_path = _COMMON_REVEAL_PATHS.get(compact)
+    if common_path:
+        return common_path
+    return ""
+
+
+def _looks_like_local_path(value: str) -> bool:
+    return bool(re.match(r"^(?:~|/|\./|\../)", str(value or "").strip()))
+
+
 def _app_focus_name(text: str) -> str:
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
@@ -449,6 +518,8 @@ def _app_open_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
         if _normalize_site_name(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)

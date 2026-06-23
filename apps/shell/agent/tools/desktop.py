@@ -238,6 +238,63 @@ def app_open(app_name: str) -> dict[str, Any]:
     }
 
 
+def reveal_path(path: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.reveal_path")
+    clean_path = _clean_required(path, "path")
+    target = _expanded_local_path(clean_path)
+    if not target.exists():
+        return {
+            "ok": False,
+            "action": "desktop.reveal_path",
+            "summary": "desktop.reveal_path failed",
+            "error": f"Path not found: {clean_path}",
+            "error_code": "path_not_found",
+            "data": {
+                "path": clean_path,
+                "expanded_path": str(target),
+                "open_target": "finder_reveal",
+                "exists": False,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    try:
+        result = subprocess.run(
+            ["open", "-R", str(target)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("desktop.reveal_path", exc)
+    if result.returncode != 0:
+        payload = _failed("desktop.reveal_path", result)
+        payload["data"] = {
+            "path": clean_path,
+            "expanded_path": str(target),
+            "open_target": "finder_reveal",
+            "exists": True,
+            "is_dir": target.is_dir(),
+        }
+        return payload
+    return {
+        "ok": True,
+        "action": "desktop.reveal_path",
+        "summary": f"Revealed {target.name or str(target)} in Finder",
+        "data": {
+            "path": clean_path,
+            "expanded_path": str(target),
+            "open_target": "finder_reveal",
+            "exists": True,
+            "is_dir": target.is_dir(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def _open_common_folder(label: str, folder_path: Path) -> dict[str, Any]:
     try:
         result = subprocess.run(
@@ -363,6 +420,13 @@ def _strip_system_settings_noise(value: str) -> str:
 
 def _compact_alias(value: str) -> str:
     return "".join(str(value or "").strip().split())
+
+
+def _expanded_local_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve(strict=False)
 
 
 def _common_folder_path(value: str) -> Path | None:

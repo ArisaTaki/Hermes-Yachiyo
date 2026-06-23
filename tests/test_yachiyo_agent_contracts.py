@@ -495,6 +495,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
+    assert desktop_tool_risk_level("desktop.reveal_path") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
@@ -509,11 +510,12 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:8] == [
+    assert list(catalog)[:9] == [
         "read_screen",
         "read_active_window",
         "open_app",
         "focus_app",
+        "reveal_path",
         "play_or_pause_media",
         "foreground_click",
         "foreground_type_text",
@@ -521,6 +523,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
+    assert catalog["reveal_path"].risk_level == "low"
+    assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["play_or_pause_media"].tools == [
         "media.apple_music_play",
         "media.apple_music_control",

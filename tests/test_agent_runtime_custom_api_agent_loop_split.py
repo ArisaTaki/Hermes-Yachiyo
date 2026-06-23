@@ -591,6 +591,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "browser.current_page",
         "browser.extract_text",
         "browser.screenshot",
+        "desktop.reveal_path",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -748,6 +749,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "辅助功能权限"},
     }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/report.pdf", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads/report.pdf"},
+    }
+    assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads/report.pdf"},
+    }
+    assert daily_desktop_intent_tool_request("在访达中显示下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/测试文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads/测试文件夹"},
+    }
     assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -885,6 +906,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 GitHub", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开小红书", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
@@ -1282,6 +1304,20 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
 
     assert pause == "已暂停 Apple Music。"
     assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+
+
+def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.reveal_path",
+        {"path": "~/Downloads/report.pdf"},
+        {
+            "ok": True,
+            "summary": "Revealed report.pdf in Finder",
+            "data": {"open_target": "finder_reveal"},
+        },
+    )
+
+    assert result == "已在 Finder 中显示：~/Downloads/report.pdf。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details() -> None:

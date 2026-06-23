@@ -30,6 +30,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.active_window",
         "app.open",
         "app.focus",
+        "desktop.reveal_path",
         "media.apple_music_play",
         "media.apple_music_control",
     }
@@ -52,6 +53,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
         "read_active_window",
         "open_app",
         "focus_app",
+        "reveal_path",
         "play_or_pause_media",
     }
 )
@@ -89,6 +91,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "read_active_window",
     "open_app",
     "focus_app",
+    "reveal_path",
     "play_or_pause_media",
     "foreground_click",
     "foreground_type_text",
@@ -112,6 +115,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_active_window": ("desktop.active_window",),
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
+    "reveal_path": ("desktop.reveal_path",),
     "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
@@ -182,6 +186,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.active_window",
         "app.open",
         "app.focus",
+        "desktop.reveal_path",
         "media.apple_music_play",
         "media.apple_music_control",
         "desktop.hotkey",

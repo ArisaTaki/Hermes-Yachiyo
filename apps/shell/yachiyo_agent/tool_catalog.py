@@ -206,6 +206,8 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
             continue
         if tool_name in tools:
             return capability_id
+    if tool_name in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]:
+        return "desktop_execution"
     if tool_name.startswith("memory."):
         return "memory"
     if tool_name.startswith("future_task."):
@@ -290,6 +292,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         ],
         "app.focus": [
             "Uses desktop automation and surfaces focus failures as tool results.",
+        ],
+        "desktop.reveal_path": [
+            "Reveals a local file or folder in Finder without opening or executing it.",
         ],
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
