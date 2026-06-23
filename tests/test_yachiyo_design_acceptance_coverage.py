@@ -1020,6 +1020,11 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
             "runnable_kind: 'main',",
             "launcher_surface: 'desktop_launcher'",
             "LauncherAgentTaskLight",
+            "type LauncherQuickMessageResult",
+            "const result = await apiPost<LauncherQuickMessageResult>('/ui/launcher/quick-message'",
+            "setAgentTaskSnapshot: setPublicAgentTask,",
+            "onAgentTaskSnapshot={launcher.setAgentTaskSnapshot}",
+            "if (result.agent_task) onAgentTaskSnapshot(result.agent_task);",
             "onApproveTaskApproval={launcher.approveAgentTaskApproval}",
             "onCancelTask={launcher.cancelAgentTask}",
             "onRejectTaskApproval={launcher.rejectAgentTaskApproval}",
@@ -1037,6 +1042,7 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
         "apps/frontend/src/views/LauncherView.tsx",
         [
             "launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)",
+            "if (result.agent_task) onAgentTaskSnapshot(result.agent_task);",
         ],
     )
     _assert_smoke_script(

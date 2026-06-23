@@ -62,6 +62,10 @@ type LauncherDesktopReadinessNotice = Pick<
   ChatNotice,
   'kind' | 'title' | 'detail' | 'action_label' | 'action_view' | 'action_params'
 > | null;
+type LauncherQuickMessageResult = {
+  ok?: boolean;
+  agent_task?: AgentTaskSnapshot | null;
+};
 
 const LAUNCHER_SUMMARY_TEST_IDS: Record<LauncherMode, {
   latestReply: string;
@@ -159,6 +163,7 @@ export function LauncherView({ view }: { view: AppView }) {
         agentTask={launcher.agentTask}
         desktopReadinessNotice={launcher.desktopReadinessNotice}
         onApproveTaskApproval={launcher.approveAgentTaskApproval}
+        onAgentTaskSnapshot={launcher.setAgentTaskSnapshot}
         onCancelTask={launcher.cancelAgentTask}
         onRejectTaskApproval={launcher.rejectAgentTaskApproval}
         data={launcher.data}
@@ -172,6 +177,7 @@ export function LauncherView({ view }: { view: AppView }) {
       agentTask={launcher.agentTask}
       desktopReadinessNotice={launcher.desktopReadinessNotice}
       onApproveTaskApproval={launcher.approveAgentTaskApproval}
+      onAgentTaskSnapshot={launcher.setAgentTaskSnapshot}
       onCancelTask={launcher.cancelAgentTask}
       onRejectTaskApproval={launcher.rejectAgentTaskApproval}
       data={launcher.data}
@@ -290,6 +296,7 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     desktopReadinessNotice,
     refresh,
     rejectAgentTaskApproval,
+    setAgentTaskSnapshot: setPublicAgentTask,
     startAgentTask,
   };
 }
@@ -331,6 +338,7 @@ function BubbleLauncher({
   agentTask: publicAgentTask,
   desktopReadinessNotice,
   onApproveTaskApproval,
+  onAgentTaskSnapshot,
   onCancelTask,
   onRejectTaskApproval,
   data,
@@ -340,6 +348,7 @@ function BubbleLauncher({
   agentTask?: AgentTaskSnapshot | null;
   desktopReadinessNotice: LauncherDesktopReadinessNotice;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onAgentTaskSnapshot: (task: AgentTaskSnapshot) => void;
   onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
@@ -507,11 +516,12 @@ function BubbleLauncher({
         taskStarted = Boolean(await startAgentTask(text));
       } catch {}
       if (!taskStarted) {
-        await apiPost('/ui/launcher/quick-message', {
+        const result = await apiPost<LauncherQuickMessageResult>('/ui/launcher/quick-message', {
           text,
           mode: data?.mode || 'bubble',
           session_id: '',
         });
+        if (result.agent_task) onAgentTaskSnapshot(result.agent_task);
       }
       setQuickInputVisible(false);
       await refresh();
@@ -680,6 +690,7 @@ function Live2DLauncher({
   agentTask: publicAgentTask,
   desktopReadinessNotice,
   onApproveTaskApproval,
+  onAgentTaskSnapshot,
   onCancelTask,
   onRejectTaskApproval,
   data,
@@ -689,6 +700,7 @@ function Live2DLauncher({
   agentTask?: AgentTaskSnapshot | null;
   desktopReadinessNotice: LauncherDesktopReadinessNotice;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onAgentTaskSnapshot: (task: AgentTaskSnapshot) => void;
   onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
@@ -1018,11 +1030,12 @@ function Live2DLauncher({
         taskStarted = Boolean(await startAgentTask(text));
       } catch {}
       if (!taskStarted) {
-        await apiPost('/ui/launcher/quick-message', {
+        const result = await apiPost<LauncherQuickMessageResult>('/ui/launcher/quick-message', {
           text,
           mode: data?.mode || 'live2d',
           session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
         });
+        if (result.agent_task) onAgentTaskSnapshot(result.agent_task);
       }
       setReplyHidden(false);
       setQuickInputVisible(false);

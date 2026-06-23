@@ -1320,7 +1320,16 @@ def test_launcher_http_routes_preserve_session_summary_and_quick_message(monkeyp
 
             def send_quick_message(self, text):
                 calls.append(("quick_message", {"text": text}))
-                return {"ok": True, "text": text, "session_id": "session-current"}
+                return {
+                    "ok": True,
+                    "text": text,
+                    "session_id": "session-current",
+                    "agent_task": {
+                        "task_id": "task-launcher",
+                        "status": "running",
+                        "open_in_studio_url": "#/agents?run_id=run-launcher",
+                    },
+                }
 
         class FakeChatAPI:
             def __init__(self, received_runtime):
@@ -1410,7 +1419,16 @@ def test_launcher_http_routes_preserve_session_summary_and_quick_message(monkeyp
         assert ack.status_code == 200
         assert ack.json() == {"ok": True, "mode": "live2d", "session_id": "session-current"}
         assert quick.status_code == 200
-        assert quick.json() == {"ok": True, "text": "继续整理会话", "session_id": "session-current"}
+        assert quick.json() == {
+            "ok": True,
+            "text": "继续整理会话",
+            "session_id": "session-current",
+            "agent_task": {
+                "task_id": "task-launcher",
+                "status": "running",
+                "open_in_studio_url": "#/agents?run_id=run-launcher",
+            },
+        }
         assert calls == [
             ("overview", {"summary_count": 2, "session_limit": 3}),
             ("notification_update", {"latest_reply": "短回复", "external_attention": False}),
