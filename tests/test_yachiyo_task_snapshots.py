@@ -211,6 +211,94 @@ def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_in
     assert task.progress_text == "需要权限 · 播放 Apple Music"
 
 
+def test_agent_task_snapshot_derives_progress_from_approved_desktop_tool_call() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-hotkey",
+            "run_id": "run-hotkey",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "detail": "desktop.hotkey",
+                    "payload": {
+                        "tool": "desktop.hotkey",
+                        "approved": True,
+                        "result": {
+                            "ok": True,
+                            "action": "desktop.hotkey",
+                            "data": {"key": "l", "modifiers": ["command"]},
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "已执行 · 发送快捷键"
+    assert task.progress_text == "已执行 · 发送快捷键"
+
+
+def test_agent_task_snapshot_derives_permission_progress_from_desktop_tool_call() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-type",
+            "run_id": "run-type",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "detail": "desktop.type_text",
+                    "payload": {
+                        "tool": "desktop.type_text",
+                        "result": {
+                            "ok": False,
+                            "permission_error": True,
+                            "permission_targets": ["accessibility"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "需要权限 · 输入前台文字"
+    assert task.progress_text == "需要权限 · 输入前台文字"
+
+
+def test_agent_task_snapshot_derives_foreground_lock_progress_from_desktop_tool_call() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-click",
+            "run_id": "run-click",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "detail": "desktop.click",
+                    "payload": {
+                        "tool": "desktop.click",
+                        "result": {
+                            "ok": False,
+                            "foreground_lock_busy": True,
+                            "locked_by": "run-other",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "前台被占用 · 点击前台界面"
+    assert task.progress_text == "前台被占用 · 点击前台界面"
+
+
 def test_agent_task_snapshot_preserves_explicit_progress_over_desktop_intent() -> None:
     task = agent_task_snapshot_from_payload(
         {
