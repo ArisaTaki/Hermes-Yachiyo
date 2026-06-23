@@ -270,6 +270,7 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/^(?:(?:输入|键入)\s*|(?:type)\s+)\S+/i.test(value)) return true;
   if (/^(?:(?:点击|双击)\s*|(?:click|double click)\s+)\d+\s*[,， ]\s*\d+/i.test(value)) return true;
   if (/(?:(?:播放|播一下|放一下)\s*\S+|(?:play)\s+\S+)/i.test(value)) return true;
+  if (/(?:(?:暂停|停止播放|继续播放|恢复播放|接着播放|播放暂停|切换播放|切换暂停)(?:\s*(?:音乐|歌曲|apple\s*music|music))?|(?:下一首|上一首|切歌|来点音乐|来些音乐|来点歌|放首歌)|(?:pause|resume|continue|next|previous|skip)(?:\s+(?:music|song|apple\s*music))?)/i.test(value)) return true;
   if (/(?:(?:在\s*(?:Finder|访达)(?:中|里)?显示)|(?:show|reveal).+(?:in|with)\s+finder)/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:打开|open)\s+/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:(?:开着吗|在运行吗|打开了吗)|(?:is|check).*(?:running|open))/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;

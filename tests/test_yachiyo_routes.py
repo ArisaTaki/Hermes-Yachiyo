@@ -851,6 +851,106 @@ async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_mod
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-media-control.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-media-control.db",
+        workspace_dir=tmp_path / "agent-runtime-route-media-control",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-media-control")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    control_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("media control daily desktop public task should not call model")
+        ),
+    )
+
+    def fake_apple_music_control(action: str) -> dict[str, Any]:
+        control_calls.append(action)
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {action} executed",
+            "data": {
+                "control": action,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_control",
+        fake_apple_music_control,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="下一首",
+                conversation_id="chat-main-media-control",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-media-control-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-media-control", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert control_calls == ["next"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert started["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["action"] == "next"
+        assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
