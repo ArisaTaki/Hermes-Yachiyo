@@ -918,6 +918,67 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "搜索张三",
+        seed_messages=[
+            ("user", "打开微信"),
+            ("assistant", "已打开 WeChat。"),
+        ],
+    )
+
+    assert result["ok"] is True
+    assert calls == [("focus", "WeChat"), ("shortcut", "find"), ("type", "张三")]
+    assert agent_task["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（2 个字符）。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    assert result["_task_timeline"]["tool_calls"][-2]["tool_name"] == "app.focus_and_safe_shortcut"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    run_event_types = [event["event_type"] for event in result["_events"]]
+    assert run_event_types.count("agent.desktop.intent_planned") == 2
+    assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
+        "agent.tool.call"
+    ) < run_event_types.index("agent.desktop.intent_completed")
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

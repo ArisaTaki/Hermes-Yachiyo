@@ -375,6 +375,100 @@ def test_daily_desktop_music_followup_query_stays_conservative():
     assert ChatAPI._daily_desktop_music_followup_query("播放超时空辉夜姬") == ""
 
 
+def test_send_message_executes_app_search_followup_before_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    runtime.chat_session.add_user_message("打开微信")
+    runtime.chat_session.add_assistant_message("已打开 WeChat。")
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app follow-up desktop task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    try:
+        result = api.send_message("搜索张三")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        messages = store.load_messages(runtime.chat_session.session_id, limit=10)
+        latest_user = [message for message in messages if message.role == "user"][-1]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "WeChat"), ("shortcut", "find"), ("type", "张三")]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（2 个字符）。"
+        assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == result["agent_task"]["summary"]
+        assert latest_user.content == "搜索张三"
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_daily_desktop_app_followup_clause_stays_conservative():
+    assert ChatAPI._daily_desktop_app_followup_clause("搜索张三") == "搜索张三"
+    assert ChatAPI._daily_desktop_app_followup_clause("输入 hello") == "输入 hello"
+    assert ChatAPI._daily_desktop_app_followup_clause("复制") == "复制"
+    assert ChatAPI._daily_desktop_app_followup_clause("打开微信") == ""
+    assert ChatAPI._daily_desktop_app_followup_clause("这是为什么？") == ""
+
+
 def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

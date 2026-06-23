@@ -65,8 +65,29 @@ _MAX_ATTACHMENT_CACHE_AGE_SECONDS = int(
 )
 _DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _VISION_ATTACHMENT_TOKEN_ESTIMATE = 85
+_DAILY_DESKTOP_APP_FOLLOWUP_RECENT_LIMIT = 6
+_DAILY_DESKTOP_APP_FOLLOWUP_MAX_CHARS = 120
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS = 80
+_DAILY_DESKTOP_APP_CONTEXT_TOOLS = {
+    "app.focus",
+    "app.focus_and_safe_click",
+    "app.focus_and_safe_key",
+    "app.focus_and_safe_scroll",
+    "app.focus_and_safe_shortcut",
+    "app.focus_and_safe_type_text",
+    "app.focus_and_click_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.open",
+    "app.open_and_safe_click",
+    "app.open_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.open_and_safe_shortcut",
+    "app.open_and_safe_type_text",
+    "app.open_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.show",
+}
 _IMAGE_EXTENSIONS_BY_MIME = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -640,10 +661,13 @@ class ChatAPI:
         text: str,
         current_context: dict[str, Any],
     ) -> str:
-        """Resolve short music follow-ups into executable desktop intents."""
+        """Resolve short daily desktop follow-ups into executable intents."""
 
         if current_context.get("conversation_kind") != "main":
             return text
+        app_followup = self._daily_desktop_app_followup_goal_text(text)
+        if app_followup:
+            return app_followup
         query = self._daily_desktop_music_followup_query(text)
         if not query:
             return text
@@ -652,6 +676,101 @@ class ChatAPI:
         if not self._has_recent_daily_desktop_music_context():
             return text
         return f"播放{query}"
+
+    def _daily_desktop_app_followup_goal_text(self, text: str) -> str:
+        clause = self._daily_desktop_app_followup_clause(text)
+        if not clause:
+            return ""
+        app_name = self._recent_daily_desktop_app_context_name()
+        if not app_name:
+            return ""
+        candidate = f"切到{app_name}，{clause}"
+        requests = daily_desktop_entrypoint_tool_requests(
+            candidate,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+        if not requests:
+            return ""
+        if not self._daily_desktop_requests_target_app_context(requests, app_name):
+            return ""
+        return candidate
+
+    @staticmethod
+    def _daily_desktop_app_followup_clause(text: str) -> str:
+        value = " ".join(str(text or "").split()).strip()
+        if not value or len(value) > _DAILY_DESKTOP_APP_FOLLOWUP_MAX_CHARS:
+            return ""
+        if "\n" in str(text or "") or re.search(r"https?://|www\.|/|\\", value, flags=re.IGNORECASE):
+            return ""
+        lowered = value.lower()
+        if lowered in {"算了", "算了吧", "不用了", "不要了", "取消", "不了", "不用", "no", "nope", "never mind"}:
+            return ""
+        if re.search(r"[?？]", value):
+            return ""
+        if re.search(
+            r"(?:怎么|如何|为什么|为何|为啥|教程|说明|解释|how\s+to|why|explain|tutorial)",
+            lowered,
+        ):
+            return ""
+        patterns = (
+            r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*\S+",
+            r"^(?:输入|填写|键入|打入|填入)\s*\S+",
+            r"^(?:点击|点一下|点按|单击|双击)\s*\S+",
+            r"^(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*\S+",
+            r"^(?:复制|粘贴|全选|撤销|重做|查找|新建窗口|新建标签|刷新|返回|前进|发送|提交|确认|确定|回车)$",
+            r"^(?:tab|escape|esc|enter|return|space|delete|backspace|up|down|left|right)$",
+            r"^(?:上箭头|下箭头|左箭头|右箭头|空格|删除|退格)$",
+            r"^(?:向上|向下|向左|向右)?(?:滚动|滑动|上滑|下滑|左滑|右滑)(?:一下|下|一页|半页)?$",
+            r"^(?:scroll|page)\s+(?:up|down|left|right)$",
+        )
+        if any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns):
+            return value
+        return ""
+
+    def _recent_daily_desktop_app_context_name(self) -> str:
+        for message in self._recent_daily_desktop_context_messages(
+            _DAILY_DESKTOP_APP_FOLLOWUP_RECENT_LIMIT
+        ):
+            raw_role = getattr(message, "role", "") or ""
+            role = str(getattr(raw_role, "value", raw_role) or "").strip().lower()
+            if role != MessageRole.USER.value:
+                continue
+            app_name = self._message_daily_desktop_app_context_name(
+                str(getattr(message, "content", "") or "")
+            )
+            if app_name:
+                return app_name
+        return ""
+
+    @staticmethod
+    def _message_daily_desktop_app_context_name(content: str) -> str:
+        requests = daily_desktop_entrypoint_tool_requests(
+            ChatAPI._main_model_goal_text(content),
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+        for request in reversed(requests):
+            tool = str(request.get("tool") or "").strip()
+            if tool not in _DAILY_DESKTOP_APP_CONTEXT_TOOLS:
+                continue
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            app_name = str(payload.get("app_name") or "").strip()
+            if app_name and app_name != "Music":
+                return app_name
+        return ""
+
+    @staticmethod
+    def _daily_desktop_requests_target_app_context(
+        requests: list[dict[str, Any]],
+        app_name: str,
+    ) -> bool:
+        for request in requests:
+            tool = str(request.get("tool") or "").strip()
+            if not tool.startswith("app.focus"):
+                continue
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if str(payload.get("app_name") or "").strip() == app_name:
+                return True
+        return False
 
     @staticmethod
     def _daily_desktop_music_followup_query(text: str) -> str:
@@ -689,19 +808,9 @@ class ChatAPI:
         return query
 
     def _has_recent_daily_desktop_music_context(self) -> bool:
-        try:
-            messages = self._chat_store().load_messages(
-                self._session.session_id,
-                limit=_DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT,
-            )
-        except Exception:
-            messages = []
-        if not messages:
-            try:
-                messages = list(self._session.get_messages())[-_DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT:]
-            except Exception:
-                messages = []
-        for message in reversed(messages):
+        for message in self._recent_daily_desktop_context_messages(
+            _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT
+        ):
             raw_role = getattr(message, "role", "") or ""
             role = str(getattr(raw_role, "value", raw_role) or "").strip().lower()
             content = str(getattr(message, "content", "") or "").strip()
@@ -712,6 +821,18 @@ class ChatAPI:
             if role == MessageRole.ASSISTANT.value and self._assistant_mentions_music_followup(content):
                 return True
         return False
+
+    def _recent_daily_desktop_context_messages(self, limit: int) -> list[Any]:
+        try:
+            messages = self._chat_store().load_messages(self._session.session_id, limit=limit)
+        except Exception:
+            messages = []
+        if not messages:
+            try:
+                messages = list(self._session.get_messages())[-limit:]
+            except Exception:
+                messages = []
+        return list(reversed(messages))
 
     @staticmethod
     def _message_has_daily_desktop_music_intent(content: str) -> bool:
