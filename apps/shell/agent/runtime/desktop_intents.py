@@ -1156,7 +1156,7 @@ def _browser_click_point(text: str) -> dict[str, Any] | None:
         r"(?:坐标|位置|coordinate|point)?\s*"
         r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:(?P<double2>双击|double\s+click)|点击|点一下|点按|单击|click)?\s*"
+        r"(?:(?P<double2>双击|double\s+click)|点击|点一下|点按|单击|click)\s*"
         r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
         r"(?:坐标|位置|coordinate|point)\s*"
         r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
@@ -1177,6 +1177,14 @@ def _browser_click_point(text: str) -> dict[str, Any] | None:
 def _browser_type_text_request(text: str) -> dict[str, Any] | None:
     if not _has_browser_page_context(text):
         return None
+    point = _browser_type_text_point(text)
+    if point:
+        return {
+            "selector": f"point={point['x']},{point['y']}",
+            "text": point["text"],
+            "fallback_x": point["x"],
+            "fallback_y": point["y"],
+        }
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|向|给)?\s*(?:当前)?(?:网页|页面|浏览器|当前页)"
@@ -1199,6 +1207,34 @@ def _browser_type_text_request(text: str) -> dict[str, Any] | None:
         target = _strip_browser_element_label(match.group("target"))
         return {
             "selector": _browser_input_selector_from_target(target),
+            "text": typed_text,
+        }
+    return None
+
+
+def _browser_type_text_point(text: str) -> dict[str, Any] | None:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|向|给)?\s*(?:当前)?(?:网页|页面|浏览器|当前页)"
+        r"(?:上|里|中|内|的|上的)?\s*(?:坐标|位置|coordinate|point)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)\s*"
+        r"(?:输入|填写|键入|打入|填入|type|enter|fill)\s*(?P<text>[^。！？!?]+)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:输入|填写|键入|打入|填入|type|enter|fill)\s*(?P<text>[^。！？!?]+?)\s*"
+        r"(?:到|在|进|into|in)\s*(?:当前)?(?:网页|页面|浏览器|当前页)?"
+        r"(?:上|里|中|内|的|上的)?\s*(?:坐标|位置|coordinate|point)\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        typed_text = _strip_typed_text(match.group("text"))
+        if not typed_text:
+            continue
+        return {
+            "x": _number_value(match.group("x")),
+            "y": _number_value(match.group("y")),
             "text": typed_text,
         }
     return None

@@ -628,14 +628,26 @@ class ToolBroker:
             ),
         )
 
-    def browser_type_text(self, selector: str, text: str) -> dict[str, Any]:
+    def browser_type_text(
+        self,
+        selector: str,
+        text: str,
+        *,
+        fallback_x: Any = None,
+        fallback_y: Any = None,
+    ) -> dict[str, Any]:
+        def foreground_fallback(*args: Any) -> dict[str, Any]:
+            return self._with_foreground_lock(
+                "browser.type_text",
+                lambda: browser._type_text_foreground_fallback(*args),
+            )
+
         return browser.type_text(
             selector,
             text,
-            foreground_fallback=lambda value: self._with_foreground_lock(
-                "browser.type_text",
-                lambda: desktop.desktop_type_text(value),
-            ),
+            fallback_x=fallback_x,
+            fallback_y=fallback_y,
+            foreground_fallback=foreground_fallback,
         )
 
     def browser_extract_text(self, selector: str = "") -> dict[str, Any]:

@@ -248,7 +248,9 @@ def type_text(
     selector: str,
     text: str,
     *,
-    foreground_fallback: Callable[[str], dict[str, Any]] | None = None,
+    fallback_x: Any = None,
+    fallback_y: Any = None,
+    foreground_fallback: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     clean_selector = _clean_required(selector, "selector")
     clean_text = _clean_required(text, "text")
@@ -256,9 +258,23 @@ def type_text(
     (() => {{
       const selector = {json.dumps(clean_selector)};
       const text = {json.dumps(clean_text)};
-      const el = document.querySelector(selector);
+      const pointSelectorPrefix = 'point=';
+      function parsePoint(value) {{
+        const parts = value.split(',').map((part) => Number(part.trim()));
+        if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return null;
+        return {{ x: parts[0], y: parts[1] }};
+      }}
+      function editableTarget(target) {{
+        if (!target) return null;
+        if (target.matches('input,textarea,[contenteditable],[role="textbox"]')) return target;
+        return target.closest('input,textarea,[contenteditable],[role="textbox"]') || target;
+      }}
+      const point = selector.startsWith(pointSelectorPrefix)
+        ? parsePoint(selector.slice(pointSelectorPrefix.length))
+        : null;
+      const el = editableTarget(point ? document.elementFromPoint(point.x, point.y) : document.querySelector(selector));
       if (!el) return {{ ok: false, error: 'selector_not_found', selector }};
-      el.scrollIntoView({{ block: 'center', inline: 'center' }});
+      if (!point) el.scrollIntoView({{ block: 'center', inline: 'center' }});
       el.focus();
       if ('value' in el) {{
         el.value = text;
@@ -268,14 +284,14 @@ def type_text(
         el.textContent = text;
         el.dispatchEvent(new Event('input', {{ bubbles: true }}));
       }}
-      return {{ ok: true, selector, tag: el.tagName, length: text.length }};
+      return {{ ok: true, selector, tag: el.tagName, length: text.length, x: point && point.x, y: point && point.y }};
     }})()
     """
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
         fallback = foreground_fallback or _type_text_foreground_fallback
-        return _type_text_fallback(clean_selector, clean_text, exc, fallback)
+        return _type_text_fallback(clean_selector, clean_text, fallback_x, fallback_y, exc, fallback)
     if not value.get("ok"):
         return {
             "ok": False,
@@ -298,22 +314,34 @@ def type_text(
 def _type_text_fallback(
     selector: str,
     text: str,
+    fallback_x: Any,
+    fallback_y: Any,
     cdp_error: Any,
-    foreground_fallback: Callable[[str], dict[str, Any]],
+    foreground_fallback: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
+    has_coordinates = fallback_x not in (None, "") and fallback_y not in (None, "")
+    fallback_name = "desktop.click+desktop.type_text" if has_coordinates else "desktop.type_text"
     try:
-        fallback_result = foreground_fallback(text)
+        fallback_result = (
+            foreground_fallback(fallback_x, fallback_y, text)
+            if has_coordinates
+            else foreground_fallback(text)
+        )
     except Exception as exc:
-        return _foreground_fallback_unavailable("browser.type_text", cdp_error, exc)
+        return _foreground_fallback_unavailable("browser.type_text", cdp_error, exc, fallback=fallback_name)
     if not fallback_result.get("ok"):
         return _foreground_fallback_unavailable(
             "browser.type_text",
             cdp_error,
             fallback_result.get("error") or fallback_result.get("summary") or fallback_result,
             fallback_result=fallback_result,
+            fallback=fallback_name,
         )
     data = dict(fallback_result.get("data") or {})
     data["selector"] = selector
+    if has_coordinates:
+        data.setdefault("x", fallback_x)
+        data.setdefault("y", fallback_y)
     data.setdefault("character_count", len(text))
     payload = {
         "ok": True,
@@ -322,7 +350,7 @@ def _type_text_fallback(
         "data": data,
         "permission_error": False,
         "fallback_used": True,
-        "fallback": "desktop.type_text",
+        "fallback": fallback_name,
         "fallback_reason": str(cdp_error),
         "missing_permissions": ["chrome_cdp"],
         "permission_targets": ["chrome_cdp"],
@@ -332,9 +360,33 @@ def _type_text_fallback(
     return payload
 
 
-def _type_text_foreground_fallback(text: str) -> dict[str, Any]:
+def _type_text_foreground_fallback(*args: Any) -> dict[str, Any]:
     from apps.shell.agent.tools import desktop
 
+    if len(args) == 3:
+        x, y, text = args
+        click_result = desktop.desktop_click(x, y)
+        if not click_result.get("ok"):
+            return click_result
+        type_result = desktop.desktop_type_text(text)
+        if not type_result.get("ok"):
+            return type_result
+        click_data = click_result.get("data") if isinstance(click_result.get("data"), dict) else {}
+        type_data = type_result.get("data") if isinstance(type_result.get("data"), dict) else {}
+        return {
+            "ok": True,
+            "action": "desktop.click+desktop.type_text",
+            "summary": "Clicked foreground coordinate and typed text",
+            "data": {
+                **type_data,
+                "x": click_data.get("x", x),
+                "y": click_data.get("y", y),
+                "character_count": type_data.get("character_count", len(str(text))),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    (text,) = args
     return desktop.desktop_type_text(text)
 
 
@@ -344,6 +396,7 @@ def _foreground_fallback_unavailable(
     fallback_error: Any,
     *,
     fallback_result: dict[str, Any] | None = None,
+    fallback: str = "desktop.type_text",
 ) -> dict[str, Any]:
     missing_permissions = ["chrome_cdp"]
     permission_targets = ["chrome_cdp"]
@@ -360,7 +413,7 @@ def _foreground_fallback_unavailable(
         "error": "browser_foreground_fallback_unavailable",
         "permission_error": True,
         "fallback_used": True,
-        "fallback": "desktop.type_text",
+        "fallback": fallback,
         "missing_permissions": _dedupe(missing_permissions),
         "permission_targets": _dedupe(permission_targets),
         "detail": f"cdp: {cdp_error}; desktop.type_text: {fallback_error}",

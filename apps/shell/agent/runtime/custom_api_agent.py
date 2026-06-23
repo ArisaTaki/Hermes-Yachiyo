@@ -1369,6 +1369,9 @@ def _browser_type_text_summary(result: dict[str, Any], planned_input: dict[str, 
     if not isinstance(length, int):
         text = _payload_text(result, planned_input, "text")
         length = len(text) if text else 0
+    point = _browser_point_selector_label(selector)
+    if point:
+        return f"已在网页位置：{point} 输入文字（{length} 个字符）。"
     target = _browser_selector_label(selector)
     if target:
         return f"已在网页{target}输入文字（{length} 个字符）。"

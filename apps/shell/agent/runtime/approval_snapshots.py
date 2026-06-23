@@ -158,8 +158,14 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
         selector = _preview_value(record, "selector")
         text = _preview_value(record, "text")
         if selector and text:
+            point = _point_selector_preview(selector)
+            if point:
+                return f"将向当前浏览器页面位置 {point} 输入文字（{len(text)} 个字符），按工具策略需要人工确认。"
             return f"将向当前浏览器页面选择器 {selector} 输入文字（{len(text)} 个字符），按工具策略需要人工确认。"
         if selector:
+            point = _point_selector_preview(selector)
+            if point:
+                return f"将向当前浏览器页面位置 {point} 输入文字，按工具策略需要人工确认。"
             return f"将向当前浏览器页面选择器 {selector} 输入文字，按工具策略需要人工确认。"
         return "将向当前浏览器页面输入文字，按工具策略需要人工确认。"
     return ""

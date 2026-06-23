@@ -293,6 +293,80 @@ def test_browser_type_text_falls_back_to_foreground_input(monkeypatch) -> None:
     assert calls == ["kaguya"]
 
 
+def test_browser_type_text_accepts_point_selector(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def fake_evaluate(expression: str) -> dict[str, object]:
+        expressions.append(expression)
+        return {
+            "ok": True,
+            "selector": "point=120,240",
+            "tag": "INPUT",
+            "length": 5,
+            "x": 120,
+            "y": 240,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", fake_evaluate)
+
+    result = browser_mod.type_text("point=120,240", "hello", fallback_x=120, fallback_y=240)
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.type_text"
+    assert result["data"] == {
+        "ok": True,
+        "selector": "point=120,240",
+        "tag": "INPUT",
+        "length": 5,
+        "x": 120,
+        "y": 240,
+    }
+    assert "pointSelectorPrefix" in expressions[0]
+    assert "document.elementFromPoint" in expressions[0]
+
+
+def test_browser_type_text_point_falls_back_to_click_then_type(monkeypatch) -> None:
+    calls = []
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    def fake_foreground_type(*args) -> dict[str, object]:
+        calls.append(args)
+        return {
+            "ok": True,
+            "action": "desktop.click+desktop.type_text",
+            "summary": "Clicked and typed",
+            "data": {"x": args[0], "y": args[1], "character_count": len(args[2])},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+
+    result = browser_mod.type_text(
+        "point=120,240",
+        "hello",
+        fallback_x=120,
+        fallback_y=240,
+        foreground_fallback=fake_foreground_type,
+    )
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.type_text"
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.click+desktop.type_text"
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["data"] == {
+        "x": 120,
+        "y": 240,
+        "character_count": 5,
+        "selector": "point=120,240",
+    }
+    assert calls == [(120, 240, "hello")]
+
+
 def test_browser_type_text_reports_foreground_permission_when_fallback_denied(
     monkeypatch,
 ) -> None:
@@ -353,6 +427,57 @@ def test_browser_type_text_broker_fallback_uses_foreground_lock(tmp_path, monkey
         "holder": "group-run-1:run-1",
         "tool": "browser.type_text",
     }
+
+
+def test_browser_type_text_broker_point_fallback_clicks_then_types_with_lock(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+    calls = []
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_click",
+        lambda x, y: calls.append(("click", x, y))
+        or {"ok": True, "data": {"x": x, "y": y}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_type_text",
+        lambda text: calls.append(("type", text))
+        or {"ok": True, "data": {"character_count": len(text)}},
+    )
+
+    result = broker.call(
+        "browser.type_text",
+        {"selector": "point=12,34", "text": "kaguya", "fallback_x": 12, "fallback_y": 34},
+    )
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.click+desktop.type_text"
+    assert result["foreground_lock"] == {
+        "holder": "group-run-1:run-1",
+        "tool": "browser.type_text",
+    }
+    assert result["data"] == {
+        "character_count": 6,
+        "x": 12,
+        "y": 34,
+        "selector": "point=12,34",
+    }
+    assert calls == [("click", 12, 34), ("type", "kaguya")]
 
 
 def test_browser_type_text_broker_fallback_preserves_foreground_lock_busy(

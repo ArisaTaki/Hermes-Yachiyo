@@ -864,6 +864,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "text": "yachiyo",
         },
     }
+    assert daily_desktop_intent_tool_request("在网页坐标 120 240 输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.type_text",
+        "input": {
+            "selector": "point=120,240",
+            "text": "hello",
+            "fallback_x": 120,
+            "fallback_y": 240,
+        },
+    }
+    assert daily_desktop_intent_tool_request("输入 hello 到网页坐标 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.type_text",
+        "input": {
+            "selector": "point=120,240",
+            "text": "hello",
+            "fallback_x": 120,
+            "fallback_y": 240,
+        },
+    }
     assert daily_desktop_intent_tool_request("填写当前网页的搜索框为 yachiyo", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.type_text",
@@ -3422,6 +3442,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"selector": "input[type=\"search\"]", "length": 7},
         },
     )
+    browser_type_text_point = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.type_text",
+        {"selector": "point=120,240", "text": "hello"},
+        {
+            "ok": True,
+            "summary": "Typed text into browser selector: point=120,240",
+            "data": {"selector": "point=120,240", "length": 5, "x": 120, "y": 240},
+        },
+    )
 
     assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
@@ -3447,6 +3476,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_click == "已点击网页元素：登录。"
     assert browser_click_point == "已点击网页位置：120, 240。"
     assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"
+    assert browser_type_text_point == "已在网页位置：120, 240 输入文字（5 个字符）。"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 

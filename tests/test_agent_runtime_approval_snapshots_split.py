@@ -182,6 +182,25 @@ def test_approval_snapshot_describes_browser_type_text_approval() -> None:
         "将向当前浏览器页面选择器 input[name=q] 输入文字（7 个字符），按工具策略需要人工确认。"
     )
 
+    point_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-browser-type-point",
+            "tool": "browser.type_text",
+            "input_preview": {
+                "selector": "point=120,240",
+                "text": "hello",
+                "fallback_x": 120,
+                "fallback_y": 240,
+            },
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert point_snapshot["risk_level"] == "medium"
+    assert point_snapshot["policy_reason"] == (
+        "将向当前浏览器页面位置 120, 240 输入文字（5 个字符），按工具策略需要人工确认。"
+    )
+
 
 def test_workflow_approval_pause_projection_uses_shared_public_snapshot() -> None:
     projection = WorkflowApprovalPauseProjection(

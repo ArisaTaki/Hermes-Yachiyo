@@ -4446,6 +4446,19 @@ async def test_yachiyo_task_route_executes_browser_screenshot_without_model(
             },
             "已在网页搜索框输入文字（7 个字符）。",
         ),
+        (
+            "在网页坐标 120 240 输入 hello",
+            "browser.type_text",
+            {"selector": "point=120,240", "text": "hello", "fallback_x": 120, "fallback_y": 240},
+            "apps.shell.agent.tools.browser.type_text",
+            {
+                "ok": True,
+                "action": "browser.type_text",
+                "summary": "Typed text into browser selector",
+                "data": {"selector": "point=120,240", "length": 5, "x": 120, "y": 240, "tag": "INPUT"},
+            },
+            "已在网页位置：120, 240 输入文字（5 个字符）。",
+        ),
     ],
 )
 async def test_yachiyo_task_route_approves_browser_interaction_intent_without_model(
@@ -5901,6 +5914,7 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         for note in tools["desktop.permissions"]["fallback_notes"]
     )
     assert "point=x,y" in tools["browser.click"]["input_schema"]["properties"]["selector"]["description"]
+    assert "point=x,y" in tools["browser.type_text"]["input_schema"]["properties"]["selector"]["description"]
     assert any("fallback_x/fallback_y" in note for note in tools["browser.click"]["fallback_notes"])
     assert tools["terminal.run"]["risk_level"] == "high"
     assert tools["terminal.run"]["approval_required"] is True

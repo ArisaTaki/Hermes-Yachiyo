@@ -590,6 +590,19 @@ def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
         )
 
 
+def test_browser_type_text_schema_accepts_optional_fallback_coordinates() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "browser.type_text",
+        {"selector": "point=12,34", "text": "hello", "fallback_x": 12, "fallback_y": 34.5},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="browser.type_text 参数 fallback_y 必须是非负坐标数字"):
+        ToolDescriptorRegistry.validate_payload(
+            "browser.type_text",
+            {"selector": "point=12,34", "text": "hello", "fallback_x": 12, "fallback_y": -1},
+        )
+
+
 def test_compile_tool_policy_accepts_browser_tools_with_interaction_approval() -> None:
     compiler = RuntimePolicyCompiler()
 
@@ -981,7 +994,8 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(
         broker,
         "browser_type_text",
-        lambda selector, text: calls.append(("type", selector, text)) or {"ok": True},
+        lambda selector, text, **kwargs: calls.append(("type", selector, text, kwargs))
+        or {"ok": True},
     )
 
     assert dispatch_tool_call(
@@ -1007,14 +1021,14 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     assert dispatch_tool_call(
         broker,
         "browser.type_text",
-        {"selector": "#q", "text": "八千代"},
+        {"selector": "point=12,34", "text": "八千代", "fallback_x": 12, "fallback_y": 34},
     ) == {"ok": True}
     assert calls == [
         ("open", "https://example.com"),
         ("open_extract", "https://example.com/docs", "main"),
         ("open_screenshot", "https://example.com/docs", "capture docs"),
         ("click", "#go", 12, 34, 2),
-        ("type", "#q", "八千代"),
+        ("type", "point=12,34", "八千代", {"fallback_x": 12, "fallback_y": 34}),
     ]
 
 

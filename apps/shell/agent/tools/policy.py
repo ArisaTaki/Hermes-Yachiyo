@@ -429,21 +429,22 @@ class ToolDescriptor:
             payload.get("selector") or ""
         ).strip():
             raise AgentRuntimeError(f"{self.name} 参数 selector 必须是非空字符串")
-        if self.name == "browser.click":
+        if self.name in {"browser.click", "browser.type_text"}:
             for key in ("fallback_x", "fallback_y"):
                 if key not in payload or payload.get(key) in (None, ""):
                     continue
                 value = payload.get(key)
                 if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-                    raise AgentRuntimeError(f"browser.click 参数 {key} 必须是非负坐标数字")
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
                 try:
                     coordinate = float(value)
                 except (TypeError, ValueError) as exc:
                     raise AgentRuntimeError(
-                        f"browser.click 参数 {key} 必须是非负坐标数字"
+                        f"{self.name} 参数 {key} 必须是非负坐标数字"
                     ) from exc
                 if coordinate < 0 or coordinate > 100000:
-                    raise AgentRuntimeError(f"browser.click 参数 {key} 必须是非负坐标数字")
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
+        if self.name == "browser.click":
             click_count = payload.get("click_count", 1)
             if click_count not in (None, ""):
                 if isinstance(click_count, bool) or not isinstance(click_count, int):
@@ -1138,10 +1139,27 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     ),
     "browser.type_text": ToolDescriptor(
         name="browser.type_text",
-        description="Set text into an input-like element in the current browser page.",
+        description=(
+            "Set text into an input-like element in the current browser page by CSS selector "
+            "or point=x,y. If Chrome CDP is unavailable, provide fallback_x and fallback_y "
+            "after observing the screen so the tool can click the coordinate and type."
+        ),
         properties={
-            "selector": {"type": "string", "description": "CSS selector to focus and edit."},
+            "selector": {
+                "type": "string",
+                "description": "CSS selector or point=x,y target to focus and edit.",
+            },
             "text": {"type": "string", "description": "Text to enter."},
+            "fallback_x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Optional screen x coordinate for no-CDP foreground fallback.",
+            },
+            "fallback_y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Optional screen y coordinate for no-CDP foreground fallback.",
+            },
         },
         required=("selector", "text"),
     ),

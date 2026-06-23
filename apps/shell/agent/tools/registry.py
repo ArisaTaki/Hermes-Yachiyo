@@ -400,6 +400,8 @@ def _browser_type_text(
     return broker.browser_type_text(
         str(payload.get("selector") or ""),
         str(payload.get("text") or ""),
+        fallback_x=payload.get("fallback_x"),
+        fallback_y=payload.get("fallback_y"),
     )
 
 
