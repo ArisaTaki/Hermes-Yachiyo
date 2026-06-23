@@ -319,6 +319,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.reveal_path",
     "desktop.running_apps",
     "desktop.safe_click",
+    "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.type_text",
@@ -353,6 +354,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
+    "desktop.safe_scroll",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.safe_shortcut",
@@ -381,6 +383,7 @@ _FOREGROUND_ACTION_TOOLS = {
     "desktop.close_window",
     "desktop.hotkey",
     "desktop.safe_click",
+    "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.type_text",
@@ -610,6 +613,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
         candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
+
+    safe_scroll = _desktop_safe_scroll(text)
+    if safe_scroll:
+        candidates.append(_request("desktop.safe_scroll", safe_scroll))
 
     open_extract_payload = _browser_open_url_and_extract_text_request(text)
     if open_extract_payload:
@@ -2718,6 +2725,105 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "newwindow": "new_window",
     }
     return mapping.get(phrase, "")
+
+
+_SCROLL_PAGE_COUNTS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
+    page_count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
+    zh_prefix = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|把|将)?\s*(?:当前|前台|这个|该)?"
+        r"(?:窗口|界面|应用|app|网页|页面|屏幕)?(?:上|里|中|内)?\s*"
+    )
+    patterns = (
+        (
+            zh_prefix
+            + r"(?P<direction>向下|往下|朝下|下|向上|往上|朝上|上)"
+            + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)"
+            + rf"(?:\s*{page_count.format(name='count')}\s*(?:页|屏|次))?"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            zh_prefix
+            + r"(?P<direction_phrase>下滑|上滑|下滚|上滚|下翻|上翻|下一页|上一页)"
+            + rf"(?:\s*{page_count.format(name='count_phrase')}\s*(?:页|屏|次))?"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            r"^(?:please\s+)?(?:scroll|page)\s+"
+            r"(?P<direction_en>down|up)"
+            + rf"(?:\s+{page_count.format(name='count_en')}\s*(?:pages?|times?)?)?"
+            + r"\s*$"
+        ),
+        (
+            rf"^(?:please\s+)?{page_count.format(name='count_en_prefix')}\s+"
+            r"(?:pages?\s+)?(?:scroll|page)\s+(?P<direction_en_prefix>down|up)\s*$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        direction = (
+            groups.get("direction")
+            or groups.get("direction_phrase")
+            or groups.get("direction_en")
+            or groups.get("direction_en_prefix")
+            or ""
+        )
+        pages = _scroll_page_count(
+            groups.get("count")
+            or groups.get("count_phrase")
+            or groups.get("count_en")
+            or groups.get("count_en_prefix")
+        )
+        if direction and pages:
+            return {
+                "direction": "up" if _scroll_direction_is_up(direction) else "down",
+                "pages": pages,
+            }
+    return None
+
+
+def _scroll_direction_is_up(value: str) -> bool:
+    direction = str(value or "").strip().lower()
+    return direction in {"向上", "往上", "朝上", "上", "上滑", "上滚", "上翻", "上一页", "up"}
+
+
+def _scroll_page_count(value: str | None) -> int:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return 1
+    if raw.isdigit():
+        count = int(raw)
+    else:
+        count = _SCROLL_PAGE_COUNTS.get(raw, 0)
+    return count if 1 <= count <= 10 else 0
 
 
 def _normalize_named_hotkey_phrase(text: str) -> str:

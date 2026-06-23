@@ -428,6 +428,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.safe_scroll",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
@@ -566,6 +567,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
     assert desktop_tool_risk_level("desktop.safe_type_text") == "low"
     assert desktop_tool_risk_level("desktop.safe_click") == "low"
+    assert desktop_tool_risk_level("desktop.safe_scroll") == "low"
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.click_ui_element") == "medium"
     assert desktop_tool_risk_level("desktop.type_into_ui_element") == "medium"
@@ -594,6 +596,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_safe_shortcut") == "low"
     assert desktop_action_risk_level("foreground_safe_type_text") == "low"
     assert desktop_action_risk_level("foreground_safe_click") == "low"
+    assert desktop_action_risk_level("foreground_safe_scroll") == "low"
     assert desktop_action_risk_level("quit_app") == "medium"
     assert desktop_action_risk_level("foreground_close_window") == "medium"
     assert desktop_action_risk_level("foreground_click_ui_element") == "medium"
@@ -608,7 +611,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:22] == [
+    assert list(catalog)[:23] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -631,6 +634,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "foreground_safe_shortcut",
         "foreground_safe_type_text",
         "foreground_safe_click",
+        "foreground_safe_scroll",
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
@@ -671,6 +675,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
     assert catalog["foreground_safe_click"].risk_level == "low"
     assert catalog["foreground_safe_click"].tools == ["desktop.safe_click"]
+    assert catalog["foreground_safe_scroll"].risk_level == "low"
+    assert catalog["foreground_safe_scroll"].tools == ["desktop.safe_scroll"]
     assert catalog["foreground_hide_app"].risk_level == "low"
     assert catalog["foreground_hide_app"].tools == ["desktop.hide_app"]
     assert catalog["foreground_minimize_window"].risk_level == "low"
@@ -788,6 +794,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     safe_shortcut = tools["desktop.safe_shortcut"]
     safe_type_text = tools["desktop.safe_type_text"]
     safe_click = tools["desktop.safe_click"]
+    safe_scroll = tools["desktop.safe_scroll"]
     click_ui_element = tools["desktop.click_ui_element"]
     type_into_ui_element = tools["desktop.type_into_ui_element"]
     minimize_window = tools["desktop.minimize_window"]
@@ -854,6 +861,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_click.risk_level == "low"
     assert safe_click.input_schema["required"] == ["x", "y"]
     assert any("coordinates explicitly provided by the user" in note for note in safe_click.fallback_notes)
+    assert safe_scroll.capability_id == "foreground_input"
+    assert safe_scroll.risk_level == "low"
+    assert safe_scroll.input_schema["required"] == ["direction"]
+    assert safe_scroll.input_schema["properties"]["direction"]["enum"] == ["up", "down"]
+    assert any("scrolls only explicit foreground up/down page requests" in note for note in safe_scroll.fallback_notes)
     assert click_ui_element.capability_id == "foreground_input"
     assert click_ui_element.risk_level == "medium"
     assert click_ui_element.input_schema["required"] == ["target"]

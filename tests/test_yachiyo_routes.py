@@ -2777,6 +2777,106 @@ async def test_yachiyo_task_route_executes_safe_click_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_safe_scroll_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-safe-scroll.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-safe-scroll.db",
+        workspace_dir=tmp_path / "agent-runtime-route-safe-scroll",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-safe-scroll")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    scrolls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe foreground scroll public task should not call model")
+        ),
+    )
+
+    def fake_safe_scroll(direction: str, *, pages: int = 1) -> dict[str, Any]:
+        scrolls.append((direction, pages))
+        return {
+            "ok": True,
+            "action": "desktop.safe_scroll",
+            "summary": "Scrolled foreground desktop down 2 pages",
+            "data": {
+                "direction": direction,
+                "pages": pages,
+                "key_code": 121,
+                "explicit_user_scroll": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="向下滚动两页",
+                conversation_id="chat-main-safe-scroll",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-safe-scroll-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-safe-scroll", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert scrolls == [("down", 2)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已向下滚动前台界面（2 页）。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {"direction": "down", "pages": 2}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_scroll"] is True
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_screen_observe_then_safe_click_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6260,6 +6360,17 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert any(
         "coordinates explicitly provided by the user" in note
         for note in tools["desktop.safe_click"]["fallback_notes"]
+    )
+    assert tools["desktop.safe_scroll"]["capability_id"] == "foreground_input"
+    assert tools["desktop.safe_scroll"]["risk_level"] == "low"
+    assert tools["desktop.safe_scroll"]["input_schema"]["required"] == ["direction"]
+    assert tools["desktop.safe_scroll"]["input_schema"]["properties"]["direction"]["enum"] == [
+        "up",
+        "down",
+    ]
+    assert any(
+        "scrolls only explicit foreground up/down page requests" in note
+        for note in tools["desktop.safe_scroll"]["fallback_notes"]
     )
     assert tools["desktop.click_ui_element"]["capability_id"] == "foreground_input"
     assert tools["desktop.click_ui_element"]["risk_level"] == "medium"

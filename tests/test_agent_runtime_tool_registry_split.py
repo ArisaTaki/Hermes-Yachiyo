@@ -289,6 +289,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_safe_shortcut",
         "desktop_safe_type_text",
         "desktop_safe_click",
+        "desktop_safe_scroll",
         "desktop_click_ui_element",
         "desktop_type_into_ui_element",
         "desktop_hide_app",
@@ -484,6 +485,18 @@ def test_desktop_safe_click_schema_accepts_only_coordinates() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.safe_click", {"x": 12, "y": True})
 
 
+def test_desktop_safe_scroll_schema_accepts_direction_and_pages() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "down"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "up", "pages": 3})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_scroll 参数 direction 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "left"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_scroll 参数 pages 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "down", "pages": 0})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_scroll 参数 pages 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "down", "pages": True})
+
+
 def test_app_minimize_schema_requires_app_name() -> None:
     ToolDescriptorRegistry.validate_payload("app.minimize", {"app_name": "Slack"})
 
@@ -558,6 +571,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "app.minimize",
                 "desktop.hide_app",
                 "desktop.minimize_window",
+                "desktop.safe_scroll",
                 "app.quit",
                 "desktop.close_window",
                 "desktop.click",
@@ -577,6 +591,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.minimize",
         "desktop.hide_app",
         "desktop.minimize_window",
+        "desktop.safe_scroll",
         "app.quit",
         "desktop.close_window",
         "desktop.click",
@@ -710,6 +725,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         broker,
         "desktop_safe_click",
         lambda x, y: calls.append(("safe_click", x, y)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "desktop_safe_scroll",
+        lambda direction, *, pages=1: calls.append(("safe_scroll", direction, pages))
+        or {"ok": True},
     )
     monkeypatch.setattr(
         broker,
@@ -862,6 +883,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.safe_scroll",
+        {"direction": "down", "pages": 2},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.click_ui_element",
         {"target": "Send", "role_filter": "button", "limit": 20, "click_count": 2},
     ) == {"ok": True}
@@ -958,6 +984,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("safe_shortcut", "copy"),
         ("safe_type_text", "hello"),
         ("safe_click", 12, 34),
+        ("safe_scroll", "down", 2),
         ("click_ui_element", "Send", "button", 20, 2),
         ("type_into_ui_element", "Search", "hello", "text", 20),
         ("hotkey", "l", ["command"]),
@@ -2577,6 +2604,44 @@ def test_desktop_safe_click_uses_single_system_events_click(monkeypatch) -> None
     assert calls[0][0][-3:] == ["12", "35", "1"]
 
 
+def test_desktop_safe_scroll_uses_system_events_page_keys(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="scrolled\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    down = desktop_mod.desktop_safe_scroll("down", pages=2)
+    up = desktop_mod.desktop_safe_scroll("up")
+
+    assert down == {
+        "ok": True,
+        "action": "desktop.safe_scroll",
+        "summary": "Scrolled foreground desktop down 2 pages",
+        "data": {
+            "direction": "down",
+            "pages": 2,
+            "key_code": 121,
+            "explicit_user_scroll": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert up["ok"] is True
+    assert up["data"] == {
+        "direction": "up",
+        "pages": 1,
+        "key_code": 116,
+        "explicit_user_scroll": True,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert calls[0][0][-2:] == ["121", "2"]
+    assert calls[1][0][-2:] == ["116", "1"]
+
+
 def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypatch) -> None:
     calls = []
 
@@ -2632,6 +2697,27 @@ def test_desktop_click_permission_failure_returns_accessibility_target(monkeypat
             "in macOS System Settings > Privacy & Security > Accessibility."
         )
     ]
+
+
+def test_desktop_safe_scroll_permission_failure_returns_accessibility_target(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="System Events got an error: not allowed assistive access.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_scroll("down")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.safe_scroll"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["accessibility"]
+    assert result["permission_targets"] == ["accessibility"]
 
 
 def test_apple_music_permission_failure_returns_music_and_automation_targets(monkeypatch) -> None:

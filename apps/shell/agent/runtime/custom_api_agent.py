@@ -32,6 +32,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.safe_click",
+    "desktop.safe_scroll",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "screen.capture",
@@ -88,6 +89,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.safe_shortcut": "执行快捷动作",
     "desktop.safe_type_text": "输入前台文字",
     "desktop.safe_click": "点击前台界面",
+    "desktop.safe_scroll": "滚动前台界面",
     "desktop.click_ui_element": "点击前台控件",
     "desktop.type_into_ui_element": "填写前台控件",
     "desktop.hide_app": "隐藏当前应用",
@@ -791,6 +793,8 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "desktop.safe_click":
                 click = _click_text(result, planned_input)
                 return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
+            if tool_name == "desktop.safe_scroll":
+                return _safe_scroll_summary(result, planned_input) or result_summary or "已滚动前台界面。"
             if tool_name == "desktop.click_ui_element":
                 return _click_ui_element_summary(result, planned_input) or result_summary or "已点击前台控件。"
             if tool_name == "desktop.type_into_ui_element":
@@ -1042,7 +1046,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
@@ -1060,6 +1064,7 @@ class RuntimeCustomApiAgentLoop:
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "
+            "map explicit current foreground scroll/page up/page down requests to desktop.safe_scroll; "
             "when the user explicitly chains multiple low-risk desktop actions, execute them in order and let Runtime pause for approval if a later action requires it; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
@@ -1540,6 +1545,19 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "browser_forward": "前进一页",
     }.get(action, "")
     return f"已{label}。" if label else ""
+
+
+def _safe_scroll_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    direction = str(data.get("direction") or planned_input.get("direction") or "").strip().lower()
+    label = {"down": "向下", "up": "向上"}.get(direction, "")
+    try:
+        pages = int(data.get("pages") or planned_input.get("pages") or 1)
+    except (TypeError, ValueError):
+        pages = 1
+    if not label:
+        return ""
+    return f"已{label}滚动前台界面（{pages} 页）。"
 
 
 def _system_volume_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

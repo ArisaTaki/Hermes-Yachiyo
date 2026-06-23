@@ -56,6 +56,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.safe_shortcut": "desktop_safe_shortcut",
     "desktop.safe_type_text": "desktop_safe_type_text",
     "desktop.safe_click": "desktop_safe_click",
+    "desktop.safe_scroll": "desktop_safe_scroll",
     "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
@@ -117,6 +118,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.safe_click",
+    "desktop.safe_scroll",
     "desktop.hide_app",
     "desktop.minimize_window",
 )
@@ -407,6 +409,15 @@ class ToolDescriptor:
                     ) from exc
                 if coordinate < 0 or coordinate > 100000:
                     raise AgentRuntimeError(f"desktop.safe_click 参数 {key} 必须是非负坐标数字")
+        if self.name == "desktop.safe_scroll":
+            direction = str(payload.get("direction") or "").strip().lower()
+            if direction not in {"up", "down"}:
+                raise AgentRuntimeError("desktop.safe_scroll 参数 direction 必须是 up 或 down")
+            pages = payload.get("pages", 1)
+            if isinstance(pages, bool) or not isinstance(pages, int):
+                raise AgentRuntimeError("desktop.safe_scroll 参数 pages 必须是 1-10 的整数")
+            if pages < 1 or pages > 10:
+                raise AgentRuntimeError("desktop.safe_scroll 参数 pages 必须是 1-10 的整数")
         if self.name == "desktop.click":
             for key in ("x", "y"):
                 value = payload.get(key)
@@ -1141,6 +1152,28 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("x", "y"),
+    ),
+    "desktop.safe_scroll": ToolDescriptor(
+        name="desktop.safe_scroll",
+        description=(
+            "Scroll the current foreground app up or down by an explicit user-provided page "
+            "count. This is a low-risk direct-action path for Chat/Bubble/Live2D; use other "
+            "foreground tools when the model needs to infer a target after observation."
+        ),
+        properties={
+            "direction": {
+                "type": "string",
+                "enum": ["up", "down"],
+                "description": "Foreground scroll direction.",
+            },
+            "pages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Number of pages to scroll. Defaults to 1.",
+            },
+        },
+        required=("direction",),
     ),
     "desktop.click": ToolDescriptor(
         name="desktop.click",

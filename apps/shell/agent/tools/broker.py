@@ -580,6 +580,12 @@ class ToolBroker:
             lambda: desktop.desktop_safe_click(x, y),
         )
 
+    def desktop_safe_scroll(self, direction: str, *, pages: Any = 1) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.safe_scroll",
+            lambda: desktop.desktop_safe_scroll(direction, pages=pages),
+        )
+
     def desktop_click(self, x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.click",

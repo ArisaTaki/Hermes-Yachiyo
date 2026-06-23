@@ -271,6 +271,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.safe_scroll",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
@@ -2254,6 +2255,47 @@ def desktop_safe_click(x: Any, y: Any) -> dict[str, Any]:
     return payload
 
 
+def desktop_safe_scroll(direction: str, *, pages: Any = 1) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.safe_scroll")
+    clean_direction = _clean_scroll_direction(direction)
+    clean_pages = _clean_scroll_pages(pages)
+    key_code = 121 if clean_direction == "down" else 116
+    result = _run_osascript(
+        """
+        on run argv
+            set keyCodeValue to item 1 of argv as integer
+            set pageCount to item 2 of argv as integer
+            repeat pageCount times
+                tell application "System Events" to key code keyCodeValue
+                delay 0.05
+            end repeat
+            return "scrolled"
+        end run
+        """,
+        [str(key_code), str(clean_pages)],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.safe_scroll",
+            {**result, "action": "desktop.safe_scroll", "summary": "desktop.safe_scroll failed"},
+        )
+    label = "down" if clean_direction == "down" else "up"
+    return {
+        "ok": True,
+        "action": "desktop.safe_scroll",
+        "summary": f"Scrolled foreground desktop {label} {clean_pages} page{'s' if clean_pages != 1 else ''}",
+        "data": {
+            "direction": clean_direction,
+            "pages": clean_pages,
+            "key_code": key_code,
+            "explicit_user_scroll": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def _send_desktop_click(
     action_name: str,
     x: Any,
@@ -2641,6 +2683,47 @@ def _clean_click_count(value: Any) -> int:
     if count < 1 or count > 3:
         raise ValueError("click_count must be an integer from 1 to 3")
     return count
+
+
+def _clean_scroll_direction(value: str) -> str:
+    aliases = {
+        "down": "down",
+        "page_down": "down",
+        "pagedown": "down",
+        "scroll_down": "down",
+        "向下": "down",
+        "下": "down",
+        "往下": "down",
+        "下滚": "down",
+        "下滑": "down",
+        "up": "up",
+        "page_up": "up",
+        "pageup": "up",
+        "scroll_up": "up",
+        "向上": "up",
+        "上": "up",
+        "往上": "up",
+        "上滚": "up",
+        "上滑": "up",
+    }
+    clean = aliases.get(str(value or "").strip().lower().replace("-", "_").replace(" ", "_"))
+    if not clean:
+        raise ValueError("direction must be up or down")
+    return clean
+
+
+def _clean_scroll_pages(value: Any) -> int:
+    if value in (None, ""):
+        return 1
+    if isinstance(value, bool):
+        raise ValueError("pages must be an integer from 1 to 10")
+    try:
+        pages = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("pages must be an integer from 1 to 10") from exc
+    if pages < 1 or pages > 10:
+        raise ValueError("pages must be an integer from 1 to 10")
+    return pages
 
 
 def _clean_modifiers(modifiers: list[str]) -> list[str]:
@@ -3088,6 +3171,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
+        "desktop.safe_scroll": ["accessibility"],
         "app.open_and_safe_type_text": ["accessibility", "open_command"],
         "app.focus_and_safe_type_text": ["accessibility", "automation"],
         "app.open_and_safe_shortcut": ["accessibility", "open_command"],
@@ -3121,6 +3205,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
+        "desktop.safe_scroll": ["accessibility"],
         "app.open_and_safe_type_text": ["accessibility", "open_command"],
         "app.focus_and_safe_type_text": ["accessibility", "automation"],
         "app.open_and_safe_shortcut": ["accessibility", "open_command"],

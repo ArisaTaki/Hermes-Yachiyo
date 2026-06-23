@@ -374,6 +374,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.safe_click": [
             "Requires Accessibility permission and only single-clicks coordinates explicitly provided by the user.",
         ],
+        "desktop.safe_scroll": [
+            "Requires Accessibility permission and scrolls only explicit foreground up/down page requests.",
+        ],
         "desktop.click_ui_element": [
             "Requires approval plus Automation or Accessibility permission because it observes foreground UI controls and clicks an inferred coordinate.",
         ],

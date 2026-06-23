@@ -623,6 +623,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.safe_scroll",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
@@ -1150,6 +1151,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_click",
             "input": {"x": 120, "y": 240},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("看一下屏幕，然后向下滚动", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_scroll",
+            "input": {"direction": "down", "pages": 1},
         },
     ]
     assert daily_desktop_intent_tool_requests("截图然后双击 120 240", allowed_tools) == [
@@ -2323,6 +2336,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("检查桌面权限", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("向下滚动", ["desktop.type_text"]) is None
     assert daily_desktop_intent_tool_request("调大音量", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("复制 hello 到剪贴板", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("复制 hello 到剪贴板", allowed_tools) == {
@@ -2355,6 +2369,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.click",
         "input": {"selector": "text=发送", "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("向下滚动", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 1},
+    }
+    assert daily_desktop_intent_tool_request("向上滚动两页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "up", "pages": 2},
+    }
+    assert daily_desktop_intent_tool_request("scroll down 3 pages", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 3},
     }
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
@@ -3572,6 +3601,20 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    safe_scroll = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_scroll",
+        {"direction": "down", "pages": 2},
+        {
+            "ok": True,
+            "summary": "Scrolled foreground desktop down 2 pages",
+            "data": {
+                "direction": "down",
+                "pages": 2,
+                "key_code": 121,
+                "explicit_user_scroll": True,
+            },
+        },
+    )
     app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.show",
         {"app_name": "Slack"},
@@ -3674,6 +3717,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
         " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"
     )
     assert safe_click == "已点击前台位置：120, 240。"
+    assert safe_scroll == "已向下滚动前台界面（2 页）。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"
