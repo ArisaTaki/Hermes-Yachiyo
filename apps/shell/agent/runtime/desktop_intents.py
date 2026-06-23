@@ -1330,6 +1330,9 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
+    named = _desktop_named_hotkey(text)
+    if named:
+        return named
     hotkey_part = (
         r"(?:command|cmd|shift|option|alt|control|ctrl|⌘|⇧|⌥|⌃|fn|"
         r"回车|确认|确定|换行|空格|退出|删除|退格|上箭头|下箭头|左箭头|右箭头|"
@@ -1355,6 +1358,57 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
         if parsed:
             return parsed
     return None
+
+
+def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
+    phrase = _normalize_named_hotkey_phrase(text)
+    mapping: dict[str, tuple[str, tuple[str, ...]]] = {
+        "复制": ("c", ("command",)),
+        "复制选中内容": ("c", ("command",)),
+        "复制当前选中内容": ("c", ("command",)),
+        "copy": ("c", ("command",)),
+        "copyselection": ("c", ("command",)),
+        "copyselectedtext": ("c", ("command",)),
+        "粘贴": ("v", ("command",)),
+        "paste": ("v", ("command",)),
+        "全选": ("a", ("command",)),
+        "selectall": ("a", ("command",)),
+        "撤销": ("z", ("command",)),
+        "undo": ("z", ("command",)),
+        "重做": ("z", ("command", "shift")),
+        "redo": ("z", ("command", "shift")),
+        "保存": ("s", ("command",)),
+        "save": ("s", ("command",)),
+        "刷新": ("r", ("command",)),
+        "reload": ("r", ("command",)),
+        "refresh": ("r", ("command",)),
+        "查找": ("f", ("command",)),
+        "find": ("f", ("command",)),
+        "新建标签页": ("t", ("command",)),
+        "新标签页": ("t", ("command",)),
+        "打开新标签页": ("t", ("command",)),
+        "newtab": ("t", ("command",)),
+        "关闭标签页": ("w", ("command",)),
+        "关闭当前标签页": ("w", ("command",)),
+        "closetab": ("w", ("command",)),
+    }
+    combo = mapping.get(phrase)
+    if combo is None:
+        return None
+    key, modifiers = combo
+    return {"key": key, "modifiers": list(modifiers)}
+
+
+def _normalize_named_hotkey_phrase(text: str) -> str:
+    phrase = _strip_query(text)
+    phrase = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按一下|按下|按|执行|触发|发送)?\s*",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(r"\s*(?:一下|下|一次|键|快捷键|热键|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
+    return re.sub(r"[\s._-]+", "", phrase.lower())
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:

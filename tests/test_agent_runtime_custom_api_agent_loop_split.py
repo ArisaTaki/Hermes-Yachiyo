@@ -1197,6 +1197,41 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},
     }
+    assert daily_desktop_intent_tool_request("复制选中内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "c", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("粘贴一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "v", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("全选", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "a", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("撤销", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "z", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("重做", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "z", "modifiers": ["command", "shift"]},
+    }
+    assert daily_desktop_intent_tool_request("copy selected text", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "c", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("new tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "t", "modifiers": ["command"]},
+    }
     assert daily_desktop_intent_tool_request("输入 你好八千代", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.type_text",
@@ -1260,6 +1295,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("调大音量", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("复制 hello 到剪贴板", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("复制 hello 到剪贴板", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello"},
+    }
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
