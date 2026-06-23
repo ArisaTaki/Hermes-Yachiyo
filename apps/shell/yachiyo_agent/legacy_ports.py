@@ -135,6 +135,19 @@ class LegacyChatTaskStarter:
             conversation_id=conversation_id,
         )
 
+    def execute_existing_main_chat_task(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        prompt: str,
+    ) -> dict[str, Any] | None:
+        return self._execute_main_daily_desktop_task(
+            task_id=task_id,
+            conversation_id=conversation_id,
+            prompt=prompt,
+        )
+
     def _execute_main_daily_desktop_task(
         self,
         *,

@@ -199,6 +199,19 @@ def _latest_agent_task_snapshot(
     return None
 
 
+def _runtime_agent_service(runtime: "AppRuntime") -> Any | None:
+    service = getattr(runtime, "agent_runtime_service", None)
+    if service is not None:
+        return service
+    getter = getattr(runtime, "get_agent_runtime_service", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:
+            return None
+    return None
+
+
 def agent_task_snapshot_for_task(
     runtime: "AppRuntime",
     task_id: str,
@@ -206,14 +219,7 @@ def agent_task_snapshot_for_task(
     task_id = str(task_id or "").strip()
     if not task_id:
         return None
-    service = getattr(runtime, "agent_runtime_service", None)
-    if service is None:
-        getter = getattr(runtime, "get_agent_runtime_service", None)
-        if callable(getter):
-            try:
-                service = getter()
-            except Exception:
-                service = None
+    service = _runtime_agent_service(runtime)
     if service is None:
         return None
 
@@ -336,6 +342,10 @@ class ChatBridge:
         if not task_id:
             return result
         desktop_candidates = daily_desktop_intent_candidates(text)
+        if desktop_candidates:
+            executed_task = self._execute_yachiyo_desktop_quick_task(task_id, text)
+            if executed_task is not None:
+                return {**result, "agent_task": executed_task}
         agent_task = self._agent_task_snapshot_for_quick_message(
             task_id,
             has_desktop_intent=bool(desktop_candidates),
@@ -351,6 +361,32 @@ class ChatBridge:
                 return result
             return {**result, "agent_task": planned_task}
         return {**result, "agent_task": agent_task}
+
+    def _execute_yachiyo_desktop_quick_task(
+        self,
+        task_id: str,
+        text: str,
+    ) -> dict[str, Any] | None:
+        service = _runtime_agent_service(self._runtime)
+        if service is None:
+            return None
+        try:
+            from apps.shell.yachiyo_agent.legacy_ports import LegacyChatTaskStarter
+
+            starter = LegacyChatTaskStarter(self._runtime, service)
+            payload = starter.execute_existing_main_chat_task(
+                task_id=task_id,
+                conversation_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
+                prompt=text,
+            )
+            if payload is not None:
+                return agent_task_snapshot_from_payload(payload).model_dump(mode="json")
+        except Exception:
+            logger.debug("Launcher daily desktop quick task execution failed: %s", task_id, exc_info=True)
+            snapshot = agent_task_snapshot_for_task(self._runtime, task_id)
+            if snapshot is not None:
+                return snapshot
+        return None
 
     def _agent_task_snapshot_for_quick_message(
         self,
