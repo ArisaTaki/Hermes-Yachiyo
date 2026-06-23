@@ -372,6 +372,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.active_window",
         "browser.open_url",
         "browser.current_page",
+        "browser.extract_text",
+        "browser.screenshot",
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
     ]
 
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs", allowed_tools) == {
@@ -388,6 +393,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.current_page",
         "input": {},
+    }
+    assert daily_desktop_intent_tool_request("读取当前网页正文", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("截取当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
     }
     assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -429,12 +444,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.active_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("按 Command+L", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "l", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("按 Ctrl Shift P", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "p", "modifiers": ["control", "shift"]},
+    }
+    assert daily_desktop_intent_tool_request("输入 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("点击 120, 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click",
+        "input": {"x": 120, "y": 240, "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("双击 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click",
+        "input": {"x": 120, "y": 240, "click_count": 2},
+    }
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
 
 
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:
@@ -541,6 +584,116 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         "source": "daily_desktop_intent",
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"app_name": "Music"},
+    }
+
+
+def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runner() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    tool_runs: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "按 Command+L"}]
+
+    def run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        order.append("tool")
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": list(messages_arg),
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        messages_arg.append(
+            {
+                "role": "user",
+                "content": (
+                    'Tool result for desktop.hotkey: {"ok": true, '
+                    '"data": {"key": "l", "modifiers": ["command"]}}'
+                ),
+            }
+        )
+
+    def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
+        order.append("model")
+        assert "Tool result for desktop.hotkey" in model_messages[-1]["content"]
+        return {"role": "assistant", "content": "已发送 Command+L。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.hotkey",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-hotkey",
+    )
+
+    assert str(result) == "已发送 Command+L。"
+    assert order == ["tool", "model"]
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        }
+    ]
+    assert tool_runs[0]["allowed_tools"] == ["desktop.hotkey"]
+    assert tool_runs[0]["kwargs"]["run_id"] == "run-hotkey"
+    assert tool_runs[0]["kwargs"]["next_iteration"] == 0
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_planned",
+        "detail": "desktop.hotkey",
+        "tool": "desktop.hotkey",
+        "status": "planned",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
+        "input_preview": {"key": "l", "modifiers": ["command"]},
     }
 
 

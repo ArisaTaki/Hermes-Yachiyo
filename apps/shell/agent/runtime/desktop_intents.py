@@ -22,6 +22,12 @@ def daily_desktop_intent_tool_request(
     if url and "browser.open_url" in allowed:
         return _request("browser.open_url", {"url": url})
 
+    if _is_browser_extract_text_request(text) and "browser.extract_text" in allowed:
+        return _request("browser.extract_text", {})
+
+    if _is_browser_screenshot_request(text) and "browser.screenshot" in allowed:
+        return _request("browser.screenshot", {"reason": "user asked to capture the browser page"})
+
     if _is_browser_current_page_request(text) and "browser.current_page" in allowed:
         return _request("browser.current_page", {})
 
@@ -36,6 +42,18 @@ def daily_desktop_intent_tool_request(
     music = _music_query(text)
     if music and "media.apple_music_play" in allowed:
         return _request("media.apple_music_play", {"query": music})
+
+    hotkey = _desktop_hotkey(text)
+    if hotkey and "desktop.hotkey" in allowed:
+        return _request("desktop.hotkey", hotkey)
+
+    type_text = _desktop_type_text(text)
+    if type_text and "desktop.type_text" in allowed:
+        return _request("desktop.type_text", {"text": type_text})
+
+    click = _desktop_click(text)
+    if click and "desktop.click" in allowed:
+        return _request("desktop.click", click)
 
     if _is_screen_capture_request(text) and "screen.capture" in allowed:
         return _request("screen.capture", {"reason": "user asked to capture the screen"})
@@ -75,12 +93,14 @@ def _looks_like_negative_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:不要|不用|无需|不需要|别).{0,12}"
-            r"(?:执行|操作|调用|真的|实际|播放|截图|截屏|读取|查看)",
+            r"(?:执行|操作|调用|真的|实际|播放|截图|截屏|读取|查看|"
+            r"输入|打字|点击|按键|快捷键|网页)",
             text,
         )
         or re.search(
             r"(?:do not|don't|without|no need to).{0,24}"
-            r"(?:execute|perform|call|play|capture|inspect)",
+            r"(?:execute|perform|call|play|capture|inspect|type|click|press|hotkey|"
+            r"screenshot|read)",
             text.lower(),
         )
     )
@@ -145,6 +165,38 @@ def _is_browser_current_page_request(text: str) -> bool:
         or "current page" in lowered
         or "current browser tab" in lowered
         or "active browser tab" in lowered
+    )
+
+
+def _is_browser_extract_text_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:读取|读一下|提取|抓取|获取).{0,10}"
+            r"(?:当前|现在|前台)?(?:网页|网站|页面|浏览器).{0,10}(?:正文|文字|文本|内容)",
+            text,
+        )
+        or "extract text from the current page" in lowered
+        or "read the current page" in lowered
+        or "read current page" in lowered
+    )
+
+
+def _is_browser_screenshot_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:当前|现在|前台)?(?:网页|网站|页面|浏览器).{0,8}"
+            r"(?:截图|截屏|屏幕截图|抓屏)",
+            text,
+        )
+        or re.search(
+            r"(?:截取|截图|截屏|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
+            text,
+        )
+        or "browser screenshot" in lowered
+        or "page screenshot" in lowered
+        or "screenshot the current page" in lowered
     )
 
 
@@ -265,6 +317,146 @@ def _music_query(text: str) -> str:
 def _is_specific_music_query(query: str) -> bool:
     normalized = re.sub(r"[\s._-]+", "", query.lower())
     return normalized not in {"音乐", "music", "song", "歌曲", "applemusic"}
+
+
+def _desktop_hotkey(text: str) -> dict[str, Any] | None:
+    hotkey_part = (
+        r"(?:command|cmd|shift|option|alt|control|ctrl|⌘|⇧|⌥|⌃|fn|"
+        r"回车|换行|空格|退出|删除|退格|上箭头|下箭头|左箭头|右箭头|"
+        r"enter|return|escape|esc|tab|space|delete|backspace|up|down|left|right|"
+        r"[A-Za-z0-9])"
+    )
+    patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+)",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*"
+        rf"(?P<combo>{hotkey_part})",
+        rf"(?:press|send|trigger)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        parsed = _parse_hotkey_combo(match.group("combo"))
+        if parsed:
+            return parsed
+    return None
+
+
+def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
+    parts = [
+        part.strip()
+        for part in re.split(r"(?:\s*\+\s*|\s*-\s*|\s+)", str(value or "").strip())
+        if part.strip()
+    ]
+    if not parts:
+        return None
+    modifier_aliases = {
+        "command": "command",
+        "cmd": "command",
+        "⌘": "command",
+        "shift": "shift",
+        "⇧": "shift",
+        "option": "option",
+        "alt": "option",
+        "⌥": "option",
+        "control": "control",
+        "ctrl": "control",
+        "⌃": "control",
+    }
+    key_aliases = {
+        "enter": "return",
+        "return": "return",
+        "回车": "return",
+        "换行": "return",
+        "escape": "escape",
+        "esc": "escape",
+        "退出": "escape",
+        "tab": "tab",
+        "space": "space",
+        "空格": "space",
+        "delete": "delete",
+        "删除": "delete",
+        "backspace": "backspace",
+        "退格": "backspace",
+        "up": "up",
+        "上箭头": "up",
+        "down": "down",
+        "下箭头": "down",
+        "left": "left",
+        "左箭头": "left",
+        "right": "right",
+        "右箭头": "right",
+    }
+    modifiers: list[str] = []
+    key = ""
+    for raw_part in parts:
+        part = raw_part.lower()
+        modifier = modifier_aliases.get(part)
+        if modifier:
+            if modifier not in modifiers:
+                modifiers.append(modifier)
+            continue
+        if part == "fn":
+            continue
+        candidate = key_aliases.get(part, part)
+        if re.fullmatch(r"[a-z0-9]", candidate) or candidate in key_aliases.values():
+            key = candidate
+        else:
+            return None
+    if not key:
+        return None
+    return {"key": key, "modifiers": modifiers}
+
+
+def _desktop_type_text(text: str) -> str:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在前台|向前台|给当前窗口)?"
+        r"(?:输入|打字|键入)\s*(?P<text>.+)$",
+        r"(?:type|enter text)\s+(?P<text>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        typed_text = _strip_typed_text(match.group("text"))
+        if typed_text:
+            return typed_text
+    return ""
+
+
+def _strip_typed_text(value: str) -> str:
+    text = _strip_query(value)
+    text = re.sub(r"\s*(?:进去|到当前窗口|到前台|然后回车|并回车)$", "", text)
+    return _strip_query(text)
+
+
+def _desktop_click(text: str) -> dict[str, Any] | None:
+    match = re.search(
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|click)\s*"
+        r"(?:坐标|位置)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    payload: dict[str, Any] = {
+        "x": _number_value(match.group("x")),
+        "y": _number_value(match.group("y")),
+        "click_count": 2 if match.group("double") else 1,
+    }
+    return payload
+
+
+def _number_value(value: str) -> int | float:
+    number = float(value)
+    if number.is_integer():
+        return int(number)
+    return number
 
 
 def _strip_query(value: str) -> str:
