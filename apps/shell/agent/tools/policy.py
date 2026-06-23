@@ -694,7 +694,8 @@ class RuntimePolicyCompiler:
     def default_tool_policy(category: str = "custom") -> dict[str, Any]:
         memory_tools = list(MEMORY_TOOL_NAMES)
         future_task_tools = list(FUTURE_TASK_TOOL_NAMES)
-        tools = [*memory_tools, *future_task_tools, "artifact.write"]
+        daily_low_risk_tools = [*LOW_RISK_DESKTOP_TOOL_NAMES, *LOW_RISK_BROWSER_TOOL_NAMES]
+        tools = [*daily_low_risk_tools, *memory_tools, *future_task_tools, "artifact.write"]
         if category in {"coding", "review"}:
             tools = [
                 "workspace.list",
@@ -709,6 +710,7 @@ class RuntimePolicyCompiler:
             tools = [
                 "workspace.list",
                 "workspace.read",
+                *daily_low_risk_tools,
                 *memory_tools,
                 *future_task_tools,
                 "artifact.write",

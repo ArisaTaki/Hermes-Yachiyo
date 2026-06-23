@@ -10,6 +10,10 @@ from apps.shell.agent.tools.policy import (
     FUTURE_TASK_TOOL_NAMES,
     HIGH_RISK_AGENT_TOOLS,
     KNOWN_AGENT_TOOLS,
+    LOW_RISK_BROWSER_TOOL_NAMES,
+    LOW_RISK_DESKTOP_TOOL_NAMES,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
     MEMORY_KINDS,
     MEMORY_SCOPES,
     MEMORY_TOOL_NAMES,
@@ -120,6 +124,28 @@ def test_memory_payload_validation_rejects_invalid_scope_and_kind() -> None:
 def test_policy_gate_normalizes_allowed_tool_entries() -> None:
     assert PolicyGate.allows_tool("terminal.run", [" workspace.read ", "terminal.run"])
     assert not PolicyGate.allows_tool("terminal.run", ["workspace.read"])
+
+
+def test_default_daily_agent_policy_includes_low_risk_desktop_tools_only() -> None:
+    policy = RuntimePolicyCompiler.default_tool_policy("custom")
+    allowed_tools = set(policy["allowed_tools"])
+
+    assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
+    assert not (allowed_tools & set(MEDIUM_RISK_DESKTOP_TOOL_NAMES))
+    assert not (allowed_tools & set(MEDIUM_RISK_BROWSER_TOOL_NAMES))
+    assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
+    assert policy["approval_required"] == {"terminal.run": True, "workspace.write_patch": True}
+
+
+def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools() -> None:
+    policy = RuntimePolicyCompiler.default_tool_policy("orchestrator")
+    allowed_tools = set(policy["allowed_tools"])
+
+    assert {"workspace.list", "workspace.read"}.issubset(allowed_tools)
+    assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
+    assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
 
 
 def test_runtime_policy_compiler_projects_tool_workspace_and_agent_runtime() -> None:
