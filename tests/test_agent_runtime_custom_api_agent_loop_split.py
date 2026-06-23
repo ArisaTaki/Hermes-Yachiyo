@@ -609,6 +609,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.close_window",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.safe_click",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1251,6 +1252,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("点击 120, 240", allowed_tools) == {
         "protocol": "json_fallback",
+        "tool": "desktop.safe_click",
+        "input": {"x": 120, "y": 240},
+    }
+    assert daily_desktop_intent_tool_request("点击 120, 240", ["desktop.click"]) == {
+        "protocol": "json_fallback",
         "tool": "desktop.click",
         "input": {"x": 120, "y": 240, "click_count": 1},
     }
@@ -1261,8 +1267,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("点击屏幕 120,240", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.click",
-        "input": {"x": 120, "y": 240, "click_count": 1},
+        "tool": "desktop.safe_click",
+        "input": {"x": 120, "y": 240},
     }
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
@@ -1972,6 +1978,20 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"character_count": 5, "explicit_user_text": True},
         },
     )
+    safe_click = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_click",
+        {"x": 120, "y": 240},
+        {
+            "ok": True,
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": 120,
+                "y": 240,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        },
+    )
     app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.show",
         {"app_name": "Slack"},
@@ -2031,6 +2051,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert safe_shortcut == "已复制选中内容。"
     assert safe_type_text == "已向前台输入文字（5 个字符）。"
+    assert safe_click == "已点击前台位置：120, 240。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"

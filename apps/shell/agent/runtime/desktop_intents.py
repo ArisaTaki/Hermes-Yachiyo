@@ -306,6 +306,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if type_text:
         candidates.append(_request("desktop.type_text", {"text": type_text}))
 
+    safe_click = _desktop_safe_click(text)
+    if safe_click:
+        candidates.append(_request("desktop.safe_click", safe_click))
+
     click = _desktop_click(text)
     if click:
         candidates.append(_request("desktop.click", click))
@@ -1560,6 +1564,13 @@ def _desktop_click(text: str) -> dict[str, Any] | None:
         "click_count": 2 if match.group("double") else 1,
     }
     return payload
+
+
+def _desktop_safe_click(text: str) -> dict[str, Any] | None:
+    payload = _desktop_click(text)
+    if not payload or payload.get("click_count") != 1:
+        return None
+    return {"x": payload["x"], "y": payload["y"]}
 
 
 def _is_close_current_window_request(text: str) -> bool:

@@ -1716,6 +1716,13 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "explicitly provided by the user" in note
         for note in tools["desktop.safe_type_text"]["fallback_notes"]
     )
+    assert tools["desktop.safe_click"]["capability_id"] == "foreground_input"
+    assert tools["desktop.safe_click"]["risk_level"] == "low"
+    assert tools["desktop.safe_click"]["input_schema"]["required"] == ["x", "y"]
+    assert any(
+        "coordinates explicitly provided by the user" in note
+        for note in tools["desktop.safe_click"]["fallback_notes"]
+    )
     assert tools["desktop.minimize_window"]["capability_id"] == "foreground_input"
     assert tools["desktop.minimize_window"]["risk_level"] == "low"
     assert tools["desktop.minimize_window"]["input_schema"]["properties"] == {}

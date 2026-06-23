@@ -193,6 +193,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "media.apple_music_control" in allowed_tools
     assert "desktop.reveal_path" in allowed_tools
     assert "desktop.safe_type_text" in allowed_tools
+    assert "desktop.safe_click" in allowed_tools
     assert "desktop.type_text" in allowed_tools
     assert "desktop.click" in allowed_tools
     assert "browser.click" in allowed_tools

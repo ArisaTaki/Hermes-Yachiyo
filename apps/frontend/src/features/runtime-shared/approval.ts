@@ -32,6 +32,7 @@ export function approvalPreviewTarget(record: Record<string, unknown>, toolName 
     const text = textInputPreview(record, ['text']);
     return text ? `输入 ${text}` : '';
   }
+  if (tool === 'desktop.safe_click') return coordinateClickPreview(record);
   if (tool === 'desktop.click') return coordinateClickPreview(record);
   if (tool === 'browser.click') {
     const selector = approvalPreviewValue(record, ['selector']);
@@ -121,6 +122,7 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'media.apple_music_control') return '控制 Apple Music';
   if (tool === 'desktop.safe_shortcut') return '执行快捷动作';
   if (tool === 'desktop.safe_type_text') return '输入前台文字';
+  if (tool === 'desktop.safe_click') return '点击前台界面';
   if (tool === 'desktop.hotkey') return '发送快捷键';
   if (tool === 'desktop.type_text') return '输入前台文字';
   if (tool === 'desktop.click') return '点击前台界面';
@@ -152,6 +154,7 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'media.apple_music_control'
     || tool === 'desktop.safe_shortcut'
     || tool === 'desktop.safe_type_text'
+    || tool === 'desktop.safe_click'
     || tool === 'desktop.hotkey'
     || tool === 'desktop.type_text'
     || tool === 'desktop.click'

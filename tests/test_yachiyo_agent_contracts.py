@@ -421,6 +421,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.close_window",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.safe_click",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -542,6 +543,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.minimize_window") == "low"
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
     assert desktop_tool_risk_level("desktop.safe_type_text") == "low"
+    assert desktop_tool_risk_level("desktop.safe_click") == "low"
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
@@ -565,6 +567,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_minimize_window") == "low"
     assert desktop_action_risk_level("foreground_safe_shortcut") == "low"
     assert desktop_action_risk_level("foreground_safe_type_text") == "low"
+    assert desktop_action_risk_level("foreground_safe_click") == "low"
     assert desktop_action_risk_level("quit_app") == "medium"
     assert desktop_action_risk_level("foreground_close_window") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
@@ -577,7 +580,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:20] == [
+    assert list(catalog)[:21] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -598,6 +601,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "write_clipboard",
         "foreground_safe_shortcut",
         "foreground_safe_type_text",
+        "foreground_safe_click",
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
@@ -633,6 +637,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_safe_shortcut"].tools == ["desktop.safe_shortcut"]
     assert catalog["foreground_safe_type_text"].risk_level == "low"
     assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
+    assert catalog["foreground_safe_click"].risk_level == "low"
+    assert catalog["foreground_safe_click"].tools == ["desktop.safe_click"]
     assert catalog["foreground_hide_app"].risk_level == "low"
     assert catalog["foreground_hide_app"].tools == ["desktop.hide_app"]
     assert catalog["foreground_minimize_window"].risk_level == "low"
@@ -743,6 +749,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     hide_app = tools["desktop.hide_app"]
     safe_shortcut = tools["desktop.safe_shortcut"]
     safe_type_text = tools["desktop.safe_type_text"]
+    safe_click = tools["desktop.safe_click"]
     minimize_window = tools["desktop.minimize_window"]
     close_window = tools["desktop.close_window"]
     browser = tools["browser.open_url"]
@@ -792,6 +799,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_type_text.risk_level == "low"
     assert safe_type_text.input_schema["required"] == ["text"]
     assert any("explicitly provided by the user" in note for note in safe_type_text.fallback_notes)
+    assert safe_click.capability_id == "foreground_input"
+    assert safe_click.risk_level == "low"
+    assert safe_click.input_schema["required"] == ["x", "y"]
+    assert any("coordinates explicitly provided by the user" in note for note in safe_click.fallback_notes)
     assert minimize_window.capability_id == "foreground_input"
     assert minimize_window.risk_level == "low"
     assert minimize_window.input_schema["properties"] == {}

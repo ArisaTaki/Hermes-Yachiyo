@@ -802,6 +802,45 @@ def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_safe_click_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    clicked: list[tuple[int, int]] = []
+
+    def fake_safe_click(x: int, y: int) -> dict:
+        clicked.append((x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": x,
+                "y": y,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "点击 120, 240",
+    )
+
+    assert clicked == [(120, 240)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已点击前台位置：120, 240。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,
@@ -1012,7 +1051,6 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
     try:
         cases = [
             ("关闭当前窗口", "desktop.close_window", {}),
-            ("点击 120, 240", "desktop.click", {"x": 120, "y": 240, "click_count": 1}),
         ]
         for text, tool_name, input_preview in cases:
             result = bridge.send_quick_message(

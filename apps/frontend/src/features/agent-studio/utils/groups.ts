@@ -27,6 +27,7 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
       'media.apple_music_control',
       'desktop.safe_shortcut',
       'desktop.safe_type_text',
+      'desktop.safe_click',
       'desktop.hotkey',
       'desktop.type_text',
       'browser.open_url',
@@ -70,7 +71,13 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
     label: 'Foreground input',
     summary: 'Run safe shortcuts, type explicit text, and send foreground input.',
     risk: 'medium',
-    tools: ['desktop.safe_shortcut', 'desktop.safe_type_text', 'desktop.hotkey', 'desktop.type_text'],
+    tools: [
+      'desktop.safe_shortcut',
+      'desktop.safe_type_text',
+      'desktop.safe_click',
+      'desktop.hotkey',
+      'desktop.type_text',
+    ],
   },
   {
     id: 'browser_control',

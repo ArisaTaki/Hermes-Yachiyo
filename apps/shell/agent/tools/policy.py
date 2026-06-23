@@ -47,6 +47,7 @@ TOOL_FUNCTION_NAMES = {
     "clipboard.write": "clipboard_write",
     "desktop.safe_shortcut": "desktop_safe_shortcut",
     "desktop.safe_type_text": "desktop_safe_type_text",
+    "desktop.safe_click": "desktop_safe_click",
     "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
@@ -96,6 +97,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "clipboard.write",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.safe_click",
     "desktop.hide_app",
     "desktop.minimize_window",
 )
@@ -184,7 +186,7 @@ class ToolDescriptor:
         if extra_fields:
             raise AgentRuntimeError(f"{self.name} 参数包含未声明字段：{', '.join(extra_fields)}")
         for key in self.required:
-            if self.name == "desktop.click" and key in {"x", "y"}:
+            if self.name in {"desktop.click", "desktop.safe_click"} and key in {"x", "y"}:
                 if payload.get(key) in (None, ""):
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
                 continue
@@ -337,6 +339,19 @@ class ToolDescriptor:
             raise AgentRuntimeError("desktop.safe_type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
+        if self.name == "desktop.safe_click":
+            for key in ("x", "y"):
+                value = payload.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise AgentRuntimeError(f"desktop.safe_click 参数 {key} 必须是非负坐标数字")
+                try:
+                    coordinate = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRuntimeError(
+                        f"desktop.safe_click 参数 {key} 必须是非负坐标数字"
+                    ) from exc
+                if coordinate < 0 or coordinate > 100000:
+                    raise AgentRuntimeError(f"desktop.safe_click 参数 {key} 必须是非负坐标数字")
         if self.name == "desktop.click":
             for key in ("x", "y"):
                 value = payload.get(key)
@@ -895,6 +910,27 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Type text into the current foreground app.",
         properties={"text": {"type": "string", "description": "Text to type."}},
         required=("text",),
+    ),
+    "desktop.safe_click": ToolDescriptor(
+        name="desktop.safe_click",
+        description=(
+            "Single-click an explicit screen coordinate that the user provided in the current "
+            "daily desktop request. Use desktop.click for double-clicks, repeated clicks, "
+            "or coordinates selected by the model after screen observation."
+        ),
+        properties={
+            "x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen x coordinate in pixels.",
+            },
+            "y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen y coordinate in pixels.",
+            },
+        },
+        required=("x", "y"),
     ),
     "desktop.click": ToolDescriptor(
         name="desktop.click",

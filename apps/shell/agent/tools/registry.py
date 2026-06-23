@@ -289,6 +289,14 @@ def _desktop_click(
     )
 
 
+def _desktop_safe_click(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_safe_click(payload.get("x"), payload.get("y"))
+
+
 def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.browser_open_url(str(payload.get("url") or ""))
 
@@ -375,6 +383,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.safe_type_text": _desktop_safe_type_text,
+    "desktop.safe_click": _desktop_safe_click,
     "desktop.type_text": _desktop_type_text,
     "desktop.click": _desktop_click,
     "browser.open_url": _browser_open_url,

@@ -25,6 +25,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "clipboard.write",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.safe_click",
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
@@ -67,6 +68,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "clipboard.write": "写入剪贴板",
     "desktop.safe_shortcut": "执行快捷动作",
     "desktop.safe_type_text": "输入前台文字",
+    "desktop.safe_click": "点击前台界面",
     "desktop.hide_app": "隐藏当前应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
@@ -534,6 +536,9 @@ class RuntimeCustomApiAgentLoop:
                 if text:
                     return f"已向前台输入文字（{len(text)} 个字符）。"
                 return result_summary or "已向前台输入文字。"
+            if tool_name == "desktop.safe_click":
+                click = _click_text(result, planned_input)
+                return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
             if tool_name == "desktop.hotkey":
                 hotkey = _hotkey_text(result, planned_input)
                 return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
@@ -677,7 +682,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
@@ -690,6 +695,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/refresh to desktop.safe_shortcut; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
+            "map explicit user-provided single-click coordinates to desktop.safe_click; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "

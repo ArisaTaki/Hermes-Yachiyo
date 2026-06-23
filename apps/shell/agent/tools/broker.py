@@ -482,6 +482,12 @@ class ToolBroker:
             lambda: desktop.desktop_type_text(text),
         )
 
+    def desktop_safe_click(self, x: Any, y: Any) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.safe_click",
+            lambda: desktop.desktop_safe_click(x, y),
+        )
+
     def desktop_click(self, x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.click",

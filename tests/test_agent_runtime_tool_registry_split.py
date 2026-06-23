@@ -286,6 +286,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "clipboard_write",
         "desktop_safe_shortcut",
         "desktop_safe_type_text",
+        "desktop_safe_click",
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
@@ -381,6 +382,15 @@ def test_desktop_safe_type_text_schema_requires_user_text() -> None:
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_type_text 参数 text 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_type_text", {"text": ""})
+
+
+def test_desktop_safe_click_schema_accepts_only_coordinates() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.safe_click", {"x": 12, "y": 34.5})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_click 参数 x 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_click", {"x": -1, "y": 34})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_click 参数 y 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_click", {"x": 12, "y": True})
 
 
 def test_app_minimize_schema_requires_app_name() -> None:
@@ -575,6 +585,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_safe_click",
+        lambda x, y: calls.append(("safe_click", x, y)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_hotkey",
         lambda key, *, modifiers=None: calls.append(("hotkey", key, modifiers))
         or {"ok": True},
@@ -672,6 +687,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.safe_click",
+        {"x": 12, "y": 34},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -731,6 +751,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("music_control", "pause"),
         ("safe_shortcut", "copy"),
         ("safe_type_text", "hello"),
+        ("safe_click", 12, 34),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
@@ -1806,6 +1827,35 @@ def test_desktop_click_uses_system_events_with_coordinates(monkeypatch) -> None:
     }
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert calls[0][0][-3:] == ["12", "35", "2"]
+
+
+def test_desktop_safe_click_uses_single_system_events_click(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="clicked\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_click(12.2, "34.6")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_click",
+        "summary": "Clicked explicit foreground coordinate at (12, 35)",
+        "data": {
+            "x": 12,
+            "y": 35,
+            "click_count": 1,
+            "explicit_user_coordinates": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert calls[0][0][-3:] == ["12", "35", "1"]
 
 
 def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypatch) -> None:

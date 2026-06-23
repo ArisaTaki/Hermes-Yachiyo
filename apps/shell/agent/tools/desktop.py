@@ -254,6 +254,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.close_window",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.safe_click",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1777,6 +1778,37 @@ def _send_desktop_text(
 def desktop_click(x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.click")
+    return _send_desktop_click(
+        "desktop.click",
+        x,
+        y,
+        click_count=click_count,
+    )
+
+
+def desktop_safe_click(x: Any, y: Any) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.safe_click")
+    payload = _send_desktop_click(
+        "desktop.safe_click",
+        x,
+        y,
+        click_count=1,
+    )
+    if payload.get("ok"):
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        payload["summary"] = f"Clicked explicit foreground coordinate at ({data.get('x')}, {data.get('y')})"
+        payload["data"] = {**data, "explicit_user_coordinates": True}
+    return payload
+
+
+def _send_desktop_click(
+    action_name: str,
+    x: Any,
+    y: Any,
+    *,
+    click_count: Any = 1,
+) -> dict[str, Any]:
     clean_x = _clean_coordinate(x, "x")
     clean_y = _clean_coordinate(y, "y")
     clean_count = _clean_click_count(click_count)
@@ -1797,12 +1829,12 @@ def desktop_click(x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
     )
     if not result["ok"]:
         return _with_permission_metadata(
-            "desktop.click",
-            {**result, "action": "desktop.click", "summary": "desktop.click failed"},
+            action_name,
+            {**result, "action": action_name, "summary": f"{action_name} failed"},
         )
     return {
         "ok": True,
-        "action": "desktop.click",
+        "action": action_name,
         "summary": f"Clicked foreground desktop at ({clean_x}, {clean_y})",
         "data": {"x": clean_x, "y": clean_y, "click_count": clean_count},
         "permission_error": False,
@@ -2402,6 +2434,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
+        "desktop.safe_click": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
@@ -2428,6 +2461,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
+        "desktop.safe_click": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],

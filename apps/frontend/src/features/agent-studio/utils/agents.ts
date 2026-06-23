@@ -66,6 +66,7 @@ export const mediaControlTools = ['media.apple_music_play', 'media.apple_music_c
 export const foregroundInputTools = [
   'desktop.safe_shortcut',
   'desktop.safe_type_text',
+  'desktop.safe_click',
   'desktop.hotkey',
   'desktop.type_text',
   'desktop.click',
