@@ -4388,6 +4388,69 @@ button:hover {
   border-radius: 999px;
 }
 
+.launcher-desktop-readiness-notice {
+  position: absolute;
+  left: 50%;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 209, 102, 0.38);
+  border-radius: 8px;
+  background: rgba(54, 40, 18, 0.82);
+  color: #ffe9bf;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: left;
+  transform: translateX(-50%);
+  z-index: 15;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-app-region: no-drag;
+}
+
+.launcher-desktop-readiness-notice.danger {
+  border-color: rgba(255, 104, 104, 0.46);
+  background: rgba(116, 29, 29, 0.84);
+  color: #ffe2e2;
+}
+
+.launcher-desktop-readiness-notice:hover,
+.launcher-desktop-readiness-notice:focus {
+  outline: none;
+  border-color: rgba(255, 219, 112, 0.68);
+}
+
+.launcher-desktop-readiness-notice span,
+.launcher-desktop-readiness-notice small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher-desktop-readiness-notice span {
+  font-weight: 650;
+}
+
+.launcher-desktop-readiness-notice small {
+  color: rgba(255, 247, 223, 0.72);
+  font-size: 9px;
+}
+
+.bubble-shell .launcher-desktop-readiness-notice {
+  top: 34px;
+  width: min(164px, calc(100vw - 12px));
+  border-radius: 999px;
+}
+
+.live2d-shell .launcher-desktop-readiness-notice {
+  top: 72px;
+  width: min(280px, 86vw);
+}
+
 .launcher-agent-task-light:hover {
   border-color: rgba(255, 219, 112, 0.64);
 }

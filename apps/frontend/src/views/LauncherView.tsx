@@ -12,6 +12,7 @@ import {
   listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
+  getYachiyoReadiness,
 } from '../features/yachiyo-chat/api';
 import {
   launcherAgentTaskFromPublicTasks,
@@ -19,7 +20,8 @@ import {
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
+import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -38,6 +40,7 @@ import type { LauncherPayload, LauncherRecentSession } from './launcherTypes';
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 5000;
+const LAUNCHER_READINESS_POLL_INTERVAL_MS = 30000;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const LIVE2D_GLOBAL_POINTER_POLL_MS = 120;
@@ -54,6 +57,10 @@ const LIVE2D_IDLE_MOTION_MIN_MS = 8500;
 const LIVE2D_IDLE_MOTION_JITTER_MS = 6500;
 
 type LauncherMode = 'bubble' | 'live2d';
+type LauncherDesktopReadinessNotice = Pick<
+  ChatNotice,
+  'kind' | 'title' | 'detail' | 'action_label' | 'action_view' | 'action_params'
+> | null;
 
 const LAUNCHER_SUMMARY_TEST_IDS: Record<LauncherMode, {
   latestReply: string;
@@ -149,6 +156,7 @@ export function LauncherView({ view }: { view: AppView }) {
     return (
       <Live2DLauncher
         agentTask={launcher.agentTask}
+        desktopReadinessNotice={launcher.desktopReadinessNotice}
         onApproveTaskApproval={launcher.approveAgentTaskApproval}
         onCancelTask={launcher.cancelAgentTask}
         onRejectTaskApproval={launcher.rejectAgentTaskApproval}
@@ -161,6 +169,7 @@ export function LauncherView({ view }: { view: AppView }) {
   return (
     <BubbleLauncher
       agentTask={launcher.agentTask}
+      desktopReadinessNotice={launcher.desktopReadinessNotice}
       onApproveTaskApproval={launcher.approveAgentTaskApproval}
       onCancelTask={launcher.cancelAgentTask}
       onRejectTaskApproval={launcher.rejectAgentTaskApproval}
@@ -174,6 +183,7 @@ export function LauncherView({ view }: { view: AppView }) {
 function useLauncher(mode: 'bubble' | 'live2d') {
   const [data, setData] = useState<LauncherPayload | null>(null);
   const [publicAgentTask, setPublicAgentTask] = useState<AgentTaskSnapshot | null>(null);
+  const [desktopReadinessNotice, setDesktopReadinessNotice] = useState<LauncherDesktopReadinessNotice>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -201,6 +211,20 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     const timer = window.setInterval(refresh, processing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
+
+  const refreshDesktopReadiness = useCallback(async () => {
+    try {
+      setDesktopReadinessNotice(chatDesktopPermissionNotice(await getYachiyoReadiness()));
+    } catch {
+      setDesktopReadinessNotice((current) => current);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDesktopReadiness();
+    const timer = window.setInterval(refreshDesktopReadiness, LAUNCHER_READINESS_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshDesktopReadiness]);
 
   const startAgentTask = useCallback(async (prompt: string) => {
     const text = prompt.trim();
@@ -260,6 +284,7 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     approveAgentTaskApproval,
     cancelAgentTask,
     data,
+    desktopReadinessNotice,
     refresh,
     rejectAgentTaskApproval,
     startAgentTask,
@@ -301,6 +326,7 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
 
 function BubbleLauncher({
   agentTask: publicAgentTask,
+  desktopReadinessNotice,
   onApproveTaskApproval,
   onCancelTask,
   onRejectTaskApproval,
@@ -309,6 +335,7 @@ function BubbleLauncher({
   startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
+  desktopReadinessNotice: LauncherDesktopReadinessNotice;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
@@ -319,6 +346,7 @@ function BubbleLauncher({
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const desktopReadinessRef = useRef<HTMLButtonElement | null>(null);
   const quickInputRef = useRef<HTMLFormElement | null>(null);
   const quickInputComposingRef = useRef(false);
   const dragStateRef = useRef<LauncherDragState | null>(null);
@@ -370,7 +398,11 @@ function BubbleLauncher({
       if (frame) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = 0;
-        const regions = [elementRegion(buttonRef.current), elementRegion(quickInputRef.current)]
+        const regions = [
+          elementRegion(buttonRef.current),
+          elementRegion(desktopReadinessRef.current),
+          elementRegion(quickInputRef.current),
+        ]
           .filter((region): region is Live2DHitRegion => Boolean(region));
         hitRegionsRef.current = regions;
         const rects = live2dShapeRects(null, regions, 'medium');
@@ -529,6 +561,11 @@ function BubbleLauncher({
         onRejectApproval={onRejectTaskApproval}
         task={agentTask}
       />
+      <LauncherDesktopReadinessNotice
+        mode="bubble"
+        notice={desktopReadinessNotice}
+        noticeRef={desktopReadinessRef}
+      />
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="bubble-quick-input" data-testid="bubble-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
           <input
@@ -564,6 +601,37 @@ function BubbleLauncher({
       ) : null}
       <LauncherSessionSummaryProbe mode="bubble" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
     </main>
+  );
+}
+
+function LauncherDesktopReadinessNotice({
+  mode,
+  notice,
+  noticeRef,
+}: {
+  mode: LauncherMode;
+  notice: LauncherDesktopReadinessNotice;
+  noticeRef: MutableRefObject<HTMLButtonElement | null>;
+}) {
+  if (!notice) return null;
+  const params = notice.action_params || {};
+  return (
+    <button
+      ref={noticeRef}
+      className={`launcher-desktop-readiness-notice ${notice.kind}`}
+      data-testid={`${mode}-launcher-readiness-notice`}
+      type="button"
+      title={notice.detail}
+      aria-label={`${notice.title}：${notice.detail}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void openAppView(notice.action_view || 'diagnostics', params);
+      }}
+    >
+      <span data-testid={`${mode}-launcher-readiness-title`}>{notice.title}</span>
+      <small data-testid={`${mode}-launcher-readiness-detail`}>{notice.detail}</small>
+    </button>
   );
 }
 
@@ -607,6 +675,7 @@ function bubbleTitle(
 
 function Live2DLauncher({
   agentTask: publicAgentTask,
+  desktopReadinessNotice,
   onApproveTaskApproval,
   onCancelTask,
   onRejectTaskApproval,
@@ -615,6 +684,7 @@ function Live2DLauncher({
   startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
+  desktopReadinessNotice: LauncherDesktopReadinessNotice;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
@@ -626,6 +696,7 @@ function Live2DLauncher({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const characterRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLImageElement | null>(null);
+  const desktopReadinessRef = useRef<HTMLButtonElement | null>(null);
   const resourceHintRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLButtonElement | null>(null);
   const quickInputRef = useRef<HTMLFormElement | null>(null);
@@ -749,6 +820,7 @@ function Live2DLauncher({
           character: characterRef.current,
           preview: previewRef.current,
           quickInput: quickInputRef.current,
+          readinessNotice: desktopReadinessRef.current,
           rendererState: rendererStateRef.current,
           rendererReady,
           reply: replyRef.current,
@@ -1015,6 +1087,7 @@ function Live2DLauncher({
                 character: characterRef.current,
                 preview: previewRef.current,
                 quickInput: quickInputRef.current,
+                readinessNotice: desktopReadinessRef.current,
                 rendererState: rendererStateRef.current,
                 rendererReady,
                 reply: replyRef.current,
@@ -1080,6 +1153,11 @@ function Live2DLauncher({
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
         task={agentTask}
+      />
+      <LauncherDesktopReadinessNotice
+        mode="live2d"
+        notice={desktopReadinessNotice}
+        noticeRef={desktopReadinessRef}
       />
 
       {launcher.enable_quick_input !== false && quickInputVisible ? (
@@ -1170,7 +1248,7 @@ function dragLauncherWindow(
 }
 
 function live2dInteractiveTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('.live2d-resource-hint, .live2d-reply, .live2d-quick-input'));
+  return target instanceof Element && Boolean(target.closest('.live2d-resource-hint, .live2d-reply, .live2d-quick-input, .launcher-desktop-readiness-notice'));
 }
 
 function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullable<LauncherPayload['launcher']>) {
@@ -1695,6 +1773,7 @@ function reportLive2DRegions({
   character,
   preview,
   quickInput,
+  readinessNotice,
   rendererState,
   rendererReady,
   reply,
@@ -1709,6 +1788,7 @@ function reportLive2DRegions({
   character: HTMLDivElement | null;
   preview: HTMLImageElement | null;
   quickInput: HTMLFormElement | null;
+  readinessNotice: HTMLButtonElement | null;
   rendererState: Live2DRendererState;
   rendererReady: boolean;
   reply: HTMLButtonElement | null;
@@ -1725,7 +1805,7 @@ function reportLive2DRegions({
   const previewRegion = preview ? live2DPreviewHitRegion(preview) : null;
   const hitRegion = canvasRegion || rendererRegion || previewRegion || null;
   positionLive2DReply(reply, hitRegion);
-  const uiRegions = [resourceHint, reply, quickInput]
+  const uiRegions = [resourceHint, reply, readinessNotice, quickInput]
     .map((element) => elementRegion(element))
     .filter((region): region is Live2DHitRegion => Boolean(region));
   hitRegionRef.current = hitRegion;
