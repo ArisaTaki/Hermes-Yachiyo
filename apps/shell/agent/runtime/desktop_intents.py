@@ -249,6 +249,21 @@ def daily_desktop_intent_tool_requests(
     return []
 
 
+def daily_desktop_entrypoint_tool_requests(
+    context: str,
+    allowed_tools: list[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Return deterministic desktop requests for Chat/Bubble/Live2D entrypoints."""
+
+    direct_request = daily_desktop_metadata_tool_request(metadata, allowed_tools)
+    if direct_request:
+        return [direct_request]
+    planning_context = daily_desktop_recovery_prompt(metadata) or context
+    return daily_desktop_intent_tool_requests(planning_context, allowed_tools)
+
+
 def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any]]:
     """Return ordered foreground desktop tool requests for explicit multi-step intents."""
 
@@ -3669,6 +3684,7 @@ def _is_active_window_request(text: str) -> bool:
 
 
 __all__ = [
+    "daily_desktop_entrypoint_tool_requests",
     "daily_desktop_intent_candidates",
     "daily_desktop_intent_sequence_candidates",
     "daily_desktop_intent_tool_request",

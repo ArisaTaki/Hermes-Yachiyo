@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_entrypoint_tool_requests,
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
     daily_desktop_intent_tool_requests,
@@ -2599,6 +2600,53 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
+
+
+def test_daily_desktop_entrypoint_tool_requests_share_metadata_and_sequence_detection() -> None:
+    allowed_tools = [
+        "app.open",
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+    ]
+    metadata = {
+        "desktop_permission_recovery": True,
+        "recovery_tool": "app.open",
+        "recovery_input": {"app_name": "辅助功能权限"},
+        "recovery_risk_level": "low",
+    }
+
+    assert daily_desktop_entrypoint_tool_requests(
+        "打开 Notes，输入 hello，再复制",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_entrypoint_tool_requests(
+        "恢复权限",
+        allowed_tools,
+        metadata=metadata,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "source": "daily_desktop_metadata",
+            "planning_reason": "structured_recovery_metadata",
+        }
+    ]
+    assert daily_desktop_entrypoint_tool_requests(
+        "怎么播放 Apple Music？",
+        allowed_tools,
+    ) == []
 
 
 def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_model() -> None:

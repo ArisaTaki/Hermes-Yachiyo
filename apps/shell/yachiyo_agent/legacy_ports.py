@@ -6,10 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_intent_candidates,
+    daily_desktop_entrypoint_tool_requests,
     daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.chat_api import ChatAPI
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -200,13 +201,20 @@ class LegacyChatTaskStarter:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
-        direct_tool_request = daily_desktop_metadata_tool_request(metadata)
+        allowed_daily_desktop_tools = list(DAILY_DESKTOP_TOOL_NAMES)
+        direct_tool_request = daily_desktop_metadata_tool_request(
+            metadata,
+            allowed_daily_desktop_tools,
+        )
         execution_prompt = daily_desktop_recovery_prompt(metadata) or prompt
+        desktop_requests = daily_desktop_entrypoint_tool_requests(
+            prompt,
+            allowed_daily_desktop_tools,
+            metadata=metadata,
+        )
         if not task_id:
             return None
-        if not direct_tool_request and (
-            not execution_prompt or not daily_desktop_intent_candidates(execution_prompt)
-        ):
+        if not direct_tool_request and not desktop_requests:
             return None
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
@@ -394,7 +402,10 @@ class LegacyChatTaskStarter:
 
 
 def _planned_daily_desktop_timeline(prompt: str) -> list[dict[str, Any]]:
-    candidates = daily_desktop_intent_candidates(prompt)
+    candidates = daily_desktop_entrypoint_tool_requests(
+        prompt,
+        list(DAILY_DESKTOP_TOOL_NAMES),
+    )
     if not candidates:
         return []
     request = candidates[0]

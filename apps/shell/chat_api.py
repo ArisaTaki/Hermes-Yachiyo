@@ -43,10 +43,9 @@ from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_intent_candidates,
-    daily_desktop_metadata_tool_request,
-    daily_desktop_recovery_prompt,
+    daily_desktop_entrypoint_tool_requests,
 )
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
@@ -708,15 +707,15 @@ class ChatAPI:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
-            metadata_desktop_tool_request = daily_desktop_metadata_tool_request(metadata)
-            daily_desktop_task_text = daily_desktop_recovery_prompt(metadata) or task_text
+            daily_desktop_requests = daily_desktop_entrypoint_tool_requests(
+                task_text,
+                list(DAILY_DESKTOP_TOOL_NAMES),
+                metadata=metadata,
+            )
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and (
-                    bool(metadata_desktop_tool_request)
-                    or bool(daily_desktop_intent_candidates(daily_desktop_task_text))
-                )
+                and bool(daily_desktop_requests)
             )
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason and not direct_daily_desktop_intent:
