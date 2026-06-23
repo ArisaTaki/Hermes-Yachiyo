@@ -193,12 +193,12 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开 Apple Music",
+        "可以帮我打开 Word 吗",
     )
 
     assert result["ok"] is True
-    assert open_calls == ["Music"]
-    assert agent_task["summary"] == "已打开 Music。"
+    assert open_calls == ["Microsoft Word"]
+    assert agent_task["summary"] == "已打开 Microsoft Word。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"

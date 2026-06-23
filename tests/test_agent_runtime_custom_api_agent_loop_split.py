@@ -631,6 +631,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://chatgpt.com"},
     }
+    assert daily_desktop_intent_tool_request("可以帮我打开 GitHub 吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("搜一下 Yachiyo desktop agent", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -813,10 +818,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("可以帮我打开下载文件夹吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开应用程序文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "/Applications"},
+    }
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Arc"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Zoom", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "zoom.us"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Word", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Microsoft Word"},
+    }
+    assert daily_desktop_intent_tool_request("启动 iTerm2", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "iTerm"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Teams", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Microsoft Teams"},
     }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
@@ -962,6 +997,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.status",
         "input": {"app_name": "Music"},
+    }
+    assert daily_desktop_intent_tool_request("Zoom 开着吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "zoom.us"},
     }
     assert daily_desktop_intent_tool_request("is Slack running", allowed_tools) == {
         "protocol": "json_fallback",

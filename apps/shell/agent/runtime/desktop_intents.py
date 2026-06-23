@@ -87,6 +87,45 @@ _APP_ALIASES = {
     "brave": "Brave Browser",
     "brave浏览器": "Brave Browser",
     "spotify": "Spotify",
+    "shortcuts": "Shortcuts",
+    "快捷指令": "Shortcuts",
+    "figma": "Figma",
+    "zoom": "zoom.us",
+    "zoomus": "zoom.us",
+    "teams": "Microsoft Teams",
+    "microsoftteams": "Microsoft Teams",
+    "word": "Microsoft Word",
+    "microsoftword": "Microsoft Word",
+    "excel": "Microsoft Excel",
+    "microsoftexcel": "Microsoft Excel",
+    "powerpoint": "Microsoft PowerPoint",
+    "ppt": "Microsoft PowerPoint",
+    "microsoftpowerpoint": "Microsoft PowerPoint",
+    "outlook": "Microsoft Outlook",
+    "microsoftoutlook": "Microsoft Outlook",
+    "telegram": "Telegram",
+    "telegramdesktop": "Telegram",
+    "whatsapp": "WhatsApp",
+    "飞书": "飞书",
+    "feishu": "Feishu",
+    "lark": "Lark",
+    "钉钉": "DingTalk",
+    "dingtalk": "DingTalk",
+    "腾讯会议": "Tencent Meeting",
+    "tencentmeeting": "Tencent Meeting",
+    "iterm": "iTerm",
+    "iterm2": "iTerm",
+    "warp": "Warp",
+    "docker": "Docker",
+    "xcode": "Xcode",
+    "postman": "Postman",
+    "linear": "Linear",
+    "raycast": "Raycast",
+    "pycharm": "PyCharm",
+    "intellij": "IntelliJ IDEA",
+    "idea": "IntelliJ IDEA",
+    "webstorm": "WebStorm",
+    "goland": "GoLand",
 }
 
 _COMMON_REVEAL_PATHS = {
@@ -108,6 +147,11 @@ _COMMON_REVEAL_PATHS = {
     "homefolder": "~",
     "主目录": "~",
     "用户文件夹": "~",
+    "applications": "/Applications",
+    "applicationsfolder": "/Applications",
+    "applicationfolder": "/Applications",
+    "应用程序": "/Applications",
+    "应用程序文件夹": "/Applications",
 }
 
 _APP_STATUS_PATTERNS = (
@@ -380,7 +424,7 @@ def _browser_named_site_url(text: str) -> str:
 
 
 def _normalize_site_name(value: str) -> str:
-    site = _strip_query(value)
+    site = _strip_polite_suffix(_strip_query(value))
     site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site)
     site = re.sub(r"\s*(?:网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
     compact = re.sub(r"[\s._-]+", "", site.lower())
@@ -656,12 +700,12 @@ def _desktop_reveal_path(text: str) -> str:
 
 
 def _normalize_reveal_path(value: str) -> str:
-    target = _strip_query(value)
+    target = _strip_polite_suffix(_strip_query(value))
     target = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", target)
     if _looks_like_local_path(target):
         return target
     target = re.sub(r"\s*(?:文件夹|目录|路径|folder|directory|path)$", "", target, flags=re.IGNORECASE)
-    target = _strip_query(target)
+    target = _strip_polite_suffix(_strip_query(target))
     if not target:
         return ""
     compact = re.sub(r"[\s._-]+", "", target.lower())
@@ -770,7 +814,7 @@ def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
     app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
     app = re.sub(r"\s*(?:应用|app|软件|程序)$", "", app, flags=re.IGNORECASE)
-    app = re.sub(r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$", "", app, flags=re.IGNORECASE)
+    app = _strip_polite_suffix(app)
     return app.strip()
 
 
@@ -1047,6 +1091,15 @@ def _number_value(value: str) -> int | float:
 
 def _strip_query(value: str) -> str:
     return str(value or "").strip(" 「」『』“”\"'`，,。.!?？！？ ")
+
+
+def _strip_polite_suffix(value: str) -> str:
+    return re.sub(
+        r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
+        "",
+        str(value or "").strip(),
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def _is_screen_capture_request(text: str) -> bool:

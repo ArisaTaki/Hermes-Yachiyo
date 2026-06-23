@@ -318,7 +318,7 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
     monkeypatch.setattr("apps.shell.agent.tools.desktop.reveal_path", fake_reveal_path)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     try:
-        result = api.send_message("打开下载文件夹")
+        result = api.send_message("可以帮我打开下载文件夹吗")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
