@@ -318,9 +318,14 @@ class ChatBridge:
 
         return get_chat_store()
 
-    def send_quick_message(self, text: str) -> Dict[str, Any]:
+    def send_quick_message(
+        self,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """快捷发送消息，委托 ChatAPI"""
-        result = self._chat_api.send_message(text)
+        result = self._chat_api.send_message(text, metadata=metadata)
         if result.get("ok") is False:
             return result
         task_id = str(result.get("task_id") or "").strip()

@@ -759,7 +759,13 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
                 "latest_reply_full": "完整回复",
             }
 
-        def send_quick_message(self, text):
+        def send_quick_message(self, text, *, metadata=None):
+            assert metadata == {
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            }
             return {"ok": True, "text": text}
 
     class FakeNotificationTracker:
@@ -848,7 +854,13 @@ async def test_launcher_quick_message_returns_agent_task_snapshot_when_available
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def send_quick_message(self, text):
+        def send_quick_message(self, text, *, metadata=None):
+            assert metadata == {
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            }
             return {"ok": True, "text": text, "task_id": "launcher-task-1"}
 
     monkeypatch.setattr(ui, "ChatBridge", FakeChatBridge)

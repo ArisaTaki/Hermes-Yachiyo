@@ -1228,15 +1228,23 @@ async def trigger_proactive_test(request: ProactiveTestRequest) -> dict[str, Any
 async def send_launcher_quick_message(request: LauncherQuickMessageRequest) -> dict[str, Any]:
     runtime = get_runtime()
     session_id = str(request.session_id or "").strip()
+    mode_id = "live2d" if request.mode == "live2d" else "bubble"
     if session_id:
         loaded = ChatAPI(runtime).load_session(session_id)
         if not loaded.get("ok"):
             return loaded
-        mode_id = "live2d" if request.mode == "live2d" else "bubble"
         service = _launcher_proactive_services.get((mode_id, id(runtime)))
         if service is not None and session_id == service.session_id:
             service.acknowledge()
-    result = ChatBridge(runtime).send_quick_message(request.text)
+    result = ChatBridge(runtime).send_quick_message(
+        request.text,
+        metadata={
+            "source": "launcher",
+            "launcher_mode": mode_id,
+            "launcher_surface": "quick_message",
+            "runnable_kind": "main",
+        },
+    )
     if not result.get("ok"):
         return result
     snapshot = agent_task_snapshot_for_task(runtime, str(result.get("task_id") or ""))

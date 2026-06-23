@@ -70,7 +70,7 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
     runtime.agent_runtime_service = _FakeDesktopIntentRuntimeService()
     bridge = ChatBridge(runtime)
     bridge._chat_api = SimpleNamespace(
-        send_message=lambda text: {
+        send_message=lambda text, **_kwargs: {
             "ok": True,
             "message_id": "message-browser",
             "task_id": "task-browser",
@@ -102,7 +102,7 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
     runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
     bridge = ChatBridge(runtime)
     bridge._chat_api = SimpleNamespace(
-        send_message=lambda text: {
+        send_message=lambda text, **_kwargs: {
             "ok": True,
             "message_id": "message-pending-browser",
             "task_id": "task-pending-browser",
@@ -143,7 +143,7 @@ def test_chat_bridge_quick_message_keeps_plain_chat_without_planned_agent_task(t
     runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
     bridge = ChatBridge(runtime)
     bridge._chat_api = SimpleNamespace(
-        send_message=lambda text: {
+        send_message=lambda text, **_kwargs: {
             "ok": True,
             "message_id": "message-plain",
             "task_id": "task-plain",
@@ -162,6 +162,48 @@ def test_chat_bridge_quick_message_keeps_plain_chat_without_planned_agent_task(t
             "echo": "今天状态怎么样？",
         }
         assert runtime.agent_runtime_service.calls == [("get_task_run_link", "task-plain")]
+    finally:
+        store.close()
+
+
+def test_chat_bridge_quick_message_forwards_entrypoint_metadata(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    bridge = ChatBridge(runtime)
+    received: dict[str, object] = {}
+
+    def send_message(text, **kwargs):
+        received["text"] = text
+        received["metadata"] = kwargs.get("metadata")
+        return {
+            "ok": True,
+            "message_id": "message-launcher",
+            "task_id": "",
+            "status": "pending",
+        }
+
+    bridge._chat_api = SimpleNamespace(send_message=send_message)
+    try:
+        result = bridge.send_quick_message(
+            "打开 Cursor",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            },
+        )
+
+        assert result["ok"] is True
+        assert received == {
+            "text": "打开 Cursor",
+            "metadata": {
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            },
+        }
     finally:
         store.close()
 

@@ -1318,8 +1318,8 @@ def test_launcher_http_routes_preserve_session_summary_and_quick_message(monkeyp
                     ],
                 }
 
-            def send_quick_message(self, text):
-                calls.append(("quick_message", {"text": text}))
+            def send_quick_message(self, text, *, metadata=None):
+                calls.append(("quick_message", {"text": text, "metadata": metadata}))
                 return {
                     "ok": True,
                     "text": text,
@@ -1437,7 +1437,18 @@ def test_launcher_http_routes_preserve_session_summary_and_quick_message(monkeyp
             ("overview", {"summary_count": 3, "session_limit": 3}),
             ("notification_ack", {"session_id": "session-current"}),
             ("load_session", {"session_id": "session-current"}),
-            ("quick_message", {"text": "继续整理会话"}),
+            (
+                "quick_message",
+                {
+                    "text": "继续整理会话",
+                    "metadata": {
+                        "source": "launcher",
+                        "launcher_mode": "live2d",
+                        "launcher_surface": "quick_message",
+                        "runnable_kind": "main",
+                    },
+                },
+            ),
         ]
     finally:
         sys.modules.pop("_oha_ui_launcher_route_http_under_test", None)
