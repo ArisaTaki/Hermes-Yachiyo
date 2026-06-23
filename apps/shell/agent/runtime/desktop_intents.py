@@ -220,11 +220,52 @@ def daily_desktop_intent_tool_request(
 ) -> dict[str, Any] | None:
     """Return a structured low-risk desktop tool request for clear daily Chat intents."""
 
+    requests = daily_desktop_intent_tool_requests(context, allowed_tools)
+    return requests[0] if requests else None
+
+
+def daily_desktop_intent_tool_requests(
+    context: str,
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    """Return structured desktop tool requests for clear daily Chat intents."""
+
     allowed = {str(tool or "").strip() for tool in allowed_tools}
+    sequence = daily_desktop_intent_sequence_candidates(context)
+    if len(sequence) > 1 and all(str(request.get("tool") or "") in allowed for request in sequence):
+        return sequence
     for request in daily_desktop_intent_candidates(context):
         if str(request.get("tool") or "") in allowed:
-            return request
-    return None
+            return [request]
+    return []
+
+
+def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any]]:
+    """Return ordered low-risk foreground desktop tool requests for explicit multi-step intents."""
+
+    text = _clean_text(context)
+    if (
+        not text
+        or _looks_like_negative_request(text)
+        or _is_desktop_permissions_request(text)
+        or _looks_like_explanation_request(text)
+    ):
+        return []
+    clauses = _split_daily_desktop_sequence(text)
+    if len(clauses) < 2:
+        return []
+    requests: list[dict[str, Any]] = []
+    for clause in clauses[:5]:
+        request = _first_daily_desktop_candidate(_strip_sequence_clause_prefix(clause))
+        if request is None:
+            return []
+        requests.append(request)
+    requests = _coalesce_app_foreground_sequence(requests)
+    if len(requests) < 2:
+        return []
+    if not _is_low_risk_foreground_sequence(requests):
+        return []
+    return requests
 
 
 _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
@@ -267,6 +308,37 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "media.apple_music_play",
     "screen.capture",
     "system.volume",
+}
+
+_LOW_RISK_FOREGROUND_SEQUENCE_TOOLS = {
+    "app.open",
+    "app.focus",
+    "app.show",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "desktop.hide_app",
+    "desktop.minimize_window",
+    "desktop.safe_click",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+}
+
+_APP_SEQUENCE_CONTEXT_TOOLS = {
+    "app.open",
+    "app.focus",
+    "app.show",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+}
+
+_FOREGROUND_ACTION_TOOLS = {
+    "desktop.safe_click",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
 }
 
 
@@ -325,6 +397,92 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if not app_name:
         return ""
     return f"打开{app_name}"
+
+
+def _split_daily_desktop_sequence(text: str) -> list[str]:
+    parts = re.split(
+        r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|(?:然后|接着|之后|随后|并且)\s*)",
+        str(text or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    return [_strip_query(part) for part in parts if _strip_query(part)]
+
+
+def _strip_sequence_clause_prefix(text: str) -> str:
+    return re.sub(
+        r"^(?:再|然后|接着|之后|随后|并且|and then|then)\s*",
+        "",
+        str(text or "").strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
+    for request in daily_desktop_intent_candidates(text):
+        tool = str(request.get("tool") or "")
+        if tool in _LOW_RISK_FOREGROUND_SEQUENCE_TOOLS:
+            return request
+    return None
+
+
+def _coalesce_app_foreground_sequence(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(requests):
+        current = requests[index]
+        next_request = requests[index + 1] if index + 1 < len(requests) else None
+        composite = _app_foreground_sequence_composite(current, next_request)
+        if composite:
+            coalesced.append(composite)
+            index += 2
+            continue
+        coalesced.append(current)
+        index += 1
+    return coalesced
+
+
+def _app_foreground_sequence_composite(
+    app_request: dict[str, Any],
+    action_request: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not action_request:
+        return None
+    app_tool = str(app_request.get("tool") or "")
+    if app_tool not in {"app.open", "app.focus"}:
+        return None
+    action_tool = str(action_request.get("tool") or "")
+    app_input = app_request.get("input") if isinstance(app_request.get("input"), dict) else {}
+    action_input = action_request.get("input") if isinstance(action_request.get("input"), dict) else {}
+    app_name = str(app_input.get("app_name") or "").strip()
+    if not app_name:
+        return None
+    mode = "open" if app_tool == "app.open" else "focus"
+    if action_tool == "desktop.safe_type_text":
+        text = str(action_input.get("text") or "").strip()
+        if text:
+            return _request(
+                f"app.{mode}_and_safe_type_text",
+                {"app_name": app_name, "text": text},
+            )
+    if action_tool == "desktop.safe_shortcut":
+        action = str(action_input.get("action") or "").strip()
+        if action:
+            return _request(
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": action},
+            )
+    return None
+
+
+def _is_low_risk_foreground_sequence(requests: list[dict[str, Any]]) -> bool:
+    tools = [str(request.get("tool") or "") for request in requests]
+    if not tools or any(tool not in _LOW_RISK_FOREGROUND_SEQUENCE_TOOLS for tool in tools):
+        return False
+    if tools[0] not in _APP_SEQUENCE_CONTEXT_TOOLS:
+        return False
+    return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
 
 
 def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
@@ -2541,6 +2699,8 @@ def _is_active_window_request(text: str) -> bool:
 
 __all__ = [
     "daily_desktop_intent_candidates",
+    "daily_desktop_intent_sequence_candidates",
     "daily_desktop_intent_tool_request",
+    "daily_desktop_intent_tool_requests",
     "daily_desktop_recovery_prompt",
 ]

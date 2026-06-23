@@ -7,6 +7,7 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
+    daily_desktop_intent_tool_requests,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
@@ -184,38 +185,45 @@ class RuntimeCustomApiAgentLoop:
                 return resumed_result
         if default_messages or start_iteration == 0:
             planning_context = context if default_messages else self._latest_user_intent_text(messages)
-            planned_tool_request = self._direct_daily_desktop_tool_request(
+            direct_planned_tool_request = self._direct_daily_desktop_tool_request(
                 direct_tool_request,
                 allowed_tools,
-            ) or daily_desktop_intent_tool_request(planning_context, allowed_tools)
-            if planned_tool_request:
-                planned_tool = str(planned_tool_request.get("tool") or "")
-                planned_input = planned_tool_request.get("input") or {}
-                planned_payload = {
-                    "tool": planned_tool,
-                    "status": "planned",
-                    "source": str(planned_tool_request.get("source") or "daily_desktop_intent"),
-                    "planning_reason": str(
-                        planned_tool_request.get("planning_reason") or "clear_daily_desktop_intent"
-                    ),
-                    "input_preview": planned_input,
-                }
-                timeline.append(
-                    self._timeline(
-                        "agent.desktop.intent_planned",
-                        planned_tool,
-                        **planned_payload,
+            )
+            planned_tool_requests = (
+                [direct_planned_tool_request]
+                if direct_planned_tool_request
+                else daily_desktop_intent_tool_requests(planning_context, allowed_tools)
+            )
+            if planned_tool_requests:
+                for planned_tool_request in planned_tool_requests:
+                    planned_tool = str(planned_tool_request.get("tool") or "")
+                    planned_input = planned_tool_request.get("input") or {}
+                    planned_payload = {
+                        "tool": planned_tool,
+                        "status": "planned",
+                        "source": str(planned_tool_request.get("source") or "daily_desktop_intent"),
+                        "planning_reason": str(
+                            planned_tool_request.get("planning_reason") or "clear_daily_desktop_intent"
+                        ),
+                        "input_preview": planned_input,
+                    }
+                    timeline.append(
+                        self._timeline(
+                            "agent.desktop.intent_planned",
+                            planned_tool,
+                            **planned_payload,
+                        )
                     )
-                )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(
-                        run_id,
-                        "agent.desktop.intent_planned",
-                        planned_payload,
-                    )
+                    if run_id and self._append_run_event is not None:
+                        self._append_run_event(
+                            run_id,
+                            "agent.desktop.intent_planned",
+                            planned_payload,
+                        )
+                tool_timeline_start = len(timeline)
                 try:
                     self._run_tool_requests(
-                        [planned_tool_request],
+                        planned_tool_requests,
                         allowed_tools,
                         broker,
                         messages,
@@ -226,6 +234,19 @@ class RuntimeCustomApiAgentLoop:
                         budget=budget,
                     )
                 except AgentApprovalRequired as exc:
+                    pending_approval = (
+                        exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
+                    )
+                    planned_tool = str(
+                        pending_approval.get("tool")
+                        or planned_tool_requests[0].get("tool")
+                        or ""
+                    )
+                    planned_input = (
+                        pending_approval.get("input")
+                        if isinstance(pending_approval.get("input"), dict)
+                        else planned_tool_requests[0].get("input") or {}
+                    )
                     self._record_desktop_intent_approval_required(
                         planned_tool,
                         planned_input,
@@ -234,13 +255,23 @@ class RuntimeCustomApiAgentLoop:
                         run_id=run_id,
                     )
                     raise
-                direct_result = self._direct_daily_desktop_result(
-                    agent,
-                    planned_tool,
-                    planned_input,
-                    timeline,
-                    run_id=run_id,
-                )
+                if len(planned_tool_requests) == 1:
+                    planned_tool = str(planned_tool_requests[0].get("tool") or "")
+                    planned_input = planned_tool_requests[0].get("input") or {}
+                    direct_result = self._direct_daily_desktop_result(
+                        agent,
+                        planned_tool,
+                        planned_input,
+                        timeline,
+                        run_id=run_id,
+                    )
+                else:
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        planned_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
                 if direct_result:
                     return direct_result
             else:
@@ -487,6 +518,99 @@ class RuntimeCustomApiAgentLoop:
                     "agent.desktop.permission_recovery",
                     recovery_payload,
                 )
+        return summary
+
+    def _direct_daily_desktop_sequence_result(
+        self,
+        planned_tool_requests: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        *,
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> str:
+        tool_events = [
+            event
+            for event in timeline[tool_timeline_start:]
+            if event.get("event") == "agent.tool.call"
+        ]
+        event_index = 0
+        completed_steps: list[dict[str, Any]] = []
+        summaries: list[str] = []
+        for planned_tool_request in planned_tool_requests:
+            planned_tool = str(planned_tool_request.get("tool") or "")
+            if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
+                return ""
+            planned_input = planned_tool_request.get("input")
+            if not isinstance(planned_input, dict):
+                planned_input = {}
+            tool_event: dict[str, Any] | None = None
+            while event_index < len(tool_events):
+                candidate = tool_events[event_index]
+                event_index += 1
+                if str(candidate.get("detail") or "") == planned_tool:
+                    tool_event = candidate
+                    break
+            if tool_event is None:
+                return ""
+            result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+            if result.get("approval_required"):
+                return ""
+            summary = self._daily_desktop_summary(planned_tool, planned_input, result)
+            if not summary:
+                return ""
+            completed_steps.append(
+                {
+                    "tool": planned_tool,
+                    "input_preview": planned_input,
+                    "result": result,
+                    "summary": summary,
+                }
+            )
+            summaries.append(summary)
+        summary = _combine_daily_desktop_summaries(summaries)
+        if not summary:
+            return ""
+        last_step = completed_steps[-1]
+        event_payload = {
+            "tool": str(last_step.get("tool") or ""),
+            "tools": [str(request.get("tool") or "") for request in planned_tool_requests],
+            "input_preview": (
+                last_step.get("input_preview") if isinstance(last_step.get("input_preview"), dict) else {}
+            ),
+            "result": last_step.get("result") if isinstance(last_step.get("result"), dict) else {},
+            "source": "daily_desktop_intent",
+            "steps": completed_steps,
+            "summary": summary,
+        }
+        timeline.append(
+            self._timeline(
+                "agent.desktop.intent_completed",
+                str(last_step.get("tool") or ""),
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
+        for step in completed_steps:
+            recovery_payload = _desktop_permission_recovery_event_payload(
+                str(step.get("tool") or ""),
+                step.get("input_preview") if isinstance(step.get("input_preview"), dict) else {},
+                step.get("result") if isinstance(step.get("result"), dict) else {},
+            )
+            if recovery_payload:
+                timeline.append(
+                    self._timeline(
+                        "agent.desktop.permission_recovery",
+                        str(step.get("tool") or ""),
+                        **recovery_payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.desktop.permission_recovery",
+                        recovery_payload,
+                    )
         return summary
 
     @staticmethod
@@ -851,6 +975,7 @@ class RuntimeCustomApiAgentLoop:
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "
+            "when the user explicitly chains multiple low-risk desktop actions, execute them in order and let Runtime pause for approval if a later action requires it; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "
@@ -1264,6 +1389,11 @@ def _sentence(value: str) -> str:
     if text.endswith(("。", ".", "!", "！", "?", "？")):
         return text
     return f"{text}。"
+
+
+def _combine_daily_desktop_summaries(summaries: list[str]) -> str:
+    sentences = [_sentence(summary) for summary in summaries if str(summary or "").strip()]
+    return " ".join(sentences)
 
 
 def _display_target_name(value: str, suffix: str = "") -> str:

@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
+    daily_desktop_intent_tool_requests,
     daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
@@ -890,6 +891,63 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_requests("打开 Notes，输入 hello，再复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Notes 并输入 hello，再复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 并新建标签页，然后粘贴", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Notes 并输入 hello，再复制", ["app.open"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Notes"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开浏览器并访问 GitHub", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Notes 并输入 再见", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "再见"},
+        }
+    ]
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",
@@ -1992,6 +2050,118 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
+
+
+def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_model() -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "app.open_and_safe_type_text":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Focused app and completed foreground action",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "foreground_action": "safe_type_text",
+                        "character_count": len(payload["text"]),
+                        "explicit_user_text": True,
+                    },
+                }
+            elif tool == "desktop.safe_shortcut":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Executed safe shortcut: copy",
+                    "data": {"shortcut_action": payload["action"]},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "app.open_and_safe_type_text",
+                    "desktop.safe_shortcut",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("multi-step daily desktop intent should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 Notes，输入 hello，再复制",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-multi-daily",
+    )
+
+    assert result == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
+    assert tool_runs == [
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_type_text",
+                "input": {"app_name": "Notes", "text": "hello"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "copy"},
+            },
+        ]
+    ]
+    planned_events = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    ]
+    assert [event["detail"] for event in planned_events] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+    ]
+    completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
+    assert completed[-1]["detail"] == "desktop.safe_shortcut"
+    assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]
 
 
 def test_daily_desktop_recovery_prompt_accepts_only_low_risk_app_open() -> None:

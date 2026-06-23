@@ -1304,6 +1304,68 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: copy",
+            "data": {"shortcut_action": action, "key": "c", "modifiers": ["command"]},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Notes，输入 hello，再复制",
+    )
+
+    assert calls == [
+        ("open", "Notes"),
+        ("focus", "Notes"),
+        ("type", "hello"),
+        ("shortcut", "copy"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+    ]
+    assert run["status"] == "completed"
+    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_safe_click_without_approval(
     tmp_path,
     monkeypatch,
