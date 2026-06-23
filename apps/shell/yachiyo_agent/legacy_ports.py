@@ -97,6 +97,13 @@ class LegacyChatTaskStarter:
         if not run_id:
             if agent_id != MAIN_CHAT_AGENT_ID or not task_id:
                 return None
+            executed = self._execute_main_daily_desktop_task(
+                task_id=task_id,
+                conversation_id=conversation_id,
+                prompt=str(request.get("prompt") or request.get("goal") or ""),
+            )
+            if executed is not None:
+                return executed
             return self._projector.chat_task_payload(
                 {
                     "task_id": task_id,
@@ -127,6 +134,191 @@ class LegacyChatTaskStarter:
             {**run, "task_id": task_id, "session_id": conversation_id},
             conversation_id=conversation_id,
         )
+
+    def _execute_main_daily_desktop_task(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        prompt: str,
+    ) -> dict[str, Any] | None:
+        prompt = str(prompt or "").strip()
+        if not task_id or not prompt or not daily_desktop_intent_candidates(prompt):
+            return None
+        start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
+        execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
+        if not callable(start_main_chat_run) or not callable(execute_main_chat_model_loop):
+            return None
+
+        self._sync_app_task_running(task_id)
+        run_id = ""
+        try:
+            run = start_main_chat_run(
+                task_id=task_id,
+                session_id=conversation_id,
+                user_goal=prompt,
+            )
+            run_id = str(run.get("run_id") or "").strip()
+            if not run_id:
+                return None
+            run = execute_main_chat_model_loop(
+                run_id,
+                [{"role": "user", "content": prompt}],
+            )
+            status = str(run.get("status") or "").strip()
+            result_text = str(run.get("result") or "").strip()
+            if status == "approval_required":
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    "等待你在 Agent Studio 中审批后继续。",
+                    status="processing",
+                )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                )
+            if status in {"failed", "cancelled"}:
+                self._sync_app_task_failed(task_id, result_text or f"Native Run {status}")
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    result_text or f"Native Run {status}",
+                    status="failed",
+                    error=result_text or f"Native Run {status}",
+                )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                )
+            complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
+            if callable(complete_main_chat_run) and result_text:
+                run = complete_main_chat_run(run_id, result_text)
+            self._sync_app_task_completed(task_id, result_text)
+            if result_text:
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    result_text,
+                    status="completed",
+                )
+            return self._projector.chat_task_payload(
+                {**run, "task_id": task_id, "session_id": conversation_id},
+                conversation_id=conversation_id,
+            )
+        except Exception as exc:
+            if run_id:
+                fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+                if callable(fail_main_chat_run):
+                    try:
+                        fail_main_chat_run(run_id, exc)
+                    except Exception:
+                        pass
+            self._sync_app_task_failed(task_id, str(exc))
+            self._sync_chat_assistant_message(
+                task_id,
+                conversation_id,
+                str(exc),
+                status="failed",
+                error=str(exc),
+            )
+            raise
+
+    def _sync_app_task_running(self, task_id: str) -> None:
+        self._sync_app_task_status(task_id, "running", progress_label="正在执行桌面操作")
+
+    def _sync_app_task_completed(self, task_id: str, result: str) -> None:
+        self._sync_app_task_status(
+            task_id,
+            "completed",
+            result=result or "[任务已完成，无输出]",
+            progress_label="已完成",
+        )
+
+    def _sync_app_task_failed(self, task_id: str, error: str) -> None:
+        self._sync_app_task_status(
+            task_id,
+            "failed",
+            error=error or "任务执行失败",
+            progress_label="执行失败",
+        )
+
+    def _sync_app_task_status(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        result: str | None = None,
+        error: str | None = None,
+        progress_label: str | None = None,
+    ) -> None:
+        state = getattr(self._app_runtime, "state", None)
+        update_task_status = getattr(state, "update_task_status", None)
+        if not callable(update_task_status):
+            return
+        try:
+            from packages.protocol.enums import TaskStatus
+
+            update_task_status(
+                task_id,
+                TaskStatus(status),
+                result=result,
+                error=error,
+                progress_label=progress_label,
+            )
+        except Exception:
+            return
+
+    def _sync_chat_assistant_message(
+        self,
+        task_id: str,
+        conversation_id: str,
+        content: str,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        session = self._chat_session_for_conversation(conversation_id)
+        upsert = getattr(session, "upsert_assistant_message", None)
+        if session is None or not callable(upsert):
+            return
+        try:
+            from apps.core.chat_session import MessageStatus
+
+            message_status = {
+                "completed": MessageStatus.COMPLETED,
+                "failed": MessageStatus.FAILED,
+                "processing": MessageStatus.PROCESSING,
+            }.get(status, MessageStatus.PROCESSING)
+            upsert(
+                task_id=task_id,
+                content=content,
+                status=message_status,
+                error=error,
+            )
+        except Exception:
+            return
+
+    def _chat_session_for_conversation(self, conversation_id: str) -> Any:
+        current = getattr(self._app_runtime, "chat_session", None)
+        if not conversation_id:
+            return current
+        if str(getattr(current, "session_id", "") or "") == conversation_id:
+            return current
+        try:
+            from apps.core.chat_session import ChatSession
+            from apps.core.chat_store import get_chat_store
+
+            store = getattr(self._app_runtime, "store", None) or get_chat_store()
+            session = ChatSession(session_id=conversation_id)
+            session.attach_store(
+                store,
+                load_existing=True,
+                fail_active_messages=False,
+            )
+            return session
+        except Exception:
+            return current
 
 
 def _planned_daily_desktop_timeline(prompt: str) -> list[dict[str, Any]]:

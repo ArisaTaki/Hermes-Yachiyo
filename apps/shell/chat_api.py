@@ -42,6 +42,7 @@ from apps.core.executor import (
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
@@ -667,15 +668,19 @@ class ChatAPI:
             if runnable_command is not None:
                 return runnable_command
 
-            unavailable_reason = user_task_unavailable_reason(self._runtime)
-            if unavailable_reason:
-                return self._unavailable_response(unavailable_reason)
-
             current_context = self._session_context()
             if current_context.get("conversation_kind") == "group" and not group_presynced:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
+            direct_daily_desktop_intent = (
+                not raw_attachments
+                and current_context.get("conversation_kind") != "group"
+                and bool(daily_desktop_intent_candidates(task_text))
+            )
+            unavailable_reason = user_task_unavailable_reason(self._runtime)
+            if unavailable_reason and not direct_daily_desktop_intent:
+                return self._unavailable_response(unavailable_reason)
 
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_native_image_input_capability()

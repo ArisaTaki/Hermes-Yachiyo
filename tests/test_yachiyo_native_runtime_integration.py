@@ -2,14 +2,111 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
+from apps.core.chat_session import ChatSession
+from apps.core.chat_store import ChatStore
+from apps.core.state import AppState
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent_runtime import NativeRunEngine
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent.contracts import StartGroupRunRequest
-from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
+from apps.shell.yachiyo_agent.legacy_ports import LegacyChatTaskStarter, LegacyStudioPort
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.service import YachiyoAgentService
 from apps.shell.yachiyo_agent.studio_service import AgentStudioService
+
+
+class _NoDefaultProfileService:
+    def get_defaults(self):
+        return {"chat": ""}
+
+    def get_profile_private(self, profile_id):
+        raise KeyError(profile_id)
+
+
+def test_yachiyo_chat_facade_executes_daily_desktop_intent_through_main_chat_runtime(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-chat-facade.db",
+        workspace_dir=tmp_path / "runtime-chat-facade",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    session = ChatSession(session_id="session-yachiyo-facade")
+    session.attach_store(store, load_existing=False)
+    app_runtime = SimpleNamespace(
+        state=AppState(),
+        chat_session=session,
+        task_runner=None,
+        agent_runtime_service=runtime,
+        store=store,
+    )
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _NoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("desktop intent should execute before model"),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        chat = YachiyoAgentService(
+            LegacyRuntimePort(runtime),
+            chat_task_starter=LegacyChatTaskStarter(app_runtime, runtime),
+        )
+
+        task = chat.start_chat_task(
+            {
+                "prompt": "打开 Apple Music",
+                "conversation_id": "session-yachiyo-facade",
+                "agent_id": "builtin:yachiyo-main",
+                "metadata": {"client_task_id": "client-facade-apple-music"},
+            }
+        )
+        timeline = chat.get_task_timeline(task.task_id)
+        event_types = [event.event_type for event in timeline.events]
+        assistant = session.get_assistant_message_for_task(task.task_id)
+
+        assert open_calls == ["Music"]
+        assert task.status == "completed"
+        assert task.summary == "已打开 Music。"
+        assert timeline.status == "completed"
+        assert timeline.task_id == task.task_id
+        assert timeline.session_id == "session-yachiyo-facade"
+        assert timeline.tool_calls[-1].tool_name == "app.open"
+        assert timeline.tool_calls[-1].status == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant is not None
+        assert assistant.content == "已打开 Music。"
+    finally:
+        store.close()
+        runtime.close()
 
 
 def test_chat_task_and_studio_timeline_share_native_runtime_snapshot(tmp_path) -> None:
