@@ -7,6 +7,7 @@ import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/Laun
 import {
   approveYachiyoTask,
   cancelYachiyoTask,
+  getYachiyoTask,
   listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
@@ -15,6 +16,7 @@ import {
   LAUNCHER_MAIN_AGENT_ID,
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
+  refreshLauncherAgentTaskAfterAction,
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
@@ -1324,9 +1326,13 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     const nextTask = approved
       ? await approveYachiyoTask(taskId, approvalId)
       : await rejectYachiyoTask(taskId, approvalId, 'Rejected from launcher mode page');
-    setPublicAgentTask(nextTask);
-    await refresh();
-    return nextTask;
+    return refreshLauncherAgentTaskAfterAction({
+      loadTask: getYachiyoTask,
+      refresh,
+      rememberTask: setPublicAgentTask,
+      shouldContinue: () => canUpdateRef.current,
+      task: nextTask,
+    });
   }, [refresh]);
 
   const approveAgentTaskApproval = useCallback((

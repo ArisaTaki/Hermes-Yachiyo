@@ -9,6 +9,7 @@ import {
 import {
   approveYachiyoTask,
   cancelYachiyoTask,
+  getYachiyoTask,
   listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
@@ -18,6 +19,7 @@ import {
   LAUNCHER_MAIN_AGENT_ID,
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
+  refreshLauncherAgentTaskAfterAction,
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
@@ -264,9 +266,12 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     const nextTask = approved
       ? await approveYachiyoTask(taskId, approvalId)
       : await rejectYachiyoTask(taskId, approvalId, 'Rejected from launcher task card');
-    setPublicAgentTask(nextTask);
-    await refresh();
-    return nextTask;
+    return refreshLauncherAgentTaskAfterAction({
+      loadTask: getYachiyoTask,
+      refresh,
+      rememberTask: setPublicAgentTask,
+      task: nextTask,
+    });
   }, [refresh]);
 
   const approveAgentTaskApproval = useCallback((

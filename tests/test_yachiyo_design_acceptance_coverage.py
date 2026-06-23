@@ -1028,6 +1028,8 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
             "onApproveTaskApproval={launcher.approveAgentTaskApproval}",
             "onCancelTask={launcher.cancelAgentTask}",
             "onRejectTaskApproval={launcher.rejectAgentTaskApproval}",
+            "refreshLauncherAgentTaskAfterAction({",
+            "loadTask: getYachiyoTask,",
         ],
     )
     _assert_contains(
@@ -1036,6 +1038,8 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
             "LAUNCHER_MAIN_AGENT_ID",
             "launcherPreferredActiveTask",
             "task.status === 'waiting_approval') return 0;",
+            "refreshLauncherAgentTaskAfterAction",
+            "LAUNCHER_TASK_ACTION_POLL_DELAYS_MS",
         ],
     )
     _assert_contains(

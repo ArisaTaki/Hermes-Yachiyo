@@ -1,6 +1,7 @@
 import type { AgentTaskSnapshot } from './types';
 
 export const LAUNCHER_MAIN_AGENT_ID = 'builtin:yachiyo-main';
+const LAUNCHER_TASK_ACTION_POLL_DELAYS_MS = [300, 800, 1500, 2500];
 
 export type LauncherTaskMode = 'bubble' | 'live2d';
 
@@ -41,6 +42,40 @@ export function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undef
   return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
 }
 
+export async function refreshLauncherAgentTaskAfterAction({
+  loadTask,
+  refresh,
+  rememberTask,
+  shouldContinue = () => true,
+  task,
+}: {
+  loadTask: (taskId: string) => Promise<AgentTaskSnapshot>;
+  refresh: () => Promise<unknown>;
+  rememberTask: (task: AgentTaskSnapshot) => void;
+  shouldContinue?: () => boolean;
+  task: AgentTaskSnapshot;
+}) {
+  const taskId = String(task.task_id || '').trim();
+  let latestTask = task;
+  if (shouldContinue()) rememberTask(latestTask);
+  await refresh();
+  if (!taskId || !launcherAgentTaskIsActive(latestTask)) return latestTask;
+
+  for (const delayMs of LAUNCHER_TASK_ACTION_POLL_DELAYS_MS) {
+    await waitForLauncherTaskActionPoll(delayMs);
+    if (!shouldContinue()) return latestTask;
+    try {
+      await refresh();
+      latestTask = await loadTask(taskId);
+      if (shouldContinue()) rememberTask(latestTask);
+    } catch {
+      return latestTask;
+    }
+    if (!launcherAgentTaskIsActive(latestTask)) return latestTask;
+  }
+  return latestTask;
+}
+
 export function launcherPreferredActiveTask(tasks: AgentTaskSnapshot[]) {
   const activeTasks = tasks.filter(launcherAgentTaskIsActive);
   if (!activeTasks.length) return null;
@@ -60,6 +95,12 @@ function launcherAgentTaskPriority(task: AgentTaskSnapshot) {
 function launcherAgentTaskUpdatedAt(task: AgentTaskSnapshot) {
   const timestamp = Date.parse(String(task.updated_at || task.created_at || ''));
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function waitForLauncherTaskActionPoll(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
 }
 
 export function launcherTaskConversationId(mode: LauncherTaskMode, data: LauncherTaskPayloadContext) {
