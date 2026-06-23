@@ -1252,6 +1252,11 @@ async def test_yachiyo_task_route_executes_clipboard_write_without_model(
             "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
         ),
         (
+            "放一下",
+            "play",
+            "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+        ),
+        (
             "下一首",
             "next",
             "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。",

@@ -1128,6 +1128,7 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "(?:close|dismiss)\\s+(?:the\\s+)?(?:current|foreground|active|this)\\s+window",
             "开着吗",
             "正在运行的应用",
+            "播放一下|放一下",
             "(?:播放|播一下|放一下)\\s*\\S+",
             "暂停|停止播放|继续播放|恢复播放|接着播放|播放暂停",
             "下一首|上一首|切歌|来点音乐|来些音乐|来点歌|放首歌",
