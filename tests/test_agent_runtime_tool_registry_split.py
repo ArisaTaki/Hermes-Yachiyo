@@ -276,6 +276,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_reveal_path",
         "media_apple_music_play",
         "media_apple_music_control",
+        "system_volume",
         "desktop_hotkey",
         "desktop_type_text",
         "desktop_click",
@@ -321,6 +322,20 @@ def test_desktop_reveal_path_schema_accepts_local_path() -> None:
 
     with pytest.raises(AgentRuntimeError, match="desktop.reveal_path 参数 path 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("desktop.reveal_path", {"path": ""})
+
+
+def test_system_volume_schema_accepts_safe_volume_actions() -> None:
+    ToolDescriptorRegistry.validate_payload("system.volume", {"action": "status"})
+    ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set", "level": 35})
+    ToolDescriptorRegistry.validate_payload("system.volume", {"action": "up", "step": 5})
+    ToolDescriptorRegistry.validate_payload("system.volume", {"action": "mute"})
+
+    with pytest.raises(AgentRuntimeError, match="system.volume 参数 action"):
+        ToolDescriptorRegistry.validate_payload("system.volume", {"action": "shutdown"})
+    with pytest.raises(AgentRuntimeError, match="system.volume 参数 level"):
+        ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set"})
+    with pytest.raises(AgentRuntimeError, match="system.volume 参数 level"):
+        ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set", "level": 150})
 
 
 def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
@@ -1314,6 +1329,39 @@ def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> N
         "fallback_used": False,
     }
     assert calls[0][1] == ["pause"]
+
+
+def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        if not args:
+            return {"ok": True, "stdout": "40|false", "stderr": ""}
+        return {"ok": True, "stdout": "50|false", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.system_volume("up")
+
+    assert result == {
+        "ok": True,
+        "action": "system.volume",
+        "summary": "System volume increased from 40% to 50%",
+        "data": {
+            "requested_action": "up",
+            "old_level": 40,
+            "old_muted": False,
+            "level": 50,
+            "muted": False,
+            "changed": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][1] is None
+    assert calls[1][1] == ["50", "false"]
 
 
 def test_apple_music_control_permission_failure_returns_music_and_automation_targets(

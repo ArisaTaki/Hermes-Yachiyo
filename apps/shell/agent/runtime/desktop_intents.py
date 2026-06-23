@@ -213,6 +213,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
 
+    volume_payload = _system_volume_request(text)
+    if volume_payload is not None:
+        candidates.append(_request("system.volume", volume_payload))
+
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
 
@@ -562,6 +566,60 @@ def _is_browser_screenshot_request(text: str) -> bool:
         or "page screenshot" in lowered
         or "screenshot the current page" in lowered
     )
+
+
+def _system_volume_request(text: str) -> dict[str, Any] | None:
+    lowered = text.lower()
+    level_patterns = (
+        r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
+        r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
+        r"(?:音量|声音)\s*(?P<level>\d{1,3})\s*%",
+        r"\b(?:set|turn)\s+(?:the\s+)?(?:system\s+)?volume\s+(?:to\s+)?"
+        r"(?P<level>\d{1,3})\s*%?\b",
+    )
+    for pattern in level_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        level = _percentage_value(match.group("level"))
+        if level is not None:
+            return {"action": "set", "level": level}
+    if re.search(r"(?:取消静音|解除静音|取消(?:系统)?静音|恢复声音)", text) or re.search(
+        r"\bunmute(?:\s+(?:system\s+)?volume)?\b",
+        lowered,
+    ):
+        return {"action": "unmute"}
+    if re.search(r"(?:静音|设为静音|开启静音|关闭声音|把声音关掉|把音量关掉)", text) or re.search(
+        r"\bmute(?:\s+(?:system\s+)?volume)?\b",
+        lowered,
+    ):
+        return {"action": "mute"}
+    if re.search(
+        r"(?:调大|调高|加大|提高|增大|升高).{0,4}(?:音量|声音)|"
+        r"(?:音量|声音).{0,4}(?:大一点|高一点|加一点|调大|调高|提高)",
+        text,
+    ) or re.search(
+        r"\b(?:turn|raise|increase)\s+(?:up\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
+        r"\bvolume\s+up\b",
+        lowered,
+    ):
+        return {"action": "up"}
+    if re.search(
+        r"(?:调小|调低|降低|减小|小声).{0,4}(?:音量|声音)|"
+        r"(?:音量|声音).{0,4}(?:小一点|低一点|减一点|调小|调低|降低)",
+        text,
+    ) or re.search(
+        r"\b(?:turn|lower|decrease)\s+(?:down\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
+        r"\bvolume\s+down\b",
+        lowered,
+    ):
+        return {"action": "down"}
+    if re.search(r"(?:当前|现在|系统)?(?:音量|声音).{0,6}(?:多少|是多少|状态)", text) or re.search(
+        r"\b(?:current\s+)?(?:system\s+)?volume(?:\s+level|\s+status)?\??$",
+        lowered,
+    ):
+        return {"action": "status"}
+    return None
 
 
 def _is_running_apps_request(text: str) -> bool:
@@ -1086,6 +1144,16 @@ def _number_value(value: str) -> int | float:
     number = float(value)
     if number.is_integer():
         return int(number)
+    return number
+
+
+def _percentage_value(value: str) -> int | None:
+    try:
+        number = int(float(str(value or "").strip()))
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or number > 100:
+        return None
     return number
 
 

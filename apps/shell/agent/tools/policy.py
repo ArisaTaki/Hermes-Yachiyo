@@ -37,6 +37,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.reveal_path": "desktop_reveal_path",
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_control": "media_apple_music_control",
+    "system.volume": "system_volume",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
@@ -64,6 +65,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.reveal_path",
     "media.apple_music_play",
     "media.apple_music_control",
+    "system.volume",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text", "desktop.click")
 LOW_RISK_BROWSER_TOOL_NAMES = (
@@ -96,6 +98,17 @@ def _redact_secrets(value: Any) -> str:
         collapse_whitespace=False,
         trim=False,
     )
+
+
+def _validate_percentage_number(value: Any, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise AgentRuntimeError(f"{label} 必须是 0-100 的数字")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise AgentRuntimeError(f"{label} 必须是 0-100 的数字") from exc
+    if number < 0 or number > 100:
+        raise AgentRuntimeError(f"{label} 必须是 0-100 的数字")
 
 
 @dataclass(frozen=True)
@@ -244,6 +257,22 @@ class ToolDescriptor:
                 raise AgentRuntimeError(
                     "media.apple_music_control 参数 action 必须是 toggle、play、pause、next 或 previous"
                 )
+        if self.name == "system.volume":
+            action = str(payload.get("action") or "").strip()
+            if action not in {"status", "set", "up", "down", "mute", "unmute"}:
+                raise AgentRuntimeError(
+                    "system.volume 参数 action 必须是 status、set、up、down、mute 或 unmute"
+                )
+            level = payload.get("level")
+            if action == "set":
+                if level in (None, ""):
+                    raise AgentRuntimeError("system.volume 参数 level 必须是 0-100 的数字")
+                _validate_percentage_number(level, "system.volume 参数 level")
+            elif level not in (None, ""):
+                _validate_percentage_number(level, "system.volume 参数 level")
+            step = payload.get("step")
+            if step not in (None, ""):
+                _validate_percentage_number(step, "system.volume 参数 step")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.click":
@@ -633,6 +662,34 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "enum": ["toggle", "play", "pause", "next", "previous"],
                 "description": "Playback control action.",
             }
+        },
+        required=("action",),
+    ),
+    "system.volume": ToolDescriptor(
+        name="system.volume",
+        description=(
+            "Read or adjust the macOS output volume for low-risk daily desktop commands. "
+            "Use status for read-only volume questions, set for an exact 0-100 level, "
+            "up/down for small relative changes, and mute/unmute for output mute state."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": ["status", "set", "up", "down", "mute", "unmute"],
+                "description": "Volume action.",
+            },
+            "level": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Exact output volume level for action=set.",
+            },
+            "step": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Optional relative step for up/down. Defaults to 10.",
+            },
         },
         required=("action",),
     ),

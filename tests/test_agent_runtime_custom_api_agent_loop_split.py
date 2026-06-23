@@ -585,6 +585,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.focus",
         "media.apple_music_play",
         "media.apple_music_control",
+        "system.volume",
         "screen.capture",
         "desktop.permissions",
         "desktop.active_window",
@@ -923,6 +924,36 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
+    assert daily_desktop_intent_tool_request("当前音量是多少", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "status"},
+    }
+    assert daily_desktop_intent_tool_request("把音量调到 35%", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 35},
+    }
+    assert daily_desktop_intent_tool_request("调大音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
+    assert daily_desktop_intent_tool_request("声音小一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("静音", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "mute"},
+    }
+    assert daily_desktop_intent_tool_request("取消静音", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "unmute"},
+    }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",
@@ -1075,6 +1106,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("检查桌面权限", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("调大音量", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
@@ -1470,6 +1502,50 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
 
     assert pause == "已暂停 Apple Music。"
     assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+
+
+def test_main_chat_desktop_intent_summarizes_system_volume() -> None:
+    status = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.volume",
+        {"action": "status"},
+        {
+            "ok": True,
+            "summary": "System volume is 42%",
+            "data": {"requested_action": "status", "level": 42, "muted": False},
+        },
+    )
+    set_level = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.volume",
+        {"action": "set", "level": 35},
+        {
+            "ok": True,
+            "summary": "System volume set to 35%",
+            "data": {"requested_action": "set", "old_level": 20, "level": 35, "muted": False},
+        },
+    )
+    increased = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.volume",
+        {"action": "up"},
+        {
+            "ok": True,
+            "summary": "System volume increased from 40% to 50%",
+            "data": {"requested_action": "up", "old_level": 40, "level": 50, "muted": False},
+        },
+    )
+    muted = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.volume",
+        {"action": "mute"},
+        {
+            "ok": True,
+            "summary": "System volume muted",
+            "data": {"requested_action": "mute", "old_level": 50, "level": 50, "muted": True},
+        },
+    )
+
+    assert status == "当前系统音量是 42%。"
+    assert set_level == "已把系统音量调到 35%。"
+    assert increased == "已把系统音量从 40% 调高到 50%。"
+    assert muted == "已将系统音量静音。"
 
 
 def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:

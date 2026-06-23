@@ -338,6 +338,62 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
         store.close()
 
 
+def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    volume_calls: list[tuple[str, object, object]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct volume task should not call model")
+        ),
+    )
+
+    def fake_system_volume(action: str, *, level=None, step=None) -> dict:
+        volume_calls.append((action, level, step))
+        return {
+            "ok": True,
+            "action": "system.volume",
+            "summary": "System volume set to 35%",
+            "data": {
+                "requested_action": action,
+                "old_level": 20,
+                "old_muted": False,
+                "level": level,
+                "muted": False,
+                "changed": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
+    try:
+        result = api.send_message("把音量调到 35%")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已把系统音量调到 35%。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已把系统音量调到 35%。"
+        assert volume_calls == [("set", 35, None)]
+        assert run["status"] == "completed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

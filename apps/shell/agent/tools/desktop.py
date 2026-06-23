@@ -931,6 +931,86 @@ def apple_music_control(action: str) -> dict[str, Any]:
     return _with_permission_metadata("media.apple_music_control", payload)
 
 
+def system_volume(action: str, *, level: Any = None, step: Any = None) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("system.volume")
+    clean_action = _clean_system_volume_action(action)
+    current = _read_system_volume()
+    if not current.get("ok"):
+        return current
+    old_level = int(current["data"]["level"])
+    old_muted = bool(current["data"]["muted"])
+    target_level = old_level
+    target_muted = old_muted
+    if clean_action == "status":
+        return {
+            "ok": True,
+            "action": "system.volume",
+            "summary": f"System volume is {old_level}%{' and muted' if old_muted else ''}",
+            "data": {
+                "requested_action": clean_action,
+                "old_level": old_level,
+                "level": old_level,
+                "muted": old_muted,
+                "changed": False,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    if clean_action == "set":
+        target_level = _coerce_percentage(level, default=old_level)
+        target_muted = False
+    elif clean_action == "up":
+        target_level = min(100, old_level + _coerce_percentage(step, default=10))
+        target_muted = False
+    elif clean_action == "down":
+        target_level = max(0, old_level - _coerce_percentage(step, default=10))
+        target_muted = False
+    elif clean_action == "mute":
+        target_muted = True
+    elif clean_action == "unmute":
+        target_muted = False
+    result = _run_osascript(
+        """
+        on run argv
+            set targetLevel to item 1 of argv as integer
+            set targetMuted to item 2 of argv
+            if targetMuted is "true" then
+                set volume with output muted true
+            else
+                set volume output volume targetLevel
+                set volume with output muted false
+            end if
+            delay 0.05
+            set volumeSettings to get volume settings
+            return (output volume of volumeSettings as text) & "|" & (output muted of volumeSettings as text)
+        end run
+        """,
+        [str(target_level), "true" if target_muted else "false"],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "system.volume",
+            {**result, "action": "system.volume", "summary": "system.volume failed"},
+        )
+    new_level, muted = _parse_system_volume(result.get("stdout"))
+    return {
+        "ok": True,
+        "action": "system.volume",
+        "summary": _system_volume_summary(clean_action, old_level, new_level, muted),
+        "data": {
+            "requested_action": clean_action,
+            "old_level": old_level,
+            "old_muted": old_muted,
+            "level": new_level,
+            "muted": muted,
+            "changed": old_level != new_level or old_muted != muted,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
@@ -1185,6 +1265,81 @@ def _clean_music_control_action(value: str) -> str:
     if not clean:
         raise ValueError("action must be one of toggle, play, pause, next, or previous")
     return clean
+
+
+def _clean_system_volume_action(value: str) -> str:
+    aliases = {
+        "status": "status",
+        "read": "status",
+        "get": "status",
+        "set": "set",
+        "up": "up",
+        "increase": "up",
+        "down": "down",
+        "decrease": "down",
+        "mute": "mute",
+        "unmute": "unmute",
+    }
+    clean = aliases.get(str(value or "").strip().lower())
+    if not clean:
+        raise ValueError("action must be one of status, set, up, down, mute, or unmute")
+    return clean
+
+
+def _read_system_volume() -> dict[str, Any]:
+    result = _run_osascript(
+        """
+        set volumeSettings to get volume settings
+        return (output volume of volumeSettings as text) & "|" & (output muted of volumeSettings as text)
+        """
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "system.volume",
+            {**result, "action": "system.volume", "summary": "system.volume failed"},
+        )
+    level, muted = _parse_system_volume(result.get("stdout"))
+    return {
+        "ok": True,
+        "action": "system.volume",
+        "summary": f"System volume is {level}%{' and muted' if muted else ''}",
+        "data": {"level": level, "muted": muted},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _parse_system_volume(value: Any) -> tuple[int, bool]:
+    parts = str(value or "").strip().split("|", 1)
+    level_text = parts[0] if parts else "0"
+    muted_text = parts[1] if len(parts) > 1 else "false"
+    return _coerce_percentage(level_text, default=0), muted_text.strip().lower() == "true"
+
+
+def _coerce_percentage(value: Any, *, default: int) -> int:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        raise ValueError("percentage must be a number from 0 to 100")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("percentage must be a number from 0 to 100") from exc
+    return max(0, min(100, int(round(number))))
+
+
+def _system_volume_summary(action: str, old_level: int, level: int, muted: bool) -> str:
+    if action == "mute":
+        return "System volume muted"
+    if action == "unmute":
+        return f"System volume unmuted at {level}%"
+    if action == "set":
+        return f"System volume set to {level}%"
+    if action == "up":
+        return f"System volume increased from {old_level}% to {level}%"
+    if action == "down":
+        return f"System volume decreased from {old_level}% to {level}%"
+    return f"System volume is {level}%{' and muted' if muted else ''}"
 
 
 def _clean_coordinate(value: Any, field: str) -> int:

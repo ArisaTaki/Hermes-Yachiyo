@@ -283,6 +283,44 @@ def test_chat_bridge_quick_message_executes_browser_search_for_launcher_entrypoi
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    volume_calls: list[tuple[str, object, object]] = []
+
+    def fake_system_volume(action: str, *, level=None, step=None) -> dict:
+        volume_calls.append((action, level, step))
+        return {
+            "ok": True,
+            "action": "system.volume",
+            "summary": "System volume increased from 40% to 50%",
+            "data": {
+                "requested_action": action,
+                "old_level": 40,
+                "old_muted": False,
+                "level": 50,
+                "muted": False,
+                "changed": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "调大音量",
+    )
+
+    assert volume_calls == [("up", None, None)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已把系统音量从 40% 调高到 50%。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "system.volume"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

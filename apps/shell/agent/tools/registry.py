@@ -174,6 +174,18 @@ def _media_apple_music_control(
     return broker.media_apple_music_control(str(payload.get("action") or ""))
 
 
+def _system_volume(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.system_volume(
+        str(payload.get("action") or ""),
+        level=payload.get("level"),
+        step=payload.get("step"),
+    )
+
+
 def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     modifiers = payload.get("modifiers")
     return broker.desktop_hotkey(
@@ -274,6 +286,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.reveal_path": _desktop_reveal_path,
     "media.apple_music_play": _media_apple_music_play,
     "media.apple_music_control": _media_apple_music_control,
+    "system.volume": _system_volume,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.type_text": _desktop_type_text,
     "desktop.click": _desktop_click,

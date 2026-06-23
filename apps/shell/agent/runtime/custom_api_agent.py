@@ -16,6 +16,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.focus",
     "media.apple_music_play",
     "media.apple_music_control",
+    "system.volume",
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
@@ -44,6 +45,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.focus": "聚焦应用",
     "media.apple_music_play": "播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
+    "system.volume": "控制系统音量",
     "desktop.hotkey": "发送快捷键",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
@@ -435,6 +437,8 @@ class RuntimeCustomApiAgentLoop:
                 return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
             if tool_name == "media.apple_music_control":
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
+            if tool_name == "system.volume":
+                return _system_volume_summary(result, planned_input) or result_summary or "已处理系统音量。"
             if tool_name == "screen.capture":
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.permissions":
@@ -604,10 +608,11 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
-            "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_control, system.volume, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
-            "commands to media.apple_music_control; map screen capture requests to "
+            "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
+            "commands to system.volume; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
@@ -862,6 +867,37 @@ def _apple_music_control_label(action: str) -> str:
         "next": "切到下一首",
         "previous": "切到上一首",
     }.get(str(action or "").strip(), "")
+
+
+def _system_volume_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    action = str(data.get("requested_action") or planned_input.get("action") or "").strip()
+    level = data.get("level")
+    muted = data.get("muted")
+    old_level = data.get("old_level")
+    try:
+        level_text = f"{int(level)}%"
+    except (TypeError, ValueError):
+        level_text = ""
+    try:
+        old_level_text = f"{int(old_level)}%"
+    except (TypeError, ValueError):
+        old_level_text = ""
+    if action == "status":
+        if level_text:
+            return f"当前系统音量是 {level_text}{'，已静音' if muted else ''}。"
+        return ""
+    if action == "set" and level_text:
+        return f"已把系统音量调到 {level_text}。"
+    if action == "up" and old_level_text and level_text:
+        return f"已把系统音量从 {old_level_text} 调高到 {level_text}。"
+    if action == "down" and old_level_text and level_text:
+        return f"已把系统音量从 {old_level_text} 调低到 {level_text}。"
+    if action == "mute":
+        return "已将系统音量静音。"
+    if action == "unmute":
+        return f"已取消系统静音{f'，当前音量 {level_text}' if level_text else ''}。"
+    return ""
 
 
 def _sentence(value: str) -> str:
