@@ -315,7 +315,15 @@ function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_e
   if ((event.sensitivity || 'public') === 'secret') return [];
   const payload = objectValue(event.payload);
   const result = objectValue(payload.result);
-  return runtimeToolRecoveryActionsFromRecords([result, payload].filter(Boolean));
+  const retryTool = String(payload.tool || result.tool || result.tool_name || event.detail || '').trim();
+  return runtimeToolRecoveryActionsFromRecords(
+    [result, payload].filter(Boolean),
+    {
+      retry_input: objectValue(payload.input_preview || result.input_preview),
+      retry_source_event_type: String(event.event_type || '').trim(),
+      retry_tool: retryTool,
+    },
+  );
 }
 
 function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {

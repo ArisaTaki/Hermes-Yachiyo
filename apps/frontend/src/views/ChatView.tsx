@@ -451,6 +451,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         runnableKind: 'main',
         metadata: runtimeToolRecoveryActionTaskMetadata(action, {
           source_task_id: task.task_id,
+          source_task_title: task.title || '',
         }),
       });
       if (!handled) setStatus('权限恢复动作提交失败');

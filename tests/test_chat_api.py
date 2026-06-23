@@ -1510,6 +1510,10 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
                 "recovery_input": {"app_name": "屏幕录制权限"},
                 "recovery_permission_target": "screen_recording",
                 "recovery_risk_level": "low",
+                "recovery_retry_input": {"display_id": "main"},
+                "recovery_retry_tool": "screen.capture",
+                "source_task_id": "task-source-screen",
+                "source_task_title": "截图当前桌面",
             },
         )
         task = runtime.state.get_task(result["task_id"])
@@ -1518,6 +1522,9 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
         event_types = [event["event_type"] for event in events]
         planned_event = next(
             event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        retry_context_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.recovery_retry_context"
         )
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
         user = next(
@@ -1548,6 +1555,15 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
         assert user_metadata["desktop_permission_recovery"] is True
         assert user_metadata["recovery_tool"] == "app.open"
         assert user_metadata["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert user_metadata["recovery_retry_tool"] == "screen.capture"
+        assert user_metadata["recovery_retry_input"] == {"display_id": "main"}
+        assert retry_context_event["payload"]["recovery_tool"] == "app.open"
+        assert retry_context_event["payload"]["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert retry_context_event["payload"]["retry_tool"] == "screen.capture"
+        assert retry_context_event["payload"]["retry_input"] == {"display_id": "main"}
+        assert retry_context_event["payload"]["source_task_id"] == "task-source-screen"
+        assert retry_context_event["payload"]["source_task_title"] == "截图当前桌面"
+        assert "agent.desktop.recovery_retry_context" in event_types
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types

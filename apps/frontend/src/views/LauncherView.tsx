@@ -369,6 +369,7 @@ function runLauncherRecoveryAction(
       launcher_recovery: true,
       launcher_recovery_surface: surface,
       source_task_id: task.task_id || '',
+      source_task_title: task.title || '',
     }),
   });
 }

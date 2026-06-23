@@ -3514,6 +3514,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/runtime-shared/toolRecoveryActions.ts",
         [
             "export type RuntimeToolRecoveryAction",
+            "export type RuntimeToolRecoveryRetryContext",
             "export function runtimeToolRecoveryActionPrompt",
             "export function runtimeToolRecoveryActionTaskMetadata",
             "export function runtimeToolRecoveryActionsFromRecords",
@@ -3523,6 +3524,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "const appName = String(input.app_name || '').trim();",
             "return `打开${appName}`;",
             "desktop_permission_recovery: true",
+            "recovery_retry_tool: action.retry_tool",
+            "runtimeToolRecoveryRetryContext(action, retryContext)",
             "action.tool === 'app.open' ? 'low' : ''",
             "prompt: String(action.prompt || label || `打开${appName}`).trim()",
         ],

@@ -57,7 +57,14 @@ export function RuntimeToolCallCard({
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);
   const recoveryHints = runtimeToolRecoveryHintsFromRecords([outputPreview, inputPreview]);
-  const recoveryActions = runtimeToolRecoveryActionsFromRecords([outputPreview, inputPreview]);
+  const recoveryActions = runtimeToolRecoveryActionsFromRecords(
+    [outputPreview, inputPreview],
+    {
+      retry_input: inputPreview,
+      retry_source_tool_call_id: toolCall.tool_call_id,
+      retry_tool: rawToolName,
+    },
+  );
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div

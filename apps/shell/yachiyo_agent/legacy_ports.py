@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_intents import (
@@ -43,6 +44,41 @@ def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
     if isinstance(decision, dict):
         return str(decision.get("reason") or "").strip()
     return str(decision or "").strip()
+
+
+def _optional_metadata_text(metadata: Mapping[str, Any], key: str) -> str:
+    return str(metadata.get(key) or "").strip()
+
+
+def _recovery_retry_context_payload(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    if metadata.get("desktop_permission_recovery") is not True:
+        return {}
+    retry_tool = _optional_metadata_text(metadata, "recovery_retry_tool")
+    retry_input = metadata.get("recovery_retry_input")
+    if not retry_tool and not isinstance(retry_input, Mapping):
+        return {}
+    recovery_input = metadata.get("recovery_input")
+    payload: dict[str, Any] = {
+        "source": "desktop_permission_recovery",
+        "recovery_tool": _optional_metadata_text(metadata, "recovery_tool"),
+        "recovery_input": dict(recovery_input) if isinstance(recovery_input, Mapping) else {},
+        "recovery_permission_target": _optional_metadata_text(metadata, "recovery_permission_target"),
+        "retry_tool": retry_tool,
+        "retry_input": dict(retry_input) if isinstance(retry_input, Mapping) else {},
+    }
+    for source_key, payload_key in (
+        ("recovery_retry_prompt", "retry_prompt"),
+        ("recovery_retry_source_event_type", "retry_source_event_type"),
+        ("recovery_retry_source_tool_call_id", "retry_source_tool_call_id"),
+        ("source_task_id", "source_task_id"),
+        ("source_task_title", "source_task_title"),
+    ):
+        value = _optional_metadata_text(metadata, source_key)
+        if value:
+            payload[payload_key] = value
+    return payload
 
 
 class LegacyChatTaskStarter:
@@ -182,6 +218,14 @@ class LegacyChatTaskStarter:
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
                 return None
+            append_run_event = getattr(self._runtime, "append_run_event", None)
+            retry_context_payload = _recovery_retry_context_payload(metadata)
+            if retry_context_payload and callable(append_run_event):
+                append_run_event(
+                    run_id,
+                    "agent.desktop.recovery_retry_context",
+                    retry_context_payload,
+                )
             run = execute_main_chat_model_loop(
                 run_id,
                 [{"role": "user", "content": execution_prompt}],
