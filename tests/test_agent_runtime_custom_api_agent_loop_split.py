@@ -616,6 +616,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://www.bilibili.com"},
     }
+    assert daily_desktop_intent_tool_request("打开小红书", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.xiaohongshu.com"},
+    }
     assert daily_desktop_intent_tool_request("打开 ChatGPT", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -692,6 +697,41 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "System Settings"},
+    }
+    assert daily_desktop_intent_tool_request("打开邮箱", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Mail"},
+    }
+    assert daily_desktop_intent_tool_request("打开地图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Maps"},
+    }
+    assert daily_desktop_intent_tool_request("打开照片", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Photos"},
+    }
+    assert daily_desktop_intent_tool_request("打开预览", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Preview"},
+    }
+    assert daily_desktop_intent_tool_request("打开计算器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Calculator"},
+    }
+    assert daily_desktop_intent_tool_request("打开应用商店", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "App Store"},
+    }
+    assert daily_desktop_intent_tool_request("打开活动监视器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Activity Monitor"},
     }
     assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
@@ -828,6 +868,9 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("打开 GitHub", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("打开小红书", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None

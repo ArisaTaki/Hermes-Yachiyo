@@ -35,6 +35,34 @@ _APP_ALIASES = {
     "提醒事项": "Reminders",
     "mail": "Mail",
     "邮件": "Mail",
+    "邮箱": "Mail",
+    "电子邮件": "Mail",
+    "messages": "Messages",
+    "信息": "Messages",
+    "通讯": "Messages",
+    "facetime": "FaceTime",
+    "contacts": "Contacts",
+    "联系人": "Contacts",
+    "通讯录": "Contacts",
+    "maps": "Maps",
+    "地图": "Maps",
+    "photos": "Photos",
+    "照片": "Photos",
+    "preview": "Preview",
+    "预览": "Preview",
+    "calculator": "Calculator",
+    "计算器": "Calculator",
+    "appstore": "App Store",
+    "应用商店": "App Store",
+    "activitymonitor": "Activity Monitor",
+    "活动监视器": "Activity Monitor",
+    "keychainaccess": "Keychain Access",
+    "钥匙串": "Keychain Access",
+    "钥匙串访问": "Keychain Access",
+    "textedit": "TextEdit",
+    "文本编辑": "TextEdit",
+    "quicktime": "QuickTime Player",
+    "quicktimeplayer": "QuickTime Player",
     "wechat": "WeChat",
     "微信": "WeChat",
     "qq": "QQ",
@@ -275,8 +303,38 @@ def _normalize_site_name(value: str) -> str:
         "twitter": "https://x.com",
         "x": "https://x.com",
         "reddit": "https://www.reddit.com",
+        "xiaohongshu": "https://www.xiaohongshu.com",
+        "小红书": "https://www.xiaohongshu.com",
+        "rednote": "https://www.xiaohongshu.com",
+        "weibo": "https://weibo.com",
+        "微博": "https://weibo.com",
+        "zhihu": "https://www.zhihu.com",
+        "知乎": "https://www.zhihu.com",
+        "douban": "https://www.douban.com",
+        "豆瓣": "https://www.douban.com",
+        "douyin": "https://www.douyin.com",
+        "抖音": "https://www.douyin.com",
+        "tiktok": "https://www.tiktok.com",
+        "taobao": "https://www.taobao.com",
+        "淘宝": "https://www.taobao.com",
+        "jd": "https://www.jd.com",
+        "jingdong": "https://www.jd.com",
+        "京东": "https://www.jd.com",
     }
     return aliases.get(compact, "")
+
+
+def _looks_like_search_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
+            r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*",
+            text,
+        )
+        or re.search(r"^(?:search|google|look up)\s+", lowered)
+    )
 
 
 def _browser_search_url(text: str) -> str:
@@ -379,6 +437,8 @@ def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
+    if _looks_like_search_request(text):
+        return ""
 
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+)",
@@ -389,6 +449,8 @@ def _app_open_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _normalize_site_name(raw_app):
+            continue
         app_name = _normalize_app_name(raw_app)
         if _looks_like_generic_app_open_target(raw_app):
             continue
