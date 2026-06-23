@@ -1,4 +1,5 @@
 import { RuntimeTimelineEventList, type RuntimeTimelineEventRecord } from './RuntimeTimelineEventList';
+import { runtimeToolDisplayLabelOrName } from '../approval';
 
 export type RuntimeTimelineEventSnapshot = {
   event_id?: string | null;
@@ -53,6 +54,10 @@ export function runtimeTimelineSummaryEvents(
 export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string {
   const title = String(event.title || '').trim();
   const type = String(event.event_type || '').trim();
+  if (type === 'agent.desktop.intent_planned') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
+  }
   const typeLabel = runtimeTimelineEventTypeLabel(type || title);
   if (typeLabel) return typeLabel;
   if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
@@ -77,7 +82,6 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.request.failed') return '模型请求失败';
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
-  if (type === 'agent.desktop.intent_planned') return '桌面意图已规划';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';
@@ -140,6 +144,18 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'run.failed' || type === 'task.failed') return '任务失败';
   if (type === 'run.cancelled' || type === 'task.cancelled') return '任务已取消';
   return '';
+}
+
+function runtimeTimelinePlannedDesktopToolLabel(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const tool = String(
+    record.tool
+      || record.tool_name
+      || event.detail
+      || '',
+  ).trim();
+  if (!tool || runtimeTimelineLooksRuntimeId(tool)) return '';
+  return runtimeToolDisplayLabelOrName(tool);
 }
 
 function runtimeTimelineLooksInternalLabel(value: string): boolean {

@@ -1,5 +1,6 @@
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
+import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 export {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -37,7 +38,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
-  if (name === 'agent.desktop.intent_planned') return detail ? `桌面意图已规划 · ${detail}` : '桌面意图已规划';
+  if (name === 'agent.desktop.intent_planned') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
+  }
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.started') return detail ? `工具执行中 · ${detail}` : '工具执行中';
   if (name === 'agent.tool.skipped' || name === 'tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
@@ -134,6 +138,11 @@ export function timelineEventTone(event: Record<string, unknown>): string {
 export function timelineEventCode(event: Record<string, unknown>): string {
   const name = timelineEventName(event);
   return name.includes('.') ? name.split('.').slice(-2).join('.') : name || 'event';
+}
+
+function plannedDesktopToolLabel(event: Record<string, unknown>, detail: string): string {
+  const tool = String(event.tool || event.tool_name || detail || '').trim();
+  return tool ? runtimeToolDisplayLabelOrName(tool) : '';
 }
 
 export function timelineEventName(event: Record<string, unknown>): string {
