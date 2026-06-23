@@ -274,6 +274,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     needs_user_action: bool = False
     pending_approvals: list[ApprovalCardSnapshot] = Field(default_factory=list)
     recent_events: list[PublicRunEvent] = Field(default_factory=list)
+    tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     open_in_studio_url: str | None = None
     created_at: str = ""

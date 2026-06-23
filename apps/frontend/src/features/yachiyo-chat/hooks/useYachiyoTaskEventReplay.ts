@@ -5,6 +5,8 @@ import {
   artifactsFromRunEventReplay,
   mergeApprovalSnapshots,
   mergeArtifactSnapshots,
+  mergeToolCallSnapshots,
+  toolCallsFromRunEventReplay,
 } from '../../runtime-shared/runEventFacts';
 import {
   mergeRuntimeRunEventPages,
@@ -12,7 +14,7 @@ import {
   runEventSequenceCursor,
 } from '../../runtime-shared/runEvents';
 import { listYachiyoTaskEvents } from '../api';
-import type { AgentTaskSnapshot, ArtifactSnapshot, PublicRunEvent } from '../types';
+import type { AgentTaskSnapshot, ArtifactSnapshot, PublicRunEvent, ToolCallSnapshot } from '../types';
 
 const TASK_EVENT_PAGE_SIZE = 200;
 
@@ -24,12 +26,15 @@ export function useYachiyoTaskEventReplay(task: AgentTaskSnapshot) {
   const [replayNextAfterSequence, setReplayNextAfterSequence] = useState(0);
   const approvals = task.pending_approvals || [];
   const artifacts = task.artifacts || [];
+  const toolCalls = task.tool_calls || [];
   const recentEvents = task.recent_events || [];
   const timelineEvents = replayEvents.length ? replayEvents : recentEvents;
   const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
   const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
+  const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];
   const approvalFacts = mergeApprovalSnapshots(approvals, replayApprovals);
   const artifactFacts = mergeArtifactSnapshots(artifacts, replayArtifacts) as ArtifactSnapshot[];
+  const toolCallFacts = mergeToolCallSnapshots(toolCalls, replayToolCalls) as ToolCallSnapshot[];
   const timelineSummaryEvents = timelineEvents.slice(-3);
   const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';
 
@@ -97,5 +102,6 @@ export function useYachiyoTaskEventReplay(task: AgentTaskSnapshot) {
     timelineEvents,
     timelineEventSource,
     timelineSummaryEvents,
+    toolCallFacts,
   };
 }

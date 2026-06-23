@@ -8,6 +8,12 @@ type ApprovalReplayCorrelationKeys = {
 
 type ApprovalReplayWeakIndex = number | 'ambiguous';
 
+const DAILY_DESKTOP_INTENT_TOOL_EVENTS = new Set([
+  'agent.desktop.intent_approval_required',
+  'agent.desktop.intent_completed',
+  'agent.desktop.intent_unavailable',
+]);
+
 export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
   const calls: ToolCallSnapshot[] = [];
   const activeByKey = new Map<string, number>();
@@ -17,16 +23,19 @@ export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallS
     if (!toolCall) return;
     const key = toolCallCorrelationKey(event, toolCall);
     const activeIndex = key ? activeByKey.get(key) : undefined;
-    if (activeIndex === undefined) {
+    const mergeIndex = activeIndex === undefined && DAILY_DESKTOP_INTENT_TOOL_EVENTS.has(event.event_type)
+      ? latestMatchingToolCallIndex(calls, toolCall)
+      : activeIndex;
+    if (mergeIndex === undefined) {
       const nextIndex = calls.length;
       calls.push(toolCall);
       if (key && !toolCallStatusIsTerminal(toolCall.status)) activeByKey.set(key, nextIndex);
       return;
     }
-    calls[activeIndex] = mergeToolCallReplayTrace(calls[activeIndex], toolCall);
+    calls[mergeIndex] = mergeToolCallReplayTrace(calls[mergeIndex], toolCall);
     if (key) {
       if (toolCallStatusIsTerminal(toolCall.status)) activeByKey.delete(key);
-      else activeByKey.set(key, activeIndex);
+      else activeByKey.set(key, mergeIndex);
     }
   });
   return calls;
@@ -36,17 +45,32 @@ export function mergeToolCallSnapshots(
   timelineToolCalls: ToolCallSnapshot[],
   replayToolCalls: ToolCallSnapshot[],
 ): ToolCallSnapshot[] {
-  const byId = new Map<string, ToolCallSnapshot>();
-  timelineToolCalls.forEach((toolCall) => byId.set(toolCall.tool_call_id, toolCall));
+  const calls: ToolCallSnapshot[] = [];
+  const byId = new Map<string, number>();
+  const byMatchKey = new Map<string, number>();
+  function indexToolCall(toolCall: ToolCallSnapshot, index: number) {
+    if (toolCall.tool_call_id) byId.set(toolCall.tool_call_id, index);
+    byMatchKey.set(toolCallSnapshotMatchKey(toolCall), index);
+  }
+
+  timelineToolCalls.forEach((toolCall) => {
+    const index = calls.length;
+    calls.push(toolCall);
+    indexToolCall(toolCall, index);
+  });
   replayToolCalls.forEach((toolCall) => {
-    const existing = byId.get(toolCall.tool_call_id);
-    if (!existing) {
-      byId.set(toolCall.tool_call_id, toolCall);
+    const matchKey = toolCallSnapshotMatchKey(toolCall);
+    const existingIndex = byId.get(toolCall.tool_call_id) ?? byMatchKey.get(matchKey);
+    if (existingIndex === undefined) {
+      const index = calls.length;
+      calls.push(toolCall);
+      indexToolCall(toolCall, index);
       return;
     }
-    byId.set(toolCall.tool_call_id, mergeToolCallTrace(existing, toolCall));
+    calls[existingIndex] = mergeToolCallTrace(calls[existingIndex], toolCall);
+    indexToolCall(calls[existingIndex], existingIndex);
   });
-  return Array.from(byId.values());
+  return calls;
 }
 
 export function artifactsFromRunEventReplay(events: PublicRunEvent[]): Array<Record<string, unknown>> {
@@ -236,7 +260,8 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   const policyReason = publicRunEventPayloadString(payload, 'policy_reason')
     || publicRunEventPayloadString(approval, 'policy_reason')
     || publicRunEventPayloadString(approval, 'reason');
-  const outputPreview = objectPreview(payload.output_preview)
+  const outputPreview = dailyDesktopIntentOutputPreview(event.event_type, payload)
+    || objectPreview(payload.output_preview)
     || objectPreview(payload.output)
     || objectPreview(payload.result)
     || (payload.error !== undefined ? { error: payload.error } : {});
@@ -564,6 +589,7 @@ function isArtifactRunEvent(eventType: string): boolean {
 }
 
 function isToolRunEvent(eventType: string): boolean {
+  if (DAILY_DESKTOP_INTENT_TOOL_EVENTS.has(eventType)) return true;
   return [
     'agent.tool.call',
     'agent.tool.denied',
@@ -614,10 +640,52 @@ function toolStatusFromRunEventPayload(
   payload: Record<string, unknown>,
   outputPreview: Record<string, unknown>,
 ): string {
+  if (eventType === 'agent.desktop.intent_approval_required') return 'waiting_approval';
+  if (eventType === 'agent.desktop.intent_unavailable') return 'blocked';
+  if (eventType === 'agent.desktop.intent_completed') {
+    if (toolCallForegroundLockBusy(outputPreview) || outputPreview.foreground_lock_busy === true) return 'blocked';
+    if (outputPreview.approval_required === true) return 'waiting_approval';
+    if (outputPreview.ok === false) return 'failed';
+    return 'completed';
+  }
   const explicit = publicRunEventPayloadString(payload, 'status');
   if (explicit) return explicit;
   if (toolCallForegroundLockBusy(payload) || outputPreview.foreground_lock_busy === true) return 'blocked';
   return toolStatusFromRunEvent(eventType);
+}
+
+function dailyDesktopIntentOutputPreview(
+  eventType: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const result = objectPreview(payload.result);
+  if (result) return result;
+  if (eventType === 'agent.desktop.intent_unavailable') {
+    return pickPresentRecord(payload, [
+      'reason',
+      'blocked_by',
+      'blocked_summary',
+      'recovery_actions',
+      'allowed_tools',
+    ]);
+  }
+  if (eventType === 'agent.desktop.intent_approval_required') {
+    return pickPresentRecord(payload, [
+      'reason',
+      'approval_id',
+      'risk_level',
+      'policy_reason',
+    ]);
+  }
+  return undefined;
+}
+
+function pickPresentRecord(source: Record<string, unknown>, keys: string[]): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {};
+  keys.forEach((key) => {
+    if (traceContextValuePresent(source[key])) result[key] = source[key];
+  });
+  return Object.keys(result).length ? result : undefined;
 }
 
 function toolCallForegroundLockBusy(payload: Record<string, unknown>): boolean {
@@ -639,6 +707,26 @@ function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapsho
   if (explicitId) return `${event.run_id}:id:${explicitId}`;
   return [
     event.run_id,
+    'tool',
+    toolCall.tool_name,
+    stableJson(toolCallCorrelationPreview(toolCall.input_preview || {})),
+  ].join(':');
+}
+
+function latestMatchingToolCallIndex(
+  calls: ToolCallSnapshot[],
+  toolCall: ToolCallSnapshot,
+): number | undefined {
+  const key = toolCallSnapshotMatchKey(toolCall);
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    if (toolCallSnapshotMatchKey(calls[index]) === key) return index;
+  }
+  return undefined;
+}
+
+function toolCallSnapshotMatchKey(toolCall: ToolCallSnapshot): string {
+  return [
+    toolCall.run_id || '',
     'tool',
     toolCall.tool_name,
     stableJson(toolCallCorrelationPreview(toolCall.input_preview || {})),

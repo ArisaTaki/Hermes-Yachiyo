@@ -180,6 +180,41 @@ def test_agent_task_snapshot_derives_progress_from_completed_desktop_intent() ->
 
     assert task.current_step == "已执行 · 播放 Apple Music"
     assert task.progress_text == "已执行 · 播放 Apple Music"
+    assert len(task.tool_calls) == 1
+    assert task.tool_calls[0].tool_name == "media.apple_music_play"
+    assert task.tool_calls[0].status == "completed"
+    assert task.tool_calls[0].output_preview == {"ok": True}
+
+
+def test_agent_task_snapshot_prefers_direct_tool_calls_over_event_fallback() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-browser",
+            "run_id": "run-browser",
+            "status": "running",
+            "tool_calls": [
+                {
+                    "tool_call_id": "call-direct",
+                    "tool_name": "browser.open_url",
+                    "status": "completed",
+                    "input_preview": {"url": "https://example.com"},
+                    "output_preview": {"ok": True},
+                }
+            ],
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "detail": "desktop.windows",
+                    "payload": {"tool": "desktop.windows", "result": {"ok": True}},
+                }
+            ],
+        }
+    )
+
+    assert len(task.tool_calls) == 1
+    assert task.tool_calls[0].tool_call_id == "call-direct"
+    assert task.tool_calls[0].tool_name == "browser.open_url"
+    assert task.tool_calls[0].input_preview == {"url": "https://example.com"}
 
 
 def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_intent() -> None:

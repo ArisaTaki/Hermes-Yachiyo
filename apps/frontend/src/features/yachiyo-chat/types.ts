@@ -15,6 +15,7 @@ export type {
   RunTimelineSnapshot,
   StartChatTaskRequest,
   TaskStatus,
+  ToolCallSnapshot,
   WorkflowSnapshot,
 } from '../runtime-shared/types';
 

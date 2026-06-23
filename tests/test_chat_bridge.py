@@ -92,6 +92,8 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
         assert result["agent_task"]["open_in_studio_url"] == "#/agents?run_id=run-browser"
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_completed"
         assert result["agent_task"]["recent_events"][0]["payload"]["source"] == "daily_desktop_intent"
+        assert result["agent_task"]["tool_calls"][0]["tool_name"] == "browser.open_url"
+        assert result["agent_task"]["tool_calls"][0]["status"] == "completed"
     finally:
         store.close()
 
@@ -121,6 +123,7 @@ def test_chat_bridge_quick_message_waits_briefly_for_daily_desktop_snapshot(tmp_
         assert result["agent_task"]["status"] == "running"
         assert result["agent_task"]["current_step"] == "已回退执行 · 打开网页 · 系统浏览器"
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_completed"
+        assert result["agent_task"]["tool_calls"][0]["tool_name"] == "browser.open_url"
         assert runtime.agent_runtime_service.calls == [
             ("get_task_run_link", "task-delayed-browser"),
             ("get_task_run_link", "task-delayed-browser"),

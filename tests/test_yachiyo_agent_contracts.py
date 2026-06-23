@@ -107,6 +107,15 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
                 detail="workspace.write_patch",
             )
         ],
+        tool_calls=[
+            ToolCallSnapshot(
+                tool_call_id="call-1",
+                run_id="run-1",
+                tool_name="workspace.write_patch",
+                status="waiting_approval",
+                input_preview={"path": "README.md"},
+            )
+        ],
         artifacts=[
             ArtifactSnapshot(
                 artifact_id="artifact-1",
@@ -134,6 +143,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "needs_user_action",
         "pending_approvals",
         "recent_events",
+        "tool_calls",
         "artifacts",
         "open_in_studio_url",
         "created_at",
@@ -141,6 +151,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     ]
     assert payload["pending_approvals"][0]["approval_id"] == "approval-1"
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
+    assert payload["tool_calls"][0]["tool_name"] == "workspace.write_patch"
     assert "event" not in payload["recent_events"][0]
 
 

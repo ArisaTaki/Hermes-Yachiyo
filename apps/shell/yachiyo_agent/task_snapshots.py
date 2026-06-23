@@ -20,6 +20,7 @@ from .artifacts import artifact_snapshots_from_payloads
 from .contracts import AgentTaskSnapshot, PublicRunEvent
 from .events import public_run_event_from_payload
 from .links import studio_run_url
+from .tool_call_snapshots import tool_call_snapshots_from_payloads
 
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
@@ -97,6 +98,11 @@ def agent_task_snapshot_from_payload(
         needs_user_action=bool(payload.get("needs_user_action") or approvals),
         pending_approvals=approvals,
         recent_events=recent_events,
+        tool_calls=tool_call_snapshots_from_payloads(
+            payload.get("tool_calls"),
+            run_id=run_id,
+            events=recent_events,
+        ),
         artifacts=artifact_snapshots_from_task_payload(
             payload,
             run_id=run_id,

@@ -1,12 +1,14 @@
 import { RuntimeToolCallSummary } from '../../runtime-shared/components/RuntimeToolCallSummary';
-import type { PublicRunEvent } from '../types';
+import type { PublicRunEvent, ToolCallSnapshot } from '../types';
 
 export function ToolCallSummary({
   events,
   limit = 4,
+  toolCalls = [],
 }: {
   events: PublicRunEvent[];
   limit?: number;
+  toolCalls?: ToolCallSnapshot[];
 }) {
   return (
     <RuntimeToolCallSummary
@@ -17,6 +19,7 @@ export function ToolCallSummary({
       label="能力"
       limit={limit}
       testId="yachiyo-agent-task-tool-summary"
+      toolCalls={toolCalls}
     />
   );
 }

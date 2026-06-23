@@ -77,6 +77,8 @@ export function launcherAgentTaskDetail(task: LauncherAgentTask) {
   }
   const step = String(task.current_step || task.progress_text || '').trim();
   if (step) return step;
+  const toolCall = task.tool_calls?.find((item) => item.tool_name);
+  if (toolCall) return launcherAgentTaskToolCallLabel(toolCall);
   const event = task.recent_events?.find((item) => item.title || item.detail || item.event_type);
   if (event) return launcherAgentTaskEventLabel(event);
   const artifact = task.artifacts?.find((item) => item.title || item.path || item.kind);
@@ -90,6 +92,24 @@ function launcherAgentTaskEventLabel(event: PublicRunEvent) {
   const detail = String(event.detail || '').trim();
   if (detail) return runtimeToolDisplayLabelOrName(detail);
   return label || '运行事件';
+}
+
+function launcherAgentTaskToolCallLabel(toolCall: { status?: string; tool_name?: string }) {
+  const toolName = String(toolCall.tool_name || '').trim();
+  const label = runtimeToolDisplayLabelOrName(toolName || 'tool');
+  const status = launcherAgentTaskToolCallStatusLabel(String(toolCall.status || '').trim());
+  return status ? `${status} · ${label}` : `执行 · ${label}`;
+}
+
+function launcherAgentTaskToolCallStatusLabel(status: string) {
+  if (status === 'completed') return '已执行';
+  if (status === 'waiting_approval' || status === 'approval_required') return '待审批';
+  if (status === 'blocked') return '被占用';
+  if (status === 'failed') return '失败';
+  if (status === 'running') return '执行中';
+  if (status === 'queued' || status === 'planned') return '准备执行';
+  if (status === 'unavailable') return '不可用';
+  return '';
 }
 
 export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {

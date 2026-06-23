@@ -1,4 +1,4 @@
-import type { PublicRunEvent } from '../types';
+import type { PublicRunEvent, ToolCallSnapshot } from '../types';
 import { runtimeToolDisplayLabelOrName, runtimeToolFamily } from '../approval';
 import { publicRunEventIsSecret } from '../runEvents';
 
@@ -54,6 +54,7 @@ export function RuntimeToolCallSummary({
   label = '工具',
   limit = 4,
   testId = 'runtime-tool-call-summary',
+  toolCalls = [],
 }: {
   className?: string;
   events: PublicRunEvent[];
@@ -62,8 +63,11 @@ export function RuntimeToolCallSummary({
   label?: string;
   limit?: number;
   testId?: string;
+  toolCalls?: ToolCallSnapshot[];
 }) {
-  const tools = summarizeRuntimeToolCalls(events, limit);
+  const tools = toolCalls.length
+    ? summarizeRuntimeToolCallSnapshots(toolCalls, limit)
+    : summarizeRuntimeToolCalls(events, limit);
   if (!tools.length) return null;
 
   return (
@@ -87,6 +91,38 @@ export function RuntimeToolCallSummary({
       </div>
     </div>
   );
+}
+
+export function summarizeRuntimeToolCallSnapshots(
+  toolCalls: ToolCallSnapshot[],
+  limit: number,
+): RuntimeToolCallSummaryItem[] {
+  const byName = new Map<string, RuntimeToolCallSummaryItem>();
+  (toolCalls || []).forEach((toolCall, index) => {
+    const name = String(toolCall.tool_name || '').trim();
+    if (!name) return;
+    const sequence = index + 1;
+    const status = normalizeRuntimeToolStatus(String(toolCall.status || '').trim());
+    const previous = byName.get(name);
+    if (previous) {
+      previous.count += 1;
+      if (sequence >= previous.sequence) {
+        previous.sequence = sequence;
+        previous.status = status;
+      }
+      return;
+    }
+    byName.set(name, {
+      count: 1,
+      name,
+      sequence,
+      status: status || 'completed',
+    });
+  });
+
+  return Array.from(byName.values())
+    .sort((left, right) => right.sequence - left.sequence)
+    .slice(0, Math.max(1, limit));
 }
 
 export function summarizeRuntimeToolCalls(

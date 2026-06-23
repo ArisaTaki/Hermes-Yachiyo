@@ -43,6 +43,7 @@ export function AgentTaskCard({
     timelineEvents,
     timelineEventSource,
     timelineSummaryEvents,
+    toolCallFacts,
   } = useYachiyoTaskEventReplay(task);
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
@@ -98,7 +99,9 @@ export function AgentTaskCard({
         ) : null}
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
-      {timelineEvents.length ? <ToolCallSummary events={timelineEvents} /> : null}
+      {timelineEvents.length || toolCallFacts.length ? (
+        <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
+      ) : null}
       {permissionRecovery ? (
         <div
           className="yachiyo-agent-task-permission-recovery"

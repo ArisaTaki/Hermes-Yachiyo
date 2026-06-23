@@ -249,6 +249,7 @@ export type AgentTaskSnapshot = {
   needs_user_action?: boolean;
   pending_approvals?: ApprovalCardSnapshot[];
   recent_events?: PublicRunEvent[];
+  tool_calls?: ToolCallSnapshot[];
   artifacts?: ArtifactSnapshot[];
   open_in_studio_url?: string | null;
   created_at?: string;
