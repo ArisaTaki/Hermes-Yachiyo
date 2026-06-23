@@ -2119,7 +2119,7 @@ def test_send_message_executes_direct_safe_click_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
     try:
-        result = api.send_message("点击 120, 240")
+        result = api.send_message("点 120 240")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]

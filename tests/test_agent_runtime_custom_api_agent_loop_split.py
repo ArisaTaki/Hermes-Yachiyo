@@ -1521,6 +1521,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_click",
         "input": {"x": 120, "y": 240},
     }
+    assert daily_desktop_intent_tool_request("点 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_click",
+        "input": {"x": 120, "y": 240},
+    }
+    assert daily_desktop_intent_tool_request("在坐标 120 240 点一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_click",
+        "input": {"x": 120, "y": 240},
+    }
+    assert daily_desktop_intent_tool_request("单击 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_click",
+        "input": {"x": 120, "y": 240},
+    }
     assert daily_desktop_intent_tool_request("点击 120, 240", ["desktop.click"]) == {
         "protocol": "json_fallback",
         "tool": "desktop.click",
@@ -1536,6 +1551,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_click",
         "input": {"x": 120, "y": 240},
     }
+    assert daily_desktop_intent_tool_request("别点 120 240", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要双击 120 240", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None

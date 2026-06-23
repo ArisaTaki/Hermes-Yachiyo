@@ -494,7 +494,7 @@ def _looks_like_negative_request(text: str) -> bool:
         re.search(
             r"(?:不要|不用|无需|不需要|别).{0,12}"
             r"(?:执行|操作|调用|真的|实际|播放|截图|截屏|读取|查看|"
-            r"输入|打字|点击|按键|快捷键|网页|关闭|关掉|退出|隐藏|收起|最小化)",
+            r"输入|打字|点击|点|单击|双击|按键|快捷键|网页|关闭|关掉|退出|隐藏|收起|最小化)",
             text,
         )
         or re.search(
@@ -1859,14 +1859,21 @@ def _strip_typed_text(value: str) -> str:
 
 
 def _desktop_click(text: str) -> dict[str, Any] | None:
-    match = re.search(
+    patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|click)\s*"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|点|click)\s*"
         r"(?:屏幕坐标|屏幕|坐标|位置)?\s*"
         r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)",
-        text,
-        flags=re.IGNORECASE,
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|到)\s*(?:屏幕坐标|屏幕|坐标|位置)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)\s*"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|点|click)",
     )
+    match = None
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            break
     if not match:
         return None
     payload: dict[str, Any] = {
