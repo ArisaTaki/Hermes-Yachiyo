@@ -964,6 +964,103 @@ async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_structured_recovery_action_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-recovery-action.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-recovery-action.db",
+        workspace_dir=tmp_path / "agent-runtime-route-recovery-action",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-recovery-action")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("structured recovery action should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "open_target": "system_settings",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="修复屏幕录制",
+                conversation_id="chat-main-recovery-action",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-recovery-action-1",
+                    "source": "live2d",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                    "desktop_permission_recovery": True,
+                    "recovery_tool": "app.open",
+                    "recovery_input": {"app_name": "屏幕录制权限"},
+                    "recovery_permission_target": "screen_recording",
+                    "recovery_risk_level": "low",
+                },
+            ),
+            request,
+        )
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        messages = store.load_messages("chat-main-recovery-action", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        user_metadata = json.loads(user.metadata_json or "{}")
+        planned_event = next(
+            event
+            for event in events["events"]
+            if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        event_types = [event["event_type"] for event in events["events"]]
+
+        assert open_calls == ["屏幕录制权限"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已打开 屏幕录制权限。"
+        assert started["tool_calls"][-1]["tool_name"] == "app.open"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert planned_event["payload"]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert user_metadata["desktop_permission_recovery"] is True
+        assert user_metadata["recovery_tool"] == "app.open"
+        assert user_metadata["recovery_input"] == {"app_name": "屏幕录制权限"}
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     class _RejectRecordingService:
         def __init__(self) -> None:

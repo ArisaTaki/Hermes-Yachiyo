@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_recovery_prompt,
+)
 from apps.shell.chat_api import ChatAPI
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -101,6 +104,7 @@ class LegacyChatTaskStarter:
                 task_id=task_id,
                 conversation_id=conversation_id,
                 prompt=str(request.get("prompt") or request.get("goal") or ""),
+                metadata=metadata,
             )
             if executed is not None:
                 return executed
@@ -141,11 +145,13 @@ class LegacyChatTaskStarter:
         task_id: str,
         conversation_id: str,
         prompt: str,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         return self._execute_main_daily_desktop_task(
             task_id=task_id,
             conversation_id=conversation_id,
             prompt=prompt,
+            metadata=metadata,
         )
 
     def _execute_main_daily_desktop_task(
@@ -154,9 +160,11 @@ class LegacyChatTaskStarter:
         task_id: str,
         conversation_id: str,
         prompt: str,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
-        if not task_id or not prompt or not daily_desktop_intent_candidates(prompt):
+        execution_prompt = daily_desktop_recovery_prompt(metadata) or prompt
+        if not task_id or not execution_prompt or not daily_desktop_intent_candidates(execution_prompt):
             return None
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
@@ -169,14 +177,14 @@ class LegacyChatTaskStarter:
             run = start_main_chat_run(
                 task_id=task_id,
                 session_id=conversation_id,
-                user_goal=prompt,
+                user_goal=prompt or execution_prompt,
             )
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
                 return None
             run = execute_main_chat_model_loop(
                 run_id,
-                [{"role": "user", "content": prompt}],
+                [{"role": "user", "content": execution_prompt}],
             )
             status = str(run.get("status") or "").strip()
             result_text = str(run.get("result") or "").strip()

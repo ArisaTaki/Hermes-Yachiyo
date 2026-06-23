@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
+    daily_desktop_recovery_prompt,
 )
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
@@ -1343,6 +1344,34 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
+
+
+def test_daily_desktop_recovery_prompt_accepts_only_low_risk_app_open() -> None:
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.open",
+            "recovery_input": {"app_name": "屏幕录制权限"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开屏幕录制权限"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.click",
+            "recovery_input": {"x": 120, "y": 240},
+            "recovery_risk_level": "low",
+        }
+    ) == ""
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.open",
+            "recovery_input": {"app_name": "Terminal"},
+            "recovery_risk_level": "high",
+        }
+    ) == ""
 
 
 def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_before_model() -> None:

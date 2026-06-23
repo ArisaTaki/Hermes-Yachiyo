@@ -42,7 +42,10 @@ from apps.core.executor import (
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_recovery_prompt,
+)
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
@@ -592,6 +595,7 @@ class ChatAPI:
         *,
         task_id: str,
         prompt: str,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         try:
             service = self._agent_runtime_service()
@@ -605,6 +609,7 @@ class ChatAPI:
                 task_id=task_id,
                 conversation_id=str(getattr(self._session, "session_id", "") or ""),
                 prompt=prompt,
+                metadata=metadata,
             )
             if payload is None:
                 return None
@@ -702,10 +707,11 @@ class ChatAPI:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
+            daily_desktop_task_text = daily_desktop_recovery_prompt(metadata) or task_text
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and bool(daily_desktop_intent_candidates(task_text))
+                and bool(daily_desktop_intent_candidates(daily_desktop_task_text))
             )
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason and not direct_daily_desktop_intent:
@@ -788,6 +794,7 @@ class ChatAPI:
                 direct_daily_desktop_task = self._execute_direct_daily_desktop_task(
                     task_id=task_id,
                     prompt=task_text,
+                    metadata=user_metadata,
                 )
             if direct_group_dispatch_directives:
                 source_text = self._format_group_dispatch_direct_source()

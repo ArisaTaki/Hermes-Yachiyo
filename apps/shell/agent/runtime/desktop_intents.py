@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -177,6 +178,26 @@ def daily_desktop_intent_tool_request(
         if str(request.get("tool") or "") in allowed:
             return request
     return None
+
+
+def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
+    """Build a deterministic low-risk prompt from a structured recovery action."""
+
+    if not isinstance(metadata, Mapping):
+        return ""
+    if metadata.get("desktop_permission_recovery") is not True:
+        return ""
+    if str(metadata.get("recovery_risk_level") or "").strip().lower() != "low":
+        return ""
+    if str(metadata.get("recovery_tool") or "").strip() != "app.open":
+        return ""
+    recovery_input = metadata.get("recovery_input")
+    if not isinstance(recovery_input, Mapping):
+        return ""
+    app_name = str(recovery_input.get("app_name") or "").strip()
+    if not app_name:
+        return ""
+    return f"打开{app_name}"
 
 
 def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
@@ -1168,6 +1189,13 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         "currenttab",
         "thistab",
         "newtab",
+        "权限",
+        "这个权限",
+        "当前权限",
+        "permission",
+        "permissions",
+        "thispermission",
+        "currentpermission",
     }:
         return True
     lowered = app.lower()
@@ -1711,4 +1739,8 @@ def _is_active_window_request(text: str) -> bool:
     )
 
 
-__all__ = ["daily_desktop_intent_candidates", "daily_desktop_intent_tool_request"]
+__all__ = [
+    "daily_desktop_intent_candidates",
+    "daily_desktop_intent_tool_request",
+    "daily_desktop_recovery_prompt",
+]
