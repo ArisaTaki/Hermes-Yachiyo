@@ -2903,6 +2903,30 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
+        [
+            "const dailyDesktopToolsIncomplete = !draft.allow_screen_context",
+            "const enableDailyDesktopTools = () => updateDraft({",
+            "allow_app_control: true,",
+            "allow_media_control: true,",
+            "allow_browser_control: true,",
+            'data-testid="agent-desktop-execution-notice"',
+            'data-testid="agent-enable-daily-desktop-tools"',
+            "disabled={busy || selectedAgentReadOnly}",
+            "开启日常桌面能力",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".agent-desktop-execution-notice",
+            "flex-wrap: wrap;",
+            ".agent-desktop-execution-notice>div",
+            ".agent-desktop-execution-notice strong",
+            ".agent-desktop-execution-notice span",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useAgentRunReadiness.ts",
         [
             "export function useAgentRunReadiness",

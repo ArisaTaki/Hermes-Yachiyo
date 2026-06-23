@@ -16013,6 +16013,39 @@ button.activity-item {
   align-content: start;
 }
 
+.agent-desktop-execution-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid oklch(66% 0.12 188 / 0.34);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.07);
+}
+
+.agent-desktop-execution-notice>div {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-desktop-execution-notice strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-desktop-execution-notice span {
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .agent-desk-panel {
   align-content: start;
 }

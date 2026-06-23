@@ -173,6 +173,16 @@ export function AgentEditorPanel({
   onUnmountVisibleSkills,
 }: AgentEditorPanelProps) {
   const updateDraft = (patch: Partial<AgentDraft>) => onDraftChange({ ...draft, ...patch });
+  const dailyDesktopToolsIncomplete = !draft.allow_screen_context
+    || !draft.allow_app_control
+    || !draft.allow_media_control
+    || !draft.allow_browser_control;
+  const enableDailyDesktopTools = () => updateDraft({
+    allow_screen_context: true,
+    allow_app_control: true,
+    allow_media_control: true,
+    allow_browser_control: true,
+  });
   const toolCapabilitySummaries = agentToolCapabilitySummaries(draft, toolCatalog);
   const toolCapabilityById = new Map(
     toolCapabilitySummaries.map((summary) => [summary.id, summary]),
@@ -294,6 +304,23 @@ export function AgentEditorPanel({
           <h3>Capabilities</h3>
         </div>
         <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
+        {dailyDesktopToolsIncomplete ? (
+          <div className="agent-desktop-execution-notice" data-testid="agent-desktop-execution-notice">
+            <div>
+              <strong>日常桌面执行能力未完整开启</strong>
+              <span>打开 App、播放音乐、搜索网页和读取屏幕上下文需要这些低风险能力；前台输入、点击和快捷键仍单独控制。</span>
+            </div>
+            <button
+              type="button"
+              className="hy-btn hy-btn-ghost"
+              data-testid="agent-enable-daily-desktop-tools"
+              disabled={busy || selectedAgentReadOnly}
+              onClick={enableDailyDesktopTools}
+            >
+              开启日常桌面能力
+            </button>
+          </div>
+        ) : null}
         <div className="agent-capability-grid">
           {agentCapabilityToggles.map((capability) => {
             const summary = toolCapabilityById.get(capability.id);
