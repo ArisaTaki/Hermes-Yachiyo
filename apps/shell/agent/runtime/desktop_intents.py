@@ -340,7 +340,7 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if safe_shortcut_action:
         candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
-    url = _browser_open_url(text)
+    url = _browser_composite_open_url(text) or _browser_open_url(text)
     if url:
         candidates.append(_request("browser.open_url", {"url": url}))
 
@@ -377,6 +377,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_status_name = _app_status_name(text)
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
+
+    app_show_or_open_name = _app_show_or_open_name(text)
+    if app_show_or_open_name:
+        candidates.append(_request("app.show", {"app_name": app_show_or_open_name}))
 
     focus_window_payload = _app_focus_window_payload(text)
     if focus_window_payload:
@@ -587,6 +591,38 @@ def _browser_open_url(text: str) -> str:
         if url:
             return url
     return ""
+
+
+def _browser_composite_open_url(text: str) -> str:
+    browser_name = (
+        r"(?:浏览器|chrome|google\s*chrome|谷歌(?:浏览器)?|safari|firefox|火狐(?:浏览器)?|"
+        r"edge(?:浏览器)?|microsoft\s*edge|arc(?:浏览器)?|brave(?:浏览器)?|browser)"
+    )
+    patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
+        rf"(?:(?:并|然后|后|之后|再)\s*)?(?:打开|访问|浏览|前往|去)\s*(?P<target>[^。！？!?，,]+)",
+        rf"(?:open|launch|start)\s+{browser_name}\s+(?:and\s+)?"
+        rf"(?:open|visit|browse|go to)\s+(?P<target>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        url = _browser_target_url(match.group("target"))
+        if url:
+            return url
+    return ""
+
+
+def _browser_target_url(value: str) -> str:
+    target = _strip_query(value)
+    target = re.sub(r"^(?:一下|下|这个|那个)\s*", "", target)
+    return (
+        _normalize_url(target)
+        or _normalize_site_name(target)
+        or _normalize_browser_site_name(target)
+    )
 
 
 def _url_match_inside_local_path(text: str, start: int) -> bool:
@@ -1054,6 +1090,7 @@ def _looks_like_app_status_request(text: str) -> bool:
 
 
 def _desktop_open_path(text: str) -> str:
+    text = _strip_finder_path_prefix(text)
     if re.search(r"\bin\s+(?:the\s+)?finder\b", text, flags=re.IGNORECASE):
         return ""
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
@@ -1080,6 +1117,7 @@ def _desktop_open_path(text: str) -> str:
 
 
 def _desktop_reveal_path(text: str) -> str:
+    text = _strip_finder_path_prefix(text)
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
@@ -1112,6 +1150,17 @@ def _desktop_reveal_path(text: str) -> str:
     return ""
 
 
+def _strip_finder_path_prefix(text: str) -> str:
+    return re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)\s*"
+        r"(?:并|然后|后|之后|再)\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def _normalize_reveal_path(value: str) -> str:
     target = _strip_polite_suffix(_strip_query(value))
     target = re.sub(r"\s+in\s+(?:the\s+)?finder$", "", target, flags=re.IGNORECASE)
@@ -1135,6 +1184,10 @@ def _looks_like_local_path(value: str) -> bool:
 
 def _app_focus_name(text: str) -> str:
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:并|然后|后|之后|再)\s*(?:切换到|切到|切回|回到|聚焦|激活|置前|显示|还原)"
+        r"(?:\s*(?:前台|前面|最前面|最前|前台来|这边|过来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:切换到|切到|切回|回到|聚焦|激活|置前|带到|带回|移到|放到|切过来)"
@@ -1153,6 +1206,46 @@ def _app_focus_name(text: str) -> str:
             continue
         raw_app = match.group("app")
         if _looks_like_window_target(raw_app):
+            continue
+        if _looks_like_composite_action_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
+def _app_show_or_open_name(text: str) -> str:
+    if _desktop_reveal_path(text) or _desktop_open_path(text):
+        return ""
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:并|然后|后|之后|再)\s*(?:切换到|切到|切回|回到|聚焦|激活|置前|显示|还原)"
+        r"(?:\s*(?:前台|前面|最前面|最前|前台来|这边|过来))?",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|切回|回到|聚焦|激活|置前|显示|还原)\s*(?P<app>[^。！？!?，,]+?)"
+        r"\s*(?:，|,)?\s*(?:如果|要是)?(?:没|没有|未)(?:打开|启动|运行|开|在运行)"
+        r".*(?:打开|启动|运行|拉起|开启)",
+        r"(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
+        r"(?:focus|activate|show|bring(?:\s+to\s+front)?)",
+        r"(?:focus|activate|switch to|show)\s+(?P<app>[^.!?]+?)\s*,?\s*"
+        r"(?:open|launch|start)\s+(?:it\s+)?(?:if\s+(?:needed|not\s+open|closed))",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
+            continue
+        if _looks_like_current_app_scope(raw_app):
+            continue
+        if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_generic_app_open_target(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)
         if app_name:
@@ -1184,6 +1277,8 @@ def _app_focus_window_payload(text: str) -> dict[str, str] | None:
         raw_title = match.group("title")
         if _looks_like_local_path(_strip_app_name(raw_app)) or _looks_like_common_path_target(raw_app):
             continue
+        if _looks_like_composite_action_target(raw_app):
+            continue
         app_name = _normalize_app_name(raw_app)
         title = _strip_window_title(raw_title)
         if app_name and title:
@@ -1211,6 +1306,8 @@ def _app_quit_name(text: str) -> str:
             continue
         raw_app = match.group("app")
         if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_composite_action_target(raw_app):
             continue
         if _looks_like_generic_app_quit_target(raw_app):
             continue
@@ -1249,6 +1346,8 @@ def _app_show_name(text: str) -> str:
             continue
         if _normalize_site_name(raw_app):
             continue
+        if _looks_like_composite_action_target(raw_app):
+            continue
         if _looks_like_generic_app_quit_target(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)
@@ -1283,6 +1382,8 @@ def _app_hide_name(text: str) -> str:
             continue
         if _normalize_site_name(raw_app):
             continue
+        if _looks_like_composite_action_target(raw_app):
+            continue
         if _looks_like_generic_app_quit_target(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)
@@ -1316,6 +1417,8 @@ def _app_minimize_name(text: str) -> str:
         if _looks_like_current_app_scope(raw_app):
             continue
         if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_composite_action_target(raw_app):
             continue
         if _looks_like_generic_app_quit_target(raw_app):
             continue
@@ -1357,6 +1460,8 @@ def _app_open_name(text: str) -> str:
         if _looks_like_common_path_target(raw_app):
             continue
         if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_composite_action_target(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)
         if _looks_like_generic_app_open_target(raw_app):
@@ -1509,9 +1614,32 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         return True
     if re.search(r"\b(?:command|shell|script|code|test)\b", lowered):
         return True
+    if _looks_like_composite_action_target(app):
+        return True
     if re.fullmatch(r"(?:一个|一条|某个|这个|那个).+", app):
         return True
     return False
+
+
+def _looks_like_composite_action_target(value: str) -> bool:
+    target = str(value or "").strip()
+    if not target:
+        return False
+    return bool(
+        re.search(
+            r"(?:并|然后|之后|再|如果|要是).{0,24}"
+            r"(?:打开|启动|运行|拉起|开启|访问|浏览|前往|搜索|搜|查|切换|切到|"
+            r"聚焦|激活|置前|显示|还原|播放|放)",
+            target,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:and|then|if)\b.{0,32}"
+            r"\b(?:open|launch|start|visit|browse|search|focus|activate|show|play)\b",
+            target,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_generic_app_quit_target(value: str) -> bool:

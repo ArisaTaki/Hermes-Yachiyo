@@ -827,6 +827,7 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
     try:
         cases = [
             ("Slack 显示出来", "app.show", "已显示 Slack。"),
+            ("打开 Slack 并切到前台", "app.show", "已显示 Slack。"),
             ("隐藏 Slack", "app.hide", "已隐藏 Slack。"),
             ("最小化 Slack", "app.minimize", "已最小化 Slack。"),
             ("切到 Slack 的 general 窗口", "app.focus_window", "已切换到 Slack 的 general 窗口。"),
@@ -865,7 +866,7 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
 
-        assert show_calls == ["Slack"]
+        assert show_calls == ["Slack", "Slack"]
         assert hide_calls == ["Slack"]
         assert minimize_calls == ["Slack"]
         assert focus_window_calls == [("Slack", "general")]
@@ -1130,6 +1131,7 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
+            ("打开浏览器并访问 GitHub", "https://github.com"),
         ]
         for prompt, url in cases:
             result = api.send_message(prompt)

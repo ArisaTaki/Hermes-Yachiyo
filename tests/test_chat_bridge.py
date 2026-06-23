@@ -632,7 +632,7 @@ def test_chat_bridge_quick_message_executes_named_app_show_without_approval(
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "显示 Slack",
+        "打开 Slack 并切到前台",
     )
 
     assert result["ok"] is True
@@ -804,7 +804,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     assert "model.requested" not in event_types
 
 
-def test_chat_bridge_quick_message_executes_browser_search_for_launcher_entrypoints(
+def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
 ):
@@ -823,12 +823,12 @@ def test_chat_bridge_quick_message_executes_browser_search_for_launcher_entrypoi
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "搜索 open hanako",
+        "打开浏览器并访问 GitHub",
     )
 
-    assert opened_urls == ["https://www.google.com/search?q=open+hanako"]
+    assert opened_urls == ["https://github.com"]
     assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "已打开网页：https://www.google.com/search?q=open+hanako。"
+    assert agent_task["summary"] == "已打开网页：https://github.com。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types

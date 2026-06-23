@@ -673,6 +673,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开浏览器并访问 GitHub", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并访问 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("open browser and visit github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开浏览器并访问 GitHub", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("用浏览器打开 Apple Music", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -835,6 +851,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.show",
         "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Slack 并切到前台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack，如果没打开就打开", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Slack 并切到前台", ["app.focus"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("还原微信", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1115,6 +1146,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开 Finder 并显示下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
     assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/测试文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
@@ -1131,6 +1167,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("把下载文件夹打开一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 并打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
