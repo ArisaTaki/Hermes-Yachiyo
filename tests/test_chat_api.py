@@ -150,7 +150,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
-    control_calls: list[str] = []
+    open_and_play_calls = 0
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -165,14 +165,18 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         ),
     )
 
-    def fake_apple_music_control(action: str) -> dict:
-        control_calls.append(action)
+    def fake_apple_music_open_and_play() -> dict:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_control",
-            "summary": f"Apple Music {action} executed",
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
             "data": {
-                "control": action,
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
                 "player_state": "playing",
                 "track": "超时空辉夜姬",
                 "artist": "Yachiyo",
@@ -180,8 +184,8 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_control",
-        fake_apple_music_control,
+        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
+        fake_apple_music_open_and_play,
     )
     try:
         result = api.send_message("能否帮我播放apple Music?")
@@ -196,15 +200,15 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert result["status"] == "completed"
         assert result["run_id"] == run["run_id"]
         assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert result["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert task.result == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
-        assert control_calls == ["play"]
+        assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert open_and_play_calls == 1
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

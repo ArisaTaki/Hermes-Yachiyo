@@ -45,6 +45,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.reveal_path": "在 Finder 中显示",
     "desktop.open_path": "打开本地路径",
     "media.apple_music_play": "播放 Apple Music",
+    "media.apple_music_open_and_play": "打开并播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "desktop.safe_shortcut": "执行快捷动作",
     "desktop.safe_type_text": "输入前台文字",

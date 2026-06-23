@@ -20,6 +20,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.minimize",
     "app.quit",
     "media.apple_music_play",
+    "media.apple_music_open_and_play",
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
@@ -63,6 +64,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.minimize": "最小化应用",
     "app.quit": "退出应用",
     "media.apple_music_play": "播放 Apple Music",
+    "media.apple_music_open_and_play": "打开并播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
@@ -540,6 +542,12 @@ class RuntimeCustomApiAgentLoop:
                 if track:
                     return f"已在 Apple Music 播放：{track}{f' - {artist}' if artist else ''}。"
                 return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
+            if tool_name == "media.apple_music_open_and_play":
+                data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                track = str(data.get("track") or "").strip()
+                artist = str(data.get("artist") or "").strip()
+                track_text = f"当前：{track}{f' - {artist}' if artist else ''}。" if track else ""
+                return f"已打开 Apple Music 并开始播放。{track_text}"
             if tool_name == "media.apple_music_control":
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
             if tool_name == "system.volume":
@@ -633,6 +641,11 @@ class RuntimeCustomApiAgentLoop:
                 if query
                 else "没能直接播放，但已打开 Apple Music。"
             )
+        if tool_name == "media.apple_music_open_and_play":
+            control = fallback.get("control") if isinstance(fallback.get("control"), dict) else {}
+            opened = fallback.get("open") if isinstance(fallback.get("open"), dict) else {}
+            if control.get("fallback_used") or opened.get("ok"):
+                return "已打开 Apple Music，但没能直接开始播放。"
         if tool_name == "media.apple_music_control" and fallback.get("ok"):
             action = _payload_text(result, planned_input, "action")
             label = _apple_music_control_label(action)
@@ -748,9 +761,10 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
-            "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
+            "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
+            "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
             "commands to system.volume; map explicit 'copy/write to clipboard' requests to "
             "clipboard.write without reading clipboard contents; map screen capture requests to "

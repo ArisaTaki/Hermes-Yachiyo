@@ -2927,7 +2927,10 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
         assert permission_calls == [True]
         assert started["status"] == "completed"
         assert "桌面执行权限还缺少：music_app, automation。" in started["summary"]
-        assert "受影响工具：media.apple_music_play, media.apple_music_control。" in started["summary"]
+        assert (
+            "受影响工具：media.apple_music_play, media.apple_music_open_and_play, "
+            "media.apple_music_control。"
+        ) in started["summary"]
         assert "可直接打开：打开 Apple Music、打开自动化权限。" in started["summary"]
         assert started["needs_user_action"] is False
         assert started["pending_approvals"] == []
@@ -2937,6 +2940,7 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
         assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
         assert tool_call["output_preview"]["affected_tools"] == [
             "media.apple_music_play",
+            "media.apple_music_open_and_play",
             "media.apple_music_control",
         ]
         assert tool_call["output_preview"]["recovery_actions"] == [
@@ -2965,6 +2969,7 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
         assert recovery_event["payload"]["permission_targets"] == ["music_app", "automation"]
         assert recovery_event["payload"]["affected_tools"] == [
             "media.apple_music_play",
+            "media.apple_music_open_and_play",
             "media.apple_music_control",
             "desktop.permissions",
         ]
@@ -5103,6 +5108,11 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["media.apple_music_play"]["input_schema"]["required"] == ["query"]
     assert tools["media.apple_music_play"]["missing_permissions"] == ["music_app"]
     assert any("Music" in note for note in tools["media.apple_music_play"]["fallback_notes"])
+    assert tools["media.apple_music_open_and_play"]["capability_id"] == "media_control"
+    assert tools["media.apple_music_open_and_play"]["risk_level"] == "low"
+    assert tools["media.apple_music_open_and_play"]["input_schema"].get("required", []) == []
+    assert tools["media.apple_music_open_and_play"]["missing_permissions"] == ["music_app"]
+    assert any("Music" in note for note in tools["media.apple_music_open_and_play"]["fallback_notes"])
     assert tools["media.apple_music_control"]["capability_id"] == "media_control"
     assert tools["media.apple_music_control"]["risk_level"] == "low"
     assert tools["media.apple_music_control"]["input_schema"]["required"] == ["action"]

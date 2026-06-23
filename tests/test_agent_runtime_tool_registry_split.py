@@ -282,6 +282,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_reveal_path",
         "desktop_open_path",
         "media_apple_music_play",
+        "media_apple_music_open_and_play",
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
@@ -579,6 +580,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "media_apple_music_open_and_play",
+        lambda: calls.append(("music_open_and_play",)) or {"ok": True, "action": "open_and_play"},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_safe_shortcut",
         lambda action: calls.append(("safe_shortcut", action)) or {"ok": True},
     )
@@ -681,6 +687,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "action": "pause"}
     assert dispatch_tool_call(
         broker,
+        "media.apple_music_open_and_play",
+        {},
+    ) == {"ok": True, "action": "open_and_play"}
+    assert dispatch_tool_call(
+        broker,
         "desktop.safe_shortcut",
         {"action": "copy"},
     ) == {"ok": True}
@@ -753,6 +764,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     assert calls == [
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
+        ("music_open_and_play",),
         ("safe_shortcut", "copy"),
         ("safe_type_text", "hello"),
         ("safe_click", 12, 34),
@@ -1507,6 +1519,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.running_apps",
         "desktop.windows",
         "media.apple_music_play",
+        "media.apple_music_open_and_play",
         "media.apple_music_control",
     ]
     assert result["data"]["missing_permissions"] == {
@@ -2093,6 +2106,60 @@ def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> N
     assert calls[0][1] == ["pause"]
 
 
+def test_apple_music_open_and_play_opens_music_then_starts_playback(monkeypatch) -> None:
+    calls = []
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": "Opened Music",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_music_control(action: str) -> dict[str, Any]:
+        calls.append(("control", action))
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": "Apple Music play executed",
+            "data": {
+                "control": action,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "app_open", fake_app_open)
+    monkeypatch.setattr(desktop_mod, "apple_music_control", fake_music_control)
+
+    result = desktop_mod.apple_music_open_and_play()
+
+    assert result == {
+        "ok": True,
+        "action": "media.apple_music_open_and_play",
+        "summary": "Opened Music and started playback",
+        "data": {
+            "app_name": "Music",
+            "open_ok": True,
+            "open_summary": "Opened Music",
+            "playback_ok": True,
+            "control": "play",
+            "player_state": "playing",
+            "track": "超时空辉夜姬",
+            "artist": "Yachiyo",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [("open", "Music"), ("control", "play")]
+
+
 def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:
     calls = []
 
@@ -2198,6 +2265,39 @@ def test_apple_music_control_permission_failure_returns_music_and_automation_tar
 
     assert result["ok"] is False
     assert result["action"] == "media.apple_music_control"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["music_app", "automation"]
+    assert result["permission_targets"] == ["music_app", "automation"]
+    assert result["fallback_used"] is True
+
+
+def test_apple_music_open_and_play_permission_failure_returns_music_and_automation_targets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "apple_music_control",
+        lambda action: {
+            "ok": False,
+            "action": "media.apple_music_control",
+            "summary": "media.apple_music_control failed",
+            "error": "Not authorized to send Apple events to Music.",
+            "data": {"control": action},
+            "permission_error": True,
+            "fallback_used": True,
+        },
+    )
+
+    result = desktop_mod.apple_music_open_and_play()
+
+    assert result["ok"] is False
+    assert result["action"] == "media.apple_music_open_and_play"
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["music_app", "automation"]
     assert result["permission_targets"] == ["music_app", "automation"]

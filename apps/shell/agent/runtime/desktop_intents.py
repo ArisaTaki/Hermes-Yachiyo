@@ -257,6 +257,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.type_text",
     "desktop.windows",
     "media.apple_music_control",
+    "media.apple_music_open_and_play",
     "media.apple_music_play",
     "screen.capture",
     "system.volume",
@@ -418,6 +419,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     reveal_path = _desktop_reveal_path(text)
     if reveal_path:
         candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
+
+    if _is_apple_music_open_and_play_request(text):
+        candidates.append(_request("media.apple_music_open_and_play", {}))
 
     music_control = _music_control_action(text)
     if music_control:
@@ -1715,6 +1719,36 @@ def _music_control_action(text: str) -> str:
     if re.fullmatch(r"(?:play|start)\s+(?:music|apple\s*music)(?:\s+app)?", lowered):
         return "play"
     return ""
+
+
+def _is_apple_music_open_and_play_request(text: str) -> bool:
+    lowered = text.lower()
+    if _music_app_generic_play_open_name(text) == "Music":
+        return True
+    return bool(
+        re.search(
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"(?:播放|放)(?:一下)?\s*"
+            r"(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+            lowered,
+        )
+        or re.search(
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"(?:启动|打开|运行|拉起|开启)(?:一下)?\s*"
+            r"(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
+            r"(?:并|然后|后|之后|再)\s*(?:开始)?(?:播放|放一下|播放一下)"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+            lowered,
+        )
+        or re.search(
+            r"^(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
+            r"(?:播放一下|播一下|放一下|播放|播|放|开始播放|继续播放)"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+            lowered,
+        )
+        or re.fullmatch(r"(?:play|start)\s+(?:apple\s*music|music)(?:\s+app)?", lowered)
+    )
 
 
 def _looks_like_generic_music_play_request(text: str) -> bool:

@@ -41,6 +41,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
+        "media.apple_music_open_and_play",
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
@@ -178,7 +179,11 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "quit_app": ("app.quit",),
     "reveal_path": ("desktop.reveal_path",),
     "open_path": ("desktop.open_path",),
-    "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
+    "play_or_pause_media": (
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    ),
     "control_system_volume": ("system.volume",),
     "write_clipboard": ("clipboard.write",),
     "foreground_safe_shortcut": ("desktop.safe_shortcut",),
@@ -298,6 +303,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
+        "media.apple_music_open_and_play",
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
@@ -329,7 +335,11 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.minimize",
         "app.quit",
     ),
-    "media_control": ("media.apple_music_play", "media.apple_music_control"),
+    "media_control": (
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    ),
     "foreground_input": (
         "desktop.hide_app",
         "desktop.minimize_window",
@@ -377,6 +387,7 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "browser.click": ("chrome_cdp",),
     "browser.type_text": ("chrome_cdp",),
     "media.apple_music_play": ("automation",),
+    "media.apple_music_open_and_play": ("automation",),
     "media.apple_music_control": ("automation",),
 }
 
@@ -675,7 +686,11 @@ def _tool_missing_permissions(
         values.extend(_missing_permissions(missing_by_capability, "screen_capture"))
     if tool in {"browser.click", "browser.type_text"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-    if tool in {"media.apple_music_play", "media.apple_music_control"}:
+    if tool in {
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    }:
         values.extend(
             value
             for value in _missing_permissions(missing_by_capability, "app_control")
@@ -698,7 +713,11 @@ def _tool_degrades_with_permissions(
         return not _missing_permissions(missing_by_capability, "screen_capture")
     if tool in {"browser.click", "browser.type_text"}:
         return not _missing_permissions(missing_by_capability, "foreground_input")
-    if tool in {"media.apple_music_play", "media.apple_music_control"}:
+    if tool in {
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    }:
         return "open_command" not in _missing_permissions(missing_by_capability, "app_control")
     return True
 

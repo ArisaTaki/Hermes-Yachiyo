@@ -42,6 +42,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.reveal_path": "desktop_reveal_path",
     "desktop.open_path": "desktop_open_path",
     "media.apple_music_play": "media_apple_music_play",
+    "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
@@ -95,6 +96,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.reveal_path",
     "desktop.open_path",
     "media.apple_music_play",
+    "media.apple_music_open_and_play",
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
@@ -784,6 +786,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         ),
         properties={"query": {"type": "string", "description": "Song, album, or artist query."}},
         required=("query",),
+    ),
+    "media.apple_music_open_and_play": ToolDescriptor(
+        name="media.apple_music_open_and_play",
+        description=(
+            "Open Apple Music and start or resume playback for explicit low-risk daily commands."
+        ),
+        properties={},
+        required=(),
     ),
     "media.apple_music_control": ToolDescriptor(
         name="media.apple_music_control",

@@ -425,6 +425,9 @@ class ToolBroker:
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 
+    def media_apple_music_open_and_play(self) -> dict[str, Any]:
+        return desktop.apple_music_open_and_play()
+
     def media_apple_music_control(self, action: str) -> dict[str, Any]:
         return desktop.apple_music_control(action)
 

@@ -749,16 +749,20 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     tmp_path,
     monkeypatch,
 ):
-    control_calls: list[str] = []
+    open_and_play_calls = 0
 
-    def fake_apple_music_control(action: str) -> dict:
-        control_calls.append(action)
+    def fake_apple_music_open_and_play() -> dict:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_control",
-            "summary": f"Apple Music {action} executed",
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
             "data": {
-                "control": action,
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
                 "player_state": "playing",
                 "track": "超时空辉夜姬",
                 "artist": "Yachiyo",
@@ -766,8 +770,8 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_control",
-        fake_apple_music_control,
+        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
+        fake_apple_music_open_and_play,
     )
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -776,14 +780,14 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     )
 
     assert result["ok"] is True
-    assert control_calls == ["play"]
-    assert agent_task["summary"] == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+    assert open_and_play_calls == 1
+    assert agent_task["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert result["_task_timeline"]["run_id"] == run["run_id"]
     assert result["_task_timeline"]["task_id"] == result["task_id"]
     assert result["_task_timeline"]["status"] == "completed"
-    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
     assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
     assert result["_task_timeline"]["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
     timeline_event_types = [

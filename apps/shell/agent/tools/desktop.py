@@ -251,7 +251,11 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.reveal_path",
         "desktop.open_path",
     ),
-    "media_control": ("media.apple_music_play", "media.apple_music_control"),
+    "media_control": (
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    ),
     "foreground_input": (
         "desktop.hide_app",
         "desktop.minimize_window",
@@ -1532,6 +1536,52 @@ def apple_music_control(action: str) -> dict[str, Any]:
     return _with_permission_metadata("media.apple_music_control", payload)
 
 
+def apple_music_open_and_play() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.apple_music_open_and_play")
+    open_result = app_open("Music")
+    control_result = apple_music_control("play")
+    control_data = control_result.get("data") if isinstance(control_result.get("data"), dict) else {}
+    data = {
+        "app_name": "Music",
+        "open_ok": bool(open_result.get("ok")),
+        "open_summary": str(open_result.get("summary") or ""),
+        "playback_ok": bool(control_result.get("ok")),
+        "control": control_data.get("control") or "play",
+        "player_state": control_data.get("player_state") or "",
+        "track": control_data.get("track") or "",
+        "artist": control_data.get("artist") or "",
+    }
+    if control_result.get("ok"):
+        return {
+            "ok": True,
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": bool(control_result.get("fallback_used")),
+        }
+
+    payload = {
+        "ok": False,
+        "action": "media.apple_music_open_and_play",
+        "summary": (
+            "Opened Music but could not start playback"
+            if open_result.get("ok")
+            else "Could not open Music or start playback"
+        ),
+        "error": str(control_result.get("error") or open_result.get("error") or "Music playback failed"),
+        "data": data,
+        "permission_error": bool(control_result.get("permission_error") or open_result.get("permission_error")),
+        "fallback_used": bool(open_result.get("ok") or control_result.get("fallback_used")),
+        "fallback_result": {
+            "open": open_result,
+            "control": control_result,
+        },
+    }
+    return _with_permission_metadata("media.apple_music_open_and_play", payload)
+
+
 def _open_apple_music_search(query: str) -> dict[str, Any]:
     clean_query = _clean_required(query, "query")
     search_url = f"https://music.apple.com/search?term={quote_plus(clean_query)}"
@@ -2475,6 +2525,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "desktop.hide_app": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
@@ -2502,6 +2553,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "desktop.hide_app": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],

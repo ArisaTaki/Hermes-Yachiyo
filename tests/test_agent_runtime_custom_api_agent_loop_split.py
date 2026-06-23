@@ -591,6 +591,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.minimize",
         "app.quit",
         "media.apple_music_play",
+        "media.apple_music_open_and_play",
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
@@ -945,8 +946,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("别最小化当前窗口", allowed_tools) is None
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("打开 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1227,6 +1228,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Music"},
     }
+    assert daily_desktop_intent_tool_request("打开 Apple Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+    }
     assert daily_desktop_intent_tool_request("启动播放器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -1234,8 +1240,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("来点音乐", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1259,33 +1265,38 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开音乐并播放", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
     assert daily_desktop_intent_tool_request("Apple Music 播放一下", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("Apple Music 放一下", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("音乐放一下", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("Music 放一下", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("放首歌", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1354,8 +1365,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("能否帮我播放apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_control",
-        "input": {"action": "play"},
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("Spotify 播放一下", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2415,6 +2426,20 @@ def test_main_chat_desktop_intent_permission_failure_records_recovery_event() ->
 
 
 def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
+    open_and_play = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_open_and_play",
+        {},
+        {
+            "ok": True,
+            "summary": "Opened Music and started playback",
+            "data": {
+                "control": "play",
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        },
+    )
     pause = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "media.apple_music_control",
         {"action": "pause"},
@@ -2441,6 +2466,7 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
 
     assert pause == "已暂停 Apple Music。"
     assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+    assert open_and_play == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
 
 
 def test_main_chat_desktop_intent_summarizes_system_volume() -> None:
@@ -2896,14 +2922,17 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         messages_arg.append(
             {
                 "role": "user",
-                "content": 'Tool result for app.open: {"ok": true, "data": {"app_name": "Music"}}',
+                "content": (
+                    'Tool result for media.apple_music_open_and_play: '
+                    '{"ok": true, "data": {"app_name": "Music"}}'
+                ),
             }
         )
 
     def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
         order.append("model")
-        assert "Tool result for app.open" in model_messages[-1]["content"]
-        return {"role": "assistant", "content": "已打开 Music。"}
+        assert "Tool result for media.apple_music_open_and_play" in model_messages[-1]["content"]
+        return {"role": "assistant", "content": "已打开并播放 Music。"}
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {
@@ -2916,6 +2945,7 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
                 "allowed_tools": [
                     "app.open",
                     "media.apple_music_play",
+                    "media.apple_music_open_and_play",
                 ]
             },
         },
@@ -2950,25 +2980,25 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         run_id="run-main-chat",
     )
 
-    assert str(result) == "已打开 Music。"
+    assert str(result) == "已打开并播放 Music。"
     assert order == ["tool", "model"]
     assert tool_runs[0]["tool_requests"] == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Music"},
+            "tool": "media.apple_music_open_and_play",
+            "input": {},
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
     assert timeline[0] == {
         "event": "agent.desktop.intent_planned",
-        "detail": "app.open",
-        "tool": "app.open",
+        "detail": "media.apple_music_open_and_play",
+        "tool": "media.apple_music_open_and_play",
         "status": "planned",
         "source": "daily_desktop_intent",
         "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {"app_name": "Music"},
+        "input_preview": {},
     }
 
 

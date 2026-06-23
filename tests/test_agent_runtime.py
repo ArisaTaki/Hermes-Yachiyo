@@ -4288,7 +4288,7 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
 
 def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(tmp_path, monkeypatch):
     service = make_service(tmp_path)
-    control_calls: list[str] = []
+    open_and_play_calls = 0
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: FakeDefaultProfileService(),
@@ -4298,21 +4298,25 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         lambda *_args, **_kwargs: pytest.fail("daily desktop intent should execute before model call"),
     )
 
-    def fake_music_control(action: str) -> dict[str, Any]:
-        control_calls.append(action)
+    def fake_music_open_and_play() -> dict[str, Any]:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_control",
-            "summary": "Apple Music play executed",
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
             "data": {
-                "control": action,
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
                 "player_state": "playing",
                 "track": "超时空辉夜姬",
                 "artist": "Yachiyo",
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_music_control)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
     try:
         run = service.start_main_chat_run(
             task_id="task-main-apple-music-generic",
@@ -4329,13 +4333,13 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
         completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
 
-        assert control_calls == ["play"]
-        assert "已继续播放 Apple Music" in updated["result"]
+        assert open_and_play_calls == 1
+        assert "已打开 Apple Music 并开始播放" in updated["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_control"
-        assert planned_event["payload"]["input_preview"] == {"action": "play"}
-        assert tool_event["payload"]["tool"] == "media.apple_music_control"
+        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["input_preview"] == {}
+        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
         assert tool_event["payload"]["result"]["ok"] is True
         assert completed_event["payload"]["source"] == "daily_desktop_intent"
     finally:
