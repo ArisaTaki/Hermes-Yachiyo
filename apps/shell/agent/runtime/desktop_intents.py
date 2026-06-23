@@ -25,9 +25,14 @@ _APP_ALIASES = {
     "终端": "Terminal",
     "命令行": "Terminal",
     "systemsettings": "System Settings",
+    "systempreferences": "System Settings",
     "settings": "System Settings",
     "系统设置": "System Settings",
+    "系统偏好": "System Settings",
+    "系统偏好设置": "System Settings",
     "设置": "System Settings",
+    "文件管理器": "Finder",
+    "文件浏览器": "Finder",
     "notes": "Notes",
     "备忘录": "Notes",
     "calendar": "Calendar",
@@ -88,6 +93,9 @@ _APP_ALIASES = {
     "brave": "Brave Browser",
     "brave浏览器": "Brave Browser",
     "spotify": "Spotify",
+    "音乐播放器": "Music",
+    "播放器": "Music",
+    "musicplayer": "Music",
     "shortcuts": "Shortcuts",
     "快捷指令": "Shortcuts",
     "figma": "Figma",
@@ -134,16 +142,25 @@ _COMMON_REVEAL_PATHS = {
     "desktopfolder": "~/Desktop",
     "桌面": "~/Desktop",
     "桌面文件夹": "~/Desktop",
+    "桌面目录": "~/Desktop",
+    "我的桌面": "~/Desktop",
     "downloads": "~/Downloads",
     "downloadsfolder": "~/Downloads",
+    "downloadsdirectory": "~/Downloads",
     "下载": "~/Downloads",
     "下载文件夹": "~/Downloads",
+    "下载目录": "~/Downloads",
+    "我的下载": "~/Downloads",
     "documents": "~/Documents",
     "documentsfolder": "~/Documents",
+    "documentsdirectory": "~/Documents",
     "文档": "~/Documents",
     "文档文件夹": "~/Documents",
+    "文档目录": "~/Documents",
+    "我的文档": "~/Documents",
     "文稿": "~/Documents",
     "文稿文件夹": "~/Documents",
+    "文稿目录": "~/Documents",
     "home": "~",
     "homefolder": "~",
     "主目录": "~",
@@ -151,8 +168,10 @@ _COMMON_REVEAL_PATHS = {
     "applications": "/Applications",
     "applicationsfolder": "/Applications",
     "applicationfolder": "/Applications",
+    "applicationsdirectory": "/Applications",
     "应用程序": "/Applications",
     "应用程序文件夹": "/Applications",
+    "应用程序目录": "/Applications",
 }
 
 _APP_STATUS_PATTERNS = (
@@ -1289,8 +1308,8 @@ def _music_query(text: str) -> str:
         return ""
     patterns = (
         r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
-        r"(?:帮我|请|麻烦)?(?:直接)?播放[一下\s]*(?P<query>[^。！？!?，,]+)",
-        r"(?:帮我|请|麻烦)?(?:直接)?放[一下\s]*(?P<query>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦)?(?:直接)?播放(?!器)[一下\s]*(?P<query>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦)?(?:直接)?放(?!器)[一下\s]*(?P<query>[^。！？!?，,]+)",
         r"(?:play)\s+(?P<query>[^.!?]+)",
     )
     for pattern in patterns:
@@ -1336,6 +1355,12 @@ def _is_specific_music_query(query: str) -> bool:
         "首歌",
         "一首歌",
         "applemusic",
+        "musicapp",
+        "音乐app",
+        "音乐应用",
+        "音乐软件",
+        "音乐播放器",
+        "播放器",
     }
 
 
@@ -1706,7 +1731,7 @@ def _strip_query(value: str) -> str:
 
 def _strip_polite_suffix(value: str) -> str:
     return re.sub(
-        r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
+        r"\s*(?:一下|一下儿|一下子|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
         "",
         str(value or "").strip(),
         flags=re.IGNORECASE,

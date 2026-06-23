@@ -841,6 +841,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "System Settings"},
     }
+    assert daily_desktop_intent_tool_request("打开系统偏好设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Settings"},
+    }
+    assert daily_desktop_intent_tool_request("打开文件管理器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Finder"},
+    }
     assert daily_desktop_intent_tool_request("打开邮箱", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -961,6 +971,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开下载目录一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开我的下载", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("显示下载目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
     assert daily_desktop_intent_tool_request("可以帮我打开下载文件夹吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -995,6 +1020,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Microsoft Teams"},
+    }
+    assert daily_desktop_intent_tool_request("打开音乐播放器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+    }
+    assert daily_desktop_intent_tool_request("启动播放器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
     }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
