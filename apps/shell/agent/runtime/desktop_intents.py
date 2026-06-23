@@ -290,6 +290,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_name:
         candidates.append(_request("app.open", {"app_name": app_name}))
 
+    safe_shortcut_action = _desktop_safe_shortcut_action(text)
+    if safe_shortcut_action:
+        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
+
     hotkey = _desktop_hotkey(text)
     if hotkey:
         candidates.append(_request("desktop.hotkey", hotkey))
@@ -1397,6 +1401,36 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         return None
     key, modifiers = combo
     return {"key": key, "modifiers": list(modifiers)}
+
+
+def _desktop_safe_shortcut_action(text: str) -> str:
+    phrase = _normalize_named_hotkey_phrase(text)
+    mapping = {
+        "复制": "copy",
+        "复制选中内容": "copy",
+        "复制当前选中内容": "copy",
+        "copy": "copy",
+        "copyselection": "copy",
+        "copyselectedtext": "copy",
+        "粘贴": "paste",
+        "paste": "paste",
+        "全选": "select_all",
+        "selectall": "select_all",
+        "撤销": "undo",
+        "undo": "undo",
+        "重做": "redo",
+        "redo": "redo",
+        "刷新": "refresh",
+        "reload": "refresh",
+        "refresh": "refresh",
+        "查找": "find",
+        "find": "find",
+        "新建标签页": "new_tab",
+        "新标签页": "new_tab",
+        "打开新标签页": "new_tab",
+        "newtab": "new_tab",
+    }
+    return mapping.get(phrase, "")
 
 
 def _normalize_named_hotkey_phrase(text: str) -> str:

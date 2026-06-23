@@ -100,6 +100,17 @@ _UNSAFE_OPEN_PATH_SUFFIXES = {
     ".applescript",
 }
 
+_SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "copy": ("c", ("command",), "copy"),
+    "paste": ("v", ("command",), "paste"),
+    "select_all": ("a", ("command",), "select all"),
+    "undo": ("z", ("command",), "undo"),
+    "redo": ("z", ("command", "shift"), "redo"),
+    "find": ("f", ("command",), "find"),
+    "new_tab": ("t", ("command",), "new tab"),
+    "refresh": ("r", ("command",), "refresh"),
+}
+
 _PRIVACY_SECURITY_URLS = (
     "x-apple.systempreferences:com.apple.preference.security?Privacy",
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
@@ -241,6 +252,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
+        "desktop.safe_shortcut",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1773,8 +1785,41 @@ def desktop_click(x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
 def desktop_hotkey(key: str, modifiers: list[str] | None = None) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.hotkey")
+    payload = _send_desktop_keystroke("desktop.hotkey", key, modifiers or [])
+    if not payload.get("ok"):
+        return payload
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    clean_key = str(data.get("key") or "").strip()
+    clean_modifiers = data.get("modifiers") if isinstance(data.get("modifiers"), list) else []
+    payload["summary"] = f"Pressed hotkey { '+'.join([*clean_modifiers, clean_key]) }"
+    return payload
+
+
+def desktop_safe_shortcut(action: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.safe_shortcut")
+    clean_action = _clean_safe_shortcut_action(action)
+    key, modifiers, label = _SAFE_SHORTCUTS[clean_action]
+    payload = _send_desktop_keystroke("desktop.safe_shortcut", key, list(modifiers))
+    if not payload.get("ok"):
+        return payload
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    payload["summary"] = f"Executed safe shortcut: {label}"
+    payload["data"] = {
+        **data,
+        "shortcut_action": clean_action,
+        "shortcut_label": label,
+    }
+    return payload
+
+
+def _send_desktop_keystroke(
+    action_name: str,
+    key: str,
+    modifiers: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     clean_key = _clean_required(key, "key")
-    clean_modifiers = _clean_modifiers(modifiers or [])
+    clean_modifiers = _clean_modifiers(list(modifiers or []))
     modifier_clause = ""
     if clean_modifiers:
         modifier_clause = " using {" + ", ".join(f"{item} down" for item in clean_modifiers) + "}"
@@ -1790,12 +1835,12 @@ def desktop_hotkey(key: str, modifiers: list[str] | None = None) -> dict[str, An
     )
     if not result["ok"]:
         return _with_permission_metadata(
-            "desktop.hotkey",
-            {**result, "action": "desktop.hotkey", "summary": "desktop.hotkey failed"},
+            action_name,
+            {**result, "action": action_name, "summary": f"{action_name} failed"},
         )
     return {
         "ok": True,
-        "action": "desktop.hotkey",
+        "action": action_name,
         "summary": f"Pressed hotkey { '+'.join([*clean_modifiers, clean_key]) }",
         "data": {"key": clean_key, "modifiers": clean_modifiers},
         "permission_error": False,
@@ -2104,6 +2149,13 @@ def _clean_modifiers(modifiers: list[str]) -> list[str]:
     return clean
 
 
+def _clean_safe_shortcut_action(action: str) -> str:
+    clean = str(action or "").strip().lower().replace("-", "_")
+    if clean not in _SAFE_SHORTCUTS:
+        raise ValueError(f"unsupported safe shortcut action: {action}")
+    return clean
+
+
 def _parse_running_apps(value: Any) -> list[dict[str, Any]]:
     apps: list[dict[str, Any]] = []
     for raw_line in str(value or "").splitlines():
@@ -2320,6 +2372,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.hide_app": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
+        "desktop.safe_shortcut": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
@@ -2344,6 +2397,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.hide_app": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
+        "desktop.safe_shortcut": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],

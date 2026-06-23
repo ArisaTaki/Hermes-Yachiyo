@@ -730,6 +730,44 @@ def test_chat_bridge_quick_message_executes_permission_diagnosis_for_launcher_en
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    shortcut_calls: list[str] = []
+
+    def fake_safe_shortcut(action: str) -> dict:
+        shortcut_calls.append(action)
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: copy",
+            "data": {
+                "shortcut_action": action,
+                "key": "c",
+                "modifiers": ["command"],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "复制选中内容",
+    )
+
+    assert shortcut_calls == ["copy"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已复制选中内容。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,

@@ -440,6 +440,12 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def desktop_safe_shortcut(self, action: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.safe_shortcut",
+            lambda: desktop.desktop_safe_shortcut(action),
+        )
+
     def desktop_hide_app(self) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hide_app",

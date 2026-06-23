@@ -1701,6 +1701,14 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "hides the current foreground app" in note
         for note in tools["desktop.hide_app"]["fallback_notes"]
     )
+    assert tools["desktop.safe_shortcut"]["capability_id"] == "foreground_input"
+    assert tools["desktop.safe_shortcut"]["risk_level"] == "low"
+    assert tools["desktop.safe_shortcut"]["input_schema"]["required"] == ["action"]
+    assert "copy" in tools["desktop.safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
+    assert any(
+        "whitelisted common shortcut" in note
+        for note in tools["desktop.safe_shortcut"]["fallback_notes"]
+    )
     assert tools["desktop.minimize_window"]["capability_id"] == "foreground_input"
     assert tools["desktop.minimize_window"]["risk_level"] == "low"
     assert tools["desktop.minimize_window"]["input_schema"]["properties"] == {}

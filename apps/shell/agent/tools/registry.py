@@ -221,6 +221,14 @@ def _clipboard_write(
     return broker.clipboard_write(str(payload.get("text") or ""))
 
 
+def _desktop_safe_shortcut(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_safe_shortcut(str(payload.get("action") or ""))
+
+
 def _desktop_close_window(
     broker: Any,
     _payload: dict[str, Any],
@@ -353,6 +361,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,
     "clipboard.write": _clipboard_write,
+    "desktop.safe_shortcut": _desktop_safe_shortcut,
     "desktop.hide_app": _desktop_hide_app,
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,

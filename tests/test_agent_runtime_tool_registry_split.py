@@ -284,6 +284,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "desktop_safe_shortcut",
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
@@ -364,6 +365,14 @@ def test_app_hide_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.hide 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.hide", {"app_name": ""})
+
+
+def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "copy"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_tab"})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
 
 
 def test_app_minimize_schema_requires_app_name() -> None:
@@ -548,6 +557,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_safe_shortcut",
+        lambda action: calls.append(("safe_shortcut", action)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_hotkey",
         lambda key, *, modifiers=None: calls.append(("hotkey", key, modifiers))
         or {"ok": True},
@@ -635,6 +649,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "action": "pause"}
     assert dispatch_tool_call(
         broker,
+        "desktop.safe_shortcut",
+        {"action": "copy"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -692,6 +711,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     assert calls == [
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
+        ("safe_shortcut", "copy"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
@@ -1742,6 +1762,36 @@ def test_desktop_click_uses_system_events_with_coordinates(monkeypatch) -> None:
     }
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert calls[0][0][-3:] == ["12", "35", "2"]
+
+
+def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("copy")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_shortcut",
+        "summary": "Executed safe shortcut: copy",
+        "data": {
+            "key": "c",
+            "modifiers": ["command"],
+            "shortcut_action": "copy",
+            "shortcut_label": "copy",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert 'keystroke keyName using {command down}' in calls[0][0][2]
+    assert calls[0][0][-1] == "c"
 
 
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:

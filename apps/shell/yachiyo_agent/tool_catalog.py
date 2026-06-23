@@ -341,6 +341,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.close_window": [
             "Requires approval and Accessibility permission because it closes the current foreground window.",
         ],
+        "desktop.safe_shortcut": [
+            "Requires Accessibility permission and only accepts whitelisted common shortcut actions.",
+        ],
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
         ],

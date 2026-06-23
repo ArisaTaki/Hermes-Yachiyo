@@ -23,6 +23,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "desktop.safe_shortcut",
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
@@ -63,6 +64,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
+    "desktop.safe_shortcut": "执行快捷动作",
     "desktop.hide_app": "隐藏当前应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
@@ -523,6 +525,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or _browser_text_summary(result)
             if tool_name == "browser.screenshot":
                 return result_summary or "已截取当前网页。"
+            if tool_name == "desktop.safe_shortcut":
+                return _safe_shortcut_summary(result, planned_input) or result_summary or "已执行快捷动作。"
             if tool_name == "desktop.hotkey":
                 hotkey = _hotkey_text(result, planned_input)
                 return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
@@ -666,7 +670,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_control, system.volume, clipboard.write, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
@@ -677,6 +681,7 @@ class RuntimeCustomApiAgentLoop:
             "map open window list questions to desktop.windows; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
+            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/refresh to desktop.safe_shortcut; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "
@@ -932,6 +937,22 @@ def _apple_music_control_label(action: str) -> str:
         "next": "切到下一首",
         "previous": "切到上一首",
     }.get(str(action or "").strip(), "")
+
+
+def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    action = str(data.get("shortcut_action") or planned_input.get("action") or "").strip()
+    label = {
+        "copy": "复制选中内容",
+        "paste": "粘贴",
+        "select_all": "全选",
+        "undo": "撤销",
+        "redo": "重做",
+        "find": "打开查找",
+        "new_tab": "新建标签页",
+        "refresh": "刷新",
+    }.get(action, "")
+    return f"已{label}。" if label else ""
 
 
 def _system_volume_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

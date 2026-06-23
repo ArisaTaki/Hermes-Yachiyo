@@ -607,6 +607,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
+        "desktop.safe_shortcut",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1199,38 +1200,43 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("复制选中内容", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "c", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
     }
     assert daily_desktop_intent_tool_request("粘贴一下", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "v", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
     }
     assert daily_desktop_intent_tool_request("全选", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "a", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "select_all"},
     }
     assert daily_desktop_intent_tool_request("撤销", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "z", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "undo"},
     }
     assert daily_desktop_intent_tool_request("重做", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "z", "modifiers": ["command", "shift"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "redo"},
     }
     assert daily_desktop_intent_tool_request("copy selected text", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "c", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
     }
     assert daily_desktop_intent_tool_request("new tab", allowed_tools) == {
         "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("复制选中内容", ["desktop.hotkey"]) == {
+        "protocol": "json_fallback",
         "tool": "desktop.hotkey",
-        "input": {"key": "t", "modifiers": ["command"]},
+        "input": {"key": "c", "modifiers": ["command"]},
     }
     assert daily_desktop_intent_tool_request("输入 你好八千代", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1942,6 +1948,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"app_name": "Slack", "window_title": "general"},
         },
     )
+    safe_shortcut = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_shortcut",
+        {"action": "copy"},
+        {
+            "ok": True,
+            "summary": "Executed safe shortcut: copy",
+            "data": {"shortcut_action": "copy", "key": "c", "modifiers": ["command"]},
+        },
+    )
     app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.show",
         {"app_name": "Slack"},
@@ -1999,6 +2014,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_quit == "已退出 Slack。"
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
+    assert safe_shortcut == "已复制选中内容。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"

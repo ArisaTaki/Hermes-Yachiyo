@@ -45,6 +45,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "desktop.safe_shortcut": "desktop_safe_shortcut",
     "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
@@ -63,6 +64,16 @@ KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
 HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
 MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
+SAFE_SHORTCUT_ACTIONS = (
+    "copy",
+    "paste",
+    "select_all",
+    "undo",
+    "redo",
+    "find",
+    "new_tab",
+    "refresh",
+)
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
     "desktop.permissions",
@@ -82,6 +93,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "desktop.safe_shortcut",
     "desktop.hide_app",
     "desktop.minimize_window",
 )
@@ -310,6 +322,13 @@ class ToolDescriptor:
                 _validate_percentage_number(step, "system.volume 参数 step")
         if self.name == "clipboard.write" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("clipboard.write 参数 text 必须是非空字符串")
+        if self.name == "desktop.safe_shortcut":
+            action = str(payload.get("action") or "").strip().lower()
+            if action not in SAFE_SHORTCUT_ACTIONS:
+                raise AgentRuntimeError(
+                    "desktop.safe_shortcut 参数 action 必须是 "
+                    + "、".join(SAFE_SHORTCUT_ACTIONS)
+                )
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.click":
@@ -806,6 +825,22 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Low-risk and reversible, but still recorded in the Run Timeline."
         ),
         properties={},
+    ),
+    "desktop.safe_shortcut": ToolDescriptor(
+        name="desktop.safe_shortcut",
+        description=(
+            "Execute a whitelisted common foreground shortcut such as copy, paste, "
+            "select all, undo, redo, find, new tab, or refresh. Unlike desktop.hotkey, "
+            "this tool does not accept arbitrary keys."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_SHORTCUT_ACTIONS),
+                "description": "Whitelisted shortcut action to execute.",
+            }
+        },
+        required=("action",),
     ),
     "desktop.minimize_window": ToolDescriptor(
         name="desktop.minimize_window",
