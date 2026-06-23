@@ -216,6 +216,75 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         store.close()
 
 
+def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct desktop music play task should not call model")
+        ),
+    )
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    try:
+        result = api.send_message("播放超时空辉夜姬")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["run_id"] == run["run_id"]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert play_calls == ["超时空辉夜姬"]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
