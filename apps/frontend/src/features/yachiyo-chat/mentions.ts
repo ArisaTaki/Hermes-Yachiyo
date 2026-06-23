@@ -262,7 +262,8 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:正在运行的应用|开了哪些应用|运行的应用|running apps|what apps are running)/i.test(value)) return true;
   if (/(?:(?:列出|查看|看看|显示|读取).{0,12}(?:窗口|windows?)|(?:窗口|windows?).{0,12}(?:哪些|什么|几个|多少)|show .+ windows)/i.test(value)) return true;
   if (/(?:(?:当前音量|调[大小]音量|声音[大小]一点|静音|取消静音)|(?:volume|mute|unmute))/i.test(value)) return true;
-  if (/(?:(?:复制|写入).*(?:剪贴板)|(?:copy|write).+(?:clipboard))/i.test(value)) return true;
+  if (/(?:(?:把|将)\s*(?:这段文字|这段文本|这个文本|这个|这段)|^(?:这段文字|这段文本|这个文本|这个|这段))\s*(?:复制|拷贝|写入|放到|放进|保存到)?.*(?:剪贴板|粘贴板)/i.test(value)) return false;
+  if (/(?:(?:把|将)\s*.+\s*(?:复制|拷贝|写入|放到|放进|保存到)\s*(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)|(?:复制|拷贝|写入)\s*.+\s*(?:到|进|至)\s*(?:系统)?(?:剪贴板|粘贴板)|(?:复制|拷贝|写入)(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*.+|(?:copy|write|put)\s+.+\s+(?:to|into)\s+(?:the\s+)?(?:system\s+)?clipboard|(?:copy|write)\s+(?:to\s+)?(?:the\s+)?(?:system\s+)?clipboard\s*[:：]\s*.+)/i.test(value)) return true;
   if (/^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:复制(?:选中|当前选中)?内容?|粘贴|全选|撤销|重做|刷新|查找|新建标签页|新标签页|打开新标签页)(?:一下|下|一次)?[?？。！!]*$/i.test(value)) return true;
   if (/^(?:copy(?: selected(?: text| content)?)?|paste|select all|undo|redo|refresh|reload|find|new tab)[.!?]*$/i.test(value)) return true;
   if (/(?:(?:退出|关闭|关掉|结束)\s*\S+|(?:quit|close|exit)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
