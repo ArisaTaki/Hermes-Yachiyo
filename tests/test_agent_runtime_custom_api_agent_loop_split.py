@@ -605,6 +605,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
+        "desktop.ui_elements",
         "app.status",
         "browser.open_url",
         "browser.open_url_and_extract_text",
@@ -1937,6 +1938,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {"app_name": "Google Chrome"},
     }
+    assert daily_desktop_intent_tool_request("当前界面有哪些按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "button", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("列出当前窗口控件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("当前界面有哪些输入框", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "text", "limit": 80},
+    }
     assert daily_desktop_intent_tool_request("Slack窗口列表", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
@@ -3200,6 +3216,38 @@ def test_main_chat_desktop_intent_summarizes_windows() -> None:
     )
 
     assert result == "当前窗口：Google Chrome: ChatGPT。"
+
+
+def test_main_chat_desktop_intent_summarizes_ui_elements() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.ui_elements",
+        {"role_filter": "button", "limit": 80},
+        {
+            "ok": True,
+            "summary": "Google Chrome UI elements: AXButton: Send",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "Send",
+                        "enabled": True,
+                        "center": {"x": 120, "y": 240},
+                    },
+                    {
+                        "role": "AXTextField",
+                        "description": "Message",
+                        "enabled": True,
+                        "center": {"x": 80, "y": 220},
+                    },
+                ],
+                "count": 2,
+            },
+        },
+    )
+
+    assert result == "当前 Google Chrome 界面控件：Button Send（120, 240）; TextField Message（80, 220）。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_status() -> None:

@@ -4022,6 +4022,116 @@ async def test_yachiyo_task_route_executes_window_list_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_ui_elements_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-ui-elements.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-ui-elements.db",
+        workspace_dir=tmp_path / "agent-runtime-route-ui-elements",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-ui-elements")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    ui_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ui elements public task should not call model")
+        ),
+    )
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict[str, Any]:
+        ui_calls.append((role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Google Chrome UI elements: AXButton: Send",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "role_filter": role_filter,
+                "limit": limit,
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "Send",
+                        "description": "Send message",
+                        "enabled": True,
+                        "center": {"x": 120, "y": 240},
+                    }
+                ],
+                "count": 1,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="当前界面有哪些按钮",
+                conversation_id="chat-main-ui-elements",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-ui-elements-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-ui-elements", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert ui_calls == [("button", 80)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "当前 Google Chrome 界面控件：Button Send（120, 240）。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {"role_filter": "button", "limit": 80}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["count"] == 1
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_app_status_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -5916,6 +6026,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["desktop.windows"]["capability_id"] == "active_window"
     assert tools["desktop.windows"]["risk_level"] == "low"
     assert any("window titles" in note for note in tools["desktop.windows"]["fallback_notes"])
+    assert tools["desktop.ui_elements"]["capability_id"] == "active_window"
+    assert tools["desktop.ui_elements"]["risk_level"] == "low"
+    assert tools["desktop.ui_elements"]["input_schema"]["properties"]["role_filter"]["type"] == "string"
+    assert any("UI controls" in note for note in tools["desktop.ui_elements"]["fallback_notes"])
     assert tools["app.status"]["capability_id"] == "app_control"
     assert tools["app.status"]["risk_level"] == "low"
     assert tools["app.status"]["input_schema"]["required"] == ["app_name"]

@@ -311,6 +311,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.windows": [
             "Requires Automation or Accessibility permission to read desktop window titles.",
         ],
+        "desktop.ui_elements": [
+            "Requires Automation or Accessibility permission to read foreground UI controls.",
+        ],
         "app.status": [
             "Checks whether a local desktop app is running without opening or focusing it.",
         ],

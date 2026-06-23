@@ -238,6 +238,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
+        "desktop.ui_elements",
     ),
     "app_control": (
         "app.status",
@@ -413,6 +414,151 @@ def active_window() -> dict[str, Any]:
             "app_name": app_name,
             "pid": int(pid_text) if pid_text.isdigit() else None,
             "title": title,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def ui_elements(role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.ui_elements")
+    clean_filter = str(role_filter or "").strip()
+    try:
+        clean_limit = max(1, min(200, int(limit or 80)))
+    except (TypeError, ValueError):
+        clean_limit = 80
+    script = """
+    on replaceText(findText, replaceTextValue, sourceText)
+        set oldDelimiters to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to findText
+        set textItems to text items of sourceText
+        set AppleScript's text item delimiters to replaceTextValue
+        set joinedText to textItems as text
+        set AppleScript's text item delimiters to oldDelimiters
+        return joinedText
+    end replaceText
+
+    on cleanText(valueToClean)
+        try
+            set cleaned to valueToClean as text
+        on error
+            set cleaned to ""
+        end try
+        set cleaned to my replaceText(tab, " ", cleaned)
+        set cleaned to my replaceText(linefeed, " ", cleaned)
+        set cleaned to my replaceText(return, " ", cleaned)
+        return cleaned
+    end cleanText
+
+    on joinRows(rowList)
+        set oldDelimiters to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to linefeed
+        set joinedRows to rowList as text
+        set AppleScript's text item delimiters to oldDelimiters
+        return joinedRows
+    end joinRows
+
+    on elementRow(targetElement, depthValue)
+        set roleText to ""
+        set subroleText to ""
+        set nameText to ""
+        set descriptionText to ""
+        set valueText to ""
+        set enabledText to ""
+        set xText to ""
+        set yText to ""
+        set widthText to ""
+        set heightText to ""
+        try
+            set roleText to my cleanText(role of targetElement)
+        end try
+        try
+            set subroleText to my cleanText(subrole of targetElement)
+        end try
+        try
+            set nameText to my cleanText(name of targetElement)
+        end try
+        try
+            set descriptionText to my cleanText(description of targetElement)
+        end try
+        try
+            set valueText to my cleanText(value of targetElement)
+        end try
+        try
+            set enabledText to my cleanText(enabled of targetElement)
+        end try
+        try
+            set positionValue to position of targetElement
+            set xText to item 1 of positionValue as text
+            set yText to item 2 of positionValue as text
+        end try
+        try
+            set sizeValue to size of targetElement
+            set widthText to item 1 of sizeValue as text
+            set heightText to item 2 of sizeValue as text
+        end try
+        return (depthValue as text) & tab & roleText & tab & subroleText & tab & nameText & tab & descriptionText & tab & valueText & tab & enabledText & tab & xText & tab & yText & tab & widthText & tab & heightText
+    end elementRow
+
+    on collectElements(containerElement, depthValue, maxDepth, maxItems)
+        set rows to {}
+        if depthValue > maxDepth then return rows
+        try
+            set childElements to UI elements of containerElement
+        on error
+            return rows
+        end try
+        repeat with childElement in childElements
+            if (count of rows) >= maxItems then exit repeat
+            set end of rows to my elementRow(childElement, depthValue)
+            if depthValue < maxDepth then
+                set childRows to my collectElements(childElement, depthValue + 1, maxDepth, maxItems - (count of rows))
+                repeat with childRow in childRows
+                    if (count of rows) >= maxItems then exit repeat
+                    set end of rows to childRow as text
+                end repeat
+            end if
+        end repeat
+        return rows
+    end collectElements
+
+    on run argv
+        set maxItems to item 1 of argv as integer
+        set maxDepth to item 2 of argv as integer
+        tell application "System Events"
+            set frontApp to first application process whose frontmost is true
+            set appName to my cleanText(name of frontApp)
+            set appPID to unix id of frontApp
+            try
+                set frontWindow to front window of frontApp
+                set windowTitle to my cleanText(name of frontWindow)
+                set rows to my collectElements(frontWindow, 0, maxDepth, maxItems)
+            on error
+                set windowTitle to ""
+                set rows to my collectElements(frontApp, 0, maxDepth, maxItems)
+            end try
+            set header to "META" & tab & appName & tab & (appPID as text) & tab & windowTitle
+            if (count of rows) is 0 then return header
+            return header & linefeed & my joinRows(rows)
+        end tell
+    end run
+    """
+    result = _run_osascript(script, [str(clean_limit), "2"])
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.ui_elements",
+            {**result, "action": "desktop.ui_elements", "summary": "desktop.ui_elements failed"},
+        )
+    parsed = _parse_ui_elements_output(result.get("stdout"), clean_filter, clean_limit)
+    return {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": _ui_elements_summary(parsed.get("elements", []), parsed.get("app_name", "")),
+        "data": {
+            **parsed,
+            "role_filter": clean_filter,
+            "limit": clean_limit,
         },
         "permission_error": False,
         "fallback_used": False,
@@ -2362,6 +2508,102 @@ def _parse_window_rows(value: Any) -> list[dict[str, Any]]:
     return windows_payload
 
 
+def _parse_ui_elements_output(
+    value: Any,
+    role_filter: str = "",
+    limit: int = 80,
+) -> dict[str, Any]:
+    app_name = ""
+    pid: int | None = None
+    title = ""
+    elements: list[dict[str, Any]] = []
+    normalized_filter = str(role_filter or "").strip().lower()
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        if parts[0] == "META":
+            while len(parts) < 4:
+                parts.append("")
+            app_name = parts[1].strip()
+            pid = int(parts[2]) if parts[2].strip().isdigit() else None
+            title = parts[3].strip()
+            continue
+        while len(parts) < 11:
+            parts.append("")
+        depth, role, subrole, name, description, element_value, enabled, x, y, width, height = parts[:11]
+        searchable = " ".join((role, subrole, name, description, element_value)).lower()
+        if normalized_filter and normalized_filter not in searchable:
+            continue
+        element: dict[str, Any] = {
+            "depth": _int_or_none(depth) or 0,
+            "role": role.strip(),
+            "subrole": subrole.strip(),
+            "name": name.strip(),
+            "description": description.strip(),
+            "value": element_value.strip(),
+            "enabled": enabled.strip().lower() == "true" if enabled.strip() else None,
+        }
+        frame = _ui_element_frame(x, y, width, height)
+        if frame:
+            element["frame"] = frame
+            element["center"] = {
+                "x": int(round(frame["x"] + frame["width"] / 2)),
+                "y": int(round(frame["y"] + frame["height"] / 2)),
+            }
+        elements.append(element)
+        if len(elements) >= limit:
+            break
+    return {
+        "app_name": app_name,
+        "pid": pid,
+        "title": title,
+        "elements": elements,
+        "count": len(elements),
+        "truncated": len(elements) >= limit,
+    }
+
+
+def _ui_element_frame(x: Any, y: Any, width: Any, height: Any) -> dict[str, int] | None:
+    values = [_int_or_none(item) for item in (x, y, width, height)]
+    if any(value is None for value in values):
+        return None
+    frame_x, frame_y, frame_width, frame_height = values
+    if frame_width is None or frame_height is None or frame_width < 0 or frame_height < 0:
+        return None
+    return {
+        "x": int(frame_x or 0),
+        "y": int(frame_y or 0),
+        "width": int(frame_width),
+        "height": int(frame_height),
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(round(float(str(value or "").strip())))
+    except (TypeError, ValueError):
+        return None
+
+
+def _ui_elements_summary(elements: list[dict[str, Any]], app_name: str = "") -> str:
+    if not elements:
+        return f"No visible UI elements found for {app_name}" if app_name else "No visible UI elements found"
+    visible = []
+    for item in elements[:5]:
+        role = str(item.get("role") or "element").strip()
+        label = (
+            str(item.get("name") or "").strip()
+            or str(item.get("description") or "").strip()
+            or str(item.get("value") or "").strip()
+        )
+        visible.append(f"{role}: {label}" if label else role)
+    suffix = f" (+{len(elements) - len(visible)} more)" if len(elements) > len(visible) else ""
+    prefix = f"{app_name} UI elements" if app_name else "UI elements"
+    return f"{prefix}: {', '.join(visible)}{suffix}"
+
+
 def _running_apps_summary(names: list[str]) -> str:
     if not names:
         return "No foreground apps are running"
@@ -2524,6 +2766,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation_or_accessibility"],
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
+        "desktop.ui_elements": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
@@ -2556,6 +2799,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation", "accessibility"],
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
+        "desktop.ui_elements": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],

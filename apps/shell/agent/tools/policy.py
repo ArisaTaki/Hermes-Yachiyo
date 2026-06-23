@@ -31,6 +31,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
     "desktop.windows": "desktop_windows",
+    "desktop.ui_elements": "desktop_ui_elements",
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
@@ -92,6 +93,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.windows",
+    "desktop.ui_elements",
     "app.status",
     "app.open",
     "app.focus",
@@ -302,6 +304,13 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
+        if self.name == "desktop.ui_elements":
+            if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
+                raise AgentRuntimeError("desktop.ui_elements 参数 role_filter 必须是字符串")
+            if "limit" in payload:
+                value = payload.get("limit")
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
+                    raise AgentRuntimeError("desktop.ui_elements 参数 limit 必须是 1-200 的整数")
         if self.name in {
             "app.open",
             "app.focus",
@@ -725,6 +734,26 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "type": "string",
                 "description": "Optional application name to filter windows.",
             }
+        },
+    ),
+    "desktop.ui_elements": ToolDescriptor(
+        name="desktop.ui_elements",
+        description=(
+            "Read visible Accessibility UI elements from the current foreground window, "
+            "including role, label, frame, and center coordinates. Low-risk observable "
+            "desktop state for planning later foreground actions."
+        ),
+        properties={
+            "role_filter": {
+                "type": "string",
+                "description": "Optional case-insensitive role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of UI elements to return. Defaults to 80.",
+            },
         },
     ),
     "app.status": ToolDescriptor(

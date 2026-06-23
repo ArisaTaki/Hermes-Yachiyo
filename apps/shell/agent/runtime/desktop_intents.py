@@ -320,6 +320,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.type_text",
+    "desktop.ui_elements",
     "desktop.windows",
     "media.apple_music_control",
     "media.apple_music_open_and_play",
@@ -645,6 +646,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
+
+    ui_elements_payload = _desktop_ui_elements_request(text)
+    if ui_elements_payload is not None:
+        candidates.append(_request("desktop.ui_elements", ui_elements_payload))
 
     windows_payload = _desktop_windows_request(text)
     if windows_payload is not None:
@@ -1534,6 +1539,41 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
     if _is_general_windows_request(text):
         return {}
     return None
+
+
+def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
+    lowered = text.lower()
+    if not (
+        re.search(
+            r"(?:当前|现在|这个|前台)?(?:窗口|界面|屏幕|应用|app)?"
+            r".{0,10}(?:有哪些|有什么|列出|列一下|显示|查看|看看|看一下|读取|识别)"
+            r".{0,10}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)"
+            r".{0,10}(?:有哪些|有什么|列表|列一下|显示|查看|看看|看一下|读取|识别)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:list|show|read|inspect)\b.{0,24}\b(?:ui elements|buttons|text fields|controls)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:what|which)\b.{0,24}\b(?:buttons|controls|ui elements)\b", lowered)
+    ):
+        return None
+    role_filter = ""
+    if re.search(r"(?:按钮|button)", text, flags=re.IGNORECASE):
+        role_filter = "button"
+    elif re.search(r"(?:输入框|文本框|输入栏|text field|textbox|input)", text, flags=re.IGNORECASE):
+        role_filter = "text"
+    elif re.search(r"(?:菜单|menu)", text, flags=re.IGNORECASE):
+        role_filter = "menu"
+    elif re.search(r"(?:复选框|checkbox)", text, flags=re.IGNORECASE):
+        role_filter = "checkbox"
+    return {"role_filter": role_filter, "limit": 80}
 
 
 def _is_general_windows_request(text: str) -> bool:

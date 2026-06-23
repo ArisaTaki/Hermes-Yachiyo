@@ -392,6 +392,9 @@ class ToolBroker:
     def desktop_windows(self, app_name: str = "") -> dict[str, Any]:
         return desktop.windows(app_name)
 
+    def desktop_ui_elements(self, role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
+        return desktop.ui_elements(role_filter=role_filter, limit=limit)
+
     def app_status(self, app_name: str) -> dict[str, Any]:
         return desktop.app_status(app_name)
 

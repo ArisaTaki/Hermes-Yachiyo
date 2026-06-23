@@ -322,6 +322,16 @@ def test_desktop_windows_schema_accepts_optional_app_name() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.windows", {"app_name": 123})
 
 
+def test_desktop_ui_elements_schema_accepts_optional_filter_and_limit() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {})
+    ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"role_filter": "button", "limit": 20})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 role_filter 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"role_filter": 123})
+    with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 limit 必须是 1-200 的整数"):
+        ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"limit": 0})
+
+
 def test_app_status_schema_requires_app_name() -> None:
     ToolDescriptorRegistry.validate_payload("app.status", {"app_name": "Google Chrome"})
 
@@ -698,6 +708,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_ui_elements",
+        lambda role_filter="", limit=80: calls.append(("ui_elements", role_filter, limit))
+        or {"ok": True, "role_filter": role_filter, "limit": limit},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_status",
         lambda app_name: calls.append(("status", app_name)) or {"ok": True, "app_name": app_name},
     )
@@ -849,6 +865,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     }
     assert dispatch_tool_call(
         broker,
+        "desktop.ui_elements",
+        {"role_filter": "button", "limit": 20},
+    ) == {"ok": True, "role_filter": "button", "limit": 20}
+    assert dispatch_tool_call(
+        broker,
         "app.status",
         {"app_name": "Google Chrome"},
     ) == {"ok": True, "app_name": "Google Chrome"}
@@ -876,6 +897,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("permissions",),
         ("running",),
         ("windows", "Google Chrome"),
+        ("ui_elements", "button", 20),
         ("status", "Google Chrome"),
     ]
 
@@ -1720,6 +1742,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
+        "desktop.ui_elements",
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
@@ -1874,6 +1897,77 @@ def test_desktop_windows_permission_failure_returns_recovery_targets(monkeypatch
 
     assert result["ok"] is False
     assert result["action"] == "desktop.windows"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
+
+
+def test_desktop_ui_elements_returns_foreground_accessibility_controls(monkeypatch) -> None:
+    osascript_args = []
+
+    def fake_osascript(_script, args=None):
+        osascript_args.append(args)
+        return {
+            "ok": True,
+            "stdout": (
+                "META\tGoogle Chrome\t202\tChatGPT\n"
+                "0\tAXButton\t\tSend\tSend message\t\ttrue\t100\t220\t40\t40\n"
+                "1\tAXTextField\t\t\tMessage\tDraft\ttrue\t20\t200\t300\t40"
+            ),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.ui_elements(role_filter="button", limit=20)
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.ui_elements"
+    assert result["summary"] == "Google Chrome UI elements: AXButton: Send"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "pid": 202,
+        "title": "ChatGPT",
+        "elements": [
+            {
+                "depth": 0,
+                "role": "AXButton",
+                "subrole": "",
+                "name": "Send",
+                "description": "Send message",
+                "value": "",
+                "enabled": True,
+                "frame": {"x": 100, "y": 220, "width": 40, "height": 40},
+                "center": {"x": 120, "y": 240},
+            },
+        ],
+        "count": 1,
+        "truncated": False,
+        "role_filter": "button",
+        "limit": 20,
+    }
+    assert osascript_args == [["20", "2"]]
+
+
+def test_desktop_ui_elements_permission_failure_returns_recovery_targets(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="Not authorized to send Apple events to System Events.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.ui_elements()
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.ui_elements"
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]

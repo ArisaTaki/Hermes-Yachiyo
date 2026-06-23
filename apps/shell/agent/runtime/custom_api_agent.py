@@ -37,6 +37,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.windows",
+    "desktop.ui_elements",
     "app.status",
     "desktop.reveal_path",
     "desktop.open_path",
@@ -62,6 +63,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.active_window": "读取当前窗口",
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
+    "desktop.ui_elements": "读取界面控件",
     "app.status": "检查应用状态",
     "desktop.reveal_path": "在 Finder 中显示",
     "desktop.open_path": "打开本地路径",
@@ -727,6 +729,8 @@ class RuntimeCustomApiAgentLoop:
                 return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
             if tool_name == "desktop.windows":
                 return _windows_summary(result, planned_input) or result_summary or "已读取窗口列表。"
+            if tool_name == "desktop.ui_elements":
+                return _ui_elements_summary(result) or result_summary or "已读取当前界面控件。"
             if tool_name == "app.status":
                 return _app_status_summary(result, planned_input) or result_summary or "已检查应用状态。"
             if tool_name == "desktop.reveal_path":
@@ -1029,7 +1033,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
@@ -1040,6 +1044,7 @@ class RuntimeCustomApiAgentLoop:
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
+            "map foreground UI control/button/input field list questions to desktop.ui_elements; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
@@ -1314,6 +1319,38 @@ def _windows_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> s
         return ""
     suffix = f" 等 {len(raw_windows)} 个窗口" if len(raw_windows) > len(items) else ""
     return f"当前窗口：{'; '.join(items)}{suffix}。"
+
+
+def _ui_elements_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_elements = data.get("elements")
+    if not isinstance(raw_elements, list):
+        return ""
+    app_name = str(data.get("app_name") or "").strip()
+    title = str(data.get("title") or "").strip()
+    if not raw_elements:
+        scope = f"{app_name} {title}".strip()
+        return f"没有读取到 {scope} 的界面控件。" if scope else "没有读取到当前界面控件。"
+    items = []
+    for item in raw_elements[:8]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "元素").replace("AX", "").strip()
+        label = (
+            str(item.get("name") or "").strip()
+            or str(item.get("description") or "").strip()
+            or str(item.get("value") or "").strip()
+        )
+        center = item.get("center") if isinstance(item.get("center"), dict) else {}
+        point = ""
+        if center.get("x") not in (None, "") and center.get("y") not in (None, ""):
+            point = f"（{center['x']}, {center['y']}）"
+        items.append(f"{role}{f' {label}' if label else ''}{point}")
+    if not items:
+        return ""
+    suffix = f" 等 {len(raw_elements)} 个控件" if len(raw_elements) > len(items) else ""
+    prefix = f"当前 {app_name} 界面控件" if app_name else "当前界面控件"
+    return f"{prefix}：{'; '.join(items)}{suffix}。"
 
 
 def _app_status_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

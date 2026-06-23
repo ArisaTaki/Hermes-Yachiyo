@@ -388,6 +388,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "desktop.permissions",
             "desktop.active_window",
             "desktop.windows",
+            "desktop.ui_elements",
             "app.status",
             "app.open",
             "app.focus",
@@ -547,6 +548,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.permissions") == "low"
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
+    assert desktop_tool_risk_level("desktop.ui_elements") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
     assert desktop_tool_risk_level("app.show") == "low"
     assert desktop_tool_risk_level("app.focus_window") == "low"
@@ -600,12 +602,13 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:21] == [
+    assert list(catalog)[:22] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
         "read_running_apps",
         "read_windows",
+        "read_ui_elements",
         "read_app_status",
         "open_app",
         "focus_app",
@@ -631,6 +634,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_running_apps"].tools == ["desktop.running_apps"]
     assert catalog["read_windows"].risk_level == "low"
     assert catalog["read_windows"].tools == ["desktop.windows"]
+    assert catalog["read_ui_elements"].risk_level == "low"
+    assert catalog["read_ui_elements"].tools == ["desktop.ui_elements"]
     assert catalog["read_app_status"].risk_level == "low"
     assert catalog["read_app_status"].tools == ["app.status"]
     assert catalog["focus_app_window"].risk_level == "low"
