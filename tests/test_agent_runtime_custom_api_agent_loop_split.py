@@ -1267,6 +1267,33 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "copy"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("open Chrome and press command l", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "open Chrome and type github.com and press enter",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Google Chrome", "text": "github.com"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 github.com，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2366,6 +2393,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "send"},
     }
+    assert daily_desktop_intent_tool_request("send current message", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
     assert daily_desktop_intent_tool_request("提交当前表单", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
@@ -2629,6 +2661,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.click_ui_element",
         "input": {"target": "Send", "role_filter": "button", "limit": 80, "click_count": 1},
     }
+    assert daily_desktop_intent_tool_request("click the search field", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "search", "role_filter": "text", "limit": 80, "click_count": 1},
+    }
     assert daily_desktop_intent_tool_request("点击发送按钮", ["desktop.click"]) is None
     assert daily_desktop_intent_tool_request("点击当前网页上的发送按钮", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2649,6 +2686,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_scroll",
         "input": {"direction": "down", "pages": 3},
+    }
+    assert daily_desktop_intent_tool_request("scroll the page down", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 1},
     }
     assert daily_desktop_intent_tool_request("按 Tab", allowed_tools) == {
         "protocol": "json_fallback",

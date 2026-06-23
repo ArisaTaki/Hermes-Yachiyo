@@ -281,15 +281,15 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
     requests: list[dict[str, Any]] = []
     for clause in clauses[:5]:
         stripped_clause = _strip_sequence_clause_prefix(clause)
+        handled_input_followup, input_followup_requests = _typed_input_followup_requests(
+            stripped_clause,
+            requests,
+        )
+        if handled_input_followup:
+            requests.extend(input_followup_requests)
+            continue
         request = _first_daily_desktop_candidate(stripped_clause)
         if request is None:
-            handled_input_followup, input_followup_requests = _typed_input_followup_requests(
-                stripped_clause,
-                requests,
-            )
-            if handled_input_followup:
-                requests.extend(input_followup_requests)
-                continue
             find_requests = _app_context_find_text_requests(stripped_clause, requests)
             if not find_requests:
                 return []
@@ -513,7 +513,9 @@ def _split_daily_desktop_sequence(text: str) -> list[str]:
         str(text or "").strip(),
     )
     parts = re.split(
-        r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|(?:然后|接着|之后|随后|并且|并)\s*)",
+        r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|"
+        r"\s+and\s+(?=(?:press|type|enter|click|scroll|send|submit|confirm|paste|copy)\b)|"
+        r"(?:然后|接着|之后|随后|并且|并)\s*)",
         protected_text,
         flags=re.IGNORECASE,
     )
@@ -756,6 +758,9 @@ def _submit_foreground_action_for_phrase(phrase: str) -> str:
         "消息发送",
         "send",
         "sendmessage",
+        "sendcurrentmessage",
+        "sendthecurrentmessage",
+        "sendcurrentchatmessage",
         "post",
     }:
         return "send"
@@ -984,13 +989,13 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if click_ui_element:
         candidates.append(_request("desktop.click_ui_element", click_ui_element))
 
-    hotkey = _desktop_hotkey(text)
-    if hotkey:
-        candidates.append(_request("desktop.hotkey", hotkey))
-
     submit_action = _desktop_submit_foreground_action(text)
     if submit_action:
         candidates.append(_request("desktop.submit_foreground", {"action": submit_action}))
+
+    hotkey = _desktop_hotkey(text)
+    if hotkey:
+        candidates.append(_request("desktop.hotkey", hotkey))
 
     type_text = _desktop_type_text(text)
     if type_text:
@@ -1365,6 +1370,8 @@ def _looks_like_search_request(text: str) -> bool:
 
 
 def _browser_search_url(text: str) -> str:
+    if _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
+        return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -2892,7 +2899,7 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+)",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*(?:一下|下|一次)?\s*"
         rf"(?P<combo>{hotkey_part})",
-        rf"(?:press|send)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"press\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
         rf"trigger\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
@@ -3193,6 +3200,13 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             + r"\s*$"
         ),
         (
+            r"^(?:please\s+)?(?:scroll|page)\s+"
+            r"(?:the\s+)?(?:current\s+)?(?:page|window|screen)\s+"
+            r"(?P<direction_en_target>down|up)"
+            + rf"(?:\s+{page_count.format(name='count_en_target')}\s*(?:pages?|times?)?)?"
+            + r"\s*$"
+        ),
+        (
             rf"^(?:please\s+)?{page_count.format(name='count_en_prefix')}\s+"
             r"(?:pages?\s+)?(?:scroll|page)\s+(?P<direction_en_prefix>down|up)\s*$"
         ),
@@ -3206,6 +3220,7 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             groups.get("direction")
             or groups.get("direction_phrase")
             or groups.get("direction_en")
+            or groups.get("direction_en_target")
             or groups.get("direction_en_prefix")
             or ""
         )
@@ -3213,6 +3228,7 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             groups.get("count")
             or groups.get("count_phrase")
             or groups.get("count_en")
+            or groups.get("count_en_target")
             or groups.get("count_en_prefix")
         )
         if direction and pages:

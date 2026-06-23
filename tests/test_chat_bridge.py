@@ -2334,6 +2334,18 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
         ),
     )
     monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.click_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("click_ui_element should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("submit_foreground should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_close_window",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("close_window should wait for approval")
@@ -2343,6 +2355,12 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
     try:
         cases = [
             ("关闭当前窗口", "desktop.close_window", {}),
+            (
+                "click the search field",
+                "desktop.click_ui_element",
+                {"target": "search", "role_filter": "text", "limit": 80, "click_count": 1},
+            ),
+            ("send current message", "desktop.submit_foreground", {"action": "send"}),
         ]
         for text, tool_name, input_preview in cases:
             result = bridge.send_quick_message(
