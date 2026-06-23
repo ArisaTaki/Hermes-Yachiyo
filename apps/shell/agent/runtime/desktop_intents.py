@@ -31,6 +31,10 @@ def daily_desktop_intent_tool_request(
     if _is_browser_current_page_request(text) and "browser.current_page" in allowed:
         return _request("browser.current_page", {})
 
+    music = _music_query(text)
+    if music and "media.apple_music_play" in allowed:
+        return _request("media.apple_music_play", {"query": music})
+
     app_focus_name = _app_focus_name(text)
     if app_focus_name and "app.focus" in allowed:
         return _request("app.focus", {"app_name": app_focus_name})
@@ -38,10 +42,6 @@ def daily_desktop_intent_tool_request(
     app_name = _app_open_name(text)
     if app_name and "app.open" in allowed:
         return _request("app.open", {"app_name": app_name})
-
-    music = _music_query(text)
-    if music and "media.apple_music_play" in allowed:
-        return _request("media.apple_music_play", {"query": music})
 
     hotkey = _desktop_hotkey(text)
     if hotkey and "desktop.hotkey" in allowed:
@@ -300,6 +300,7 @@ def _strip_app_name(value: str) -> str:
 
 def _music_query(text: str) -> str:
     patterns = (
+        r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
         r"(?:帮我|请|麻烦)?(?:直接)?播放[一下\s]*(?P<query>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦)?(?:直接)?放[一下\s]*(?P<query>[^。！？!?，,]+)",
         r"(?:play)\s+(?P<query>[^.!?]+)",
@@ -308,10 +309,30 @@ def _music_query(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        query = _strip_query(match.group("query"))
+        query = _strip_music_query_context(match.group("query"))
         if query and _is_specific_music_query(query):
             return query
     return ""
+
+
+def _strip_music_query_context(value: str) -> str:
+    query = _strip_query(value)
+    query = re.sub(
+        r"\s*(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"\s*(?:在|用|通过)\s*(?:apple\s*music|music|音乐)(?:里|中|上|内)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(r"^apple\s*music(?:里|中|上|内)?(?:的)?\s*", "", query, flags=re.IGNORECASE)
+    query = re.sub(r"^(?:music|音乐)(?:里|中|上|内)(?:的)?\s*", "", query, flags=re.IGNORECASE)
+    query = re.sub(r"^(?:里|中|上|内|里面)(?:的)?\s*", "", query)
+    return _strip_query(query)
 
 
 def _is_specific_music_query(query: str) -> bool:

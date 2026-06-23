@@ -429,10 +429,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 播放超时空辉夜姬", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("在 Apple Music 播放超时空辉夜姬", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
     assert daily_desktop_intent_tool_request("播放 Music For a Sushi Restaurant", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "Music For a Sushi Restaurant"},
+    }
+    assert daily_desktop_intent_tool_request("play Space Oddity in Apple Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "Space Oddity"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 播放超时空辉夜姬", ["app.open"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
     }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
