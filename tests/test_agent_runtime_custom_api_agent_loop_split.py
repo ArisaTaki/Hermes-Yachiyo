@@ -583,6 +583,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.open",
         "app.focus",
         "media.apple_music_play",
+        "media.apple_music_control",
         "screen.capture",
         "desktop.active_window",
         "browser.open_url",
@@ -626,8 +627,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Music"},
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
     }
     assert daily_desktop_intent_tool_request("打开 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -636,8 +637,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Music"},
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("暂停音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "pause"},
+    }
+    assert daily_desktop_intent_tool_request("下一首", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "next"},
+    }
+    assert daily_desktop_intent_tool_request("上一首", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "previous"},
     }
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
@@ -668,6 +684,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Music"},
+    }
+    assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_control"]) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
     }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
@@ -975,6 +996,35 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
     assert "你可以这样处理：" in result
     assert "Open Music.app once" in result
     assert "Grant Automation permission" in result
+
+
+def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
+    pause = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_control",
+        {"action": "pause"},
+        {
+            "ok": True,
+            "summary": "Apple Music pause executed",
+            "data": {"control": "pause", "player_state": "paused"},
+        },
+    )
+    next_track = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_control",
+        {"action": "next"},
+        {
+            "ok": True,
+            "summary": "Apple Music next executed",
+            "data": {
+                "control": "next",
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        },
+    )
+
+    assert pause == "已暂停 Apple Music。"
+    assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
 
 
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:

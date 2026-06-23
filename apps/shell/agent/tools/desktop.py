@@ -194,6 +194,94 @@ def apple_music_play(query: str) -> dict[str, Any]:
     return _with_permission_metadata("media.apple_music_play", payload)
 
 
+def apple_music_control(action: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.apple_music_control")
+    clean_action = _clean_music_control_action(action)
+    result = _run_osascript(
+        """
+        on run argv
+            set controlAction to item 1 of argv
+            tell application "Music"
+                try
+                    if controlAction is "toggle" then
+                        playpause
+                    else if controlAction is "play" then
+                        play
+                    else if controlAction is "pause" then
+                        pause
+                    else if controlAction is "next" then
+                        next track
+                    else if controlAction is "previous" then
+                        previous track
+                    else
+                        return "error|-1|unsupported_control"
+                    end if
+                    delay 0.1
+                    set stateText to player state as text
+                    try
+                        set trackName to name of current track
+                        set artistName to artist of current track
+                    on error
+                        set trackName to ""
+                        set artistName to ""
+                    end try
+                    return "controlled|" & controlAction & "|" & stateText & "|" & trackName & "|" & artistName
+                on error errMsg number errNum
+                    return "error|" & errNum & "|" & errMsg
+                end try
+            end tell
+        end run
+        """,
+        [clean_action],
+    )
+    if not result["ok"]:
+        fallback = app_open("Music")
+        return {
+            **_with_permission_metadata(
+                "media.apple_music_control",
+                {
+                    **result,
+                    "action": "media.apple_music_control",
+                    "summary": "media.apple_music_control failed",
+                },
+            ),
+            "action": "media.apple_music_control",
+            "fallback_used": bool(fallback.get("ok")),
+            "fallback_result": fallback,
+        }
+    parts = str(result.get("stdout") or "").strip().split("|", 4)
+    while len(parts) < 5:
+        parts.append("")
+    status, first, second, third, fourth = parts
+    if status == "controlled":
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {first} executed",
+            "data": {
+                "control": first or clean_action,
+                "player_state": second,
+                "track": third,
+                "artist": fourth,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    fallback = app_open("Music")
+    payload = {
+        "ok": False,
+        "action": "media.apple_music_control",
+        "summary": f"Could not control Apple Music with action {clean_action}; opened Music.",
+        "error": second or first or "Music did not accept the control action",
+        "data": {"control": clean_action, "status": status},
+        "permission_error": status == "error" and _looks_like_permission_error(f"{first}\n{second}"),
+        "fallback_used": bool(fallback.get("ok")),
+        "fallback_result": fallback,
+    }
+    return _with_permission_metadata("media.apple_music_control", payload)
+
+
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
@@ -374,6 +462,26 @@ def _clean_required(value: str, field: str) -> str:
     return clean
 
 
+def _clean_music_control_action(value: str) -> str:
+    aliases = {
+        "toggle": "toggle",
+        "playpause": "toggle",
+        "play_pause": "toggle",
+        "pause": "pause",
+        "play": "play",
+        "resume": "play",
+        "next": "next",
+        "next_track": "next",
+        "previous": "previous",
+        "prev": "previous",
+        "previous_track": "previous",
+    }
+    clean = aliases.get(str(value or "").strip().lower())
+    if not clean:
+        raise ValueError("action must be one of toggle, play, pause, next, or previous")
+    return clean
+
+
 def _clean_coordinate(value: Any, field: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{field} must be a non-negative screen coordinate")
@@ -466,6 +574,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_control": ["music_app", "automation"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
@@ -479,6 +588,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_control": ["music_app", "automation"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],

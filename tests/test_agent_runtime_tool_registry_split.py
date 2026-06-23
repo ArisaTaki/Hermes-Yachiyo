@@ -270,6 +270,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_open",
         "app_focus",
         "media_apple_music_play",
+        "media_apple_music_control",
         "desktop_hotkey",
         "desktop_type_text",
         "desktop_click",
@@ -320,6 +321,26 @@ def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> N
         )
 
 
+def test_apple_music_control_schema_accepts_safe_playback_actions() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "media.apple_music_control",
+        {"action": "pause"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "media.apple_music_control",
+        {"action": "next"},
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="media.apple_music_control 参数 action 必须是",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "media.apple_music_control",
+            {"action": "volume_up"},
+        )
+
+
 def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
     ToolDescriptorRegistry.validate_payload(
         "browser.click",
@@ -356,6 +377,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "media_apple_music_control",
+        lambda action: calls.append(("music_control", action)) or {"ok": True, "action": action},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_hotkey",
         lambda key, *, modifiers=None: calls.append(("hotkey", key, modifiers))
         or {"ok": True},
@@ -374,6 +400,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "query": "超时空辉夜姬"}
     assert dispatch_tool_call(
         broker,
+        "media.apple_music_control",
+        {"action": "pause"},
+    ) == {"ok": True, "action": "pause"}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -384,6 +415,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert calls == [
         ("music", "超时空辉夜姬"),
+        ("music_control", "pause"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
     ]
@@ -661,4 +693,68 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
             "or the target app in macOS System Settings > Privacy & Security > Automation."
         ),
     ]
+    assert result["fallback_used"] is True
+
+
+def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {
+            "ok": True,
+            "stdout": "controlled|pause|paused|超时空辉夜姬|Yachiyo",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.apple_music_control("pause")
+
+    assert result == {
+        "ok": True,
+        "action": "media.apple_music_control",
+        "summary": "Apple Music pause executed",
+        "data": {
+            "control": "pause",
+            "player_state": "paused",
+            "track": "超时空辉夜姬",
+            "artist": "Yachiyo",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][1] == ["pause"]
+
+
+def test_apple_music_control_permission_failure_returns_music_and_automation_targets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": False,
+            "action": "osascript",
+            "summary": "osascript failed",
+            "error": "Not authorized to send Apple events to Music.",
+            "permission_error": True,
+            "fallback_used": False,
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+
+    result = desktop_mod.apple_music_control("next")
+
+    assert result["ok"] is False
+    assert result["action"] == "media.apple_music_control"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["music_app", "automation"]
+    assert result["permission_targets"] == ["music_app", "automation"]
     assert result["fallback_used"] is True

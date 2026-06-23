@@ -15,6 +15,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
     "app.focus",
     "media.apple_music_play",
+    "media.apple_music_control",
     "screen.capture",
     "desktop.active_window",
     "browser.open_url",
@@ -330,6 +331,8 @@ class RuntimeCustomApiAgentLoop:
                 if track:
                     return f"已在 Apple Music 播放：{track}{f' - {artist}' if artist else ''}。"
                 return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
+            if tool_name == "media.apple_music_control":
+                return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
             if tool_name == "screen.capture":
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.active_window":
@@ -353,6 +356,10 @@ class RuntimeCustomApiAgentLoop:
                 if query
                 else "没能直接播放，但已打开 Apple Music。"
             )
+        if tool_name == "media.apple_music_control" and fallback.get("ok"):
+            action = _payload_text(result, planned_input, "action")
+            label = _apple_music_control_label(action)
+            return f"没能直接{label}，但已打开 Apple Music。" if label else "没能直接控制，但已打开 Apple Music。"
         error = str(result.get("error") or result_summary or "工具返回失败").strip()
         permission_targets = result.get("permission_targets")
         if result.get("permission_error") or permission_targets:
@@ -413,10 +420,12 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.active_window, app.open/app.focus, media.apple_music_play, "
-            "desktop.click, desktop.hotkey, and desktop.type_text when they are allowed. "
-            "For explicit daily commands, map 'play <song>' or '播放<歌曲>' to "
-            "media.apple_music_play, screen capture requests to screen.capture, and current "
-            "or foreground window questions to desktop.active_window before answering. "
+            "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
+            "when they are allowed. For explicit daily commands, map 'play <song>' or "
+            "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
+            "commands to media.apple_music_control; map screen capture requests to "
+            "screen.capture, and current or foreground window questions to desktop.active_window "
+            "before answering. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "
@@ -492,6 +501,28 @@ def _browser_text_summary(result: dict[str, Any]) -> str:
     if len(text) > 1200:
         text = f"{text[:1200]}..."
     return text
+
+
+def _apple_music_control_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    action = str(data.get("control") or planned_input.get("action") or "").strip()
+    label = _apple_music_control_label(action)
+    if not label:
+        return ""
+    track = str(data.get("track") or "").strip()
+    artist = str(data.get("artist") or "").strip()
+    track_text = f"当前：{track}{f' - {artist}' if artist else ''}。" if track else ""
+    return f"已{label} Apple Music。{track_text}"
+
+
+def _apple_music_control_label(action: str) -> str:
+    return {
+        "toggle": "切换播放/暂停",
+        "play": "继续播放",
+        "pause": "暂停",
+        "next": "切到下一首",
+        "previous": "切到上一首",
+    }.get(str(action or "").strip(), "")
 
 
 def _permission_diagnostics(result: dict[str, Any]) -> str:

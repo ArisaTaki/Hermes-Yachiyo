@@ -270,6 +270,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "media.apple_music_play": [
             "Direct Apple Music playback falls back to opening Music when playback is unavailable.",
         ],
+        "media.apple_music_control": [
+            "Apple Music playback controls fall back to opening Music when direct control is unavailable.",
+        ],
         "browser.open_url": [
             "Falls back to the system browser when Chrome CDP is unavailable.",
         ],

@@ -43,6 +43,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
 
+    music_control = _music_control_action(text)
+    if music_control:
+        candidates.append(_request("media.apple_music_control", {"action": music_control}))
+
     music = _music_query(text)
     if music:
         candidates.append(_request("media.apple_music_play", {"query": music}))
@@ -350,6 +354,47 @@ def _strip_music_query_context(value: str) -> str:
 def _is_specific_music_query(query: str) -> bool:
     normalized = re.sub(r"[\s._-]+", "", query.lower())
     return normalized not in {"音乐", "music", "song", "歌曲", "applemusic"}
+
+
+def _music_control_action(text: str) -> str:
+    lowered = text.lower()
+    if re.search(r"(?:下一首|下一曲|下首|切下一首|跳下一首|下一首歌)", text) or re.search(
+        r"\b(?:next|skip)\s+(?:song|track)\b",
+        lowered,
+    ):
+        return "next"
+    if re.search(r"(?:上一首|上一曲|上首|切上一首|回到上一首|上一首歌)", text) or re.search(
+        r"\b(?:previous|prev|back)\s+(?:song|track)\b",
+        lowered,
+    ):
+        return "previous"
+    if re.search(r"(?:播放\s*/\s*暂停|暂停\s*/\s*播放|播放暂停|切换播放|切换暂停)", text) or re.search(
+        r"\b(?:toggle|play\s*/\s*pause|playpause)\b",
+        lowered,
+    ):
+        return "toggle"
+    if re.search(r"(?:暂停|停一下|停止播放|先停一下)(?:\s*(?:音乐|歌曲|apple\s*music|music))?", lowered) or re.search(
+        r"\bpause\s+(?:music|apple\s*music|playback)\b",
+        lowered,
+    ):
+        return "pause"
+    if re.search(
+        r"(?:继续播放|恢复播放|接着播放|开始播放)(?:\s*(?:音乐|歌曲|apple\s*music|music))?",
+        lowered,
+    ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
+        return "play"
+    if re.search(
+        r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?(?:播放|放)(?:一下)?"
+        r"\s*(?:音乐|music|apple\s*music)(?:应用|app|软件|程序)?\s*"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+        lowered,
+    ):
+        return "play"
+    if re.fullmatch(r"(?:播放|放)(?:一下)?(?:音乐|music|apple\s*music)(?:应用|app|软件|程序)?", lowered):
+        return "play"
+    if re.fullmatch(r"(?:play|start)\s+(?:music|apple\s*music)(?:\s+app)?", lowered):
+        return "play"
+    return ""
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:

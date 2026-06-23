@@ -31,6 +31,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "media.apple_music_play": "播放 Apple Music",
+    "media.apple_music_control": "控制 Apple Music",
     "desktop.hotkey": "发送快捷键",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",

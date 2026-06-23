@@ -392,6 +392,9 @@ class ToolBroker:
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 
+    def media_apple_music_control(self, action: str) -> dict[str, Any]:
+        return desktop.apple_music_control(action)
+
     def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hotkey",

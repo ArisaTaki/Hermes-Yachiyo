@@ -31,6 +31,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "app.open",
         "app.focus",
         "media.apple_music_play",
+        "media.apple_music_control",
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
@@ -111,7 +112,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_active_window": ("desktop.active_window",),
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
-    "play_or_pause_media": ("media.apple_music_play",),
+    "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
     "foreground_hotkey": ("desktop.hotkey",),
@@ -182,6 +183,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.open",
         "app.focus",
         "media.apple_music_play",
+        "media.apple_music_control",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -195,7 +197,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "screen_capture": ("screen.capture",),
     "active_window": ("desktop.active_window",),
     "app_control": ("app.open", "app.focus"),
-    "media_control": ("media.apple_music_play",),
+    "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
     "browser_control": (
         "browser.open_url",
@@ -233,6 +235,7 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "browser.click": ("chrome_cdp",),
     "browser.type_text": ("chrome_cdp",),
     "media.apple_music_play": ("automation",),
+    "media.apple_music_control": ("automation",),
 }
 
 GROUP_TOOL_POLICY_PRESETS: dict[str, tuple[str, ...]] = {
@@ -512,7 +515,7 @@ def _tool_missing_permissions(
         values.extend(_missing_permissions(missing_by_capability, "screen_capture"))
     if tool in {"browser.click", "browser.type_text"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-    if tool == "media.apple_music_play":
+    if tool in {"media.apple_music_play", "media.apple_music_control"}:
         values.extend(
             value
             for value in _missing_permissions(missing_by_capability, "app_control")
@@ -535,7 +538,7 @@ def _tool_degrades_with_permissions(
         return not _missing_permissions(missing_by_capability, "screen_capture")
     if tool in {"browser.click", "browser.type_text"}:
         return not _missing_permissions(missing_by_capability, "foreground_input")
-    if tool == "media.apple_music_play":
+    if tool in {"media.apple_music_play", "media.apple_music_control"}:
         return "open_command" not in _missing_permissions(missing_by_capability, "app_control")
     return True
 

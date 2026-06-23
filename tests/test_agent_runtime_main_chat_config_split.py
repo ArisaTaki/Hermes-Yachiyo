@@ -49,6 +49,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "桌面执行型 Agent" in config["instructions"]
     assert "优先调用工具尝试执行" in config["instructions"]
     assert "media.apple_music_play" in config["instructions"]
+    assert "media.apple_music_control" in config["instructions"]
     assert "screen.capture" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]
     assert "desktop.click" in config["instructions"]

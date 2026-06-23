@@ -378,6 +378,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "app.open",
             "app.focus",
             "media.apple_music_play",
+            "media.apple_music_control",
         },
     )
 
@@ -413,6 +414,7 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
             "app.open",
             "app.focus",
             "media.apple_music_play",
+            "media.apple_music_control",
             "desktop.hotkey",
             "desktop.type_text",
             "desktop.click",
@@ -429,7 +431,10 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
     assert capabilities["foreground_input"]["available"] is False
     assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
     assert capabilities["media_control"]["available"] is True
-    assert capabilities["media_control"]["available_tools"] == ["media.apple_music_play"]
+    assert capabilities["media_control"]["available_tools"] == [
+        "media.apple_music_play",
+        "media.apple_music_control",
+    ]
 
 
 def test_desktop_execution_capability_policy_reports_tool_level_degradation() -> None:
@@ -441,6 +446,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
             "app.open",
             "app.focus",
             "media.apple_music_play",
+            "media.apple_music_control",
             "desktop.hotkey",
             "desktop.type_text",
             "desktop.click",
@@ -467,7 +473,10 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
     assert app_control["available_tools"] == ["app.open"]
     assert app_control["unavailable_tools"] == ["app.focus"]
     assert media_control["available"] is False
-    assert media_control["degraded_tools"] == ["media.apple_music_play"]
+    assert media_control["degraded_tools"] == [
+        "media.apple_music_play",
+        "media.apple_music_control",
+    ]
     assert browser_control["available"] is False
     assert browser_control["degraded_tools"] == [
         "browser.open_url",
@@ -479,6 +488,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
     assert "browser.extract_text" in browser_control["unavailable_tools"]
     assert "app.open" in root["available_tools"]
     assert "media.apple_music_play" in root["degraded_tools"]
+    assert "media.apple_music_control" in root["degraded_tools"]
 
 
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
@@ -511,7 +521,10 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
-    assert catalog["play_or_pause_media"].tools == ["media.apple_music_play"]
+    assert catalog["play_or_pause_media"].tools == [
+        "media.apple_music_play",
+        "media.apple_music_control",
+    ]
     assert catalog["foreground_click"].risk_level == "medium"
     assert catalog["foreground_click"].requires_approval is False
     assert catalog["delete_or_overwrite_user_file"].risk_level == "high"

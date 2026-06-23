@@ -31,6 +31,7 @@ TOOL_FUNCTION_NAMES = {
     "app.open": "app_open",
     "app.focus": "app_focus",
     "media.apple_music_play": "media_apple_music_play",
+    "media.apple_music_control": "media_apple_music_control",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
@@ -52,6 +53,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.open",
     "app.focus",
     "media.apple_music_play",
+    "media.apple_music_control",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text", "desktop.click")
 LOW_RISK_BROWSER_TOOL_NAMES = (
@@ -221,6 +223,12 @@ class ToolDescriptor:
             payload.get("query") or ""
         ).strip():
             raise AgentRuntimeError("media.apple_music_play 参数 query 必须是非空字符串")
+        if self.name == "media.apple_music_control":
+            action = str(payload.get("action") or "").strip()
+            if action not in {"toggle", "play", "pause", "next", "previous"}:
+                raise AgentRuntimeError(
+                    "media.apple_music_control 参数 action 必须是 toggle、play、pause、next 或 previous"
+                )
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.click":
@@ -548,6 +556,21 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         ),
         properties={"query": {"type": "string", "description": "Song, album, or artist query."}},
         required=("query",),
+    ),
+    "media.apple_music_control": ToolDescriptor(
+        name="media.apple_music_control",
+        description=(
+            "Control Apple Music playback for low-risk daily commands: play, pause, "
+            "toggle play/pause, next track, or previous track."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": ["toggle", "play", "pause", "next", "previous"],
+                "description": "Playback control action.",
+            }
+        },
+        required=("action",),
     ),
     "desktop.hotkey": ToolDescriptor(
         name="desktop.hotkey",

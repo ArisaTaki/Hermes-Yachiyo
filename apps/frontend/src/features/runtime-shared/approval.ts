@@ -100,6 +100,7 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'app.open') return '打开应用';
   if (tool === 'app.focus') return '聚焦应用';
   if (tool === 'media.apple_music_play') return '播放 Apple Music';
+  if (tool === 'media.apple_music_control') return '控制 Apple Music';
   if (tool === 'desktop.hotkey') return '发送快捷键';
   if (tool === 'desktop.type_text') return '输入前台文字';
   if (tool === 'browser.open_url') return '打开网页';
@@ -127,6 +128,7 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'app.open'
     || tool === 'app.focus'
     || tool === 'media.apple_music_play'
+    || tool === 'media.apple_music_control'
     || tool === 'desktop.hotkey'
     || tool === 'desktop.type_text'
   ) {

@@ -24,6 +24,7 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
       'app.open',
       'app.focus',
       'media.apple_music_play',
+      'media.apple_music_control',
       'desktop.hotkey',
       'desktop.type_text',
       'browser.open_url',
@@ -58,9 +59,9 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
   {
     id: 'media_control',
     label: 'Media',
-    summary: 'Search and play Apple Music.',
+    summary: 'Search, play, and control Apple Music.',
     risk: 'low',
-    tools: ['media.apple_music_play'],
+    tools: ['media.apple_music_play', 'media.apple_music_control'],
   },
   {
     id: 'foreground_input',
