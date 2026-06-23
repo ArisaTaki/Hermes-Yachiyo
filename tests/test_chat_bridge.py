@@ -553,7 +553,7 @@ def test_chat_bridge_quick_message_executes_named_windows_list_without_model(
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "Slack窗口列表",
+        "what windows are open in Slack",
     )
 
     assert result["ok"] is True

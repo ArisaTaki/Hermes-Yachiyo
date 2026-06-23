@@ -1883,6 +1883,10 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
     if _is_active_window_request(text):
         return None
     app_patterns = (
+        r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app>[^.!?]+)",
+        r"(?:what|which)\s+(?:open\s+)?windows\s+(?:are\s+)?(?:open\s+)?"
+        r"(?:in|for|of)\s+(?P<app>[^.!?]+)",
+        r"(?:what|which)\s+windows\s+does\s+(?P<app>[^.!?]+?)\s+have",
         r"(?:list|show|read)\s+(?P<app>[^.!?]+?)\s+windows",
         r"(?P<app>[^.!?]+?)\s+windows\?",
         r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*(?:窗口|windows?)\s*(?:列表|清单|list)$",

@@ -2311,6 +2311,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {"app_name": "Google Chrome"},
     }
+    assert daily_desktop_intent_tool_request("list windows in Chrome", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("what windows are open in Chrome", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("Chrome 有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
