@@ -30,6 +30,7 @@ _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
 _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
+    "desktop.permissions": "检查桌面权限",
     "desktop.active_window": "读取当前窗口",
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
@@ -307,6 +308,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
     fallback = _text(result.get("fallback") or result.get("fallback_tool"))
     fallback_labels = {
         "system_browser": "系统浏览器",
+        "desktop.permissions": "权限诊断",
         "desktop.click": "桌面点击",
         "desktop.type_text": "桌面输入",
         "desktop.running_apps": "运行中应用",

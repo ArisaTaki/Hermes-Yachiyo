@@ -385,6 +385,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         platform_name="Darwin",
         registered_tools={
             "screen.capture",
+            "desktop.permissions",
             "desktop.active_window",
             "desktop.windows",
             "app.status",
@@ -405,6 +406,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "browser_control",
     ]
     assert capabilities["desktop_execution"]["available"] is True
+    assert "desktop.permissions" in capabilities["desktop_execution"]["available_tools"]
     assert capabilities["screen_capture"]["available"] is True
     assert capabilities["screen_capture"]["available_tools"] == ["screen.capture"]
     assert capabilities["foreground_input"]["available"] is False
@@ -506,6 +508,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
+    assert desktop_tool_risk_level("desktop.permissions") == "low"
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
@@ -516,6 +519,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
     assert desktop_action_risk_level("read_screen") == "low"
+    assert desktop_action_risk_level("diagnose_permissions") == "low"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
@@ -526,8 +530,9 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:12] == [
+    assert list(catalog)[:13] == [
         "read_screen",
+        "diagnose_permissions",
         "read_active_window",
         "read_running_apps",
         "read_windows",
@@ -542,6 +547,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
+    assert catalog["diagnose_permissions"].risk_level == "low"
+    assert catalog["diagnose_permissions"].tools == ["desktop.permissions"]
     assert catalog["read_running_apps"].risk_level == "low"
     assert catalog["read_running_apps"].tools == ["desktop.running_apps"]
     assert catalog["read_windows"].risk_level == "low"
@@ -649,6 +656,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     tools = {tool.tool_name: tool for tool in catalog.tools}
 
     music = tools["media.apple_music_play"]
+    permissions = tools["desktop.permissions"]
     browser = tools["browser.open_url"]
     terminal = tools["terminal.run"]
 
@@ -657,6 +665,9 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert music.input_schema["required"] == ["query"]
     assert music.missing_permissions == ["music_app"]
     assert any("Music" in note for note in music.fallback_notes)
+    assert permissions.capability_id == "desktop_execution"
+    assert permissions.risk_level == "low"
+    assert any("missing desktop permission" in note for note in permissions.fallback_notes)
     assert browser.capability_id == "browser_control"
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]

@@ -17,6 +17,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_play",
     "media.apple_music_control",
     "screen.capture",
+    "desktop.permissions",
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.windows",
@@ -33,6 +34,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
 
 _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
+    "desktop.permissions": "检查桌面权限",
     "desktop.active_window": "读取当前窗口",
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
@@ -435,6 +437,8 @@ class RuntimeCustomApiAgentLoop:
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
             if tool_name == "screen.capture":
                 return result_summary or "已截取当前屏幕。"
+            if tool_name == "desktop.permissions":
+                return _desktop_permissions_summary(result) or result_summary or "已检查桌面权限。"
             if tool_name == "desktop.active_window":
                 return result_summary or _active_window_summary(result)
             if tool_name == "desktop.running_apps":
@@ -599,7 +603,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
             "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
@@ -608,6 +612,8 @@ class RuntimeCustomApiAgentLoop:
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
             "map single app running/open status questions to app.status; "
+            "map desktop permission diagnostics and 'why can't you control/open/click/play' "
+            "questions to desktop.permissions; "
             "map 'show/reveal in Finder' requests to desktop.reveal_path. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
@@ -698,6 +704,23 @@ def _active_window_summary(result: dict[str, Any]) -> str:
     return "已读取当前前台窗口。"
 
 
+def _desktop_permissions_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_targets = result.get("permission_targets") or data.get("permission_targets") or []
+    targets = _text_list(raw_targets)
+    if not targets:
+        return "桌面执行权限已就绪。"
+    raw_tools = result.get("affected_tools") or data.get("affected_tools") or []
+    affected_tools = _text_list(raw_tools)
+    target_text = ", ".join(targets[:6])
+    target_suffix = " 等" if len(targets) > 6 else ""
+    if not affected_tools:
+        return f"桌面执行权限还缺少：{target_text}{target_suffix}。"
+    tool_text = ", ".join(affected_tools[:6])
+    tool_suffix = " 等" if len(affected_tools) > 6 else ""
+    return f"桌面执行权限还缺少：{target_text}{target_suffix}。受影响工具：{tool_text}{tool_suffix}。"
+
+
 def _running_apps_summary(result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     raw_apps = data.get("apps")
@@ -752,6 +775,21 @@ def _app_status_summary(result: dict[str, Any], planned_input: dict[str, Any]) -
     if not app_name or not isinstance(running, bool):
         return ""
     return f"{app_name} 当前{'正在运行' if running else '没有运行'}。"
+
+
+def _text_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        raw_items = value
+    elif value in (None, ""):
+        raw_items = []
+    else:
+        raw_items = [value]
+    items: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
 
 
 def _browser_page_summary(result: dict[str, Any]) -> str:

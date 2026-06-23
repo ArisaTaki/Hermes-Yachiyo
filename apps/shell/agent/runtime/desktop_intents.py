@@ -139,10 +139,17 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     """Return ordered desktop tool candidates before policy filtering."""
 
     text = _clean_text(context)
-    if not text or _looks_like_explanation_request(text) or _looks_like_negative_request(text):
+    if not text or _looks_like_negative_request(text):
         return []
 
     candidates: list[dict[str, Any]] = []
+    if _is_desktop_permissions_request(text):
+        candidates.append(_request("desktop.permissions", {}))
+        return candidates
+
+    if _looks_like_explanation_request(text):
+        return []
+
     url = _browser_open_url(text)
     if url:
         candidates.append(_request("browser.open_url", {"url": url}))
@@ -257,6 +264,43 @@ def _looks_like_negative_request(text: str) -> bool:
             r"(?:execute|perform|call|play|capture|inspect|type|click|press|hotkey|"
             r"screenshot|read)",
             text.lower(),
+        )
+    )
+
+
+def _is_desktop_permissions_request(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(
+        r"(?:检查|诊断|查看|看看|确认).{0,12}"
+        r"(?:桌面执行|本地工具|自动化|辅助功能|屏幕录制|权限).{0,12}"
+        r"(?:权限|状态|问题)?",
+        text,
+    ):
+        return True
+    if re.search(
+        r"(?:权限诊断|桌面权限|桌面执行权限|本地工具权限|自动化权限状态|辅助功能权限状态|"
+        r"屏幕录制权限状态)",
+        text,
+    ):
+        return True
+    if re.search(
+        r"(?:为什么|为何|为啥|怎么回事).{0,16}"
+        r"(?:不能|无法|没法|不会).{0,16}"
+        r"(?:控制|操作|执行|打开应用|启动应用|播放音乐|点击|输入|截图|截屏|读取窗口)",
+        text,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:check|diagnose|inspect|read)\s+(?:desktop|macos|mac|automation|"
+            r"accessibility|screen recording)\s+permissions?\b",
+            lowered,
+        )
+        or re.search(
+            r"\bwhy\s+can(?:not|'t)\s+(?:you|yachiyo|the agent).{0,40}"
+            r"(?:control|operate|open apps?|launch apps?|play music|click|type|"
+            r"capture the screen|read windows?)",
+            lowered,
         )
     )
 

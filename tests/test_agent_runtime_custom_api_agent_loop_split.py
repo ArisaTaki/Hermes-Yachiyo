@@ -586,6 +586,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_play",
         "media.apple_music_control",
         "screen.capture",
+        "desktop.permissions",
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
@@ -751,6 +752,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "辅助功能权限"},
+    }
+    assert daily_desktop_intent_tool_request("检查桌面权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("为什么不能控制桌面？", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("check desktop permissions", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/report.pdf", allowed_tools) == {
         "protocol": "json_fallback",
@@ -953,11 +969,19 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_candidates("为什么不能控制桌面？") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.permissions",
+            "input": {},
+        }
+    ]
     assert daily_desktop_intent_candidates("怎么截图？") == []
     assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
@@ -971,6 +995,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("Chrome 开着吗", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("ChatGPT 打开了吗", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("检查一下 Slack 是否在运行", ["browser.open_url"]) is None
+    assert daily_desktop_intent_tool_request("检查桌面权限", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
@@ -1453,6 +1478,35 @@ def test_main_chat_desktop_intent_summarizes_app_status() -> None:
 
     assert running == "Google Chrome 当前正在运行。"
     assert stopped == "Slack 当前没有运行。"
+
+
+def test_main_chat_desktop_intent_summarizes_desktop_permissions() -> None:
+    ready = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.permissions",
+        {},
+        {
+            "ok": True,
+            "summary": "Desktop execution permissions are ready.",
+            "permission_targets": [],
+            "affected_tools": [],
+        },
+    )
+    missing = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.permissions",
+        {},
+        {
+            "ok": True,
+            "summary": "Missing desktop permissions",
+            "permission_targets": ["screen_recording", "automation"],
+            "affected_tools": ["screen.capture", "media.apple_music_play"],
+        },
+    )
+
+    assert ready == "桌面执行权限已就绪。"
+    assert missing == (
+        "桌面执行权限还缺少：screen_recording, automation。"
+        "受影响工具：screen.capture, media.apple_music_play。"
+    )
 
 
 def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details() -> None:

@@ -27,6 +27,7 @@ TOOL_FUNCTION_NAMES = {
     "terminal.run": "terminal_run",
     "artifact.write": "artifact_write",
     "screen.capture": "screen_capture",
+    "desktop.permissions": "desktop_permissions",
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
     "desktop.windows": "desktop_windows",
@@ -53,6 +54,7 @@ MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
+    "desktop.permissions",
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.windows",
@@ -543,6 +545,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": "Optional short reason shown in the Run Timeline.",
             }
         },
+    ),
+    "desktop.permissions": ToolDescriptor(
+        name="desktop.permissions",
+        description=(
+            "Read desktop execution permission readiness, missing permission targets, "
+            "and affected tools. Low-risk diagnostic state."
+        ),
+        properties={},
     ),
     "desktop.active_window": ToolDescriptor(
         name="desktop.active_window",

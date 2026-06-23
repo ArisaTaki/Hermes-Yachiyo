@@ -383,6 +383,9 @@ class ToolBroker:
     def desktop_active_window(self) -> dict[str, Any]:
         return desktop.active_window()
 
+    def desktop_permissions(self) -> dict[str, Any]:
+        return desktop.permissions()
+
     def desktop_running_apps(self) -> dict[str, Any]:
         return desktop.running_apps()
 

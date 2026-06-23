@@ -266,6 +266,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
 
     assert {
         "screen_capture",
+        "desktop_permissions",
         "desktop_active_window",
         "desktop_running_apps",
         "desktop_windows",
@@ -291,6 +292,10 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
 
 def test_desktop_running_apps_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.running_apps", {})
+
+
+def test_desktop_permissions_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.permissions", {})
 
 
 def test_desktop_windows_schema_accepts_optional_app_name() -> None:
@@ -432,6 +437,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_permissions",
+        lambda: calls.append(("permissions",)) or {"ok": True, "action": "desktop.permissions"},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_running_apps",
         lambda: calls.append(("running",)) or {"ok": True, "apps": ["Finder"]},
     )
@@ -471,6 +481,10 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.reveal_path",
         {"path": "~/Downloads/report.pdf"},
     ) == {"ok": True, "path": "~/Downloads/report.pdf"}
+    assert dispatch_tool_call(broker, "desktop.permissions", {}) == {
+        "ok": True,
+        "action": "desktop.permissions",
+    }
     assert dispatch_tool_call(broker, "desktop.running_apps", {}) == {
         "ok": True,
         "apps": ["Finder"],
@@ -490,6 +504,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("reveal", "~/Downloads/report.pdf"),
+        ("permissions",),
         ("running",),
         ("windows", "Google Chrome"),
         ("status", "Google Chrome"),
@@ -867,6 +882,64 @@ def test_desktop_active_window_permission_failure_returns_recovery_targets(monke
             "in macOS System Settings > Privacy & Security > Accessibility."
         ),
     ]
+
+
+def test_desktop_permissions_reports_ready_state(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {
+            "desktop_execution": [],
+            "screen_capture": [],
+            "active_window": [],
+        },
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.permissions"
+    assert result["summary"] == "Desktop execution permissions are ready."
+    assert result["permission_error"] is False
+    assert result["permission_targets"] == []
+    assert result["affected_tools"] == []
+    assert result["data"]["diagnostic_route"] == "/yachiyo/readiness"
+
+
+def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {
+            "screen_capture": ["screen_recording"],
+            "active_window": ["automation_or_accessibility"],
+            "media_control": ["music_app", "automation"],
+        },
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.permissions"
+    assert result["permission_error"] is True
+    assert result["permission_targets"] == [
+        "screen_recording",
+        "automation_or_accessibility",
+        "music_app",
+        "automation",
+    ]
+    assert result["affected_tools"] == [
+        "screen.capture",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.windows",
+        "media.apple_music_play",
+        "media.apple_music_control",
+    ]
+    assert result["data"]["missing_permissions"] == {
+        "screen_capture": ["screen_recording"],
+        "active_window": ["automation_or_accessibility"],
+        "media_control": ["music_app", "automation"],
+    }
+    assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
 
 
 def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:

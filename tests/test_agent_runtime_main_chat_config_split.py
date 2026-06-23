@@ -51,6 +51,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "media.apple_music_play" in config["instructions"]
     assert "media.apple_music_control" in config["instructions"]
     assert "screen.capture" in config["instructions"]
+    assert "desktop.permissions" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]
     assert "desktop.running_apps" in config["instructions"]
     assert "desktop.windows" in config["instructions"]

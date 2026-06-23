@@ -284,6 +284,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "screen.capture": [
             "Requires Screen Recording permission; denial is reported in readiness diagnostics.",
         ],
+        "desktop.permissions": [
+            "Reports missing desktop permission targets and the tools affected by them.",
+        ],
         "desktop.active_window": [
             "Requires Automation or Accessibility permission to read the foreground window.",
         ],

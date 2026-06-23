@@ -142,6 +142,31 @@ _SYSTEM_SETTINGS_TARGETS = {
     ),
 }
 
+_PERMISSION_CAPABILITY_TOOLS = {
+    "screen_capture": ("screen.capture",),
+    "active_window": (
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.windows",
+    ),
+    "app_control": (
+        "app.status",
+        "app.open",
+        "app.focus",
+        "desktop.reveal_path",
+    ),
+    "media_control": ("media.apple_music_play", "media.apple_music_control"),
+    "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
+    "browser_control": (
+        "browser.open_url",
+        "browser.current_page",
+        "browser.click",
+        "browser.type_text",
+        "browser.extract_text",
+        "browser.screenshot",
+    ),
+}
+
 
 def screen_capture(target_path: Path) -> dict[str, Any]:
     if _desktop_platform() != "macos":
@@ -201,6 +226,47 @@ def active_window() -> dict[str, Any]:
             "title": title,
         },
         "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def permissions() -> dict[str, Any]:
+    """Return desktop execution permission readiness for observable diagnostics."""
+
+    from apps.shell.yachiyo_agent.desktop_permissions import (
+        desktop_permission_missing_by_capability,
+    )
+
+    try:
+        missing_by_capability = desktop_permission_missing_by_capability(use_cache=True)
+    except Exception as exc:
+        return _error("desktop.permissions", exc)
+
+    clean_missing = _clean_missing_permissions_by_capability(missing_by_capability)
+    missing_targets = _ordered_unique(
+        target for targets in clean_missing.values() for target in targets
+    )
+    affected_tools = _affected_tools_for_missing_permissions(clean_missing)
+    ready = not missing_targets
+    summary = _desktop_permissions_summary(missing_targets, affected_tools)
+    recovery_hints = _permission_recovery_hints_for_targets(missing_targets)
+    return {
+        "ok": True,
+        "action": "desktop.permissions",
+        "summary": summary,
+        "data": {
+            "ready": ready,
+            "missing_permissions": clean_missing,
+            "permission_targets": missing_targets,
+            "affected_tools": affected_tools,
+            "diagnostic_route": "/yachiyo/readiness",
+        },
+        "missing_permissions": missing_targets,
+        "permission_targets": missing_targets,
+        "affected_tools": affected_tools,
+        "recovery_hints": recovery_hints,
+        "diagnostic_route": "/yachiyo/readiness",
+        "permission_error": not ready,
         "fallback_used": False,
     }
 
@@ -1150,6 +1216,67 @@ def _windows_summary(windows_payload: list[dict[str, Any]], app_name: str = "") 
         else ""
     )
     return f"Open windows: {', '.join(visible)}{suffix}"
+
+
+def _clean_missing_permissions_by_capability(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    clean: dict[str, list[str]] = {}
+    for capability, raw_targets in value.items():
+        capability_id = str(capability or "").strip()
+        if not capability_id:
+            continue
+        if isinstance(raw_targets, (list, tuple, set)):
+            targets = _ordered_unique(str(item or "").strip() for item in raw_targets)
+        else:
+            targets = _ordered_unique([str(raw_targets or "").strip()])
+        clean[capability_id] = [target for target in targets if target]
+    return clean
+
+
+def _affected_tools_for_missing_permissions(
+    missing_by_capability: dict[str, list[str]],
+) -> list[str]:
+    tools: list[str] = []
+    for capability_id, missing_targets in missing_by_capability.items():
+        if not missing_targets:
+            continue
+        if capability_id == "desktop_execution":
+            tools.extend(
+                tool
+                for capability_tools in _PERMISSION_CAPABILITY_TOOLS.values()
+                for tool in capability_tools
+            )
+            continue
+        tools.extend(_PERMISSION_CAPABILITY_TOOLS.get(capability_id, ()))
+    return _ordered_unique(tools)
+
+
+def _desktop_permissions_summary(
+    missing_targets: list[str],
+    affected_tools: list[str],
+) -> str:
+    if not missing_targets:
+        return "Desktop execution permissions are ready."
+    targets = ", ".join(missing_targets[:6])
+    target_suffix = "..." if len(missing_targets) > 6 else ""
+    if not affected_tools:
+        return f"Missing desktop permissions: {targets}{target_suffix}"
+    tools = ", ".join(affected_tools[:6])
+    tool_suffix = "..." if len(affected_tools) > 6 else ""
+    return f"Missing desktop permissions: {targets}{target_suffix}. Affected tools: {tools}{tool_suffix}"
+
+
+def _ordered_unique(values: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values or []:
+        clean = str(value or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
 
 
 def _split_status(value: Any) -> tuple[str, str, str]:

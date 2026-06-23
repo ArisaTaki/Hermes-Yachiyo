@@ -185,6 +185,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert create_call["agent_override"]["inherited_tool_policy_id"] == "desktop_execution"
     assert "workspace.read" in allowed_tools
     assert "screen.capture" in allowed_tools
+    assert "desktop.permissions" in allowed_tools
     assert "desktop.running_apps" in allowed_tools
     assert "desktop.windows" in allowed_tools
     assert "app.status" in allowed_tools

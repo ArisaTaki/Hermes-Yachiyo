@@ -27,6 +27,7 @@ DESKTOP_EXECUTION_CAPABILITY_IDS = (
 LOW_RISK_DESKTOP_TOOLS = frozenset(
     {
         "screen.capture",
+        "desktop.permissions",
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
@@ -53,6 +54,7 @@ MEDIUM_RISK_BROWSER_TOOLS = frozenset({"browser.click", "browser.type_text"})
 LOW_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "read_screen",
+        "diagnose_permissions",
         "read_active_window",
         "read_running_apps",
         "read_windows",
@@ -94,6 +96,7 @@ DESKTOP_ACTION_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
 }
 DESKTOP_ACTION_RISK_ORDER = (
     "read_screen",
+    "diagnose_permissions",
     "read_active_window",
     "read_running_apps",
     "read_windows",
@@ -121,6 +124,7 @@ DESKTOP_ACTION_RISK_ORDER = (
 
 DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_screen": ("screen.capture",),
+    "diagnose_permissions": ("desktop.permissions",),
     "read_active_window": ("desktop.active_window",),
     "read_running_apps": ("desktop.running_apps",),
     "read_windows": ("desktop.windows",),
@@ -141,6 +145,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
 
 DESKTOP_ACTION_TITLES: dict[str, str] = {
     "read_screen": "Read screen",
+    "diagnose_permissions": "Diagnose desktop permissions",
     "read_active_window": "Read active window",
     "open_app": "Open app",
     "focus_app": "Focus app",
@@ -164,6 +169,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
 
 DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "read_screen": "Capture or inspect visible desktop state.",
+    "diagnose_permissions": "Read missing desktop permission targets and affected tools.",
     "read_active_window": "Read the foreground application and window title.",
     "open_app": "Launch a local desktop application.",
     "focus_app": "Bring a local desktop application to the foreground.",
@@ -195,6 +201,7 @@ DESKTOP_TOOL_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
 DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "desktop_execution": (
         "screen.capture",
+        "desktop.permissions",
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
@@ -430,17 +437,30 @@ def desktop_execution_capability_snapshots(
         if capability_id != "desktop_execution"
         for tool in child_degraded_tools.get(capability_id, [])
     )
+    child_tools = {
+        tool
+        for capability_id in DESKTOP_EXECUTION_CAPABILITY_IDS
+        if capability_id != "desktop_execution"
+        for tool in DESKTOP_CAPABILITY_TOOLS[capability_id]
+    }
+    root_diagnostic_tools = _ordered_unique(
+        tool
+        for tool in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
+        if tool not in child_tools and supported and tool in registered
+    )
     root_unavailable_tools = _ordered_unique(
         tool
         for tool in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
-        if tool not in root_available_tools and tool not in root_degraded_tools
+        if tool not in root_available_tools
+        and tool not in root_degraded_tools
+        and tool not in root_diagnostic_tools
     )
     capability_models["desktop_execution"] = DesktopExecutionCapabilitySnapshot(
         available=supported and any(child_availability.values()) and not root_missing,
         platform=platform_id,
         missing_permissions=root_missing,
         tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"]),
-        available_tools=[] if root_missing else root_available_tools,
+        available_tools=[] if root_missing else _ordered_unique([*root_diagnostic_tools, *root_available_tools]),
         degraded_tools=[] if root_missing else root_degraded_tools,
         unavailable_tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"])
         if root_missing

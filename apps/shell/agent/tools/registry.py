@@ -122,6 +122,14 @@ def _desktop_active_window(
     return broker.desktop_active_window()
 
 
+def _desktop_permissions(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_permissions()
+
+
 def _desktop_running_apps(
     broker: Any,
     _payload: dict[str, Any],
@@ -256,6 +264,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "terminal.run": _terminal_run,
     "artifact.write": _artifact_write,
     "screen.capture": _screen_capture,
+    "desktop.permissions": _desktop_permissions,
     "desktop.active_window": _desktop_active_window,
     "desktop.running_apps": _desktop_running_apps,
     "desktop.windows": _desktop_windows,
