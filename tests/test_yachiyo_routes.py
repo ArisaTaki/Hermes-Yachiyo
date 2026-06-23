@@ -1937,6 +1937,407 @@ async def test_yachiyo_task_route_executes_minimize_current_window_without_model
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_open_path_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-open-path.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-open-path.db",
+        workspace_dir=tmp_path / "agent-runtime-route-open-path",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-open-path")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("open path public task should not call model")
+        ),
+    )
+
+    def fake_open_path(path: str) -> dict[str, Any]:
+        open_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": f"Opened {path}",
+            "data": {
+                "path": path,
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="打开下载文件夹",
+                conversation_id="chat-main-open-path",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-open-path-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-open-path", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert open_calls == ["~/Downloads"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已打开文件夹：~/Downloads。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["path"] == "~/Downloads"
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["open_target"] == "system_open"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_reveal_path_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-reveal-path.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-reveal-path.db",
+        workspace_dir=tmp_path / "agent-runtime-route-reveal-path",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-reveal-path")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    reveal_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("reveal path public task should not call model")
+        ),
+    )
+
+    def fake_reveal_path(path: str) -> dict[str, Any]:
+        reveal_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.reveal_path",
+            "summary": f"Revealed {path}",
+            "data": {
+                "path": path,
+                "open_target": "finder_reveal",
+                "exists": True,
+                "is_dir": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.reveal_path", fake_reveal_path)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="在 Finder 中显示 ~/Downloads/report.pdf",
+                conversation_id="chat-main-reveal-path",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-reveal-path-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-reveal-path", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert reveal_calls == ["~/Downloads/report.pdf"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已在 Finder 中显示：~/Downloads/report.pdf。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["path"] == "~/Downloads/report.pdf"
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["open_target"] == "finder_reveal"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_desktop_permission_diagnosis_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-permission-diagnosis.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-permission-diagnosis.db",
+        workspace_dir=tmp_path / "agent-runtime-route-permission-diagnosis",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-permission-diagnosis")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    permission_calls: list[bool] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("desktop permission diagnosis public task should not call model")
+        ),
+    )
+
+    def fake_permissions() -> dict[str, Any]:
+        permission_calls.append(True)
+        return {
+            "ok": True,
+            "action": "desktop.permissions",
+            "summary": "Desktop permissions ready",
+            "data": {
+                "permission_targets": [],
+                "affected_tools": [],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.permissions", fake_permissions)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="检查桌面权限",
+                conversation_id="chat-main-permission-diagnosis",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-permission-diagnosis-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-permission-diagnosis", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert permission_calls == [True]
+        assert started["status"] == "completed"
+        assert started["summary"] == "桌面执行权限已就绪。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.permissions"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.permissions"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["permission_targets"] == []
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_screen_capture_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-screen-capture.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-screen-capture.db",
+        workspace_dir=tmp_path / "agent-runtime-route-screen-capture",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-screen-capture")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    capture_targets: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("screen capture public task should not call model")
+        ),
+    )
+
+    def fake_screen_capture(target_path: Path) -> dict[str, Any]:
+        capture_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="当前屏幕是什么",
+                conversation_id="chat-main-screen-capture",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-screen-capture-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-screen-capture", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert capture_targets
+        assert capture_targets[0].endswith("screenshots/current-screen.png")
+        assert started["status"] == "completed"
+        assert started["summary"] == "已截取当前屏幕。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert timeline["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert timeline["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
