@@ -1117,7 +1117,8 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "(?:播放|播一下|放一下)\\s*\\S+",
             "暂停|停止播放|继续播放|恢复播放|接着播放|播放暂停",
             "下一首|上一首|切歌|来点音乐|来些音乐|来点歌|放首歌",
-            "(?:打开|启动|运行|切换到|聚焦)\\s*\\S+",
+            "(?:打开|启动|运行|切换到|切到|切回|回到|聚焦|激活|置前)\\s*\\S+",
+            "focus|activate|switch to|bring up|launch|open",
         ],
     )
 

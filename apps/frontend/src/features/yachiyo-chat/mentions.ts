@@ -275,6 +275,6 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:(?:在\s*(?:Finder|访达)(?:中|里)?显示)|(?:show|reveal).+(?:in|with)\s+finder)/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:打开|open)\s+/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:(?:开着吗|在运行吗|打开了吗)|(?:is|check).*(?:running|open))/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
-  if (/(?:(?:打开|启动|运行|切换到|聚焦)\s*\S+|(?:focus|launch|open)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
+  if (/(?:(?:打开|启动|运行|切换到|切到|切回|回到|聚焦|激活|置前)\s*\S+|(?:focus|activate|switch to|bring up|launch|open)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
   return false;
 }
