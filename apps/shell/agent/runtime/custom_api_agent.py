@@ -35,6 +35,7 @@ class RuntimeCustomApiAgentLoop:
         tool_loop_projection: Any,
         run_tool_requests: Callable[..., None],
         error_type: type[Exception],
+        append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
     ) -> None:
         self._agent_model_config_private = agent_model_config_private
         self._compile_agent_runtime = compile_agent_runtime
@@ -57,6 +58,7 @@ class RuntimeCustomApiAgentLoop:
         self._tool_loop_projection = tool_loop_projection
         self._run_tool_requests = run_tool_requests
         self._error_type = error_type
+        self._append_run_event = append_run_event
 
     def run(
         self,
@@ -94,17 +96,26 @@ class RuntimeCustomApiAgentLoop:
             if planned_tool_request:
                 planned_tool = str(planned_tool_request.get("tool") or "")
                 planned_input = planned_tool_request.get("input") or {}
+                planned_payload = {
+                    "tool": planned_tool,
+                    "status": "planned",
+                    "source": "daily_desktop_intent",
+                    "planning_reason": "clear_daily_desktop_intent",
+                    "input_preview": planned_input,
+                }
                 timeline.append(
                     self._timeline(
                         "agent.desktop.intent_planned",
                         planned_tool,
-                        tool=planned_tool,
-                        status="planned",
-                        source="daily_desktop_intent",
-                        planning_reason="clear_daily_desktop_intent",
-                        input_preview=planned_input,
+                        **planned_payload,
                     )
                 )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.desktop.intent_planned",
+                        planned_payload,
+                    )
                 self._run_tool_requests(
                     [planned_tool_request],
                     allowed_tools,

@@ -722,6 +722,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
     order: list[str] = []
     tool_runs: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
 
     def run_tool_requests(
         tool_requests,
@@ -793,6 +794,13 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
         tool_loop_projection=FakeToolLoopProjection(),
         run_tool_requests=run_tool_requests,
         error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {
+                "run_id": run_id,
+                "event_type": event_type,
+                "payload": payload,
+            }
+        ),
     )
 
     result = loop.run(
@@ -824,6 +832,19 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"query": "超时空辉夜姬"},
     }
+    assert appended_events == [
+        {
+            "run_id": "run-music",
+            "event_type": "agent.desktop.intent_planned",
+            "payload": {
+                "tool": "media.apple_music_play",
+                "status": "planned",
+                "source": "daily_desktop_intent",
+                "planning_reason": "clear_daily_desktop_intent",
+                "input_preview": {"query": "超时空辉夜姬"},
+            },
+        }
+    ]
 
 
 def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
@@ -837,6 +858,7 @@ def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
         assert agent_runtime.RuntimeCustomApiAgentLoop is RuntimeCustomApiAgentLoop
         assert isinstance(service.custom_api_agent_loop, RuntimeCustomApiAgentLoop)
         assert service.custom_api_agent_loop._tool_schemas is RuntimeToolOperations.model_tool_schemas
+        assert getattr(service.custom_api_agent_loop._append_run_event, "__self__", None) is service
         assert getattr(service.custom_api_agent_loop._run_budget, "__self__", None) is not service
         assert getattr(service.custom_api_agent_loop._check_context_budget, "__self__", None) is not service
         assert getattr(service.custom_api_agent_loop._limit_model_output, "__self__", None) is not service

@@ -162,5 +162,6 @@ def build_runtime_tooling_stack(
             tool_loop_projection=tooling.tool_loop_projection,
             run_tool_requests=run_tool_requests,
             error_type=AgentRuntimeError,
+            append_run_event=append_run_event,
         ),
     )
