@@ -7,6 +7,33 @@ export type RuntimeToolRecoveryAction = {
   tool: string;
 };
 
+export function runtimeToolRecoveryActionPrompt(action: RuntimeToolRecoveryAction): string {
+  const tool = String(action.tool || '').trim();
+  const input = objectValue(action.input);
+  const appName = String(input.app_name || '').trim();
+  const prompt = String(action.prompt || '').trim();
+  if (isExecutableRecoveryPrompt(prompt)) return prompt;
+  const label = String(action.label || '').trim();
+  if (isExecutableRecoveryPrompt(label)) return label;
+  if (tool === 'app.open' && appName) return `打开${appName}`;
+  return prompt || label || tool;
+}
+
+export function runtimeToolRecoveryActionTaskMetadata(
+  action: RuntimeToolRecoveryAction,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    daily_desktop_intent: true,
+    desktop_permission_recovery: true,
+    recovery_input: action.input,
+    recovery_permission_target: action.permission_target,
+    recovery_risk_level: action.risk_level || '',
+    recovery_tool: action.tool,
+    ...extra,
+  };
+}
+
 export function runtimeToolRecoveryActionsFromRecords(
   sources: Array<Record<string, unknown>>,
 ): RuntimeToolRecoveryAction[] {
@@ -36,11 +63,15 @@ export function runtimeToolRecoveryActionsFromRecord(
       input,
       label,
       permission_target: String(action.permission_target || '').trim(),
-      prompt: label || `打开 ${appName}`,
+      prompt: String(action.prompt || label || `打开${appName}`).trim(),
       risk_level: String(action.risk_level || '').trim() || undefined,
       tool,
     }];
   });
+}
+
+function isExecutableRecoveryPrompt(value: string): boolean {
+  return /^(?:打开|启动|前往|进入|显示|切到|切换到)\s*/.test(value.trim());
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

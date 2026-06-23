@@ -118,6 +118,10 @@ import {
   responsiveChatSidebarMaxWidth,
 } from '../features/yachiyo-chat/layoutState';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
+import {
+  runtimeToolRecoveryActionPrompt,
+  runtimeToolRecoveryActionTaskMetadata,
+} from '../features/runtime-shared/toolRecoveryActions';
 import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
@@ -433,7 +437,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     task: AgentTaskSnapshot,
     action: TaskPermissionRecoveryAction,
   ) => {
-    const prompt = String(action.prompt || action.label || '').trim();
+    const prompt = runtimeToolRecoveryActionPrompt(action);
     if (!prompt || approvalActionMessageId) return;
     const busyId = `task:${task.task_id || 'unknown'}:recovery:${action.permission_target || action.tool}`;
     setApprovalActionMessageId(busyId);
@@ -445,14 +449,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         prompt,
         runnableId: null,
         runnableKind: 'main',
-        metadata: {
-          daily_desktop_intent: true,
-          desktop_permission_recovery: true,
-          recovery_input: action.input,
-          recovery_permission_target: action.permission_target,
-          recovery_tool: action.tool,
+        metadata: runtimeToolRecoveryActionTaskMetadata(action, {
           source_task_id: task.task_id,
-        },
+        }),
       });
       if (!handled) setStatus('权限恢复动作提交失败');
     } finally {

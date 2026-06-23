@@ -21,6 +21,11 @@ import {
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
+import {
+  runtimeToolRecoveryActionPrompt,
+  runtimeToolRecoveryActionTaskMetadata,
+  type RuntimeToolRecoveryAction,
+} from '../features/runtime-shared/toolRecoveryActions';
 import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-shared/studioLinks';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
@@ -89,6 +94,14 @@ type ActivityEvent = {
   created_at?: string;
   metadata?: Record<string, unknown>;
 };
+type LauncherModeStartTaskOptions = {
+  metadata?: Record<string, unknown>;
+  title?: string | null;
+};
+type LauncherModeStartTask = (
+  prompt: string,
+  options?: LauncherModeStartTaskOptions,
+) => Promise<AgentTaskSnapshot | null>;
 
 type ActivityPayload = {
   ok?: boolean;
@@ -1354,19 +1367,23 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     return nextTask;
   }, [refresh]);
 
-  const startAgentTask = useCallback(async (prompt: string) => {
+  const startAgentTask = useCallback(async (
+    prompt: string,
+    options: LauncherModeStartTaskOptions = {},
+  ) => {
     const text = prompt.trim();
     if (!text) return null;
     const task = await startYachiyoTask({
       prompt: text,
       agent_id: LAUNCHER_MAIN_AGENT_ID,
       conversation_id: launcherTaskConversationId(mode, data),
-      title: launcherTaskTitle(text),
+      title: options.title || launcherTaskTitle(text),
       metadata: {
         source: 'launcher',
         launcher_mode: mode,
         runnable_kind: 'main',
         launcher_surface: 'mode_page',
+        ...(options.metadata || {}),
       },
     });
     setPublicAgentTask(task);
@@ -1388,6 +1405,23 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
 
 function launcherPayloadHasActiveTask(data: LauncherPayload | null) {
   return ['queued', 'running', 'waiting_approval'].includes(String(data?.chat?.agent_task?.status || ''));
+}
+
+function runLauncherModeRecoveryAction(
+  startAgentTask: LauncherModeStartTask,
+  task: AgentTaskSnapshot,
+  action: RuntimeToolRecoveryAction,
+  surface: string,
+) {
+  const prompt = runtimeToolRecoveryActionPrompt(action);
+  return startAgentTask(prompt, {
+    title: action.label || prompt,
+    metadata: runtimeToolRecoveryActionTaskMetadata(action, {
+      launcher_recovery: true,
+      launcher_recovery_surface: surface,
+      source_task_id: task.task_id || '',
+    }),
+  });
 }
 
 export function BubbleModePage() {
@@ -1441,7 +1475,7 @@ export function BubbleModePage() {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
+            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(startAgentTask, task, action, 'bubble-mode-page')}
             task={agentTask}
             testIdPrefix="bubble-mode"
             variant="panel"
@@ -1522,7 +1556,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
+            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(startAgentTask, task, action, 'live2d-mode-page')}
             task={agentTask}
             testIdPrefix="live2d-mode"
             variant="panel"
@@ -1551,7 +1585,7 @@ function LauncherModeTaskComposer({
   startAgentTask,
 }: {
   mode: 'bubble' | 'live2d';
-  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
+  startAgentTask: LauncherModeStartTask;
 }) {
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);

@@ -25,6 +25,11 @@ import {
 } from '../features/yachiyo-chat/launcherTasks';
 import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
+import {
+  runtimeToolRecoveryActionPrompt,
+  runtimeToolRecoveryActionTaskMetadata,
+  type RuntimeToolRecoveryAction,
+} from '../features/runtime-shared/toolRecoveryActions';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -68,6 +73,14 @@ type LauncherQuickMessageResult = {
   ok?: boolean;
   agent_task?: AgentTaskSnapshot | null;
 };
+type LauncherStartAgentTaskOptions = {
+  metadata?: Record<string, unknown>;
+  title?: string | null;
+};
+type LauncherStartAgentTask = (
+  prompt: string,
+  options?: LauncherStartAgentTaskOptions,
+) => Promise<AgentTaskSnapshot | null>;
 
 const LAUNCHER_SUMMARY_TEST_IDS: Record<LauncherMode, {
   latestReply: string;
@@ -235,19 +248,23 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     return () => window.clearInterval(timer);
   }, [refreshDesktopReadiness]);
 
-  const startAgentTask = useCallback(async (prompt: string) => {
+  const startAgentTask = useCallback(async (
+    prompt: string,
+    options: LauncherStartAgentTaskOptions = {},
+  ) => {
     const text = prompt.trim();
     if (!text) return null;
     const task = await startYachiyoTask({
       prompt: text,
       agent_id: LAUNCHER_MAIN_AGENT_ID,
       conversation_id: launcherTaskConversationId(mode, data),
-      title: launcherTaskTitle(text),
+      title: options.title || launcherTaskTitle(text),
       metadata: {
         source: 'launcher',
         launcher_mode: mode,
         runnable_kind: 'main',
         launcher_surface: 'desktop_launcher',
+        ...(options.metadata || {}),
       },
     });
     setPublicAgentTask(task);
@@ -339,6 +356,23 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
   void openLauncherMenu(mode);
 }
 
+function runLauncherRecoveryAction(
+  startAgentTask: LauncherStartAgentTask,
+  task: AgentTaskSnapshot,
+  action: RuntimeToolRecoveryAction,
+  surface: string,
+) {
+  const prompt = runtimeToolRecoveryActionPrompt(action);
+  return startAgentTask(prompt, {
+    title: action.label || prompt,
+    metadata: runtimeToolRecoveryActionTaskMetadata(action, {
+      launcher_recovery: true,
+      launcher_recovery_surface: surface,
+      source_task_id: task.task_id || '',
+    }),
+  });
+}
+
 function BubbleLauncher({
   agentTask: publicAgentTask,
   desktopReadinessNotice,
@@ -358,7 +392,7 @@ function BubbleLauncher({
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
-  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
+  startAgentTask: LauncherStartAgentTask;
 }) {
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
@@ -577,7 +611,7 @@ function BubbleLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
-        onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
+        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(startAgentTask, task, action, 'bubble')}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice
@@ -711,7 +745,7 @@ function Live2DLauncher({
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
-  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
+  startAgentTask: LauncherStartAgentTask;
 }) {
   const launcher = data?.launcher || {};
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1174,7 +1208,7 @@ function Live2DLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
-        onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
+        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(startAgentTask, task, action, 'live2d')}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice

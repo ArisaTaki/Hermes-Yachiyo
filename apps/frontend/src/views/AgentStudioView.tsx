@@ -56,7 +56,11 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
-import type { RuntimeToolRecoveryAction } from '../features/runtime-shared/toolRecoveryActions';
+import {
+  runtimeToolRecoveryActionPrompt,
+  runtimeToolRecoveryActionTaskMetadata,
+  type RuntimeToolRecoveryAction,
+} from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
 import type { ToolCallSnapshot } from '../features/yachiyo-studio/types';
 import { openAppView } from '../lib/bridge';
@@ -204,19 +208,18 @@ export function AgentStudioView() {
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
   ) => {
-    const prompt = action.prompt || action.label;
+    const prompt = runtimeToolRecoveryActionPrompt(action);
     if (!prompt) throw new Error('恢复动作缺少提示词');
     const task = await startYachiyoTask({
       prompt,
       title: action.label || prompt,
-      metadata: {
+      metadata: runtimeToolRecoveryActionTaskMetadata(action, {
         permission_target: action.permission_target,
-        recovery_tool: action.tool,
         source: 'agent_studio_tool_recovery',
         source_run_id: toolCall.run_id || '',
         source_tool_call_id: toolCall.tool_call_id || '',
         source_tool_name: toolCall.tool_name || '',
-      },
+      }),
     });
     return {
       statusMessage: `已创建恢复任务：${task.title || prompt}`,
