@@ -3485,6 +3485,99 @@ async def test_yachiyo_task_route_executes_browser_current_page_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_projects_browser_cdp_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-browser-cdp-recovery.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-browser-cdp-recovery.db",
+        workspace_dir=tmp_path / "agent-runtime-route-browser-cdp-recovery",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-browser-cdp-recovery")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser cdp recovery public task should not call model")
+        ),
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.browser._configured_browser_cdp_url", lambda: "")
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="当前网页是什么",
+                conversation_id="chat-main-browser-cdp-recovery",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-browser-cdp-recovery-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        tool_call = started["tool_calls"][-1]
+        recovery_event = next(
+            event
+            for event in events["events"]
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+
+        assert started["status"] == "completed"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert "桌面操作未完成：chrome_cdp_unavailable" in started["summary"]
+        assert "缺少权限：chrome_cdp" in started["summary"]
+        assert "可直接打开：打开 Google Chrome。" in started["summary"]
+        assert tool_call["tool_name"] == "browser.current_page"
+        assert tool_call["status"] == "failed"
+        assert tool_call["output_preview"]["permission_targets"] == ["chrome_cdp"]
+        assert tool_call["output_preview"]["recovery_actions"] == [
+            {
+                "label": "打开 Google Chrome",
+                "tool": "app.open",
+                "input": {"app_name": "Google Chrome"},
+                "permission_target": "chrome_cdp",
+                "risk_level": "low",
+            }
+        ]
+        assert timeline["tool_calls"][-1]["tool_name"] == "browser.current_page"
+        assert timeline["tool_calls"][-1]["output_preview"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert recovery_event["payload"]["permission_targets"] == ["chrome_cdp"]
+        assert recovery_event["payload"]["affected_tools"] == ["browser.current_page"]
+        assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_browser_extract_text_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
