@@ -1101,6 +1101,24 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setProcessingCount((current) => Math.max(1, current || 1));
     stickToBottomRef.current = true;
     try {
+      const retryText = messageText(message);
+      const retryDailyDesktopTaskPrompt = !message.attachments?.length
+        ? yachiyoDailyDesktopTaskPrompt(retryText)
+        : null;
+      if (retryDailyDesktopTaskPrompt) {
+        const handled = await startPublicYachiyoTask({
+          clientMessageId: createClientMessageId(),
+          conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+          prompt: retryDailyDesktopTaskPrompt,
+          runnableId: null,
+          runnableKind: 'main',
+          metadata: {
+            daily_desktop_intent: true,
+            retry_of_message_id: message.id,
+          },
+        });
+        if (handled) return;
+      }
       const result = await retryLegacyChatMessage(message.id);
       if (result.ok === false) throw new Error(result.error || '重试失败');
       if (await handleLegacyChatRunnableResult(result)) return;

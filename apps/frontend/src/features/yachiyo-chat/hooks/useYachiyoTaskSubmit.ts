@@ -4,6 +4,8 @@ import { startYachiyoTask } from '../api';
 import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../taskStatusText';
 import type { AgentTaskSnapshot } from '../types';
 
+const MAIN_CHAT_AGENT_ID = 'builtin:yachiyo-main';
+
 type StartPublicYachiyoTaskRequest = {
   clientMessageId: string;
   conversationId: string | null;
@@ -47,14 +49,14 @@ export function useYachiyoTaskSubmit({
   }: StartPublicYachiyoTaskRequest) => {
     try {
       const runnableLabel = runnableKind === 'workflow' ? 'Workflow' : runnableKind === 'agent' ? 'Agent' : '八千代';
-      const cleanRunnableId = String(runnableId || '').trim();
+      const cleanRunnableId = String(runnableId || (runnableKind === 'main' ? MAIN_CHAT_AGENT_ID : '')).trim();
       const task = await startYachiyoTask({
         prompt,
         conversation_id: conversationId,
         ...(runnableKind === 'workflow' && cleanRunnableId
           ? { workflow_id: cleanRunnableId }
           : {}),
-        ...(runnableKind === 'agent' && cleanRunnableId
+        ...((runnableKind === 'agent' || runnableKind === 'main') && cleanRunnableId
           ? { agent_id: cleanRunnableId }
           : {}),
         metadata: {
