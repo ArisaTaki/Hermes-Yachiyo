@@ -42,6 +42,14 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
   }
+  if (name === 'agent.desktop.intent_approval_required') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `等待审批 · ${toolLabel}` : '等待审批桌面动作';
+  }
+  if (name === 'agent.desktop.intent_completed') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
+  }
   if (name === 'agent.desktop.intent_unavailable') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
@@ -133,6 +141,8 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
   if (name === 'agent.desktop.intent_planned') return 'tool';
+  if (name === 'agent.desktop.intent_approval_required') return 'approval';
+  if (name === 'agent.desktop.intent_completed') return 'ready';
   if (name === 'agent.desktop.intent_unavailable') return 'danger';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';

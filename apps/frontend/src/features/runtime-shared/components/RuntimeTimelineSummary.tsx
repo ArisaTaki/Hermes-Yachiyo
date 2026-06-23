@@ -59,6 +59,14 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
   }
+  if (type === 'agent.desktop.intent_approval_required') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `等待审批 · ${toolLabel}` : '等待审批桌面动作';
+  }
+  if (type === 'agent.desktop.intent_completed') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
+  }
   if (type === 'agent.desktop.intent_unavailable') {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
