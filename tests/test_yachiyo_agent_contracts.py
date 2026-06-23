@@ -420,6 +420,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -540,6 +541,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.hide_app") == "low"
     assert desktop_tool_risk_level("desktop.minimize_window") == "low"
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
+    assert desktop_tool_risk_level("desktop.safe_type_text") == "low"
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
@@ -562,6 +564,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_hide_app") == "low"
     assert desktop_action_risk_level("foreground_minimize_window") == "low"
     assert desktop_action_risk_level("foreground_safe_shortcut") == "low"
+    assert desktop_action_risk_level("foreground_safe_type_text") == "low"
     assert desktop_action_risk_level("quit_app") == "medium"
     assert desktop_action_risk_level("foreground_close_window") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
@@ -594,7 +597,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "control_system_volume",
         "write_clipboard",
         "foreground_safe_shortcut",
-        "foreground_hide_app",
+        "foreground_safe_type_text",
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
@@ -628,6 +631,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
     assert catalog["foreground_safe_shortcut"].risk_level == "low"
     assert catalog["foreground_safe_shortcut"].tools == ["desktop.safe_shortcut"]
+    assert catalog["foreground_safe_type_text"].risk_level == "low"
+    assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
     assert catalog["foreground_hide_app"].risk_level == "low"
     assert catalog["foreground_hide_app"].tools == ["desktop.hide_app"]
     assert catalog["foreground_minimize_window"].risk_level == "low"
@@ -737,6 +742,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
     safe_shortcut = tools["desktop.safe_shortcut"]
+    safe_type_text = tools["desktop.safe_type_text"]
     minimize_window = tools["desktop.minimize_window"]
     close_window = tools["desktop.close_window"]
     browser = tools["browser.open_url"]
@@ -782,6 +788,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_shortcut.input_schema["required"] == ["action"]
     assert "copy" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted common shortcut" in note for note in safe_shortcut.fallback_notes)
+    assert safe_type_text.capability_id == "foreground_input"
+    assert safe_type_text.risk_level == "low"
+    assert safe_type_text.input_schema["required"] == ["text"]
+    assert any("explicitly provided by the user" in note for note in safe_type_text.fallback_notes)
     assert minimize_window.capability_id == "foreground_input"
     assert minimize_window.risk_level == "low"
     assert minimize_window.input_schema["properties"] == {}

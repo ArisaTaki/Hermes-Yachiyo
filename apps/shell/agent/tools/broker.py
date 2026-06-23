@@ -446,6 +446,12 @@ class ToolBroker:
             lambda: desktop.desktop_safe_shortcut(action),
         )
 
+    def desktop_safe_type_text(self, text: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.safe_type_text",
+            lambda: desktop.desktop_safe_type_text(text),
+        )
+
     def desktop_hide_app(self) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hide_app",

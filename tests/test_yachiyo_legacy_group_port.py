@@ -192,11 +192,14 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "media.apple_music_play" in allowed_tools
     assert "media.apple_music_control" in allowed_tools
     assert "desktop.reveal_path" in allowed_tools
+    assert "desktop.safe_type_text" in allowed_tools
     assert "desktop.type_text" in allowed_tools
     assert "desktop.click" in allowed_tools
     assert "browser.click" in allowed_tools
     assert "terminal.run" not in allowed_tools
     assert inherited_policy["approval_required"] == {
+        "app.quit": True,
+        "desktop.close_window": True,
         "desktop.hotkey": True,
         "desktop.type_text": True,
         "desktop.click": True,

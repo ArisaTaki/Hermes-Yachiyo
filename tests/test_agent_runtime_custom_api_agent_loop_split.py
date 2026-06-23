@@ -608,6 +608,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1239,6 +1240,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"key": "c", "modifiers": ["command"]},
     }
     assert daily_desktop_intent_tool_request("输入 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("输入 你好八千代", ["desktop.type_text"]) == {
         "protocol": "json_fallback",
         "tool": "desktop.type_text",
         "input": {"text": "你好八千代"},
@@ -1957,6 +1963,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"shortcut_action": "copy", "key": "c", "modifiers": ["command"]},
         },
     )
+    safe_type_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_type_text",
+        {"text": "你好八千代"},
+        {
+            "ok": True,
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": 5, "explicit_user_text": True},
+        },
+    )
     app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.show",
         {"app_name": "Slack"},
@@ -2015,6 +2030,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert safe_shortcut == "已复制选中内容。"
+    assert safe_type_text == "已向前台输入文字（5 个字符）。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"

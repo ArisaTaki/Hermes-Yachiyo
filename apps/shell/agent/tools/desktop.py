@@ -253,6 +253,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -1720,6 +1721,33 @@ def desktop_close_window() -> dict[str, Any]:
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
+    return _send_desktop_text(
+        "desktop.type_text",
+        text,
+        summary="Typed text into the foreground app",
+    )
+
+
+def desktop_safe_type_text(text: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.safe_type_text")
+    payload = _send_desktop_text(
+        "desktop.safe_type_text",
+        text,
+        summary="Typed user-provided text into the foreground app",
+    )
+    if payload.get("ok"):
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        payload["data"] = {**data, "explicit_user_text": True}
+    return payload
+
+
+def _send_desktop_text(
+    action_name: str,
+    text: str,
+    *,
+    summary: str,
+) -> dict[str, Any]:
     clean_text = _clean_required(text, "text")
     result = _run_osascript(
         """
@@ -1733,13 +1761,13 @@ def desktop_type_text(text: str) -> dict[str, Any]:
     )
     if not result["ok"]:
         return _with_permission_metadata(
-            "desktop.type_text",
-            {**result, "action": "desktop.type_text", "summary": "desktop.type_text failed"},
+            action_name,
+            {**result, "action": action_name, "summary": f"{action_name} failed"},
         )
     return {
         "ok": True,
-        "action": "desktop.type_text",
-        "summary": "Typed text into the foreground app",
+        "action": action_name,
+        "summary": summary,
         "data": {"character_count": len(clean_text)},
         "permission_error": False,
         "fallback_used": False,
@@ -2373,6 +2401,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
+        "desktop.safe_type_text": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
@@ -2398,6 +2427,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
+        "desktop.safe_type_text": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],

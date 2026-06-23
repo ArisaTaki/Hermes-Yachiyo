@@ -317,6 +317,8 @@ function runtimeToolActiveSummaryLabel(name: string, status: string): string {
   if (tool === 'app.focus') return '正在聚焦应用';
   if (tool === 'media.apple_music_play') return '正在打开 Music';
   if (tool === 'media.apple_music_control') return '正在控制 Music';
+  if (tool === 'desktop.safe_shortcut') return '正在执行快捷动作';
+  if (tool === 'desktop.safe_type_text') return '正在输入前台文字';
   if (tool === 'desktop.hotkey') return '正在发送快捷键';
   if (tool === 'desktop.type_text') return '正在输入前台文字';
   if (tool === 'browser.open_url') return '正在打开网页';

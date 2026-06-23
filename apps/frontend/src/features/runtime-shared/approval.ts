@@ -119,6 +119,8 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'app.focus') return '聚焦应用';
   if (tool === 'media.apple_music_play') return '播放 Apple Music';
   if (tool === 'media.apple_music_control') return '控制 Apple Music';
+  if (tool === 'desktop.safe_shortcut') return '执行快捷动作';
+  if (tool === 'desktop.safe_type_text') return '输入前台文字';
   if (tool === 'desktop.hotkey') return '发送快捷键';
   if (tool === 'desktop.type_text') return '输入前台文字';
   if (tool === 'desktop.click') return '点击前台界面';
@@ -148,6 +150,8 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'app.focus'
     || tool === 'media.apple_music_play'
     || tool === 'media.apple_music_control'
+    || tool === 'desktop.safe_shortcut'
+    || tool === 'desktop.safe_type_text'
     || tool === 'desktop.hotkey'
     || tool === 'desktop.type_text'
     || tool === 'desktop.click'

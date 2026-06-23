@@ -344,6 +344,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.safe_shortcut": [
             "Requires Accessibility permission and only accepts whitelisted common shortcut actions.",
         ],
+        "desktop.safe_type_text": [
+            "Requires Accessibility permission and only types text explicitly provided by the user.",
+        ],
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
         ],

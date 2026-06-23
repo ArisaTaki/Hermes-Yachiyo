@@ -269,6 +269,14 @@ def _desktop_type_text(
     return broker.desktop_type_text(str(payload.get("text") or ""))
 
 
+def _desktop_safe_type_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_safe_type_text(str(payload.get("text") or ""))
+
+
 def _desktop_click(
     broker: Any,
     payload: dict[str, Any],
@@ -366,6 +374,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,
+    "desktop.safe_type_text": _desktop_safe_type_text,
     "desktop.type_text": _desktop_type_text,
     "desktop.click": _desktop_click,
     "browser.open_url": _browser_open_url,

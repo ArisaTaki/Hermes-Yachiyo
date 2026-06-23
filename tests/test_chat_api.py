@@ -593,7 +593,7 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
         store.close()
 
 
-def test_send_message_requires_approval_for_direct_type_text_task(tmp_path, monkeypatch):
+def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
@@ -608,38 +608,48 @@ def test_send_message_requires_approval_for_direct_type_text_task(tmp_path, monk
     monkeypatch.setattr(
         "apps.shell.agent_runtime.openai_compatible_chat_message",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("direct foreground input task should not call model")
+            AssertionError("direct safe foreground input task should not call model")
         ),
     )
 
-    def fake_type_text(text: str) -> dict:
+    def fake_safe_type_text(text: str) -> dict:
         typed_texts.append(text)
         return {
             "ok": True,
-            "action": "desktop.type_text",
-            "summary": "Typed text",
-            "data": {"text": text},
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_type_text", fake_type_text)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
     try:
         result = api.send_message("输入 你好八千代")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
         assert result["ok"] is True
-        assert result["status"] == "waiting_approval"
-        assert result["agent_task"]["status"] == "waiting_approval"
-        assert result["agent_task"]["needs_user_action"] is True
-        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.type_text"
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
         assert task is not None
-        assert task.status == TaskStatus.RUNNING
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已向前台输入文字（5 个字符）。"
         assert assistant is not None
-        assert assistant.status == MessageStatus.PROCESSING
-        assert run["status"] == "approval_required"
-        assert run["pending_approval"]["tool"] == "desktop.type_text"
-        assert typed_texts == []
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已向前台输入文字（5 个字符）。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert typed_texts == ["你好八千代"]
     finally:
         service.close()
         store.close()

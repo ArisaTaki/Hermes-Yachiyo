@@ -294,6 +294,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if safe_shortcut_action:
         candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
+    safe_type_text = _desktop_safe_type_text(text)
+    if safe_type_text:
+        candidates.append(_request("desktop.safe_type_text", {"text": safe_type_text}))
+
     hotkey = _desktop_hotkey(text)
     if hotkey:
         candidates.append(_request("desktop.hotkey", hotkey))
@@ -1527,6 +1531,10 @@ def _desktop_type_text(text: str) -> str:
         if typed_text:
             return typed_text
     return ""
+
+
+def _desktop_safe_type_text(text: str) -> str:
+    return _desktop_type_text(text)
 
 
 def _strip_typed_text(value: str) -> str:

@@ -768,6 +768,40 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    typed_text: list[str] = []
+
+    def fake_safe_type_text(text: str) -> dict:
+        typed_text.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "输入 你好八千代",
+    )
+
+    assert typed_text == ["你好八千代"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已向前台输入文字（5 个字符）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,
@@ -978,7 +1012,6 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
     try:
         cases = [
             ("关闭当前窗口", "desktop.close_window", {}),
-            ("输入 你好八千代", "desktop.type_text", {"text": "你好八千代"}),
             ("点击 120, 240", "desktop.click", {"x": 120, "y": 240, "click_count": 1}),
         ]
         for text, tool_name, input_preview in cases:

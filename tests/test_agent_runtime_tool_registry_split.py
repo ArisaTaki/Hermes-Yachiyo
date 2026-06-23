@@ -285,6 +285,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "system_volume",
         "clipboard_write",
         "desktop_safe_shortcut",
+        "desktop_safe_type_text",
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
@@ -373,6 +374,13 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
+
+
+def test_desktop_safe_type_text_schema_requires_user_text() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.safe_type_text", {"text": "hello"})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_type_text 参数 text 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_type_text", {"text": ""})
 
 
 def test_app_minimize_schema_requires_app_name() -> None:
@@ -562,6 +570,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_safe_type_text",
+        lambda text: calls.append(("safe_type_text", text)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_hotkey",
         lambda key, *, modifiers=None: calls.append(("hotkey", key, modifiers))
         or {"ok": True},
@@ -654,6 +667,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.safe_type_text",
+        {"text": "hello"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -712,6 +730,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
         ("safe_shortcut", "copy"),
+        ("safe_type_text", "hello"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
@@ -1738,6 +1757,31 @@ def test_desktop_type_text_permission_failure_returns_accessibility_target(monke
             "in macOS System Settings > Privacy & Security > Accessibility."
         )
     ]
+
+
+def test_desktop_safe_type_text_uses_system_events_with_explicit_text(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="typed\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_type_text("hello")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_type_text",
+        "summary": "Typed user-provided text into the foreground app",
+        "data": {"character_count": 5, "explicit_user_text": True},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert calls[0][0][-1] == "hello"
+    assert "keystroke textToType" in calls[0][0][2]
 
 
 def test_desktop_click_uses_system_events_with_coordinates(monkeypatch) -> None:

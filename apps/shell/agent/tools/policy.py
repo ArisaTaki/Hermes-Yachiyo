@@ -46,6 +46,7 @@ TOOL_FUNCTION_NAMES = {
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
     "desktop.safe_shortcut": "desktop_safe_shortcut",
+    "desktop.safe_type_text": "desktop_safe_type_text",
     "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
@@ -94,6 +95,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "system.volume",
     "clipboard.write",
     "desktop.safe_shortcut",
+    "desktop.safe_type_text",
     "desktop.hide_app",
     "desktop.minimize_window",
 )
@@ -329,6 +331,10 @@ class ToolDescriptor:
                     "desktop.safe_shortcut 参数 action 必须是 "
                     + "、".join(SAFE_SHORTCUT_ACTIONS)
                 )
+        if self.name == "desktop.safe_type_text" and not str(
+            payload.get("text") or ""
+        ).strip():
+            raise AgentRuntimeError("desktop.safe_type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.click":
@@ -841,6 +847,16 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("action",),
+    ),
+    "desktop.safe_type_text": ToolDescriptor(
+        name="desktop.safe_type_text",
+        description=(
+            "Type text that the user explicitly provided in the current daily desktop request "
+            "into the foreground app. This is a low-risk direct-action path for Chat/Bubble/Live2D; "
+            "use desktop.type_text for model-selected or multi-step typing."
+        ),
+        properties={"text": {"type": "string", "description": "User-provided text to type."}},
+        required=("text",),
     ),
     "desktop.minimize_window": ToolDescriptor(
         name="desktop.minimize_window",
