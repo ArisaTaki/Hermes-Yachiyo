@@ -435,7 +435,7 @@ def _looks_like_search_request(text: str) -> bool:
             r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*",
             text,
         )
-        or re.search(r"^(?:search|google|look up)\s+", lowered)
+        or re.search(r"^(?:search|google|look up)\b\s+", lowered)
     )
 
 
@@ -444,7 +444,7 @@ def _browser_search_url(text: str) -> str:
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
         r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
-        r"(?:search|google|look up)\s+(?:for\s+)?(?P<query>[^.!?]+)",
+        r"\b(?:search|google|look up)\b\s+(?:for\s+)?(?P<query>[^.!?]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -912,7 +912,9 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+)",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*"
         rf"(?P<combo>{hotkey_part})",
-        rf"(?:press|send|trigger)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"(?:press|send)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
+        rf"trigger\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
     )
     for pattern in patterns:

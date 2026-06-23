@@ -985,6 +985,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_candidates("trigger provider failure") == []
+    assert daily_desktop_intent_candidates("Turn the research notes into an implementation plan.") == []
     assert daily_desktop_intent_candidates("为什么不能控制桌面？") == [
         {
             "protocol": "json_fallback",

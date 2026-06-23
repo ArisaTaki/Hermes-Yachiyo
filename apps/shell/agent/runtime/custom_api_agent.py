@@ -121,12 +121,6 @@ class RuntimeCustomApiAgentLoop:
         run_id: str = "",
         budget: Any | None = None,
     ) -> str:
-        model_config = self._agent_model_config_private(agent)
-        base_url = str(model_config.get("base_url") or "").rstrip("/")
-        model = str(model_config.get("model") or "").strip()
-        api_key = str(model_config.get("api_key") or "").strip()
-        if not base_url or not model or not api_key:
-            raise self._error_type("Agent 模型 Profile 缺少 base_url、model 或 API Key")
         runtime = self._compile_agent_runtime(agent)
         allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
         default_messages = messages is None
@@ -136,7 +130,6 @@ class RuntimeCustomApiAgentLoop:
             self._ensure_runtime_system_message(messages, allowed_tools)
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
-        tools = self._tool_schemas(allowed_tools)
         start_iteration = self._normalize_tool_iteration(start_iteration)
         if not default_messages and start_iteration == 0:
             resumed_result = self._direct_existing_daily_desktop_result(
@@ -214,6 +207,13 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if unavailable_summary:
                         return unavailable_summary
+        model_config = self._agent_model_config_private(agent)
+        base_url = str(model_config.get("base_url") or "").rstrip("/")
+        model = str(model_config.get("model") or "").strip()
+        api_key = str(model_config.get("api_key") or "").strip()
+        if not base_url or not model or not api_key:
+            raise self._error_type("Agent 模型 Profile 缺少 base_url、model 或 API Key")
+        tools = self._tool_schemas(allowed_tools)
         for iteration in range(start_iteration, self._max_tool_iterations):
             self._check_context_budget(budget, messages)
             budget.claim_model_call()

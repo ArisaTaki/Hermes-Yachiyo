@@ -13,6 +13,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1608,6 +1609,8 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
                 "tool": "terminal.run",
                 "input_preview": {"command": "printf next"},
                 "requested_at": "now",
+                "risk_level": "high",
+                "policy_reason": "terminal.run 可执行本地命令，按工具策略必须人工确认。",
             },
         ),
         ("agent_run_failed", "agent.run.failed", {"error": "safe failure"}),
@@ -3191,6 +3194,7 @@ def test_workflow_approval_pause_projection_builds_private_and_public_payloads()
         "requested_at": "2026-06-12T00:00:00+00:00",
         "workflow_node_id": "gate",
         "workflow_node_label": "Human Gate",
+        "policy_reason": "Workflow 审批节点要求人工确认：Review output",
     }
     assert "workflow_context" not in projection.public_pending_approval()
     assert event == {
@@ -3463,6 +3467,12 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
     assert pending["workflow_node_id"] == "gate"
     assert pending["workflow_node_label"] == "Human Gate"
     assert "workflow_context" not in pending
+    public_pending = {
+        **pending,
+        "policy_reason": (
+            "Workflow 审批节点要求人工确认：Review child output before continuing."
+        ),
+    }
     assert timeline == [
         {
             "event": "workflow.node.approval_required",
@@ -3472,7 +3482,7 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
             "workflow_node_label": "Human Gate",
             "workflow_node_approval_criteria": "Review child output before continuing.",
             "status": "approval_required",
-            "pending_approval": pending,
+            "pending_approval": public_pending,
         }
     ]
     assert engine.events == [
@@ -3485,7 +3495,7 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
                 "workflow_node_label": "Human Gate",
                 "workflow_node_approval_criteria": "Review child output before continuing.",
                 "status": "approval_required",
-                "pending_approval": pending,
+                "pending_approval": public_pending,
             },
         )
     ]
@@ -4272,6 +4282,166 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
             "task.completed",
             "run.completed",
         ]
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    control_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("daily desktop intent should execute before model call"),
+    )
+
+    def fake_music_control(action: str) -> dict[str, Any]:
+        control_calls.append(action)
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": "Apple Music play executed",
+            "data": {
+                "control": action,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_music_control)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-apple-music-generic",
+            session_id="session-main-apple-music-generic",
+            user_goal="能否帮我播放 Apple Music?",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "能否帮我播放 Apple Music?"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
+
+        assert control_calls == ["play"]
+        assert "已继续播放 Apple Music" in updated["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["tool"] == "media.apple_music_control"
+        assert planned_event["payload"]["input_preview"] == {"action": "play"}
+        assert tool_event["payload"]["tool"] == "media.apple_music_control"
+        assert tool_event["payload"]["result"]["ok"] is True
+        assert completed_event["payload"]["source"] == "daily_desktop_intent"
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_profile(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("model should not be required for direct desktop intent"),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-apple-music-no-profile",
+            session_id="session-main-apple-music-no-profile",
+            user_goal="打开 Apple Music",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "打开 Apple Music"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert open_calls == ["Music"]
+        assert updated["result"] == "已打开 Music。"
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["tool"] == "app.open"
+        assert planned_event["payload"]["input_preview"] == {"app_name": "Music"}
+        assert tool_event["payload"]["tool"] == "app.open"
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_executes_specific_apple_music_song_before_model(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    play_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("specific music intent should execute before model call"),
+    )
+
+    def fake_music_play(query: str) -> dict[str, Any]:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": "Apple Music playback started",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_play", fake_music_play)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-apple-music-song",
+            session_id="session-main-apple-music-song",
+            user_goal="播放超时空辉夜姬",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "播放超时空辉夜姬"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert play_calls == ["超时空辉夜姬"]
+        assert updated["result"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["tool"] == "media.apple_music_play"
+        assert planned_event["payload"]["input_preview"] == {"query": "超时空辉夜姬"}
+        assert tool_event["payload"]["tool"] == "media.apple_music_play"
+        assert tool_event["payload"]["result"]["data"]["track"] == "超时空辉夜姬"
     finally:
         service.close()
 

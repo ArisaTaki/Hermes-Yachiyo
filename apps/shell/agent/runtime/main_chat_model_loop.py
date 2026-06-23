@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_intent_tool_request,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
-from apps.shell.agent.runtime.model_messages import model_output_metadata
+from apps.shell.agent.runtime.model_messages import message_visible_content_text, model_output_metadata
 
 
 def build_runtime_main_chat_model_loop_runner(
@@ -117,9 +121,6 @@ class MainChatModelLoopRunner:
         if str(run.get("kind") or "") != "main_chat_run":
             raise self._error_type("Run 不是主聊天 Native Run")
         default_profile_id = str(profile_id or self._default_profile_id() or "").strip()
-        if not default_profile_id:
-            raise self._error_type("native_agent_not_ready:chat_model_profile_required")
-        model_config = self._model_profile_config_private(default_profile_id)
         agent = self._main_chat_agent_config(
             model_profile_id=default_profile_id,
             tool_policy=tool_policy,
@@ -135,25 +136,38 @@ class MainChatModelLoopRunner:
                 allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             )
         )
-        timeline.append(
-            self._timeline(
-                "model.request.started",
-                str(model_config.get("model") or ""),
-                profile_id=default_profile_id,
-                capability="chat",
+        direct_daily_desktop_intent = self._will_handle_daily_desktop_intent(
+            messages,
+            runtime["tool_policy"].get("allowed_tools") or [],
+        )
+        if not default_profile_id and not direct_daily_desktop_intent:
+            raise self._error_type("native_agent_not_ready:chat_model_profile_required")
+        model_config = (
+            self._model_profile_config_private(default_profile_id)
+            if default_profile_id
+            else {}
+        )
+        if not direct_daily_desktop_intent:
+            timeline.append(
+                self._timeline(
+                    "model.request.started",
+                    str(model_config.get("model") or ""),
+                    profile_id=default_profile_id,
+                    capability="chat",
+                )
             )
-        )
         self._update_run(run_id, status="running", timeline=timeline)
-        self._append_run_event(
-            run_id,
-            "model.request.started",
-            self._task_model_events.model_request_started_payload(
-                profile_id=default_profile_id,
-                model=str(model_config.get("model") or ""),
-                capability="chat",
-                message_count=len(messages),
-            ),
-        )
+        if not direct_daily_desktop_intent:
+            self._append_run_event(
+                run_id,
+                "model.request.started",
+                self._task_model_events.model_request_started_payload(
+                    profile_id=default_profile_id,
+                    model=str(model_config.get("model") or ""),
+                    capability="chat",
+                    message_count=len(messages),
+                ),
+            )
         broker_kwargs: dict[str, Any] = {}
         approval_required = runtime["tool_policy"].get("approval_required") or {}
         if approval_required:
@@ -237,3 +251,25 @@ class MainChatModelLoopRunner:
             artifacts=artifacts,
             pending_approval=None,
         )
+
+    @staticmethod
+    def _will_handle_daily_desktop_intent(
+        messages: list[dict[str, Any]],
+        allowed_tools: list[str],
+    ) -> bool:
+        intent_text = _latest_user_intent_text(messages)
+        if not intent_text:
+            return False
+        if daily_desktop_intent_tool_request(intent_text, allowed_tools):
+            return True
+        return bool(daily_desktop_intent_candidates(intent_text))
+
+
+def _latest_user_intent_text(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        if str(message.get("role") or "") != "user":
+            continue
+        content = message_visible_content_text(message).strip()
+        if content:
+            return content
+    return ""
