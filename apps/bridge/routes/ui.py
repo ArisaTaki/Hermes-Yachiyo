@@ -1247,6 +1247,8 @@ async def send_launcher_quick_message(request: LauncherQuickMessageRequest) -> d
     )
     if not result.get("ok"):
         return result
+    if isinstance(result.get("agent_task"), dict):
+        return result
     snapshot = agent_task_snapshot_for_task(runtime, str(result.get("task_id") or ""))
     if snapshot is None:
         return result

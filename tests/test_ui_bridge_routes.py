@@ -721,6 +721,13 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
     )
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
     ui._launcher_notifications.clear()
+    recovery_action = {
+        "label": "打开辅助功能权限",
+        "tool": "app.open",
+        "input": {"app_name": "辅助功能权限"},
+        "permission_target": "accessibility",
+        "risk_level": "low",
+    }
 
     class FakeChatBridge:
         def __init__(self, received_runtime):
@@ -748,6 +755,26 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
                         {
                             "event_type": "agent.tool.approval_required",
                             "title": "Approval required",
+                        },
+                        {
+                            "event_type": "agent.desktop.permission_recovery",
+                            "title": "需要辅助功能权限",
+                            "payload": {
+                                "permission_targets": ["accessibility"],
+                                "affected_tools": ["desktop.safe_click"],
+                                "recovery_actions": [recovery_action],
+                            },
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "tool_name": "desktop.safe_click",
+                            "status": "failed",
+                            "output_preview": {
+                                "permission_error": True,
+                                "permission_targets": ["accessibility"],
+                                "recovery_actions": [recovery_action],
+                            },
                         }
                     ],
                     "artifacts": [],
@@ -808,6 +835,18 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
         bubble_payload["chat"]["agent_task"]["recent_events"][0]["event_type"]
         == "agent.tool.approval_required"
     )
+    assert (
+        bubble_payload["chat"]["agent_task"]["recent_events"][1]["event_type"]
+        == "agent.desktop.permission_recovery"
+    )
+    assert (
+        bubble_payload["chat"]["agent_task"]["recent_events"][1]["payload"]["recovery_actions"][0]
+        == recovery_action
+    )
+    assert (
+        bubble_payload["chat"]["agent_task"]["tool_calls"][0]["output_preview"]["recovery_actions"][0]
+        == recovery_action
+    )
 
     live2d_payload = await ui.get_launcher_view("live2d")
     assert live2d_payload["launcher"]["show_reply_bubble"] is True
@@ -815,6 +854,14 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
     assert live2d_payload["launcher"]["latest_status"] == "completed"
     assert live2d_payload["chat"]["agent_task"]["task_id"] == "launcher-task-1"
     assert live2d_payload["chat"]["agent_task"]["open_in_studio_url"] == "#/agents?run_id=launcher-task-1"
+    assert (
+        live2d_payload["chat"]["agent_task"]["recent_events"][1]["payload"]["permission_targets"]
+        == ["accessibility"]
+    )
+    assert (
+        live2d_payload["chat"]["agent_task"]["tool_calls"][0]["output_preview"]["permission_targets"]
+        == ["accessibility"]
+    )
     assert await ui.acknowledge_launcher(ui.LauncherAckRequest(mode="live2d")) == {
         "ok": True,
         "mode": "live2d",
@@ -876,6 +923,99 @@ async def test_launcher_quick_message_returns_agent_task_snapshot_when_available
     assert result["agent_task"]["status"] == "waiting_approval"
     assert result["agent_task"]["needs_user_action"] is True
     assert result["agent_task"]["open_in_studio_url"] == "#/agents?run_id=launcher-task-1"
+
+
+@pytest.mark.asyncio
+async def test_launcher_quick_message_preserves_chat_bridge_agent_task_recovery(monkeypatch):
+    runtime_snapshot_calls: list[str] = []
+
+    class FakeLauncherAgentRuntimeService:
+        def get_run(self, run_id: str):
+            runtime_snapshot_calls.append(run_id)
+            return {
+                "run_id": run_id,
+                "user_goal": "Stale launcher task",
+                "status": "running",
+                "timeline": [],
+            }
+
+    runtime = SimpleNamespace(agent_runtime_service=FakeLauncherAgentRuntimeService())
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    recovery_action = {
+        "label": "打开辅助功能权限",
+        "tool": "app.open",
+        "input": {"app_name": "辅助功能权限"},
+        "permission_target": "accessibility",
+        "risk_level": "low",
+    }
+    agent_task = {
+        "task_id": "launcher-task-recovery",
+        "conversation_id": "launcher-session-1",
+        "title": "点击 120, 240",
+        "status": "failed",
+        "needs_user_action": True,
+        "pending_approvals": [],
+        "recent_events": [
+            {
+                "event_type": "agent.desktop.permission_recovery",
+                "title": "需要辅助功能权限",
+                "payload": {
+                    "permission_targets": ["accessibility"],
+                    "affected_tools": ["desktop.safe_click"],
+                    "recovery_actions": [recovery_action],
+                },
+            }
+        ],
+        "tool_calls": [
+            {
+                "tool_name": "desktop.safe_click",
+                "status": "failed",
+                "output_preview": {
+                    "permission_error": True,
+                    "permission_targets": ["accessibility"],
+                    "recovery_actions": [recovery_action],
+                },
+            }
+        ],
+        "artifacts": [],
+        "open_in_studio_url": "#/agents?run_id=launcher-task-recovery",
+    }
+
+    class FakeChatBridge:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def send_quick_message(self, text, *, metadata=None):
+            assert metadata == {
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            }
+            return {
+                "ok": True,
+                "text": text,
+                "task_id": "launcher-task-recovery",
+                "agent_task": agent_task,
+            }
+
+    monkeypatch.setattr(ui, "ChatBridge", FakeChatBridge)
+
+    result = await ui.send_launcher_quick_message(
+        ui.LauncherQuickMessageRequest(text="点击 120, 240", mode="bubble"),
+    )
+
+    assert runtime_snapshot_calls == []
+    assert result["ok"] is True
+    assert result["agent_task"] == agent_task
+    assert (
+        result["agent_task"]["recent_events"][0]["payload"]["recovery_actions"][0]
+        == recovery_action
+    )
+    assert (
+        result["agent_task"]["tool_calls"][0]["output_preview"]["recovery_actions"][0]
+        == recovery_action
+    )
 
 
 def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):
