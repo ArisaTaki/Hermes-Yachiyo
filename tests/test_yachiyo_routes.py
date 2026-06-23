@@ -4390,6 +4390,139 @@ async def test_yachiyo_task_route_executes_browser_screenshot_without_model(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("prompt", "tool_name", "input_preview", "patched_tool", "tool_result", "expected_summary"),
+    [
+        (
+            "点击当前网页上的登录按钮",
+            "browser.click",
+            {"selector": "text=登录", "click_count": 1},
+            "apps.shell.agent.tools.browser.click",
+            {
+                "ok": True,
+                "action": "browser.click",
+                "summary": "Clicked browser selector",
+                "data": {"selector": "text=登录", "label": "登录", "tag": "BUTTON"},
+            },
+            "已点击网页元素：登录。",
+        ),
+        (
+            "在网页搜索框输入 yachiyo",
+            "browser.type_text",
+            {
+                "selector": (
+                    'input[type="search"], input[name="q"], textarea[name="q"], '
+                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                    'input[aria-label*="search" i], input[placeholder*="search" i]'
+                ),
+                "text": "yachiyo",
+            },
+            "apps.shell.agent.tools.browser.type_text",
+            {
+                "ok": True,
+                "action": "browser.type_text",
+                "summary": "Typed text into browser selector",
+                "data": {
+                    "selector": (
+                        'input[type="search"], input[name="q"], textarea[name="q"], '
+                        'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                        'input[aria-label*="search" i], input[placeholder*="search" i]'
+                    ),
+                    "length": 7,
+                    "tag": "INPUT",
+                },
+            },
+            "已在网页搜索框输入文字（7 个字符）。",
+        ),
+    ],
+)
+async def test_yachiyo_task_route_approves_browser_interaction_intent_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    tool_name: str,
+    input_preview: dict[str, Any],
+    patched_tool: str,
+    tool_result: dict[str, Any],
+    expected_summary: str,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / f"chat-route-{tool_name}.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / f"agent-runtime-route-{tool_name}.db",
+        workspace_dir=tmp_path / f"agent-runtime-route-{tool_name}",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id=f"chat-main-{tool_name}")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    tool_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser interaction public task should not call model")
+        ),
+    )
+
+    def fake_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        tool_calls.append({"args": args, "kwargs": kwargs})
+        return tool_result
+
+    monkeypatch.setattr(patched_tool, fake_tool)
+    try:
+        started = ChatAPI(app_runtime).send_message(prompt)
+        task = state.get_task(started["task_id"])
+        waiting_message = session.get_assistant_message_for_task(started["task_id"])
+        waiting_run = service.get_run(started["run_id"])
+
+        assert started["ok"] is True
+        assert started["status"] == "waiting_approval"
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING
+        assert waiting_message is not None
+        assert waiting_message.status == MessageStatus.PROCESSING
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == tool_name
+        assert waiting_run["pending_approval"]["input_preview"] == input_preview
+        assert tool_calls == []
+
+        approved = await yachiyo.approve_task(started["task_id"], None, request)
+        completed_task = state.get_task(started["task_id"])
+        completed_message = session.get_assistant_message_for_task(started["task_id"])
+        completed_run = service.get_run(started["run_id"])
+
+        assert approved["status"] == "completed"
+        assert approved["summary"] == expected_summary
+        assert len(tool_calls) == 1
+        assert completed_task is not None
+        assert completed_task.status == TaskStatus.COMPLETED
+        assert completed_task.result == expected_summary
+        assert completed_message is not None
+        assert completed_message.status == MessageStatus.COMPLETED
+        assert completed_message.content == expected_summary
+        assert completed_message.metadata["pending_approval"] == {}
+        assert completed_run["status"] == "completed"
+        assert completed_run["pending_approval"] == {}
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("prompt", "tool_name", "input_preview", "patched_tool"),
     [
         (

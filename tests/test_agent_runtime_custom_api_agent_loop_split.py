@@ -610,8 +610,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "browser.open_url_and_extract_text",
         "browser.open_url_and_screenshot",
         "browser.current_page",
+        "browser.click",
         "browser.extract_text",
         "browser.screenshot",
+        "browser.type_text",
         "desktop.reveal_path",
         "desktop.open_path",
         "desktop.hide_app",
@@ -809,6 +811,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.screenshot",
         "input": {"reason": "user asked to capture the browser page"},
+    }
+    assert daily_desktop_intent_tool_request("点击当前网页上的登录按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {"selector": "text=登录", "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("点击网页上的 Submit", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {"selector": "text=Submit", "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("在网页搜索框输入 yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.type_text",
+        "input": {
+            "selector": (
+                'input[type="search"], input[name="q"], textarea[name="q"], '
+                'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                'input[aria-label*="search" i], input[placeholder*="search" i]'
+            ),
+            "text": "yachiyo",
+        },
+    }
+    assert daily_desktop_intent_tool_request("填写当前网页的搜索框为 yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.type_text",
+        "input": {
+            "selector": (
+                'input[type="search"], input[name="q"], textarea[name="q"], '
+                'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                'input[aria-label*="search" i], input[placeholder*="search" i]'
+            ),
+            "text": "yachiyo",
+        },
     }
     assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3329,6 +3365,24 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
         {},
         {"ok": True, "summary": "Hid the foreground app"},
     )
+    browser_click = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.click",
+        {"selector": "text=登录"},
+        {
+            "ok": True,
+            "summary": "Clicked browser selector: text=登录",
+            "data": {"selector": "text=登录", "label": "登录"},
+        },
+    )
+    browser_type_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.type_text",
+        {"selector": "input[type=\"search\"]", "text": "yachiyo"},
+        {
+            "ok": True,
+            "summary": "Typed text into browser selector: input[type=\"search\"]",
+            "data": {"selector": "input[type=\"search\"]", "length": 7},
+        },
+    )
 
     assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
@@ -3351,6 +3405,8 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert close_window == "已关闭当前窗口。"
     assert minimize_window == "已最小化当前窗口。"
     assert hide_app == "已隐藏当前应用。"
+    assert browser_click == "已点击网页元素：登录。"
+    assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 

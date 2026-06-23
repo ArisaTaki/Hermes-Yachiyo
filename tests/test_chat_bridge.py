@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
@@ -1732,6 +1733,94 @@ def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task
         assert hotkey_calls == [("l", ["command"])]
         assert approved.status == "completed"
         assert approved.summary == "已发送快捷键：Command+L。"
+        assert approved.needs_user_action is False
+        assert approved.pending_approvals == []
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.output.completed" in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_chat_bridge_quick_message_browser_click_approval_executes_and_completes(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-browser-click-approval.db",
+        workspace_dir=tmp_path / "runtime-browser-click-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    click_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher browser click approval should not call model")
+        ),
+    )
+
+    def fake_browser_click(selector: str, **kwargs: Any) -> dict:
+        click_calls.append((selector, int(kwargs.get("click_count") or 1)))
+        return {
+            "ok": True,
+            "action": "browser.click",
+            "summary": "Clicked browser selector",
+            "data": {
+                "selector": selector,
+                "label": "登录",
+                "tag": "BUTTON",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "点击当前网页上的登录按钮",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert click_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "selector": "text=登录",
+            "click_count": 1,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "browser.click"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert click_calls == [("text=登录", 1)]
+        assert approved.status == "completed"
+        assert approved.summary == "已点击网页元素：登录。"
         assert approved.needs_user_action is False
         assert approved.pending_approvals == []
         assert run["status"] == "completed"

@@ -298,11 +298,13 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.show",
     "app.status",
     "browser.current_page",
+    "browser.click",
     "browser.extract_text",
     "browser.open_url",
     "browser.open_url_and_extract_text",
     "browser.open_url_and_screenshot",
     "browser.screenshot",
+    "browser.type_text",
     "clipboard.write",
     "desktop.active_window",
     "desktop.click",
@@ -325,6 +327,17 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "screen.capture",
     "system.volume",
 }
+
+_BROWSER_SEARCH_INPUT_SELECTOR = (
+    'input[type="search"], input[name="q"], textarea[name="q"], '
+    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+    'input[aria-label*="search" i], input[placeholder*="search" i]'
+)
+
+_BROWSER_TEXT_INPUT_SELECTOR = (
+    'input:not([type]), input[type="text"], input[type="search"], '
+    'textarea, [contenteditable="true"]'
+)
 
 _FOREGROUND_SEQUENCE_TOOLS = {
     "app.open",
@@ -607,6 +620,14 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         candidates.append(
             _request("browser.screenshot", {"reason": "user asked to capture the browser page"})
         )
+
+    browser_click_payload = _browser_click_request(text)
+    if browser_click_payload:
+        candidates.append(_request("browser.click", browser_click_payload))
+
+    browser_type_text_payload = _browser_type_text_request(text)
+    if browser_type_text_payload:
+        candidates.append(_request("browser.type_text", browser_type_text_payload))
 
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
@@ -1094,6 +1115,109 @@ def _browser_search_url(text: str) -> str:
                 return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
     return ""
+
+
+def _browser_click_request(text: str) -> dict[str, Any] | None:
+    if not _has_browser_page_context(text):
+        return None
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:点击|点一下|点按|单击)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?P<label>[^。！？!?，,]+?)\s*(?:按钮|链接|元素)?$",
+        r"\b(?:click|press)\s+(?:the\s+)?(?P<label>[^.!?]+?)"
+        r"(?:\s+(?:button|link|element))?"
+        r"(?:\s+(?:on|in)\s+(?:the\s+)?(?:current\s+)?(?:page|browser))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        label = _strip_browser_element_label(match.group("label"))
+        if not label or _looks_like_click_coordinate_label(label):
+            continue
+        return {"selector": _browser_selector_from_label(label), "click_count": 1}
+    return None
+
+
+def _browser_type_text_request(text: str) -> dict[str, Any] | None:
+    if not _has_browser_page_context(text):
+        return None
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|向|给)?\s*(?:当前)?(?:网页|页面|浏览器|当前页)"
+        r"(?:上|里|中|内)?(?:的)?\s*(?P<target>[^。！？!?，,]*?)"
+        r"(?:输入|填写|键入|打入|填入)\s*(?P<text>[^。！？!?]+)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:填写|填入|输入)\s*(?:当前)?(?:网页|页面|浏览器|当前页)?(?:的)?"
+        r"(?P<target>[^。！？!?，,]+?)\s*(?:为|成|:|：)\s*(?P<text>[^。！？!?]+)$",
+        r"\b(?:type|enter|fill)\s+(?P<text>[^.!?]+?)\s+"
+        r"(?:into|in)\s+(?P<target>[^.!?]+?)\s+"
+        r"(?:on|in)\s+(?:the\s+)?(?:current\s+)?(?:page|browser)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        typed_text = _strip_typed_text(match.group("text"))
+        if not typed_text:
+            continue
+        target = _strip_browser_element_label(match.group("target"))
+        return {
+            "selector": _browser_input_selector_from_target(target),
+            "text": typed_text,
+        }
+    return None
+
+
+def _has_browser_page_context(text: str) -> bool:
+    return bool(
+        re.search(r"(?:网页|页面|浏览器|当前页)", text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:browser|page)\b", text, flags=re.IGNORECASE)
+    )
+
+
+def _strip_browser_element_label(value: str) -> str:
+    label = _strip_query(value)
+    label = re.sub(r"^(?:当前)?(?:网页|页面|浏览器|当前页)(?:上的|上|里|中|内|的)?\s*", "", label)
+    label = re.sub(r"^(?:的|上的|上|里|中|内)\s*", "", label)
+    label = re.sub(r"\s*(?:按钮|链接|元素|button|link|element|field|input|box)$", "", label, flags=re.IGNORECASE)
+    return _strip_query(label)
+
+
+def _looks_like_click_coordinate_label(value: str) -> bool:
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?\s*(?:,|，|\s)\s*\d+(?:\.\d+)?", str(value or "").strip()))
+
+
+def _browser_selector_from_label(label: str) -> str:
+    clean = str(label or "").strip()
+    if _looks_like_css_selector(clean):
+        return clean
+    return f"text={clean}"
+
+
+def _browser_input_selector_from_target(target: str) -> str:
+    clean = str(target or "").strip()
+    if _looks_like_css_selector(clean):
+        return clean
+    lowered = clean.lower()
+    if re.search(r"(?:搜索|查找|search|query|q)", lowered):
+        return _BROWSER_SEARCH_INPUT_SELECTOR
+    if re.search(r"(?:密码|password)", lowered):
+        return 'input[type="password"]'
+    if re.search(r"(?:邮箱|邮件|email|e-mail)", lowered):
+        return 'input[type="email"], input[name*="email" i], input[autocomplete="email"]'
+    if re.search(r"(?:用户名|账号|账户|user|username|login)", lowered):
+        return 'input[name*="user" i], input[autocomplete="username"], input[type="text"]'
+    return _BROWSER_TEXT_INPUT_SELECTOR
+
+
+def _looks_like_css_selector(value: str) -> bool:
+    stripped = str(value or "").strip()
+    return bool(
+        stripped.startswith(("#", ".", "["))
+        or re.match(r"^(?:button|a|input|textarea|select|form|div|span|\\*)\\b", stripped, flags=re.IGNORECASE)
+    )
 
 
 def _strip_search_query(value: str) -> str:

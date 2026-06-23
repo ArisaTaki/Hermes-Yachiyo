@@ -1108,12 +1108,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "browser.click": ToolDescriptor(
         name="browser.click",
         description=(
-            "Click an element in the current browser page by CSS selector. "
+            "Click an element in the current browser page by CSS selector or text=<label>. "
             "If Chrome CDP is unavailable, provide fallback_x and fallback_y after observing "
             "the screen so the tool can safely fall back to foreground desktop clicking."
         ),
         properties={
-            "selector": {"type": "string", "description": "CSS selector to click."},
+            "selector": {"type": "string", "description": "CSS selector or text=<label> target to click."},
             "fallback_x": {
                 "type": "number",
                 "minimum": 0,

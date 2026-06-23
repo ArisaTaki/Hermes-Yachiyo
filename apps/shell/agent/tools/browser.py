@@ -67,11 +67,35 @@ def click(
     expression = f"""
     (() => {{
       const selector = {json.dumps(clean_selector)};
-      const el = document.querySelector(selector);
+      const textSelectorPrefix = 'text=';
+      function normalized(value) {{
+        return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+      }}
+      function labelFor(el) {{
+        return (
+          el.innerText ||
+          el.value ||
+          el.getAttribute('aria-label') ||
+          el.getAttribute('title') ||
+          el.getAttribute('name') ||
+          ''
+        ).trim();
+      }}
+      function findByText(label) {{
+        const target = normalized(label);
+        const elements = Array.from(document.querySelectorAll(
+          'button,a,[role="button"],input[type="button"],input[type="submit"],' +
+          'input[type="reset"],[aria-label],[title]'
+        ));
+        return elements.find((el) => normalized(labelFor(el)).includes(target));
+      }}
+      const el = selector.startsWith(textSelectorPrefix)
+        ? findByText(selector.slice(textSelectorPrefix.length))
+        : document.querySelector(selector);
       if (!el) return {{ ok: false, error: 'selector_not_found', selector }};
       el.scrollIntoView({{ block: 'center', inline: 'center' }});
       el.click();
-      const label = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+      const label = labelFor(el);
       return {{ ok: true, selector, tag: el.tagName, label: label.slice(0, 200) }};
     }})()
     """

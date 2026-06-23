@@ -44,8 +44,10 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "browser.open_url_and_extract_text",
     "browser.open_url_and_screenshot",
     "browser.current_page",
+    "browser.click",
     "browser.extract_text",
     "browser.screenshot",
+    "browser.type_text",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.close_window",
@@ -92,9 +94,9 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "browser.open_url_and_extract_text": "打开并读取网页",
     "browser.open_url_and_screenshot": "打开并截取网页",
     "browser.current_page": "读取当前网页",
+    "browser.click": "点击网页元素",
     "browser.extract_text": "提取网页文本",
     "browser.screenshot": "截取网页",
-    "browser.click": "点击网页元素",
     "browser.type_text": "填写网页输入",
 }
 
@@ -755,6 +757,14 @@ class RuntimeCustomApiAgentLoop:
                 if result.get("ok") is True:
                     return _browser_page_summary(result)
                 return result_summary or _browser_page_summary(result)
+            if tool_name == "browser.click":
+                if result.get("ok") is True:
+                    return _browser_click_summary(result, planned_input)
+                return result_summary or "没能点击网页元素。"
+            if tool_name == "browser.type_text":
+                if result.get("ok") is True:
+                    return _browser_type_text_summary(result, planned_input)
+                return result_summary or "没能填写网页输入。"
             if tool_name == "browser.extract_text":
                 if result.get("ok") is True:
                     return _browser_text_summary(result)
@@ -1339,6 +1349,39 @@ def _browser_page_summary(result: dict[str, Any]) -> str:
     if url:
         return f"当前网页是 {url}。"
     return "已读取当前网页信息。"
+
+
+def _browser_click_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    label = str(data.get("label") or "").strip()
+    target = label or _browser_selector_label(str(data.get("selector") or planned_input.get("selector") or ""))
+    return f"已点击网页元素：{target}。" if target else "已点击网页元素。"
+
+
+def _browser_type_text_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    selector = str(data.get("selector") or planned_input.get("selector") or "").strip()
+    length = data.get("length") or data.get("character_count")
+    if not isinstance(length, int):
+        text = _payload_text(result, planned_input, "text")
+        length = len(text) if text else 0
+    target = _browser_selector_label(selector)
+    if target:
+        return f"已在网页{target}输入文字（{length} 个字符）。"
+    return f"已向网页输入文字（{length} 个字符）。"
+
+
+def _browser_selector_label(selector: str) -> str:
+    clean = str(selector or "").strip()
+    if clean.startswith("text="):
+        return clean.removeprefix("text=").strip()
+    if clean in {
+        'input[type="search"], input[name="q"], textarea[name="q"], input[aria-label*="搜索" i], input[placeholder*="搜索" i], input[aria-label*="search" i], input[placeholder*="search" i]',
+    }:
+        return "搜索框"
+    if clean:
+        return f"元素 {clean}"
+    return ""
 
 
 def _browser_text_summary(result: dict[str, Any]) -> str:

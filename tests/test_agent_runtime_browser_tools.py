@@ -122,6 +122,24 @@ def test_browser_click_falls_back_to_foreground_coordinates(monkeypatch) -> None
     assert calls == [(12, 34, 2)]
 
 
+def test_browser_click_accepts_text_selector(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def fake_evaluate(expression: str) -> dict[str, object]:
+        expressions.append(expression)
+        return {"ok": True, "selector": "text=登录", "tag": "BUTTON", "label": "登录"}
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", fake_evaluate)
+
+    result = browser_mod.click("text=登录")
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.click"
+    assert result["data"] == {"ok": True, "selector": "text=登录", "tag": "BUTTON", "label": "登录"}
+    assert "textSelectorPrefix" in expressions[0]
+    assert "findByText" in expressions[0]
+
+
 def test_browser_click_without_fallback_coordinates_reports_recovery(monkeypatch) -> None:
     def raise_no_cdp(_expression: str) -> dict[str, object]:
         raise RuntimeError("No debuggable browser page found")
