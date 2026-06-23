@@ -133,6 +133,7 @@ def _click_fallback(
             "fallback": "desktop.click",
             "missing_permissions": ["chrome_cdp"],
             "permission_targets": ["chrome_cdp"],
+            "recovery_actions": _permission_recovery_actions_for_targets(["chrome_cdp"]),
             "detail": str(cdp_error),
         }
     try:
@@ -197,6 +198,9 @@ def _click_fallback_unavailable(
         "detail": f"cdp: {cdp_error}; desktop.click: {fallback_error}",
         "fallback_result": fallback_result or {},
     }
+    recovery_actions = _permission_recovery_actions_for_targets(payload["permission_targets"])
+    if recovery_actions:
+        payload["recovery_actions"] = recovery_actions
     for key in ("foreground_lock_busy", "locked_by", "foreground_lock"):
         if key in result:
             payload[key] = result[key]
@@ -325,6 +329,9 @@ def _foreground_fallback_unavailable(
         "detail": f"cdp: {cdp_error}; desktop.type_text: {fallback_error}",
         "fallback_result": fallback_result or {},
     }
+    recovery_actions = _permission_recovery_actions_for_targets(payload["permission_targets"])
+    if recovery_actions:
+        payload["recovery_actions"] = recovery_actions
     for key in ("foreground_lock_busy", "locked_by", "foreground_lock"):
         if key in result:
             payload[key] = result[key]
@@ -449,7 +456,8 @@ def _screenshot_fallback_unavailable(cdp_error: Any, fallback_error: Any) -> dic
     if _looks_like_screen_capture_permission_error(fallback_error):
         missing_permissions.append("screen_recording")
         permission_targets.append("screen_recording")
-    return {
+    permission_targets = _dedupe(permission_targets)
+    payload = {
         "ok": False,
         "action": "browser.screenshot",
         "summary": "Chrome CDP is unavailable and screen capture fallback failed",
@@ -457,10 +465,14 @@ def _screenshot_fallback_unavailable(cdp_error: Any, fallback_error: Any) -> dic
         "permission_error": True,
         "fallback_used": True,
         "fallback": "screen.capture",
-        "missing_permissions": missing_permissions,
+        "missing_permissions": _dedupe(missing_permissions),
         "permission_targets": permission_targets,
         "detail": f"cdp: {cdp_error}; screen.capture: {fallback_error}",
     }
+    recovery_actions = _permission_recovery_actions_for_targets(permission_targets)
+    if recovery_actions:
+        payload["recovery_actions"] = recovery_actions
+    return payload
 
 
 def _evaluate_current_page(expression: str) -> dict[str, Any]:
@@ -594,10 +606,64 @@ def _cdp_unavailable(action: str, detail: Any = None) -> dict[str, Any]:
                 "browser.cdp_url 后再重试浏览器自动化。"
             )
         ],
+        "recovery_actions": _permission_recovery_actions_for_targets(["chrome_cdp"]),
     }
     if detail:
         payload["detail"] = str(detail)
     return payload
+
+
+def _permission_recovery_actions_for_targets(targets: list[str]) -> list[dict[str, Any]]:
+    actions_by_target = {
+        "chrome_cdp": (
+            {
+                "label": "打开 Google Chrome",
+                "tool": "app.open",
+                "input": {"app_name": "Google Chrome"},
+                "permission_target": "chrome_cdp",
+                "risk_level": "low",
+            },
+        ),
+        "screen_recording": (
+            {
+                "label": "打开屏幕录制权限",
+                "tool": "app.open",
+                "input": {"app_name": "屏幕录制权限"},
+                "permission_target": "screen_recording",
+                "risk_level": "low",
+            },
+        ),
+        "accessibility": (
+            {
+                "label": "打开辅助功能权限",
+                "tool": "app.open",
+                "input": {"app_name": "辅助功能权限"},
+                "permission_target": "accessibility",
+                "risk_level": "low",
+            },
+        ),
+    }
+    seen: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+    actions: list[dict[str, Any]] = []
+    for target in targets:
+        for action in actions_by_target.get(str(target or "").strip(), ()):
+            tool_name = str(action.get("tool") or "").strip()
+            raw_input = action.get("input") if isinstance(action.get("input"), dict) else {}
+            input_key = tuple(sorted((str(key), str(value)) for key, value in raw_input.items()))
+            key = (tool_name, input_key)
+            if not tool_name or key in seen:
+                continue
+            seen.add(key)
+            actions.append(
+                {
+                    "label": str(action.get("label") or tool_name),
+                    "tool": tool_name,
+                    "input": dict(raw_input),
+                    "permission_target": str(action.get("permission_target") or target),
+                    "risk_level": str(action.get("risk_level") or "low"),
+                }
+            )
+    return actions
 
 
 def _looks_like_screen_capture_permission_error(value: Any) -> bool:

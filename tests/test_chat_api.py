@@ -910,6 +910,70 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
         store.close()
 
 
+def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct browser permission failure should not call model")
+        ),
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.browser._configured_browser_cdp_url", lambda: "")
+    try:
+        result = api.send_message("当前网页是什么")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_call = result["agent_task"]["tool_calls"][-1]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert "桌面操作未完成：chrome_cdp_unavailable" in result["agent_task"]["summary"]
+        assert "缺少权限：chrome_cdp" in result["agent_task"]["summary"]
+        assert "可直接打开：打开 Google Chrome。" in result["agent_task"]["summary"]
+        assert tool_call["tool_name"] == "browser.current_page"
+        assert tool_call["status"] == "failed"
+        assert tool_call["output_preview"]["permission_targets"] == ["chrome_cdp"]
+        assert tool_call["output_preview"]["recovery_actions"] == [
+            {
+                "label": "打开 Google Chrome",
+                "tool": "app.open",
+                "input": {"app_name": "Google Chrome"},
+                "permission_target": "chrome_cdp",
+                "risk_level": "low",
+            }
+        ]
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        recovery_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+        assert recovery_event["payload"]["permission_targets"] == ["chrome_cdp"]
+        assert recovery_event["payload"]["affected_tools"] == ["browser.current_page"]
+        assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

@@ -955,6 +955,51 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
 
 
+def test_chat_bridge_quick_message_surfaces_browser_cdp_recovery(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("apps.shell.agent.tools.browser._configured_browser_cdp_url", lambda: "")
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "当前网页是什么",
+    )
+    timeline = result["_task_timeline"]
+    recovery_event = next(
+        event
+        for event in timeline["events"]
+        if event["event_type"] == "agent.desktop.permission_recovery"
+    )
+
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert "桌面操作未完成：chrome_cdp_unavailable" in agent_task["summary"]
+    assert "缺少权限：chrome_cdp" in agent_task["summary"]
+    assert "可直接打开：打开 Google Chrome。" in agent_task["summary"]
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.current_page"
+    assert agent_task["tool_calls"][-1]["status"] == "failed"
+    assert agent_task["tool_calls"][-1]["output_preview"]["permission_error"] is True
+    assert agent_task["tool_calls"][-1]["output_preview"]["permission_targets"] == ["chrome_cdp"]
+    assert agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"] == [
+        {
+            "label": "打开 Google Chrome",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "permission_target": "chrome_cdp",
+            "risk_level": "low",
+        }
+    ]
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.permission_recovery" in event_types
+    assert "model.request.started" not in event_types
+    assert recovery_event["payload"]["permission_targets"] == ["chrome_cdp"]
+    assert recovery_event["payload"]["affected_tools"] == ["browser.current_page"]
+    assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,

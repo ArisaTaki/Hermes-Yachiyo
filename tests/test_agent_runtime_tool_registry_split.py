@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 
+from apps.shell.agent.tools import browser as browser_mod
 from apps.shell.agent.tools import desktop as desktop_mod
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools.broker import ToolBroker
@@ -811,6 +812,27 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
         ("open", "https://example.com"),
         ("click", "#go", 12, 34, 2),
         ("type", "#q", "八千代"),
+    ]
+
+
+def test_browser_current_page_cdp_failure_returns_recovery_action(monkeypatch) -> None:
+    monkeypatch.setattr(browser_mod, "_configured_browser_cdp_url", lambda: "")
+
+    result = browser_mod.current_page()
+
+    assert result["ok"] is False
+    assert result["action"] == "browser.current_page"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开 Google Chrome",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "permission_target": "chrome_cdp",
+            "risk_level": "low",
+        }
     ]
 
 
