@@ -792,11 +792,11 @@ def _is_browser_screenshot_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:当前|现在|前台)?(?:网页|网站|页面|浏览器).{0,8}"
-            r"(?:截图|截屏|屏幕截图|抓屏)",
+            r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图)",
             text,
         )
         or re.search(
-            r"(?:截取|截图|截屏|截一下|截个图|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
+            r"(?:截取|截图|截屏|截一下|截个图|截|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
             text,
         )
         or "browser screenshot" in lowered
@@ -2034,6 +2034,8 @@ def _is_screen_capture_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(r"(?:截个?图|截图|截屏|屏幕截图|抓屏|拍屏)", text)
+        or re.search(r"(?:当前|现在|这个)?(?:屏幕|桌面).{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)", text)
+        or re.search(r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
         or re.search(r"(?:看一下|看看|看下|查看|读取).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
         or re.search(r"(?:当前|现在|这个)?(?:屏幕|桌面).{0,8}(?:是什么|是啥|内容|画面)", text)
         or "take a screenshot" in lowered

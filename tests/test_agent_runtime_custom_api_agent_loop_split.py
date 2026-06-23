@@ -724,6 +724,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.screenshot",
         "input": {"reason": "user asked to capture the browser page"},
     }
+    assert daily_desktop_intent_tool_request("当前网页截一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
+    }
+    assert daily_desktop_intent_tool_request("页面截个图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
+    }
     assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus",
@@ -1346,6 +1356,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"text": "hello world"},
     }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "screen.capture",
+        "input": {"reason": "user asked to capture the screen"},
+    }
+    assert daily_desktop_intent_tool_request("屏幕截一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "screen.capture",
+        "input": {"reason": "user asked to capture the screen"},
+    }
+    assert daily_desktop_intent_tool_request("截当前屏幕", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",
         "input": {"reason": "user asked to capture the screen"},

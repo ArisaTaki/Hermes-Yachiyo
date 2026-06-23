@@ -1312,7 +1312,7 @@ def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch)
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
     try:
-        result = api.send_message("当前屏幕是什么")
+        result = api.send_message("屏幕截一下")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -1447,7 +1447,7 @@ def test_send_message_executes_direct_browser_screenshot_task(tmp_path, monkeypa
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_browser_screenshot)
     try:
-        result = api.send_message("截取当前网页")
+        result = api.send_message("页面截个图")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         event_types = [
