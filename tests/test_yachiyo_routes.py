@@ -1120,6 +1120,129 @@ async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_mod
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-app-find.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-app-find.db",
+        workspace_dir=tmp_path / "agent-runtime-route-app-find",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-app-find")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app find public task should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed text",
+            "data": {"text": text, "character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="打开 Notes，然后搜索 hello",
+                conversation_id="chat-main-app-find",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-app-find-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-app-find", limit=10)
+            if message.role == "assistant"
+        )
+        event_types = [event["event_type"] for event in events["events"]]
+
+        assert calls == [
+            ("open", "Notes"),
+            ("focus", "Notes"),
+            ("shortcut", "find"),
+            ("type", "hello"),
+        ]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已打开 Notes 并打开查找。 已向前台输入文字（5 个字符）。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert [tool_call["tool_name"] for tool_call in started["tool_calls"][-2:]] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert [tool_call["tool_name"] for tool_call in timeline["tool_calls"][-2:]] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_named_site_open_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

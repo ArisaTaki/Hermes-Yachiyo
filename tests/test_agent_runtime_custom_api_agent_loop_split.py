@@ -980,6 +980,37 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"app_name": "Finder", "action": "new_window"},
         }
     ]
+    assert daily_desktop_intent_tool_requests("打开 Notes，然后搜索 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("切到 Slack，然后查找 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome，然后搜索 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=yachiyo"},
+        }
+    ]
     assert daily_desktop_intent_tool_requests("打开 Notes 并输入 hello，再复制", ["app.open"]) == [
         {
             "protocol": "json_fallback",

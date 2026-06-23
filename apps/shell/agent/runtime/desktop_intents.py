@@ -143,6 +143,15 @@ _APP_ALIASES = {
     "goland": "GoLand",
 }
 
+_BROWSER_APP_NAMES = {
+    "Arc",
+    "Brave Browser",
+    "Firefox",
+    "Google Chrome",
+    "Microsoft Edge",
+    "Safari",
+}
+
 _COMMON_REVEAL_PATHS = {
     "desktop": "~/Desktop",
     "desktopfolder": "~/Desktop",
@@ -256,9 +265,14 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
         return []
     requests: list[dict[str, Any]] = []
     for clause in clauses[:5]:
-        request = _first_daily_desktop_candidate(_strip_sequence_clause_prefix(clause))
+        stripped_clause = _strip_sequence_clause_prefix(clause)
+        request = _first_daily_desktop_candidate(stripped_clause)
         if request is None:
-            return []
+            find_requests = _app_context_find_text_requests(stripped_clause, requests)
+            if not find_requests:
+                return []
+            requests.extend(find_requests)
+            continue
         requests.append(request)
     if len(requests) < 2:
         return []
@@ -493,6 +507,57 @@ def _is_foreground_desktop_sequence(requests: list[dict[str, Any]]) -> bool:
     if tools[0] in _APP_SEQUENCE_CONTEXT_TOOLS:
         return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
     return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools)
+
+
+def _app_context_find_text_requests(
+    text: str,
+    previous_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _latest_sequence_app_context_is_browser(previous_requests):
+        return []
+    if not _latest_sequence_app_context_name(previous_requests):
+        return []
+    query = _desktop_find_query(text)
+    if not query:
+        return []
+    return [
+        _request("desktop.safe_shortcut", {"action": "find"}),
+        _request("desktop.safe_type_text", {"text": query}),
+    ]
+
+
+def _latest_sequence_app_context_is_browser(requests: list[dict[str, Any]]) -> bool:
+    app_name = _latest_sequence_app_context_name(requests)
+    return bool(app_name and app_name in _BROWSER_APP_NAMES)
+
+
+def _latest_sequence_app_context_name(requests: list[dict[str, Any]]) -> str:
+    for request in reversed(requests):
+        tool = str(request.get("tool") or "").strip()
+        if tool not in _APP_SEQUENCE_CONTEXT_TOOLS:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if app_name:
+            return app_name
+    return ""
+
+
+def _desktop_find_query(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在(?:当前|前台)?(?:窗口|应用|app)?(?:里|中|内|上)?\s*)?"
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:find|search)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_search_query(match.group("query"))
+        if query:
+            return query
+    return ""
 
 
 def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
