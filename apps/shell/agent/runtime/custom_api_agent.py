@@ -23,6 +23,9 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "browser.current_page",
     "browser.extract_text",
     "browser.screenshot",
+    "desktop.hotkey",
+    "desktop.type_text",
+    "desktop.click",
 }
 
 _DAILY_DESKTOP_TOOL_LABELS = {
@@ -126,6 +129,14 @@ class RuntimeCustomApiAgentLoop:
         self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
         start_iteration = self._normalize_tool_iteration(start_iteration)
+        if not default_messages and start_iteration == 0:
+            resumed_result = self._direct_existing_daily_desktop_result(
+                agent,
+                timeline,
+                run_id=run_id,
+            )
+            if resumed_result:
+                return resumed_result
         if default_messages or start_iteration == 0:
             planning_context = context if default_messages else self._latest_user_intent_text(messages)
             planned_tool_request = daily_desktop_intent_tool_request(planning_context, allowed_tools)
@@ -431,6 +442,17 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or _browser_text_summary(result)
             if tool_name == "browser.screenshot":
                 return result_summary or "已截取当前网页。"
+            if tool_name == "desktop.hotkey":
+                hotkey = _hotkey_text(result, planned_input)
+                return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
+            if tool_name == "desktop.type_text":
+                text = _payload_text(result, planned_input, "text")
+                if text:
+                    return f"已向前台输入文字（{len(text)} 个字符）。"
+                return result_summary or "已向前台输入文字。"
+            if tool_name == "desktop.click":
+                click = _click_text(result, planned_input)
+                return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
             return result_summary or "已执行桌面操作。"
 
         fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
@@ -454,6 +476,63 @@ class RuntimeCustomApiAgentLoop:
             return f"桌面操作未完成：{_sentence(error)}{suffix}{diagnostics}".strip()
         diagnostics = _permission_diagnostics(result)
         return f"桌面操作未完成：{_sentence(error)}{diagnostics}".strip()
+
+    def _direct_existing_daily_desktop_result(
+        self,
+        agent: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        *,
+        run_id: str = "",
+    ) -> str:
+        tool_event = self._latest_tool_call_event_for_daily_desktop_intent(timeline)
+        if not tool_event:
+            return ""
+        tool_name = str(tool_event.get("detail") or tool_event.get("tool") or "").strip()
+        planned_input = self._latest_daily_desktop_input(timeline, tool_name)
+        if planned_input is None:
+            return ""
+        return self._direct_daily_desktop_result(
+            agent,
+            tool_name,
+            planned_input,
+            timeline,
+            run_id=run_id,
+        )
+
+    @staticmethod
+    def _latest_tool_call_event_for_daily_desktop_intent(
+        timeline: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        for event in reversed(timeline):
+            if event.get("event") == "agent.desktop.intent_completed":
+                return None
+            if event.get("event") != "agent.tool.call":
+                continue
+            tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+            if tool_name in _DIRECT_DAILY_DESKTOP_TOOLS:
+                return event
+        return None
+
+    @staticmethod
+    def _latest_daily_desktop_input(
+        timeline: list[dict[str, Any]],
+        tool_name: str,
+    ) -> dict[str, Any] | None:
+        for event in reversed(timeline):
+            event_type = str(event.get("event") or "").strip()
+            if event_type not in {
+                "agent.desktop.intent_planned",
+                "agent.desktop.intent_approval_required",
+            }:
+                continue
+            event_tool = str(event.get("tool") or event.get("detail") or "").strip()
+            if event_tool != tool_name:
+                continue
+            if str(event.get("source") or "") != "daily_desktop_intent":
+                continue
+            input_preview = event.get("input_preview")
+            return dict(input_preview) if isinstance(input_preview, dict) else {}
+        return None
 
     def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
         for message in reversed(messages):
@@ -555,6 +634,39 @@ class RuntimeCustomApiAgentLoop:
 def _payload_text(result: dict[str, Any], planned_input: dict[str, Any], key: str) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     return str(data.get(key) or planned_input.get(key) or "").strip()
+
+
+def _hotkey_text(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    key = str(data.get("key") or planned_input.get("key") or "").strip()
+    raw_modifiers = data.get("modifiers") or planned_input.get("modifiers") or []
+    modifiers = [str(item).strip() for item in raw_modifiers if str(item).strip()] if isinstance(raw_modifiers, list) else []
+    parts = [*_hotkey_modifier_labels(modifiers), key.upper() if len(key) == 1 else key]
+    return "+".join(part for part in parts if part)
+
+
+def _hotkey_modifier_labels(modifiers: list[str]) -> list[str]:
+    labels = {
+        "command": "Command",
+        "cmd": "Command",
+        "shift": "Shift",
+        "option": "Option",
+        "alt": "Option",
+        "control": "Control",
+        "ctrl": "Control",
+    }
+    return [labels.get(modifier.lower(), modifier) for modifier in modifiers]
+
+
+def _click_text(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    x = data.get("x", planned_input.get("x"))
+    y = data.get("y", planned_input.get("y"))
+    click_count = data.get("click_count", planned_input.get("click_count"))
+    if x in (None, "") or y in (None, ""):
+        return ""
+    count_text = "双击 " if str(click_count or "") == "2" else ""
+    return f"{count_text}{x}, {y}"
 
 
 def _active_window_summary(result: dict[str, Any]) -> str:

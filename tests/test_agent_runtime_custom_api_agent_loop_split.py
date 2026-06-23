@@ -1551,6 +1551,201 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
     }
 
 
+def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_model() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "按 Command+L"}]
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        order.append("tool")
+        request = tool_requests[0]
+        result = {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "data": {"key": "l", "modifiers": ["command"]},
+        }
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                "desktop.hotkey",
+                input_preview=request["input"],
+                result=result,
+            )
+        )
+        messages_arg.append(
+            {"role": "user", "content": f"Tool result for desktop.hotkey: {result}"}
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["desktop.hotkey"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful daily hotkey intent should not call the model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-hotkey-direct",
+    )
+
+    assert str(result) == "已发送快捷键：Command+L。"
+    assert order == ["tool"]
+    assert [event["event"] for event in timeline] == [
+        "agent.desktop.intent_planned",
+        "agent.tool.call",
+        "agent.desktop.intent_completed",
+    ]
+    assert timeline[-1]["summary"] == "已发送快捷键：Command+L。"
+    assert appended_events[-1] == {
+        "run_id": "run-hotkey-direct",
+        "event_type": "agent.desktop.intent_completed",
+        "payload": {
+            "tool": "desktop.hotkey",
+            "source": "daily_desktop_intent",
+            "result": {
+                "ok": True,
+                "action": "desktop.hotkey",
+                "data": {"key": "l", "modifiers": ["command"]},
+            },
+            "summary": "已发送快捷键：Command+L。",
+        },
+    }
+
+
+def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanning() -> None:
+    budget = FakeBudget()
+    timeline = [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.hotkey",
+            "tool": "desktop.hotkey",
+            "status": "planned",
+            "source": "daily_desktop_intent",
+            "planning_reason": "clear_daily_desktop_intent",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "event": "agent.desktop.intent_approval_required",
+            "detail": "desktop.hotkey",
+            "tool": "desktop.hotkey",
+            "status": "approval_required",
+            "source": "daily_desktop_intent",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "desktop.hotkey",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "result": {
+                "ok": True,
+                "action": "desktop.hotkey",
+                "data": {"key": "l", "modifiers": ["command"]},
+            },
+        },
+    ]
+    appended_events: list[dict[str, Any]] = []
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["desktop.hotkey"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved daily hotkey resume should not call the model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved daily hotkey resume should not re-run the planner")
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[
+            {"role": "user", "content": "按 Command+L"},
+            {"role": "user", "content": "Tool result for desktop.hotkey: ok"},
+        ],
+        start_iteration=0,
+        run_id="run-hotkey-resume",
+        budget=budget,
+    )
+
+    assert str(result) == "已发送快捷键：Command+L。"
+    assert timeline[-1]["event"] == "agent.desktop.intent_completed"
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"
+
+
 def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_pause() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
