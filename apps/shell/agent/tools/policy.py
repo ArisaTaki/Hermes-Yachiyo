@@ -34,6 +34,7 @@ TOOL_FUNCTION_NAMES = {
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
+    "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
     "app.quit": "app_quit",
@@ -70,6 +71,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.status",
     "app.open",
     "app.focus",
+    "app.show",
     "app.hide",
     "app.minimize",
     "desktop.reveal_path",
@@ -268,6 +270,7 @@ class ToolDescriptor:
         if self.name in {
             "app.open",
             "app.focus",
+            "app.show",
             "app.hide",
             "app.minimize",
             "app.quit",
@@ -653,6 +656,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "app.focus": ToolDescriptor(
         name="app.focus",
         description="Bring a local desktop application to the foreground.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "app.show": ToolDescriptor(
+        name="app.show",
+        description=(
+            "Show, unhide, restore minimized windows, and activate a local desktop application."
+        ),
         properties={"app_name": {"type": "string", "description": "Application name."}},
         required=("app_name",),
     ),

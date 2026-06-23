@@ -228,6 +228,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.show",
         "app.hide",
         "app.minimize",
         "app.quit",
@@ -943,6 +944,71 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "action": "app.focus",
         "summary": f"Focused {clean_name}",
         "data": {"app_name": clean_name},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def app_show(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.show")
+    clean_name = _clean_required(app_name, "app_name")
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            set statusText to "launched"
+            set restoredCount to 0
+            tell application "System Events"
+                if exists application process appName then
+                    set statusText to "shown"
+                    set visible of application process appName to true
+                    tell application process appName
+                        repeat with windowRef in windows
+                            try
+                                if value of attribute "AXMinimized" of windowRef is true then
+                                    set value of attribute "AXMinimized" of windowRef to false
+                                    set restoredCount to restoredCount + 1
+                                end if
+                            end try
+                        end repeat
+                    end tell
+                end if
+            end tell
+            tell application appName to activate
+            return statusText & "|" & appName & "|" & restoredCount
+        end run
+        """,
+        [clean_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.show",
+            {
+                **result,
+                "action": "app.show",
+                "summary": "app.show failed",
+                "data": {"app_name": clean_name},
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    parts = stdout.split("|") if stdout else []
+    status = parts[0] if parts else "unknown"
+    restored_count = _int_value(parts[2] if len(parts) > 2 else 0)
+    summary = (
+        f"Launched and showed {clean_name}"
+        if status == "launched"
+        else f"Showed {clean_name}"
+    )
+    return {
+        "ok": True,
+        "action": "app.show",
+        "summary": summary,
+        "data": {
+            "app_name": clean_name,
+            "show_status": status,
+            "restored_window_count": restored_count,
+        },
         "permission_error": False,
         "fallback_used": False,
     }
@@ -2111,6 +2177,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
+        "app.show": ["automation", "accessibility"],
         "app.hide": ["accessibility"],
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
@@ -2133,6 +2200,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
+        "app.show": ["automation", "accessibility"],
         "app.hide": ["accessibility"],
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],

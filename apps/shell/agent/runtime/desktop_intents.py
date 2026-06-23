@@ -236,6 +236,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_quit_name:
         candidates.append(_request("app.quit", {"app_name": app_quit_name}))
 
+    app_show_name = _app_show_name(text)
+    if app_show_name:
+        candidates.append(_request("app.show", {"app_name": app_show_name}))
+
     app_hide_name = _app_hide_name(text)
     if app_hide_name:
         candidates.append(_request("app.hide", {"app_name": app_hide_name}))
@@ -903,6 +907,40 @@ def _app_quit_name(text: str) -> str:
     return ""
 
 
+def _app_show_name(text: str) -> str:
+    if (
+        _looks_like_search_request(text)
+        or _is_running_apps_request(text)
+        or _looks_like_app_status_request(text)
+    ):
+        return ""
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:显示|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏)",
+        r"\b(?:show|unhide|restore)\s+(?P<app>[^.!?]+)",
+        r"\bbring\s+back\s+(?P<app>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
+            continue
+        if _looks_like_current_app_scope(raw_app):
+            continue
+        if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_generic_app_quit_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
 def _app_hide_name(text: str) -> str:
     if (
         _looks_like_search_request(text)
@@ -919,6 +957,10 @@ def _app_hide_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
+            continue
         if _looks_like_current_app_scope(raw_app):
             continue
         if _normalize_site_name(raw_app):
@@ -947,6 +989,10 @@ def _app_minimize_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
+            continue
         if _looks_like_current_app_scope(raw_app):
             continue
         if _normalize_site_name(raw_app):
@@ -1117,6 +1163,12 @@ def _looks_like_current_app_scope(value: str) -> bool:
         "activeapplication",
         "thisapplication",
     }
+
+
+def _looks_like_common_path_target(value: str) -> bool:
+    app = _strip_app_name(value)
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    return compact in _COMMON_REVEAL_PATHS
 
 
 def _music_query(text: str) -> str:

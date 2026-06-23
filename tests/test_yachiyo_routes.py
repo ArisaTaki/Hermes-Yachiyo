@@ -1665,6 +1665,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["app.status"]["capability_id"] == "app_control"
     assert tools["app.status"]["risk_level"] == "low"
     assert tools["app.status"]["input_schema"]["required"] == ["app_name"]
+    assert tools["app.show"]["capability_id"] == "app_control"
+    assert tools["app.show"]["risk_level"] == "low"
+    assert tools["app.show"]["input_schema"]["required"] == ["app_name"]
+    assert any("show, unhide, restore" in note for note in tools["app.show"]["fallback_notes"])
     assert tools["app.hide"]["capability_id"] == "app_control"
     assert tools["app.hide"]["risk_level"] == "low"
     assert tools["app.hide"]["input_schema"]["required"] == ["app_name"]

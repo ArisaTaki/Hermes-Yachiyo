@@ -583,6 +583,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",
         "app.focus",
+        "app.show",
         "app.hide",
         "app.minimize",
         "app.quit",
@@ -701,6 +702,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.quit",
         "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("显示 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("还原微信", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("unhide Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("显示 GitHub", allowed_tools) != {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "GitHub"},
     }
     assert daily_desktop_intent_tool_request("隐藏 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1845,6 +1866,24 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"app_name": "Slack", "running": True},
         },
     )
+    app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.show",
+        {"app_name": "Slack"},
+        {
+            "ok": True,
+            "summary": "Showed Slack",
+            "data": {"app_name": "Slack", "show_status": "shown"},
+        },
+    )
+    app_show_launched = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.show",
+        {"app_name": "Slack"},
+        {
+            "ok": True,
+            "summary": "Launched and showed Slack",
+            "data": {"app_name": "Slack", "show_status": "launched"},
+        },
+    )
     app_hide = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.hide",
         {"app_name": "Slack"},
@@ -1883,6 +1922,8 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
     assert app_quit == "已退出 Slack。"
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
+    assert app_show == "已显示 Slack。"
+    assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"
     assert app_minimize == "已最小化 Slack。"
     assert close_window == "已关闭当前窗口。"

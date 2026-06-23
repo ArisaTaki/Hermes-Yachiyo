@@ -340,6 +340,49 @@ def test_chat_bridge_quick_message_executes_named_app_hide_without_approval(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_named_app_show_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    show_calls: list[str] = []
+
+    def fake_app_show(app_name: str) -> dict:
+        show_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.show",
+            "summary": f"Showed {app_name}",
+            "data": {"app_name": app_name, "show_status": "shown", "restored_window_count": 1},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_show",
+        fake_app_show,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "显示 Slack",
+    )
+
+    assert result["ok"] is True
+    assert show_calls == ["Slack"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已显示 Slack。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.show"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_named_app_minimize_without_approval(
     tmp_path,
     monkeypatch,

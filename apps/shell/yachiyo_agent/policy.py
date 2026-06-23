@@ -34,6 +34,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "app.status",
         "app.open",
         "app.focus",
+        "app.show",
         "app.hide",
         "app.minimize",
         "desktop.reveal_path",
@@ -68,6 +69,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
         "read_app_status",
         "open_app",
         "focus_app",
+        "show_app",
         "hide_app",
         "minimize_app",
         "reveal_path",
@@ -119,6 +121,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "read_app_status",
     "open_app",
     "focus_app",
+    "show_app",
     "hide_app",
     "minimize_app",
     "quit_app",
@@ -156,6 +159,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_app_status": ("app.status",),
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
+    "show_app": ("app.show",),
     "hide_app": ("app.hide",),
     "minimize_app": ("app.minimize",),
     "quit_app": ("app.quit",),
@@ -183,6 +187,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "read_active_window": "Read active window",
     "open_app": "Open app",
     "focus_app": "Focus app",
+    "show_app": "Show app",
     "hide_app": "Hide app",
     "minimize_app": "Minimize app",
     "quit_app": "Quit app",
@@ -216,6 +221,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "read_active_window": "Read the foreground application and window title.",
     "open_app": "Launch a local desktop application.",
     "focus_app": "Bring a local desktop application to the foreground.",
+    "show_app": "Show, unhide, restore minimized windows, and activate a local desktop application.",
     "hide_app": "Hide a running local desktop application without quitting it.",
     "minimize_app": "Minimize windows for a running local desktop application without quitting it.",
     "quit_app": "Quit a local desktop application after approval.",
@@ -260,6 +266,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.show",
         "app.hide",
         "app.minimize",
         "app.quit",
@@ -284,7 +291,15 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     ),
     "screen_capture": ("screen.capture",),
     "active_window": ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
-    "app_control": ("app.status", "app.open", "app.focus", "app.hide", "app.minimize", "app.quit"),
+    "app_control": (
+        "app.status",
+        "app.open",
+        "app.focus",
+        "app.show",
+        "app.hide",
+        "app.minimize",
+        "app.quit",
+    ),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": (
         "desktop.hide_app",
@@ -617,6 +632,9 @@ def _tool_missing_permissions(
         values.extend(value for value in capability_missing if value == "open_command")
     elif tool == "app.focus":
         values.extend(value for value in capability_missing if value != "open_command")
+    elif tool == "app.show":
+        values.extend(value for value in capability_missing if value != "open_command")
+        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
     elif tool in {"app.hide", "app.minimize"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
     else:

@@ -391,6 +391,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "app.status",
             "app.open",
             "app.focus",
+            "app.show",
             "app.hide",
             "app.minimize",
             "app.quit",
@@ -434,6 +435,7 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
             "desktop.active_window",
             "app.open",
             "app.focus",
+            "app.show",
             "app.hide",
             "app.minimize",
             "media.apple_music_play",
@@ -496,7 +498,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 
     assert app_control["available"] is False
     assert app_control["available_tools"] == ["app.open", "app.hide", "app.minimize"]
-    assert app_control["unavailable_tools"] == ["app.status", "app.focus", "app.quit"]
+    assert app_control["unavailable_tools"] == ["app.status", "app.focus", "app.show", "app.quit"]
     assert media_control["available"] is False
     assert media_control["degraded_tools"] == [
         "media.apple_music_play",
@@ -522,6 +524,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
+    assert desktop_tool_risk_level("app.show") == "low"
     assert desktop_tool_risk_level("app.hide") == "low"
     assert desktop_tool_risk_level("app.minimize") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
@@ -542,6 +545,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("open_path") == "low"
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
+    assert desktop_action_risk_level("show_app") == "low"
     assert desktop_action_risk_level("hide_app") == "low"
     assert desktop_action_risk_level("minimize_app") == "low"
     assert desktop_action_risk_level("foreground_hide_app") == "low"
@@ -567,6 +571,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "read_app_status",
         "open_app",
         "focus_app",
+        "show_app",
         "hide_app",
         "minimize_app",
         "quit_app",
@@ -578,7 +583,6 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "foreground_hide_app",
         "foreground_minimize_window",
         "foreground_click",
-        "foreground_close_window",
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
@@ -590,6 +594,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_windows"].tools == ["desktop.windows"]
     assert catalog["read_app_status"].risk_level == "low"
     assert catalog["read_app_status"].tools == ["app.status"]
+    assert catalog["show_app"].risk_level == "low"
+    assert catalog["show_app"].tools == ["app.show"]
     assert catalog["hide_app"].risk_level == "low"
     assert catalog["hide_app"].tools == ["app.hide"]
     assert catalog["minimize_app"].risk_level == "low"
@@ -709,6 +715,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     music = tools["media.apple_music_play"]
     permissions = tools["desktop.permissions"]
     quit_app = tools["app.quit"]
+    named_show_app = tools["app.show"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
@@ -730,6 +737,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert quit_app.approval_required is False
     assert quit_app.input_schema["required"] == ["app_name"]
     assert any("approval" in note for note in quit_app.fallback_notes)
+    assert named_show_app.capability_id == "app_control"
+    assert named_show_app.risk_level == "low"
+    assert named_show_app.input_schema["required"] == ["app_name"]
+    assert any("show, unhide, restore" in note for note in named_show_app.fallback_notes)
     assert named_hide_app.capability_id == "app_control"
     assert named_hide_app.risk_level == "low"
     assert named_hide_app.input_schema["required"] == ["app_name"]
