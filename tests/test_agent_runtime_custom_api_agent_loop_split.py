@@ -954,6 +954,29 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
     assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
+def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_play",
+        {"query": "超时空辉夜姬"},
+        {
+            "ok": False,
+            "error": "Not authorized to send Apple events to Music.",
+            "permission_error": True,
+            "permission_targets": ["music_app", "automation"],
+            "recovery_hints": [
+                "Open Music.app once, confirm the track exists in the local library.",
+                "Grant Automation permission in System Settings.",
+            ],
+        },
+    )
+
+    assert "桌面操作未完成：Not authorized to send Apple events to Music." in result
+    assert "缺少权限：music_app, automation" in result
+    assert "你可以这样处理：" in result
+    assert "Open Music.app once" in result
+    assert "Grant Automation permission" in result
+
+
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:
     budget = FakeBudget()
     order: list[str] = []

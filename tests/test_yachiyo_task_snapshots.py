@@ -131,6 +131,60 @@ def test_agent_task_snapshot_derives_progress_from_unavailable_desktop_intent() 
     assert task.progress_text == "无法执行 · 播放 Apple Music"
 
 
+def test_agent_task_snapshot_derives_progress_from_completed_desktop_intent() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-music",
+            "run_id": "run-music",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "media.apple_music_play",
+                    "payload": {
+                        "tool": "media.apple_music_play",
+                        "result": {"ok": True},
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "已执行 · 播放 Apple Music"
+    assert task.progress_text == "已执行 · 播放 Apple Music"
+
+
+def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_intent() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-music",
+            "run_id": "run-music",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "media.apple_music_play",
+                    "payload": {
+                        "tool": "media.apple_music_play",
+                        "result": {
+                            "ok": False,
+                            "permission_error": True,
+                            "permission_targets": ["music_app", "automation"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "需要权限 · 播放 Apple Music"
+    assert task.progress_text == "需要权限 · 播放 Apple Music"
+
+
 def test_agent_task_snapshot_preserves_explicit_progress_over_desktop_intent() -> None:
     task = agent_task_snapshot_from_payload(
         {

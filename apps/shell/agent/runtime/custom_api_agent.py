@@ -357,8 +357,9 @@ class RuntimeCustomApiAgentLoop:
         permission_targets = result.get("permission_targets")
         if result.get("permission_error") or permission_targets:
             targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
+            diagnostics = _permission_diagnostics(result)
             suffix = f" 缺少权限：{targets}。" if targets else ""
-            return f"桌面操作未完成：{error}。{suffix}".strip()
+            return f"桌面操作未完成：{error}。{suffix}{diagnostics}".strip()
         return f"桌面操作未完成：{error}。"
 
     def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
@@ -491,3 +492,36 @@ def _browser_text_summary(result: dict[str, Any]) -> str:
     if len(text) > 1200:
         text = f"{text[:1200]}..."
     return text
+
+
+def _permission_diagnostics(result: dict[str, Any]) -> str:
+    hints = _string_list(result.get("recovery_hints"))
+    if not hints:
+        hints = _permission_target_hints(_string_list(result.get("permission_targets")))
+    if not hints:
+        return ""
+    return " 你可以这样处理：" + " ".join(hints)
+
+
+def _permission_target_hints(targets: list[str]) -> list[str]:
+    hints_by_target = {
+        "accessibility": "在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。",
+        "automation": "在 macOS 系统设置 > 隐私与安全性 > 自动化 中允许 Oha-Yachiyo 控制目标 App/System Events。",
+        "music_app": "先打开 Music.app，确认歌曲在资料库里，并在系统弹窗出现时允许自动化控制 Music。",
+        "screen_recording": "在 macOS 系统设置 > 隐私与安全性 > 屏幕录制 中允许 Oha-Yachiyo 或当前运行环境。",
+        "chrome_cdp": "启动或配置 Chrome DevTools/CDP 连接后再重试浏览器控制。",
+    }
+    hints: list[str] = []
+    for target in targets:
+        hint = hints_by_target.get(target)
+        if hint and hint not in hints:
+            hints.append(hint)
+    return hints
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []

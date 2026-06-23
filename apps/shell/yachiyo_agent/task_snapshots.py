@@ -24,6 +24,7 @@ from .links import studio_run_url
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
 _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
+_COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
@@ -198,10 +199,19 @@ def _desktop_intent_progress_text(
         if event.event_type not in {
             _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
             _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+            _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         }:
             continue
         tool_name = _event_tool_name(event)
         label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
+        if event.event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
+            payload = event.payload if isinstance(event.payload, Mapping) else {}
+            result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+            if result.get("permission_error"):
+                return f"需要权限 · {label}" if label else "需要桌面权限"
+            if result.get("ok") is False:
+                return f"执行失败 · {label}" if label else "桌面动作失败"
+            return f"已执行 · {label}" if label else "已执行桌面动作"
         if event.event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE:
             return f"无法执行 · {label}" if label else "无法执行桌面动作"
         if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
