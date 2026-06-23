@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+
 from .desktop_permissions import desktop_permission_missing_by_capability
 from .legacy_runs import LegacyRunPayloadProjector
 from .policy import desktop_execution_capability_snapshots
@@ -15,6 +17,33 @@ def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
     if isinstance(decision, dict):
         return str(decision.get("reason") or "").strip()
     return str(decision or "").strip()
+
+
+def _approval_id_from_decision(decision: dict[str, Any] | str | None) -> str:
+    if not isinstance(decision, dict):
+        return ""
+    metadata = decision.get("metadata") if isinstance(decision.get("metadata"), dict) else {}
+    return str(decision.get("approval_id") or metadata.get("approval_id") or "").strip()
+
+
+def _assert_matching_pending_approval(
+    run: dict[str, Any],
+    requested_approval_id: str,
+) -> None:
+    if not requested_approval_id:
+        return
+    pending = run.get("pending_approval")
+    pending_approval_id = ""
+    if isinstance(pending, dict):
+        pending_approval_id = str(pending.get("approval_id") or "").strip()
+    if pending_approval_id == requested_approval_id:
+        return
+    run_id = str(run.get("run_id") or "").strip()
+    raise AgentRuntimeError(
+        "审批 ID 与当前待审批项不匹配"
+        f"：{requested_approval_id}"
+        f"{f' for run {run_id}' if run_id else ''}"
+    )
 
 
 class LegacyRuntimePort:
@@ -217,6 +246,7 @@ class LegacyRuntimePort:
 
     def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
+        self._assert_task_approval(run_id, decision)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
                 task_id,
@@ -226,6 +256,7 @@ class LegacyRuntimePort:
 
     def reject(self, task_id: str, decision: dict[str, Any] | str | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
+        self._assert_task_approval(run_id, decision)
         reason = _rejection_reason(decision)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
@@ -244,6 +275,19 @@ class LegacyRuntimePort:
                 task_id,
                 self._run_action_payload(run_id, self._runtime.cancel_run(run_id)),
             )
+        )
+
+    def _assert_task_approval(
+        self,
+        run_id: str,
+        decision: dict[str, Any] | str | None,
+    ) -> None:
+        requested_approval_id = _approval_id_from_decision(decision)
+        if not requested_approval_id:
+            return
+        _assert_matching_pending_approval(
+            self._runtime.get_run(run_id),
+            requested_approval_id,
         )
 
     def _run_id_for_task(self, task_id: str) -> str:

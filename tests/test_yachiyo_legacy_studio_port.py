@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
@@ -117,6 +120,16 @@ def test_legacy_studio_port_accepts_approve_decision_payload() -> None:
     assert runtime.last_approve_request == {"run_id": "run-1"}
 
 
+def test_legacy_studio_port_rejects_mismatched_approval_id() -> None:
+    runtime = _FakeGroupRuntime()
+    port = LegacyStudioPort(runtime)
+
+    with pytest.raises(AgentRuntimeError, match="审批 ID 与当前待审批项不匹配"):
+        port.approve_run_approval("run-1", {"approval_id": "wrong-approval"})
+
+    assert runtime.last_approve_request is None
+
+
 class _FakeGroupRuntime:
     def __init__(self, statuses: dict[str, str] | None = None) -> None:
         self.child_run_ids: list[str] = []
@@ -167,6 +180,16 @@ class _FakeGroupRuntime:
         self.runs[run_id] = run
         self.child_run_ids.append(run_id)
         return dict(run)
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        if run_id not in self.runs and run_id == "run-1":
+            return {
+                "pending_approval": {"approval_id": "approval-1"},
+                "run_id": "run-1",
+                "status": "approval_required",
+                "user_goal": "Approve me",
+            }
+        return dict(self.runs[run_id])
 
     def append_run_event(
         self,

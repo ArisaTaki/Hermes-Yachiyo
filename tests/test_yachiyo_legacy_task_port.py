@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.yachiyo_agent.legacy_ports import LegacyRuntimePort as CompatLegacyRuntimePort
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 
@@ -167,6 +170,40 @@ def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
     assert ("get_task_run_link", "task-1") in runtime.calls
 
 
+def test_legacy_runtime_port_honors_matching_task_approval_id() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    approved = port.approve("task-1", {"approval_id": "approval-1"})
+
+    assert approved["status"] == "completed"
+    assert ("approve_run_approval", "run-1") in runtime.calls
+
+
+def test_legacy_runtime_port_rejects_mismatched_task_approval_id() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    with pytest.raises(AgentRuntimeError, match="审批 ID 与当前待审批项不匹配"):
+        port.approve("task-1", {"approval_id": "wrong-approval"})
+
+    assert ("approve_run_approval", "run-1") not in runtime.calls
+
+
 def test_legacy_runtime_port_resolves_task_link_for_timeline() -> None:
     runtime = _FakeRuntime()
     port = LegacyRuntimePort(runtime)
@@ -287,6 +324,7 @@ class _FakeRuntime:
                 "run_id": "run-1",
                 "user_goal": "Patch README",
                 "status": "running",
+                "pending_approval": {"approval_id": "approval-1"},
                 "timeline": [{"event": "run.started"}],
             },
             "workflow-run-1": {
@@ -296,6 +334,7 @@ class _FakeRuntime:
                 "workflow_id": "workflow-1",
                 "user_goal": "Build report",
                 "status": "running",
+                "pending_approval": {"approval_id": "approval-workflow-1"},
                 "timeline": [{"event": "workflow.run.started"}],
             },
         }

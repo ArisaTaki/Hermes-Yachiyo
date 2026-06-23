@@ -20,7 +20,11 @@ from .legacy_groups import (
 )
 from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
-from .legacy_tasks import LegacyRuntimePort
+from .legacy_tasks import (
+    LegacyRuntimePort,
+    _approval_id_from_decision,
+    _assert_matching_pending_approval,
+)
 from .desktop_permissions import desktop_permission_missing_by_capability
 from .desk import LocalAgentDeskStore
 from .groups import group_run_snapshot_from_payload
@@ -474,7 +478,7 @@ class LegacyStudioPort:
         run_id: str,
         decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        del decision
+        self._assert_run_approval(run_id, decision)
         return self._runtime.approve_run_approval(run_id)
 
     def reject_run_approval(
@@ -482,7 +486,21 @@ class LegacyStudioPort:
         run_id: str,
         decision: dict[str, Any] | str | None = None,
     ) -> dict[str, Any]:
+        self._assert_run_approval(run_id, decision)
         return self._runtime.reject_run_approval(run_id, _rejection_reason(decision))
+
+    def _assert_run_approval(
+        self,
+        run_id: str,
+        decision: dict[str, Any] | str | None,
+    ) -> None:
+        requested_approval_id = _approval_id_from_decision(decision)
+        if not requested_approval_id:
+            return
+        _assert_matching_pending_approval(
+            self._runtime.get_run(run_id),
+            requested_approval_id,
+        )
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         return self._runtime.read_run_artifact(run_id, artifact_path)
