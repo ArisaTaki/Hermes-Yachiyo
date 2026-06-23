@@ -635,6 +635,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("打开浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Cursor", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Cursor"},
+    }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -1025,6 +1035,43 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
 
     assert pause == "已暂停 Apple Music。"
     assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+
+
+def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details() -> None:
+    app_unverified = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open",
+        {"app_name": "Google Chrome"},
+        {
+            "ok": True,
+            "summary": "Opened Google Chrome",
+            "data": {"app_name": "Google Chrome", "launch_verified": False},
+        },
+    )
+    browser_fallback = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.open_url",
+        {"url": "https://example.com"},
+        {
+            "ok": True,
+            "summary": "Opened URL in the system browser: https://example.com",
+            "data": {"url": "https://example.com"},
+            "fallback_used": True,
+            "fallback": "system_browser",
+        },
+    )
+    app_not_found = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open",
+        {"app_name": "Missing App"},
+        {
+            "ok": False,
+            "error": "Application not found.",
+            "error_code": "app_not_found",
+            "recovery_hints": ["确认应用已安装，或换用精确应用名。"],
+        },
+    )
+
+    assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
+    assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
+    assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:

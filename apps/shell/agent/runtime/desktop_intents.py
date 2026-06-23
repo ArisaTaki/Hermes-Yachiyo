@@ -277,6 +277,10 @@ def _normalize_app_name(value: str) -> str:
         "音乐": "Music",
         "googlechrome": "Google Chrome",
         "chrome": "Google Chrome",
+        "chrome浏览器": "Google Chrome",
+        "谷歌浏览器": "Google Chrome",
+        "浏览器": "Google Chrome",
+        "browser": "Google Chrome",
         "safari": "Safari",
         "finder": "Finder",
         "访达": "Finder",
@@ -301,7 +305,10 @@ def _normalize_app_name(value: str) -> str:
         "notion": "Notion",
         "obsidian": "Obsidian",
         "vscode": "Visual Studio Code",
+        "vsc": "Visual Studio Code",
         "visualstudiocode": "Visual Studio Code",
+        "code": "Visual Studio Code",
+        "cursor": "Cursor",
     }
     return aliases.get(compact, app)
 

@@ -542,9 +542,38 @@ def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
     assert result["ok"] is False
     assert result["action"] == "app.open"
     assert result["summary"] == "app.open failed"
-    assert result["data"] == {}
+    assert result["data"] == {"app_name": "Missing App"}
     assert result["permission_error"] is False
     assert result["fallback_used"] is False
+    assert result["error_code"] == "app_not_found"
+    assert "确认应用已安装" in result["recovery_hints"][0]
+
+
+def test_app_open_success_records_launch_verification(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {"ok": True, "stdout": "running", "stderr": ""},
+    )
+
+    result = desktop_mod.app_open("Google Chrome")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.open"
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "launch_verified": True,
+        "launch_status": "running",
+    }
+    assert calls[0][0] == ["open", "-a", "Google Chrome"]
 
 
 def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:

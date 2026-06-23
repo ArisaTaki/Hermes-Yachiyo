@@ -319,6 +319,9 @@ class RuntimeCustomApiAgentLoop:
         if result.get("ok"):
             if tool_name == "app.open":
                 app_name = _payload_text(result, planned_input, "app_name")
+                data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                if data.get("launch_verified") is False and app_name:
+                    return f"已向 macOS 发送打开 {app_name} 的请求，但未能确认它已启动。"
                 return f"已打开 {app_name}。" if app_name else (result_summary or "已打开应用。")
             if tool_name == "app.focus":
                 app_name = _payload_text(result, planned_input, "app_name")
@@ -339,6 +342,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or _active_window_summary(result)
             if tool_name == "browser.open_url":
                 url = _payload_text(result, planned_input, "url")
+                if result.get("fallback_used") and result.get("fallback") == "system_browser":
+                    return f"已用系统浏览器打开网页：{url}。" if url else (result_summary or "已用系统浏览器打开网页。")
                 return f"已打开网页：{url}。" if url else (result_summary or "已打开网页。")
             if tool_name == "browser.current_page":
                 return result_summary or _browser_page_summary(result)
@@ -366,8 +371,9 @@ class RuntimeCustomApiAgentLoop:
             targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
             diagnostics = _permission_diagnostics(result)
             suffix = f" 缺少权限：{targets}。" if targets else ""
-            return f"桌面操作未完成：{error}。{suffix}{diagnostics}".strip()
-        return f"桌面操作未完成：{error}。"
+            return f"桌面操作未完成：{_sentence(error)}{suffix}{diagnostics}".strip()
+        diagnostics = _permission_diagnostics(result)
+        return f"桌面操作未完成：{_sentence(error)}{diagnostics}".strip()
 
     def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
         for message in reversed(messages):
@@ -523,6 +529,15 @@ def _apple_music_control_label(action: str) -> str:
         "next": "切到下一首",
         "previous": "切到上一首",
     }.get(str(action or "").strip(), "")
+
+
+def _sentence(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.endswith(("。", ".", "!", "！", "?", "？")):
+        return text
+    return f"{text}。"
 
 
 def _permission_diagnostics(result: dict[str, Any]) -> str:

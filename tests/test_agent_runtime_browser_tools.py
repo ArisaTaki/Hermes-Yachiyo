@@ -70,6 +70,7 @@ def test_browser_cdp_unavailable_returns_recovery_target(monkeypatch) -> None:
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["chrome_cdp"]
     assert result["permission_targets"] == ["chrome_cdp"]
+    assert "Chrome DevTools/CDP" in result["recovery_hints"][0]
 
 
 def test_browser_extract_text_uses_current_page_evaluation(monkeypatch) -> None:

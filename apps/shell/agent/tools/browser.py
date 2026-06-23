@@ -588,6 +588,12 @@ def _cdp_unavailable(action: str, detail: Any = None) -> dict[str, Any]:
         "fallback_used": False,
         "missing_permissions": ["chrome_cdp"],
         "permission_targets": ["chrome_cdp"],
+        "recovery_hints": [
+            (
+                "启动 Chrome DevTools/CDP，或在 Native Agent diagnostics 里配置 "
+                "browser.cdp_url 后再重试浏览器自动化。"
+            )
+        ],
     }
     if detail:
         payload["detail"] = str(detail)

@@ -86,12 +86,13 @@ def app_open(app_name: str) -> dict[str, Any]:
     except Exception as exc:
         return _error("app.open", exc)
     if result.returncode != 0:
-        return _failed("app.open", result)
+        return _app_open_failed(clean_name, result)
+    verification = _app_running_verification(clean_name)
     return {
         "ok": True,
         "action": "app.open",
         "summary": f"Opened {clean_name}",
-        "data": {"app_name": clean_name},
+        "data": {"app_name": clean_name, **verification},
         "permission_error": False,
         "fallback_used": False,
     }
@@ -453,6 +454,62 @@ def _failed(action: str, result: subprocess.CompletedProcess[str]) -> dict[str, 
         "fallback_used": False,
     }
     return _with_permission_metadata(action, payload)
+
+
+def _app_open_failed(app_name: str, result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    payload = _failed("app.open", result)
+    payload["data"] = {"app_name": app_name}
+    error = str(payload.get("error") or "")
+    if _looks_like_app_not_found(error):
+        payload["error_code"] = "app_not_found"
+        payload["recovery_hints"] = [
+            (
+                "确认应用已安装，或换用 macOS 里的精确应用名，例如 "
+                "Google Chrome、Safari、Music、Visual Studio Code。"
+            )
+        ]
+    return payload
+
+
+def _app_running_verification(app_name: str) -> dict[str, Any]:
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            if application appName is running then
+                return "running"
+            end if
+            return "not_running"
+        end run
+        """,
+        [app_name],
+    )
+    if result.get("ok"):
+        status = str(result.get("stdout") or "").strip()
+        return {
+            "launch_verified": status == "running",
+            "launch_status": status or "unknown",
+        }
+    return {
+        "launch_verified": None,
+        "launch_status": "unknown",
+        "launch_verification_error": str(result.get("error") or result.get("stderr") or ""),
+    }
+
+
+def _looks_like_app_not_found(value: Any) -> bool:
+    normalized = str(value or "").lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "application not found",
+            "unable to find application",
+            "was not found",
+            "can't find application",
+            "can’t find application",
+            "does not exist",
+        )
+    )
 
 
 def _clean_required(value: str, field: str) -> str:
