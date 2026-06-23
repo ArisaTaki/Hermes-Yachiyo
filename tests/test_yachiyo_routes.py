@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -743,6 +744,107 @@ async def test_yachiyo_task_approve_syncs_main_chat_desktop_approval_to_chat(
         assert completed_message.metadata["run_status"] == "completed"
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route.db",
+        workspace_dir=tmp_path / "agent-runtime-route",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-daily-desktop")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("daily desktop public task should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="打开 Word",
+                conversation_id="chat-main-daily-desktop",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-daily-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        messages = store.load_messages("chat-main-daily-desktop", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        assistant = next(message for message in messages if message.role == "assistant")
+        user_metadata = json.loads(user.metadata_json or "{}")
+
+        assert open_calls == ["Microsoft Word"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已打开 Microsoft Word。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "app.open"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Microsoft Word"
+        assert timeline["task_id"] == started["task_id"]
+        assert timeline["status"] == "completed"
+        assert timeline["tool_calls"][-1]["tool_name"] == "app.open"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["launch_verified"] is True
+        event_types = [event["event_type"] for event in events["events"]]
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert user.task_id == started["task_id"]
+        assert user_metadata["client_message_id"] == "route-main-daily-1"
+        assert user_metadata["daily_desktop_intent"] is True
+        assert assistant.task_id == started["task_id"]
+        assert assistant.content == "已打开 Microsoft Word。"
+        assert assistant.status == MessageStatus.COMPLETED
     finally:
         service.close()
         store.close()
