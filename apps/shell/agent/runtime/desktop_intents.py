@@ -1332,15 +1332,15 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
     hotkey_part = (
         r"(?:command|cmd|shift|option|alt|control|ctrl|⌘|⇧|⌥|⌃|fn|"
-        r"回车|换行|空格|退出|删除|退格|上箭头|下箭头|左箭头|右箭头|"
+        r"回车|确认|确定|换行|空格|退出|删除|退格|上箭头|下箭头|左箭头|右箭头|"
         r"enter|return|escape|esc|tab|space|delete|backspace|up|down|left|right|"
         r"[A-Za-z0-9])"
     )
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        rf"(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*"
+        rf"(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*(?:一下|下|一次)?\s*"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+)",
-        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*"
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*(?:一下|下|一次)?\s*"
         rf"(?P<combo>{hotkey_part})",
         rf"(?:press|send)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
@@ -1382,6 +1382,8 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
         "enter": "return",
         "return": "return",
         "回车": "return",
+        "确认": "return",
+        "确定": "return",
         "换行": "return",
         "escape": "escape",
         "esc": "escape",
@@ -1405,7 +1407,7 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
     modifiers: list[str] = []
     key = ""
     for raw_part in parts:
-        part = raw_part.lower()
+        part = re.sub(r"键$", "", raw_part.lower())
         modifier = modifier_aliases.get(part)
         if modifier:
             if modifier not in modifiers:
@@ -1449,7 +1451,7 @@ def _desktop_click(text: str) -> dict[str, Any] | None:
     match = re.search(
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|click)\s*"
-        r"(?:坐标|位置)?\s*"
+        r"(?:屏幕坐标|屏幕|坐标|位置)?\s*"
         r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)",
         text,
         flags=re.IGNORECASE,

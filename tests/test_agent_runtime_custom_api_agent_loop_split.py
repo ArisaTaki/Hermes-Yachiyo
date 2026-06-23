@@ -1187,6 +1187,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hotkey",
         "input": {"key": "p", "modifiers": ["control", "shift"]},
     }
+    assert daily_desktop_intent_tool_request("按一下回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("按确认键", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
     assert daily_desktop_intent_tool_request("输入 你好八千代", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.type_text",
@@ -1201,6 +1211,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.click",
         "input": {"x": 120, "y": 240, "click_count": 2},
+    }
+    assert daily_desktop_intent_tool_request("点击屏幕 120,240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click",
+        "input": {"x": 120, "y": 240, "click_count": 1},
     }
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
