@@ -46,6 +46,8 @@ def _run_launcher_daily_desktop_quick_message(
     tmp_path,
     monkeypatch,
     text: str,
+    permission_probe: Any | None = None,
+    permission_preflight: Any | None = None,
 ) -> tuple[dict, dict, dict, list[str]]:
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
@@ -66,6 +68,15 @@ def _run_launcher_daily_desktop_quick_message(
             AssertionError("launcher daily desktop quick message should not call model")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        permission_probe or (lambda use_cache=True: {}),
+    )
+    if permission_preflight is not None:
+        monkeypatch.setattr(
+            "apps.shell.agent.tools.desktop.permission_preflight",
+            permission_preflight,
+        )
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
@@ -82,10 +93,8 @@ def _run_launcher_daily_desktop_quick_message(
         task_timeline = YachiyoAgentService(LegacyRuntimePort(service)).get_task_timeline(
             result["task_id"]
         ).model_dump(mode="json")
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
         messages = store.load_messages("session-current", limit=10)
         user = next(message for message in messages if message.role == "user")
         assistant = next(message for message in messages if message.role == "assistant")
@@ -98,6 +107,7 @@ def _run_launcher_daily_desktop_quick_message(
         assert user_metadata["source"] == "launcher"
         assert user_metadata["launcher_mode"] == "live2d"
         assert assistant.content == agent_task["summary"]
+        result["_events"] = events
         result["_task_timeline"] = task_timeline
         return result, agent_task, run, event_types
     finally:
@@ -1354,6 +1364,8 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     monkeypatch,
 ):
     calls: list[tuple[str, str]] = []
+    permission_probe_calls: list[bool] = []
+    permission_cache_warmed = False
 
     def fake_app_open(app_name: str) -> dict:
         calls.append(("open", app_name))
@@ -1381,6 +1393,46 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
             "data": {"shortcut_action": action, "key": "c", "modifiers": ["command"]},
         }
 
+    def fake_permission_probe(use_cache: bool = True) -> dict[str, list[str]]:
+        nonlocal permission_cache_warmed
+        permission_probe_calls.append(use_cache)
+        permission_cache_warmed = True
+        return {"foreground_input": ["accessibility"]}
+
+    def fake_permission_preflight() -> dict:
+        if not permission_cache_warmed:
+            return {
+                "ok": True,
+                "action": "desktop.permission_preflight",
+                "permission_error": False,
+                "permission_targets": [],
+                "affected_tools": [],
+                "recovery_actions": [],
+                "data": {"ready": True},
+            }
+        return {
+            "ok": True,
+            "action": "desktop.permission_preflight",
+            "permission_error": True,
+            "permission_targets": ["accessibility"],
+            "affected_tools": ["app.open_and_safe_type_text", "desktop.safe_shortcut"],
+            "recovery_actions": [
+                {
+                    "label": "打开辅助功能权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "辅助功能权限"},
+                    "permission_target": "accessibility",
+                    "risk_level": "low",
+                }
+            ],
+            "diagnostic_route": "/yachiyo/readiness",
+            "data": {
+                "ready": False,
+                "permission_targets": ["accessibility"],
+                "affected_tools": ["app.open_and_safe_type_text", "desktop.safe_shortcut"],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
@@ -1389,6 +1441,8 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
         tmp_path,
         monkeypatch,
         "打开 Notes，输入 hello，再复制",
+        permission_probe=fake_permission_probe,
+        permission_preflight=fake_permission_preflight,
     )
 
     assert calls == [
@@ -1397,6 +1451,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
         ("type", "hello"),
         ("shortcut", "copy"),
     ]
+    assert permission_probe_calls == [True]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
@@ -1407,6 +1462,20 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     ]
     assert run["status"] == "completed"
     assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "agent.desktop.permission_preflight" in event_types
+    assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
+        "tool.requested"
+    )
+    preflight_event = next(
+        event
+        for event in _result["_events"]
+        if event["event_type"] == "agent.desktop.permission_preflight"
+    )
+    assert preflight_event["payload"]["permission_targets"] == ["accessibility"]
+    assert preflight_event["payload"]["affected_tools"] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+    ]
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 

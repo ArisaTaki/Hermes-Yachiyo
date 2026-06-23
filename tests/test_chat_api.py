@@ -294,6 +294,8 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
     calls: list[tuple[str, str]] = []
+    permission_probe_calls: list[bool] = []
+    permission_cache_warmed = False
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -306,6 +308,56 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("multi-step desktop chat task should not call model")
         ),
+    )
+
+    def fake_permission_probe(use_cache: bool = True) -> dict[str, list[str]]:
+        nonlocal permission_cache_warmed
+        permission_probe_calls.append(use_cache)
+        permission_cache_warmed = True
+        return {"foreground_input": ["accessibility"]}
+
+    def fake_permission_preflight() -> dict:
+        if not permission_cache_warmed:
+            return {
+                "ok": True,
+                "action": "desktop.permission_preflight",
+                "permission_error": False,
+                "permission_targets": [],
+                "affected_tools": [],
+                "recovery_actions": [],
+                "data": {"ready": True},
+            }
+        return {
+            "ok": True,
+            "action": "desktop.permission_preflight",
+            "permission_error": True,
+            "permission_targets": ["accessibility"],
+            "affected_tools": ["app.open_and_safe_type_text", "desktop.safe_shortcut"],
+            "recovery_hints": ["Grant Accessibility permission."],
+            "recovery_actions": [
+                {
+                    "label": "打开辅助功能权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "辅助功能权限"},
+                    "permission_target": "accessibility",
+                    "risk_level": "low",
+                }
+            ],
+            "diagnostic_route": "/yachiyo/readiness",
+            "data": {
+                "ready": False,
+                "permission_targets": ["accessibility"],
+                "affected_tools": ["app.open_and_safe_type_text", "desktop.safe_shortcut"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        fake_permission_probe,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.permission_preflight",
+        fake_permission_preflight,
     )
 
     def fake_app_open(app_name: str) -> dict:
@@ -348,6 +400,7 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
 
         assert result["ok"] is True
         assert result["status"] == "completed"
+        assert permission_probe_calls == [True]
         assert calls == [
             ("open", "Notes"),
             ("focus", "Notes"),
@@ -367,6 +420,27 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         assert assistant.content == result["agent_task"]["summary"]
         assert run["status"] == "completed"
         assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.permission_preflight" in event_types
+        assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
+            "tool.requested"
+        )
+        preflight_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.permission_preflight"
+        )
+        assert preflight_event["payload"]["permission_targets"] == ["accessibility"]
+        assert preflight_event["payload"]["affected_tools"] == [
+            "app.open_and_safe_type_text",
+            "desktop.safe_shortcut",
+        ]
+        assert preflight_event["payload"]["recovery_actions"] == [
+            {
+                "label": "打开辅助功能权限",
+                "tool": "app.open",
+                "input": {"app_name": "辅助功能权限"},
+                "permission_target": "accessibility",
+                "risk_level": "low",
+            }
+        ]
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types

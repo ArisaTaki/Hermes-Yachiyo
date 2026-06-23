@@ -48,6 +48,7 @@ from apps.shell.agent.runtime.desktop_intents import (
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
+from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
 
@@ -621,6 +622,17 @@ class ChatAPI:
             logger.debug("主聊天日常桌面任务直接执行失败: %s", task_id, exc_info=True)
             return None
 
+    def _warm_daily_desktop_permission_cache(
+        self,
+        requests: list[dict[str, Any]],
+    ) -> None:
+        if not requests:
+            return
+        try:
+            desktop_permission_missing_by_capability(use_cache=True)
+        except Exception:
+            logger.debug("刷新桌面执行权限缓存失败", exc_info=True)
+
     def _with_session(self, session_id: str, callback):
         """Run a small ChatAPI mutation against a specific persisted session."""
         session_id = str(session_id or "").strip()
@@ -717,6 +729,8 @@ class ChatAPI:
                 and current_context.get("conversation_kind") != "group"
                 and bool(daily_desktop_requests)
             )
+            if direct_daily_desktop_intent:
+                self._warm_daily_desktop_permission_cache(daily_desktop_requests)
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason and not direct_daily_desktop_intent:
                 return self._unavailable_response(unavailable_reason)
