@@ -52,6 +52,35 @@ def test_tool_broker_payload_approved_field_cannot_bypass_terminal_approval(
     assert result["tool"] == "terminal.run"
 
 
+def test_tool_broker_policy_approval_blocks_foreground_tool_until_approved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        approvals={"desktop.type_text": True},
+    )
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "desktop_type_text",
+        lambda text: calls.append(text) or {"ok": True, "text": text},
+    )
+
+    approval = broker.call("desktop.type_text", {"text": "hello"})
+    approved = broker.call("desktop.type_text", {"text": "hello"}, approved=True)
+
+    assert approval == {
+        "ok": False,
+        "approval_required": True,
+        "tool": "desktop.type_text",
+        "policy_reason": "当前工具策略要求人工确认后再执行。",
+    }
+    assert approved == {"ok": True, "text": "hello"}
+    assert calls == ["hello"]
+
+
 def test_tool_broker_write_patch_keeps_workspace_scope_and_hash_reporting(
     tmp_path: Path,
 ) -> None:

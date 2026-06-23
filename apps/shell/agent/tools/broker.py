@@ -473,6 +473,16 @@ class ToolBroker:
         }
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
+        if not approved and self.approvals.get(name) and name not in {
+            "terminal.run",
+            "workspace.write_patch",
+        }:
+            return {
+                "ok": False,
+                "approval_required": True,
+                "tool": name,
+                "policy_reason": "当前工具策略要求人工确认后再执行。",
+            }
         return dispatch_tool_call(self, name, payload, approved=approved)
 
     def _with_foreground_lock(self, tool_name: str, action: Any) -> dict[str, Any]:

@@ -69,6 +69,7 @@ def test_runtime_tool_broker_factory_builds_run_scoped_broker(tmp_path) -> None:
     broker = factory.for_run(
         run_id=" run-1 ",
         workspace_policy=workspace_policy,
+        approvals={"desktop.type_text": True},
         default_runnable_id="agent-1",
         skills=skills,
     )
@@ -76,6 +77,7 @@ def test_runtime_tool_broker_factory_builds_run_scoped_broker(tmp_path) -> None:
     assert isinstance(broker, FakeBroker)
     assert broker.workspace_policy is workspace_policy
     assert broker.artifact_root == tmp_path / "artifacts" / "run-1"
+    assert broker.kwargs["approvals"] == {"desktop.type_text": True}
     assert broker.kwargs["skills"] is skills
     assert broker.kwargs["memory_store"] == {"memory": {"source_run_id": "run-1"}}
     assert broker.kwargs["future_task_store"] == {
@@ -94,8 +96,13 @@ def test_runtime_tool_broker_factory_uses_main_chat_default_runnable(tmp_path) -
         main_chat_agent_id="builtin:yachiyo-main",
     )
 
-    broker = factory.for_main_chat(run_id="run-chat", workspace_policy={})
+    broker = factory.for_main_chat(
+        run_id="run-chat",
+        workspace_policy={},
+        approvals={"browser.click": True},
+    )
 
+    assert broker.kwargs["approvals"] == {"browser.click": True}
     assert broker.kwargs["future_task_store"] == {
         "future": {
             "source_run_id": "run-chat",

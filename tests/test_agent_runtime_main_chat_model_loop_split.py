@@ -179,6 +179,22 @@ def test_main_chat_model_loop_runner_projects_successful_loop() -> None:
     assert state["events"][-1][1]["finish_reason"] == "stop"
 
 
+def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
+    runner, state = _runner()
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {
+            "allowed_tools": ["desktop.type_text"],
+            "approval_required": {"desktop.type_text": True},
+        },
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+
+    result = runner.execute("run-1", [{"role": "user", "content": "输入 hello"}])
+
+    assert result["status"] == "running"
+    assert state["tool_brokers"].calls[0]["approvals"] == {"desktop.type_text": True}
+
+
 def test_main_chat_model_loop_runner_projects_approval_required_without_bypassing_gate() -> None:
     def raise_approval(*_args: Any, **_kwargs: Any) -> str:
         raise AgentApprovalRequired({"tool": "terminal.run", "approval_id": "approval-1"})

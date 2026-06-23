@@ -72,6 +72,14 @@ class RuntimeToolApprovalResumeService:
             or pending_context.get("workflow_run_id")
             or ""
         ).strip()
+        broker_kwargs: dict[str, Any] = foreground_lock_broker_kwargs(
+            run_id=run_id,
+            run_group_id=run_group_id,
+            workflow_run_id=workflow_run_id,
+        )
+        approval_required = runtime["tool_policy"].get("approval_required") or {}
+        if approval_required:
+            broker_kwargs["approvals"] = approval_required
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
@@ -80,11 +88,7 @@ class RuntimeToolApprovalResumeService:
                 workspace_policy=runtime["workspace_policy"],
                 skills=skills,
                 default_runnable_id=str((run.get("runnable_id") or self._main_chat_agent_id)),
-                **foreground_lock_broker_kwargs(
-                    run_id=run_id,
-                    run_group_id=run_group_id,
-                    workflow_run_id=workflow_run_id,
-                ),
+                **broker_kwargs,
             ),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget_factory=lambda context_run_id, context_timeline: self._run_budget(

@@ -35,6 +35,7 @@ class RuntimeToolBrokerFactory:
         *,
         run_id: str,
         workspace_policy: dict[str, Any],
+        approvals: dict[str, bool] | None = None,
         default_runnable_id: str = "",
         artifacts_dir: Path | None = None,
         skills: list[dict[str, Any]] | None = None,
@@ -61,6 +62,7 @@ class RuntimeToolBrokerFactory:
         return self._tool_broker_factory(
             workspace_policy,
             root / clean_run_id,
+            approvals=approvals,
             skills=skills,
             memory_store=self._memory_store(source_run_id=clean_run_id),
             future_task_store=self._future_task_store(
@@ -70,10 +72,17 @@ class RuntimeToolBrokerFactory:
             **extra,
         )
 
-    def for_main_chat(self, *, run_id: str, workspace_policy: dict[str, Any]) -> Any:
+    def for_main_chat(
+        self,
+        *,
+        run_id: str,
+        workspace_policy: dict[str, Any],
+        approvals: dict[str, bool] | None = None,
+    ) -> Any:
         return self.for_run(
             run_id=run_id,
             workspace_policy=workspace_policy,
+            approvals=approvals,
             default_runnable_id=self._main_chat_agent_id,
         )
 

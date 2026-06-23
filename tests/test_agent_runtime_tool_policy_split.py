@@ -126,16 +126,24 @@ def test_policy_gate_normalizes_allowed_tool_entries() -> None:
     assert not PolicyGate.allows_tool("terminal.run", ["workspace.read"])
 
 
-def test_default_daily_agent_policy_includes_low_risk_desktop_tools_only() -> None:
+def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_approval() -> None:
     policy = RuntimePolicyCompiler.default_tool_policy("custom")
     allowed_tools = set(policy["allowed_tools"])
 
     assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
-    assert not (allowed_tools & set(MEDIUM_RISK_DESKTOP_TOOL_NAMES))
-    assert not (allowed_tools & set(MEDIUM_RISK_BROWSER_TOOL_NAMES))
+    assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
-    assert policy["approval_required"] == {"terminal.run": True, "workspace.write_patch": True}
+    assert policy["approval_required"] == {
+        "desktop.hotkey": True,
+        "desktop.type_text": True,
+        "desktop.click": True,
+        "browser.click": True,
+        "browser.type_text": True,
+        "terminal.run": True,
+        "workspace.write_patch": True,
+    }
 
 
 def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools() -> None:
@@ -145,6 +153,8 @@ def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools(
     assert {"workspace.list", "workspace.read"}.issubset(allowed_tools)
     assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
+    assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
 
 

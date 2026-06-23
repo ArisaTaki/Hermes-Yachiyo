@@ -190,6 +190,13 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "desktop.click" in allowed_tools
     assert "browser.click" in allowed_tools
     assert "terminal.run" not in allowed_tools
+    assert inherited_policy["approval_required"] == {
+        "desktop.hotkey": True,
+        "desktop.type_text": True,
+        "desktop.click": True,
+        "browser.click": True,
+        "browser.type_text": True,
+    }
     assert started["participants"][0]["inherited_tool_policy_id"] == "desktop_execution"
     assert member_started["payload"]["inherited_tool_policy_id"] == "desktop_execution"
     assert member_started["payload"]["member_allowed_tools"] == allowed_tools

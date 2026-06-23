@@ -69,6 +69,14 @@ DAILY_DESKTOP_TOOL_NAMES = (
 )
 
 
+def _approval_required_agent_tools() -> tuple[str, ...]:
+    return (
+        *sorted(HIGH_RISK_AGENT_TOOLS),
+        *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+        *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    )
+
+
 def _redact_secrets(value: Any) -> str:
     return redact_sensitive_text(
         value,
@@ -694,8 +702,8 @@ class RuntimePolicyCompiler:
     def default_tool_policy(category: str = "custom") -> dict[str, Any]:
         memory_tools = list(MEMORY_TOOL_NAMES)
         future_task_tools = list(FUTURE_TASK_TOOL_NAMES)
-        daily_low_risk_tools = [*LOW_RISK_DESKTOP_TOOL_NAMES, *LOW_RISK_BROWSER_TOOL_NAMES]
-        tools = [*daily_low_risk_tools, *memory_tools, *future_task_tools, "artifact.write"]
+        daily_tools = list(DAILY_DESKTOP_TOOL_NAMES)
+        tools = [*daily_tools, *memory_tools, *future_task_tools, "artifact.write"]
         if category in {"coding", "review"}:
             tools = [
                 "workspace.list",
@@ -710,14 +718,16 @@ class RuntimePolicyCompiler:
             tools = [
                 "workspace.list",
                 "workspace.read",
-                *daily_low_risk_tools,
+                *daily_tools,
                 *memory_tools,
                 *future_task_tools,
                 "artifact.write",
             ]
         return {
             "allowed_tools": tools,
-            "approval_required": {"terminal.run": True, "workspace.write_patch": True},
+            "approval_required": {
+                tool: True for tool in _approval_required_agent_tools()
+            },
         }
 
     @staticmethod
@@ -740,7 +750,7 @@ class RuntimePolicyCompiler:
 
         raw_approval = raw.get("approval_required")
         approval_required = dict(raw_approval) if isinstance(raw_approval, dict) else {}
-        for tool in HIGH_RISK_AGENT_TOOLS:
+        for tool in _approval_required_agent_tools():
             if tool in normalized_allowed:
                 approval_required[tool] = True
             else:

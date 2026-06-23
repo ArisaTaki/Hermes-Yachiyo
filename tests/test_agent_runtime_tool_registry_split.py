@@ -284,7 +284,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
     assert "workspace.write_patch" in HIGH_RISK_AGENT_TOOLS
 
 
-def test_compile_tool_policy_accepts_desktop_tools_without_marking_them_high_risk() -> None:
+def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
     compiler = RuntimePolicyCompiler()
 
     policy = compiler.compile_tool_policy(
@@ -298,7 +298,11 @@ def test_compile_tool_policy_accepts_desktop_tools_without_marking_them_high_ris
         "desktop.type_text",
         "terminal.run",
     ]
-    assert policy["approval_required"] == {"terminal.run": True}
+    assert policy["approval_required"] == {
+        "desktop.click": True,
+        "desktop.type_text": True,
+        "terminal.run": True,
+    }
 
 
 def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> None:
@@ -329,7 +333,7 @@ def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
         )
 
 
-def test_compile_tool_policy_accepts_browser_tools_without_marking_them_high_risk() -> None:
+def test_compile_tool_policy_accepts_browser_tools_with_interaction_approval() -> None:
     compiler = RuntimePolicyCompiler()
 
     policy = compiler.compile_tool_policy(
@@ -338,7 +342,7 @@ def test_compile_tool_policy_accepts_browser_tools_without_marking_them_high_ris
     )
 
     assert policy["allowed_tools"] == ["browser.open_url", "browser.click", "workspace.write_patch"]
-    assert policy["approval_required"] == {"workspace.write_patch": True}
+    assert policy["approval_required"] == {"browser.click": True, "workspace.write_patch": True}
 
 
 def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> None:

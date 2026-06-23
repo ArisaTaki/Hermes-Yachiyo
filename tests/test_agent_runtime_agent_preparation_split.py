@@ -66,6 +66,7 @@ class FakeSharedToolBrokers:
         *,
         run_id: str,
         workspace_policy: dict[str, Any],
+        approvals: dict[str, bool] | None = None,
         default_runnable_id: str = "",
         skills: list[dict[str, Any]] | None = None,
         foreground_lock_key: str = "",
@@ -77,6 +78,8 @@ class FakeSharedToolBrokers:
             "default_runnable_id": default_runnable_id,
             "skills": skills,
         }
+        if approvals:
+            call["approvals"] = approvals
         if foreground_lock_key:
             call["foreground_lock_key"] = foreground_lock_key
         if foreground_lock_owner:

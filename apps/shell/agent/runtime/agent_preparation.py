@@ -97,32 +97,41 @@ class RuntimeAgentRunPreparer:
         skills = self._load_agent_skills(agent.get("skill_ids") or [])
         context = self._agent_context(agent, user_goal, upstream, skills=skills)
         default_runnable_id = str(agent.get("agent_id") or "")
+        approval_required = runtime["tool_policy"].get("approval_required") or {}
         if self._tool_brokers is not None:
+            broker_kwargs: dict[str, Any] = foreground_lock_broker_kwargs(
+                run_id=run_id,
+                run_group_id=run_group_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if approval_required:
+                broker_kwargs["approvals"] = approval_required
             broker = self._tool_brokers.for_run(
                 run_id=run_id,
                 workspace_policy=runtime["workspace_policy"],
                 default_runnable_id=default_runnable_id,
                 skills=skills,
-                **foreground_lock_broker_kwargs(
-                    run_id=run_id,
-                    run_group_id=run_group_id,
-                    workflow_run_id=workflow_run_id,
-                ),
+                **broker_kwargs,
             )
         else:
             if self._tool_broker_factory is None:
                 raise RuntimeError(
                     "Tool broker factory is required when shared tool brokers are not configured"
                 )
-            broker = self._tool_broker_factory(
-                runtime["workspace_policy"],
-                artifact_root,
-                skills=skills,
-                memory_store=self._memory_store(source_run_id=run_id),
-                future_task_store=self._future_task_store(
+            broker_kwargs: dict[str, Any] = {
+                "skills": skills,
+                "memory_store": self._memory_store(source_run_id=run_id),
+                "future_task_store": self._future_task_store(
                     source_run_id=run_id,
                     default_runnable_id=default_runnable_id,
                 ),
+            }
+            if approval_required:
+                broker_kwargs["approvals"] = approval_required
+            broker = self._tool_broker_factory(
+                runtime["workspace_policy"],
+                artifact_root,
+                **broker_kwargs,
             )
         return AgentRunPreparation(
             backend=backend,

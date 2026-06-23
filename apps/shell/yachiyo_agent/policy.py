@@ -300,7 +300,12 @@ def group_tool_policy_for_id(policy_id: str | None) -> dict[str, Any]:
     tools = GROUP_TOOL_POLICY_PRESETS.get(token, ())
     if not tools:
         return {}
-    return {"allowed_tools": list(tools), "approval_required": {}}
+    approval_required = {
+        tool: True
+        for tool in tools
+        if tool in MEDIUM_RISK_DESKTOP_TOOLS or tool in MEDIUM_RISK_BROWSER_TOOLS
+    }
+    return {"allowed_tools": list(tools), "approval_required": approval_required}
 
 
 def merge_tool_policies(

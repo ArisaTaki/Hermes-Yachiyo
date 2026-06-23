@@ -154,9 +154,14 @@ class MainChatModelLoopRunner:
                 message_count=len(messages),
             ),
         )
+        broker_kwargs: dict[str, Any] = {}
+        approval_required = runtime["tool_policy"].get("approval_required") or {}
+        if approval_required:
+            broker_kwargs["approvals"] = approval_required
         broker = self._tool_brokers.for_main_chat(
             run_id=run_id,
             workspace_policy=runtime["workspace_policy"],
+            **broker_kwargs,
         )
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         try:
