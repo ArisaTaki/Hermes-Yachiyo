@@ -217,6 +217,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if volume_payload is not None:
         candidates.append(_request("system.volume", volume_payload))
 
+    clipboard_text = _clipboard_write_text(text)
+    if clipboard_text:
+        candidates.append(_request("clipboard.write", {"text": clipboard_text}))
+
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
 
@@ -620,6 +624,39 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ):
         return {"action": "status"}
     return None
+
+
+def _clipboard_write_text(text: str) -> str:
+    patterns = (
+        r"(?:把|将)\s*(?P<text>.+?)\s*(?:复制|拷贝|写入|放到|放进|保存到)\s*(?:到|进|至)?\s*"
+        r"(?:系统)?(?:剪贴板|粘贴板)",
+        r"(?:复制|拷贝|写入)\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
+        r"(?:系统)?(?:剪贴板|粘贴板)",
+        r"(?:复制|拷贝|写入)(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*"
+        r"(?P<text>.+)$",
+        r"\b(?:copy|write|put)\s+(?P<text>.+?)\s+(?:to|into)\s+(?:the\s+)?"
+        r"(?:system\s+)?clipboard\b",
+        r"\b(?:copy|write)\s+(?:to\s+)?(?:the\s+)?(?:system\s+)?clipboard\s*[:：]\s*"
+        r"(?P<text>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        cleaned = _normalize_clipboard_text(match.group("text"))
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _normalize_clipboard_text(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^(?:一下|下|这个|那个)\s*", "", text)
+    text = text.strip(" 「」『』“”\"'`")
+    compact = re.sub(r"[\s._-]+", "", text.lower())
+    if compact in {"", "这段", "这段文字", "这段文本", "这个", "这个文本", "text", "thistext"}:
+        return ""
+    return text
 
 
 def _is_running_apps_request(text: str) -> bool:

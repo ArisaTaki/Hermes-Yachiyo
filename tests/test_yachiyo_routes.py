@@ -1648,6 +1648,14 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["media.apple_music_control"]["risk_level"] == "low"
     assert tools["media.apple_music_control"]["input_schema"]["required"] == ["action"]
     assert tools["media.apple_music_control"]["missing_permissions"] == ["music_app"]
+    assert tools["system.volume"]["capability_id"] == "desktop_execution"
+    assert tools["system.volume"]["risk_level"] == "low"
+    assert tools["system.volume"]["input_schema"]["required"] == ["action"]
+    assert any("volume" in note for note in tools["system.volume"]["fallback_notes"])
+    assert tools["clipboard.write"]["capability_id"] == "desktop_execution"
+    assert tools["clipboard.write"]["risk_level"] == "low"
+    assert tools["clipboard.write"]["input_schema"]["required"] == ["text"]
+    assert any("clipboard" in note for note in tools["clipboard.write"]["fallback_notes"])
     assert tools["desktop.running_apps"]["capability_id"] == "active_window"
     assert tools["desktop.running_apps"]["risk_level"] == "low"
     assert any("foreground app list" in note for note in tools["desktop.running_apps"]["fallback_notes"])

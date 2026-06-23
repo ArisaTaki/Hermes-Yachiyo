@@ -586,6 +586,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_play",
         "media.apple_music_control",
         "system.volume",
+        "clipboard.write",
         "screen.capture",
         "desktop.permissions",
         "desktop.active_window",
@@ -954,6 +955,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "unmute"},
     }
+    assert daily_desktop_intent_tool_request("把 047e43ac 复制到剪贴板", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "047e43ac"},
+    }
+    assert daily_desktop_intent_tool_request("写入剪贴板：hello world", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
+    assert daily_desktop_intent_tool_request("copy hello world to clipboard", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",
@@ -1107,9 +1123,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("调大音量", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("复制 hello 到剪贴板", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
 
 
 def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_before_model() -> None:
@@ -1546,6 +1564,21 @@ def test_main_chat_desktop_intent_summarizes_system_volume() -> None:
     assert set_level == "已把系统音量调到 35%。"
     assert increased == "已把系统音量从 40% 调高到 50%。"
     assert muted == "已将系统音量静音。"
+
+
+def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_text() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "clipboard.write",
+        {"text": "047e43ac"},
+        {
+            "ok": True,
+            "summary": "Copied 8 characters to clipboard",
+            "data": {"text_length": 8, "platform": "macos"},
+        },
+    )
+
+    assert result == "已复制 8 个字符到剪贴板。"
+    assert "047e43ac" not in result
 
 
 def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:

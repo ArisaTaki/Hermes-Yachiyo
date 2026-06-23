@@ -37,6 +37,8 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.reveal_path",
         "media.apple_music_play",
         "media.apple_music_control",
+        "system.volume",
+        "clipboard.write",
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
@@ -63,6 +65,8 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
         "focus_app",
         "reveal_path",
         "play_or_pause_media",
+        "control_system_volume",
+        "write_clipboard",
     }
 )
 MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
@@ -105,6 +109,8 @@ DESKTOP_ACTION_RISK_ORDER = (
     "focus_app",
     "reveal_path",
     "play_or_pause_media",
+    "control_system_volume",
+    "write_clipboard",
     "foreground_click",
     "foreground_type_text",
     "foreground_hotkey",
@@ -133,6 +139,8 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "focus_app": ("app.focus",),
     "reveal_path": ("desktop.reveal_path",),
     "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
+    "control_system_volume": ("system.volume",),
+    "write_clipboard": ("clipboard.write",),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
     "foreground_hotkey": ("desktop.hotkey",),
@@ -150,6 +158,8 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "open_app": "Open app",
     "focus_app": "Focus app",
     "play_or_pause_media": "Play or pause media",
+    "control_system_volume": "Control system volume",
+    "write_clipboard": "Write clipboard",
     "foreground_click": "Click foreground UI",
     "foreground_type_text": "Type into foreground UI",
     "foreground_hotkey": "Send foreground hotkey",
@@ -174,6 +184,8 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "open_app": "Launch a local desktop application.",
     "focus_app": "Bring a local desktop application to the foreground.",
     "play_or_pause_media": "Control local media playback such as Apple Music.",
+    "control_system_volume": "Read or adjust local system output volume.",
+    "write_clipboard": "Write explicit user-provided text to the system clipboard.",
     "foreground_click": "Click in the foreground application or browser page.",
     "foreground_type_text": "Enter text into the current foreground target.",
     "foreground_hotkey": "Send a keyboard shortcut to the foreground target.",
@@ -211,6 +223,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.reveal_path",
         "media.apple_music_play",
         "media.apple_music_control",
+        "system.volume",
+        "clipboard.write",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",

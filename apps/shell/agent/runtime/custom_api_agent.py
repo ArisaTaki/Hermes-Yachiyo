@@ -17,6 +17,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_play",
     "media.apple_music_control",
     "system.volume",
+    "clipboard.write",
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
@@ -46,6 +47,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "media.apple_music_play": "播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
+    "clipboard.write": "写入剪贴板",
     "desktop.hotkey": "发送快捷键",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
@@ -439,6 +441,8 @@ class RuntimeCustomApiAgentLoop:
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
             if tool_name == "system.volume":
                 return _system_volume_summary(result, planned_input) or result_summary or "已处理系统音量。"
+            if tool_name == "clipboard.write":
+                return _clipboard_write_summary(result, planned_input) or result_summary or "已写入剪贴板。"
             if tool_name == "screen.capture":
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.permissions":
@@ -608,11 +612,12 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
-            "media.apple_music_control, system.volume, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_control, system.volume, clipboard.write, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
-            "commands to system.volume; map screen capture requests to "
+            "commands to system.volume; map explicit 'copy/write to clipboard' requests to "
+            "clipboard.write without reading clipboard contents; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
@@ -898,6 +903,15 @@ def _system_volume_summary(result: dict[str, Any], planned_input: dict[str, Any]
     if action == "unmute":
         return f"已取消系统静音{f'，当前音量 {level_text}' if level_text else ''}。"
     return ""
+
+
+def _clipboard_write_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    length = data.get("text_length")
+    if not isinstance(length, int):
+        text = str(planned_input.get("text") or "")
+        length = len(text) if text else 0
+    return f"已复制 {length} 个字符到剪贴板。" if length else "已写入剪贴板。"
 
 
 def _sentence(value: str) -> str:

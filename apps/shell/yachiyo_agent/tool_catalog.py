@@ -275,6 +275,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "media.apple_music_control": [
             "Apple Music playback controls fall back to opening Music when direct control is unavailable.",
         ],
+        "system.volume": [
+            "Uses the local system volume interface and records only volume state metadata.",
+        ],
+        "clipboard.write": [
+            "Writes explicit user-provided text to the system clipboard and records only character count.",
+        ],
         "browser.open_url": [
             "Falls back to the system browser when Chrome CDP is unavailable.",
         ],

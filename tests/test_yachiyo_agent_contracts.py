@@ -515,11 +515,15 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
+    assert desktop_tool_risk_level("system.volume") == "low"
+    assert desktop_tool_risk_level("clipboard.write") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
     assert desktop_action_risk_level("read_screen") == "low"
     assert desktop_action_risk_level("diagnose_permissions") == "low"
+    assert desktop_action_risk_level("control_system_volume") == "low"
+    assert desktop_action_risk_level("write_clipboard") == "low"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
@@ -530,7 +534,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:13] == [
+    assert list(catalog)[:15] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -541,6 +545,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "focus_app",
         "reveal_path",
         "play_or_pause_media",
+        "control_system_volume",
+        "write_clipboard",
         "foreground_click",
         "foreground_type_text",
         "foreground_hotkey",
@@ -561,6 +567,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "media.apple_music_play",
         "media.apple_music_control",
     ]
+    assert catalog["control_system_volume"].tools == ["system.volume"]
+    assert catalog["write_clipboard"].tools == ["clipboard.write"]
     assert catalog["foreground_click"].risk_level == "medium"
     assert catalog["foreground_click"].requires_approval is False
     assert catalog["delete_or_overwrite_user_file"].risk_level == "high"

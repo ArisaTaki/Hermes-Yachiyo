@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1011,6 +1012,37 @@ def system_volume(action: str, *, level: Any = None, step: Any = None) -> dict[s
     }
 
 
+def clipboard_write(text: str) -> dict[str, Any]:
+    clean_text = _clean_required(text, "text")
+    command = _clipboard_write_command()
+    if not command:
+        return _unsupported("clipboard.write")
+    try:
+        result = subprocess.run(
+            command,
+            input=clean_text,
+            text=True,
+            capture_output=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("clipboard.write", exc)
+    if result.returncode != 0:
+        return _failed("clipboard.write", result)
+    return {
+        "ok": True,
+        "action": "clipboard.write",
+        "summary": f"Copied {len(clean_text)} characters to clipboard",
+        "data": {
+            "text_length": len(clean_text),
+            "platform": _desktop_platform(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
@@ -1307,6 +1339,23 @@ def _read_system_volume() -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def _clipboard_write_command() -> list[str]:
+    platform_name = _desktop_platform()
+    if platform_name == "macos":
+        return ["pbcopy"]
+    if platform_name == "windows":
+        return ["clip"]
+    if platform_name == "linux":
+        for command in (
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ):
+            if shutil.which(command[0]):
+                return command
+    return []
 
 
 def _parse_system_volume(value: Any) -> tuple[int, bool]:

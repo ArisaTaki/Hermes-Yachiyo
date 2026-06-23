@@ -38,6 +38,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
+    "clipboard.write": "clipboard_write",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
@@ -66,6 +67,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_play",
     "media.apple_music_control",
     "system.volume",
+    "clipboard.write",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text", "desktop.click")
 LOW_RISK_BROWSER_TOOL_NAMES = (
@@ -273,6 +275,8 @@ class ToolDescriptor:
             step = payload.get("step")
             if step not in (None, ""):
                 _validate_percentage_number(step, "system.volume 参数 step")
+        if self.name == "clipboard.write" and not str(payload.get("text") or "").strip():
+            raise AgentRuntimeError("clipboard.write 参数 text 必须是非空字符串")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.click":
@@ -692,6 +696,20 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("action",),
+    ),
+    "clipboard.write": ToolDescriptor(
+        name="clipboard.write",
+        description=(
+            "Write explicit user-provided text to the system clipboard. "
+            "Do not use this to read clipboard contents."
+        ),
+        properties={
+            "text": {
+                "type": "string",
+                "description": "Text to write to the system clipboard.",
+            }
+        },
+        required=("text",),
     ),
     "desktop.hotkey": ToolDescriptor(
         name="desktop.hotkey",

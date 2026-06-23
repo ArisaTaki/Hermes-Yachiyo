@@ -419,6 +419,9 @@ class ToolBroker:
     ) -> dict[str, Any]:
         return desktop.system_volume(action, level=level, step=step)
 
+    def clipboard_write(self, text: str) -> dict[str, Any]:
+        return desktop.clipboard_write(text)
+
     def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hotkey",

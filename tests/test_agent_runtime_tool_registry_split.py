@@ -277,6 +277,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_play",
         "media_apple_music_control",
         "system_volume",
+        "clipboard_write",
         "desktop_hotkey",
         "desktop_type_text",
         "desktop_click",
@@ -336,6 +337,13 @@ def test_system_volume_schema_accepts_safe_volume_actions() -> None:
         ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set"})
     with pytest.raises(AgentRuntimeError, match="system.volume 参数 level"):
         ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set", "level": 150})
+
+
+def test_clipboard_write_schema_requires_text() -> None:
+    ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": "hello"})
+
+    with pytest.raises(AgentRuntimeError, match="clipboard.write 参数 text 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": ""})
 
 
 def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
@@ -1362,6 +1370,52 @@ def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:
     }
     assert calls[0][1] is None
     assert calls[1][1] == ["50", "false"]
+
+
+def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, *, input=None, text=None, capture_output=None, timeout=None, check=None):
+        calls.append(
+            {
+                "command": command,
+                "input": input,
+                "text": text,
+                "capture_output": capture_output,
+                "timeout": timeout,
+                "check": check,
+            }
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.clipboard_write("hello world")
+
+    assert result == {
+        "ok": True,
+        "action": "clipboard.write",
+        "summary": "Copied 11 characters to clipboard",
+        "data": {
+            "text_length": 11,
+            "platform": "macos",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [
+        {
+            "command": ["pbcopy"],
+            "input": "hello world",
+            "text": True,
+            "capture_output": True,
+            "timeout": 3,
+            "check": False,
+        }
+    ]
+    assert "hello world" not in result["summary"]
+    assert "hello world" not in str(result["data"])
 
 
 def test_apple_music_control_permission_failure_returns_music_and_automation_targets(

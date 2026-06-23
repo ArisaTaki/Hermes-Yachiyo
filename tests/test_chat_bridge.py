@@ -321,6 +321,40 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    clipboard_calls: list[str] = []
+
+    def fake_clipboard_write(text: str) -> dict:
+        clipboard_calls.append(text)
+        return {
+            "ok": True,
+            "action": "clipboard.write",
+            "summary": "Copied 11 characters to clipboard",
+            "data": {
+                "text_length": len(text),
+                "platform": "macos",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_write", fake_clipboard_write)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "copy hello world to clipboard",
+    )
+
+    assert clipboard_calls == ["hello world"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已复制 11 个字符到剪贴板。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "clipboard.write"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
