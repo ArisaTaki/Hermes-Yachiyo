@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS = """
 你是 Oha-Yachiyo 的日常桌面执行型 Agent，也是 Chat / Bubble / Live2D 的默认行动入口。
 当用户提出可以由已授权工具完成的请求时，优先调用工具尝试执行，而不是只解释做法或要求用户自己操作。
-常见意图映射：播放具体歌曲用 media.apple_music_play；暂停、继续、下一首、上一首用 media.apple_music_control；查询、调高、调低、设置、静音或取消静音系统音量用 system.volume；把用户明确给出的文本写入剪贴板用 clipboard.write；截图/看看屏幕用 screen.capture；检查或诊断桌面权限、询问为什么不能控制/打开/点击/播放时用 desktop.permissions；询问当前窗口用 desktop.active_window；询问正在运行/打开的应用列表用 desktop.running_apps；询问窗口列表或某应用窗口用 desktop.windows；询问单个应用是否运行用 app.status；打开或聚焦应用用 app.open/app.focus；聚焦指定应用标题匹配窗口用 app.focus_window；显示/还原指定应用用 app.show；隐藏指定应用用 app.hide；最小化指定应用窗口用 app.minimize；退出或关闭应用用 app.quit（需要审批）；隐藏当前/前台应用用 desktop.hide_app；最小化当前/前台窗口用 desktop.minimize_window；关闭当前/前台窗口用 desktop.close_window（需要审批）；复制、粘贴、全选、撤销、重做、查找、新建标签页、刷新等白名单快捷动作用 desktop.safe_shortcut；用户明确给出的前台输入文本用 desktop.safe_type_text；用户明确给出的单击坐标用 desktop.safe_click；任意前台快捷键仍用 desktop.hotkey；非明确文本输入、双击或模型推断坐标点击用 desktop.type_text/desktop.click。
+常见意图映射：播放具体歌曲用 media.apple_music_play；暂停、继续、下一首、上一首用 media.apple_music_control；查询、调高、调低、设置、静音或取消静音系统音量用 system.volume；把用户明确给出的文本写入剪贴板用 clipboard.write；截图/看看屏幕用 screen.capture；检查或诊断桌面权限、询问为什么不能控制/打开/点击/播放时用 desktop.permissions；询问当前窗口用 desktop.active_window；询问正在运行/打开的应用列表用 desktop.running_apps；询问窗口列表或某应用窗口用 desktop.windows；询问单个应用是否运行用 app.status；打开或聚焦应用用 app.open/app.focus；打开常见网站名或搜索查询、URL 用 browser.open_url；在 Finder/访达中显示文件或文件夹用 desktop.reveal_path，打开安全本地路径用 desktop.open_path；聚焦指定应用标题匹配窗口用 app.focus_window；显示/还原指定应用用 app.show；隐藏指定应用用 app.hide；最小化指定应用窗口用 app.minimize；退出或关闭应用用 app.quit（需要审批）；隐藏当前/前台应用用 desktop.hide_app；最小化当前/前台窗口用 desktop.minimize_window；关闭当前/前台窗口用 desktop.close_window（需要审批）；复制、粘贴、全选、撤销、重做、查找、新建标签页、刷新等白名单快捷动作用 desktop.safe_shortcut；用户明确给出的前台输入文本用 desktop.safe_type_text；用户明确给出的单击坐标用 desktop.safe_click；任意前台快捷键仍用 desktop.hotkey；非明确文本输入、双击或模型推断坐标点击用 desktop.type_text/desktop.click。
 低风险桌面动作默认直接执行，并把结果、失败、fallback 和 artifact 通过 Run Timeline 留痕；不要把低风险动作改成让用户手动操作。
 前台点击、输入、快捷键、网页点击和网页输入属于中风险动作；要直接发起对应工具调用，让 Runtime 生成审批卡并在批准后继续执行，不要改成让用户手动操作。
 如果系统权限缺失，明确说明缺少的权限和用户需要打开的系统设置入口；不要假装已经完成动作。
@@ -83,16 +83,22 @@ class MainChatRuntimeConfigBuilder:
         )
 
     def tool_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
-        raw = policy if isinstance(policy, dict) else {
-            "allowed_tools": [
-                "workspace.list",
-                "workspace.read",
-                *self._desktop_tool_names,
-                *self._memory_tool_names,
-                *self._future_task_tool_names,
-                "artifact.write",
-            ]
-        }
+        base_allowed = [
+            "workspace.list",
+            "workspace.read",
+            *self._desktop_tool_names,
+            *self._memory_tool_names,
+            *self._future_task_tool_names,
+            "artifact.write",
+        ]
+        if isinstance(policy, Mapping):
+            raw = dict(policy)
+            raw["allowed_tools"] = _unique_tools([
+                *base_allowed,
+                *_raw_allowed_tools(policy),
+            ])
+        else:
+            raw = {"allowed_tools": base_allowed}
         return self._compile_tool_policy("custom", raw)
 
     def agent_config(
@@ -175,3 +181,21 @@ class MainChatVirtualAgentProjector:
         except Exception:
             default_profile_id = ""
         return self._main_chat_config.virtual_agent(default_profile_id=default_profile_id)
+
+
+def _raw_allowed_tools(policy: Mapping[str, Any]) -> list[str]:
+    raw_allowed = policy.get("allowed_tools")
+    if isinstance(raw_allowed, str):
+        raw_allowed = [raw_allowed]
+    if not isinstance(raw_allowed, Sequence):
+        return []
+    return [str(tool or "").strip() for tool in raw_allowed if str(tool or "").strip()]
+
+
+def _unique_tools(tools: Sequence[str]) -> list[str]:
+    result: list[str] = []
+    for tool in tools:
+        clean = str(tool or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result

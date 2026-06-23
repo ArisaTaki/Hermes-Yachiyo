@@ -86,6 +86,39 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     }
 
 
+def test_main_chat_config_builder_overlays_daily_desktop_tools_on_explicit_policy(tmp_path) -> None:
+    compiler = RuntimePolicyCompiler()
+    builder = MainChatRuntimeConfigBuilder(
+        main_chat_agent_id="builtin:yachiyo-main",
+        agent_workspaces_dir=tmp_path / "agent-workspaces",
+        workspace_status=lambda: {},
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        trust_workspace_from_policy=lambda *_args, **_kwargs: None,
+        memory_tool_names=sorted(MEMORY_TOOL_NAMES),
+        future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+        desktop_tool_names=sorted(DAILY_DESKTOP_TOOL_NAMES),
+    )
+
+    policy = builder.tool_policy(
+        {
+            "allowed_tools": ["workspace.read", "terminal.run"],
+            "approval_required": {"terminal.run": True},
+        }
+    )
+
+    allowed_tools = set(policy["allowed_tools"])
+    assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
+    assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
+    assert {"workspace.list", "workspace.read", "artifact.write", "terminal.run"}.issubset(
+        allowed_tools
+    )
+    assert policy["approval_required"]["terminal.run"] is True
+    for tool in (*MEDIUM_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_BROWSER_TOOL_NAMES):
+        assert policy["approval_required"][tool] is True
+
+
 def test_main_chat_config_builder_projects_virtual_agent_without_trusting_workspace(tmp_path) -> None:
     compiler = RuntimePolicyCompiler()
     trusted: list[tuple[dict[str, Any], str, bool]] = []
