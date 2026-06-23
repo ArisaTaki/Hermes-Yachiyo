@@ -100,7 +100,35 @@ def test_approval_snapshot_marks_foreground_desktop_tools_medium_risk() -> None:
 
     assert snapshot["risk_level"] == "medium"
     assert snapshot["policy_reason"] == (
-        "前台输入、点击或快捷键会操作当前桌面窗口，按工具策略需要人工确认。"
+        "将向当前前台窗口发送快捷键 Command+L，按工具策略需要人工确认。"
+    )
+
+
+def test_approval_snapshot_describes_foreground_text_and_click_approval() -> None:
+    text_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-type-text",
+            "tool": "desktop.type_text",
+            "input_preview": {"text": "hello"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+    click_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-click",
+            "tool": "desktop.click",
+            "input_preview": {"x": 12.0, "y": 34, "click_count": 2},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert text_snapshot["risk_level"] == "medium"
+    assert text_snapshot["policy_reason"] == (
+        "将向当前前台窗口输入文字（5 个字符），按工具策略需要人工确认。"
+    )
+    assert click_snapshot["risk_level"] == "medium"
+    assert click_snapshot["policy_reason"] == (
+        "将双击坐标 12, 34 处的当前前台窗口，按工具策略需要人工确认。"
     )
 
 
@@ -116,7 +144,23 @@ def test_approval_snapshot_marks_browser_input_tools_medium_risk() -> None:
 
     assert snapshot["risk_level"] == "medium"
     assert snapshot["policy_reason"] == (
-        "网页点击或输入会操作当前浏览器页面，按工具策略需要人工确认。"
+        "将点击当前浏览器页面中的选择器 button[type=submit]，按工具策略需要人工确认。"
+    )
+
+
+def test_approval_snapshot_describes_browser_type_text_approval() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-browser-type",
+            "tool": "browser.type_text",
+            "input_preview": {"selector": "input[name=q]", "text": "yachiyo"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["risk_level"] == "medium"
+    assert snapshot["policy_reason"] == (
+        "将向当前浏览器页面选择器 input[name=q] 输入文字（7 个字符），按工具策略需要人工确认。"
     )
 
 

@@ -97,6 +97,9 @@ def _approval_policy_reason(
     if tool_name == "workspace.write_patch":
         return "workspace.write_patch 会修改工作区文件，按工具策略必须人工确认。"
     if risk_level == "medium":
+        foreground_reason = _medium_risk_foreground_reason(tool_name, public_input_preview)
+        if foreground_reason:
+            return foreground_reason
         if tool_name in MEDIUM_RISK_DESKTOP_TOOL_NAMES:
             return "前台输入、点击或快捷键会操作当前桌面窗口，按工具策略需要人工确认。"
         if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
@@ -114,6 +117,127 @@ def _workflow_approval_criteria(raw: dict[str, Any], public_input_preview: Any) 
     if isinstance(public_input_preview, dict):
         return str(public_input_preview.get("criteria") or "").strip()
     return ""
+
+
+def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:
+    record = public_input_preview if isinstance(public_input_preview, dict) else {}
+    if tool_name == "desktop.hotkey":
+        hotkey = _hotkey_preview(record)
+        if hotkey:
+            return f"将向当前前台窗口发送快捷键 {hotkey}，按工具策略需要人工确认。"
+        return "将向当前前台窗口发送快捷键，按工具策略需要人工确认。"
+    if tool_name == "desktop.type_text":
+        text = _preview_value(record, "text")
+        if text:
+            return f"将向当前前台窗口输入文字（{len(text)} 个字符），按工具策略需要人工确认。"
+        return "将向当前前台窗口输入文字，按工具策略需要人工确认。"
+    if tool_name == "desktop.click":
+        click = _click_preview(record)
+        if click:
+            return f"将{click}当前前台窗口，按工具策略需要人工确认。"
+        return "将点击当前前台窗口，按工具策略需要人工确认。"
+    if tool_name == "browser.click":
+        selector = _preview_value(record, "selector")
+        if selector:
+            return f"将点击当前浏览器页面中的选择器 {selector}，按工具策略需要人工确认。"
+        click = _click_preview(record, x_key="fallback_x", y_key="fallback_y")
+        if click:
+            return f"将通过桌面回退{click}当前浏览器页面，按工具策略需要人工确认。"
+        return "将点击当前浏览器页面，按工具策略需要人工确认。"
+    if tool_name == "browser.type_text":
+        selector = _preview_value(record, "selector")
+        text = _preview_value(record, "text")
+        if selector and text:
+            return f"将向当前浏览器页面选择器 {selector} 输入文字（{len(text)} 个字符），按工具策略需要人工确认。"
+        if selector:
+            return f"将向当前浏览器页面选择器 {selector} 输入文字，按工具策略需要人工确认。"
+        return "将向当前浏览器页面输入文字，按工具策略需要人工确认。"
+    return ""
+
+
+def _preview_value(record: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
+            return _number_preview(value)
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _number_preview(value: int | float) -> str:
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(value)
+
+
+def _click_preview(
+    record: dict[str, Any],
+    *,
+    x_key: str = "x",
+    y_key: str = "y",
+) -> str:
+    x = _preview_value(record, x_key)
+    y = _preview_value(record, y_key)
+    if not x or not y:
+        return ""
+    click_count = _click_count(record.get("click_count"))
+    if click_count == 2:
+        action = "双击"
+    elif click_count > 2:
+        action = f"点击 x{click_count}"
+    else:
+        action = "点击"
+    return f"{action}坐标 {x}, {y} 处的"
+
+
+def _click_count(value: Any) -> int:
+    if isinstance(value, bool) or value in (None, ""):
+        return 1
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(3, count))
+
+
+def _hotkey_preview(record: dict[str, Any]) -> str:
+    modifiers = record.get("modifiers")
+    parts = []
+    if isinstance(modifiers, list):
+        parts.extend(_hotkey_part_label(item) for item in modifiers)
+    parts.append(_hotkey_part_label(record.get("key")))
+    return "+".join(part for part in parts if part)
+
+
+def _hotkey_part_label(value: Any) -> str:
+    part = str(value or "").strip()
+    if not part:
+        return ""
+    normalized = part.lower()
+    if normalized in {"cmd", "command"}:
+        return "Command"
+    if normalized in {"ctrl", "control"}:
+        return "Control"
+    if normalized in {"alt", "option"}:
+        return "Option"
+    if normalized == "shift":
+        return "Shift"
+    if normalized == "return":
+        return "Return"
+    if normalized == "escape":
+        return "Escape"
+    if normalized == "space":
+        return "Space"
+    if normalized == "tab":
+        return "Tab"
+    if len(normalized) == 1:
+        return normalized.upper()
+    return part
 
 
 class ApprovalSnapshotBuilder:

@@ -24,17 +24,27 @@ export function approvalPreviewValue(record: Record<string, unknown>, keys: stri
 
 export function approvalPreviewTarget(record: Record<string, unknown>, toolName = ''): string {
   const tool = String(toolName || '').trim();
-  if (tool === 'desktop.hotkey') return hotkeyPreview(record);
-  if (tool === 'desktop.type_text') return approvalPreviewValue(record, ['text']);
+  if (tool === 'desktop.hotkey') {
+    const hotkey = hotkeyPreview(record);
+    return hotkey ? `快捷键 ${hotkey}` : '';
+  }
+  if (tool === 'desktop.type_text') {
+    const text = textInputPreview(record, ['text']);
+    return text ? `输入 ${text}` : '';
+  }
   if (tool === 'desktop.click') return coordinateClickPreview(record);
   if (tool === 'browser.click') {
-    return approvalPreviewValue(record, ['selector'])
-      || coordinateClickPreview(record, ['fallback_x', 'fallback_y']);
+    const selector = approvalPreviewValue(record, ['selector']);
+    if (selector) return `点击 ${selector}`;
+    const fallback = coordinateClickPreview(record, ['fallback_x', 'fallback_y']);
+    return fallback ? `回退${fallback}` : '';
   }
   if (tool === 'browser.type_text') {
     const selector = approvalPreviewValue(record, ['selector']);
-    const text = approvalPreviewValue(record, ['text']);
-    return [selector, text].filter(Boolean).join(' · ');
+    const text = textInputPreview(record, ['text']);
+    if (selector && text) return `${selector} · 输入 ${text}`;
+    if (text) return `输入 ${text}`;
+    return selector;
   }
   return approvalPreviewValue(record, [
     'command',
@@ -75,6 +85,14 @@ function hotkeyPartLabel(value: unknown): string {
   return part;
 }
 
+function textInputPreview(record: Record<string, unknown>, keys: string[]): string {
+  const text = approvalPreviewValue(record, keys);
+  if (!text) return '';
+  const compact = text.replace(/\s+/g, ' ');
+  const clipped = compact.length > 48 ? `${compact.slice(0, 48)}...` : compact;
+  return `「${clipped}」`;
+}
+
 function coordinateClickPreview(
   record: Record<string, unknown>,
   keys: [string, string] = ['x', 'y'],
@@ -103,6 +121,7 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'media.apple_music_control') return '控制 Apple Music';
   if (tool === 'desktop.hotkey') return '发送快捷键';
   if (tool === 'desktop.type_text') return '输入前台文字';
+  if (tool === 'desktop.click') return '点击前台界面';
   if (tool === 'browser.open_url') return '打开网页';
   if (tool === 'browser.current_page') return '读取当前网页';
   if (tool === 'browser.click') return '点击网页元素';
@@ -131,6 +150,7 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'media.apple_music_control'
     || tool === 'desktop.hotkey'
     || tool === 'desktop.type_text'
+    || tool === 'desktop.click'
   ) {
     return 'desktop';
   }
