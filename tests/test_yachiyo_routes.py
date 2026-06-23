@@ -805,7 +805,7 @@ async def test_yachiyo_chat_task_link_is_visible_from_studio_timeline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_yachiyo_task_approval_body_id_does_not_replace_task_link_lookup() -> None:
+async def test_yachiyo_task_approval_body_id_keeps_task_link_lookup() -> None:
     runtime = _FakeAgentRuntime()
     request = _request(runtime)
 
@@ -819,12 +819,12 @@ async def test_yachiyo_task_approval_body_id_does_not_replace_task_link_lookup()
     )
     approved = await yachiyo.approve_task(
         "task-chat-1",
-        yachiyo.TaskApprovalRequest(approval_id="approval-distinct"),
+        yachiyo.TaskApprovalRequest(approval_id="run-1"),
         request,
     )
     rejected = await yachiyo.reject_task(
         "task-chat-1",
-        yachiyo.TaskApprovalRequest(approval_id="approval-distinct", reason="No"),
+        yachiyo.TaskApprovalRequest(approval_id="run-1", reason="No"),
         request,
     )
 

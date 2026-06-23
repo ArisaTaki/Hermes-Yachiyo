@@ -69,6 +69,7 @@ import {
   mentionQueryAtEnd,
   mentionTextForOption,
   replaceTrailingMentionQuery,
+  yachiyoDailyDesktopTaskPrompt,
   yachiyoPublicTaskPrompt,
   yachiyoPublicTaskTarget,
   type MentionOption,
@@ -675,13 +676,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const publicTaskTarget = outgoingAttachments.length === 0
         ? yachiyoPublicTaskTarget(text, runnables, assistantProfile)
         : null;
-      if (publicTaskTarget) {
+      const dailyDesktopTaskPrompt = !publicTaskTarget && outgoingAttachments.length === 0
+        ? yachiyoDailyDesktopTaskPrompt(text)
+        : null;
+      if (publicTaskTarget || dailyDesktopTaskPrompt) {
         const handled = await startPublicYachiyoTask({
           clientMessageId,
           conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
-          prompt: yachiyoPublicTaskPrompt(text, publicTaskTarget),
-          runnableId: publicTaskTarget.id,
-          runnableKind: publicTaskTarget.kind,
+          prompt: publicTaskTarget ? yachiyoPublicTaskPrompt(text, publicTaskTarget) : dailyDesktopTaskPrompt || text,
+          runnableId: publicTaskTarget?.id || null,
+          runnableKind: publicTaskTarget?.kind || 'main',
+          metadata: {
+            daily_desktop_intent: Boolean(dailyDesktopTaskPrompt),
+          },
         });
         if (handled) {
           return;

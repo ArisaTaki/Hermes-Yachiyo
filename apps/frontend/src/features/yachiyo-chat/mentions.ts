@@ -174,6 +174,12 @@ export function yachiyoPublicTaskPrompt(input: string, target: MentionOption): s
   return prompt || String(input || '').trim();
 }
 
+export function yachiyoDailyDesktopTaskPrompt(input: string): string | null {
+  const prompt = String(input || '').trim();
+  if (!prompt || DESKTOP_INTENT_HELP_RE.test(prompt)) return null;
+  return looksLikeDailyDesktopIntent(prompt) ? prompt : null;
+}
+
 function mentionOptionFromRunnable(item: MentionRunnable): MentionOption {
   return {
     id: item.id,
@@ -204,4 +210,23 @@ function uniqueStrings(values: unknown[]): string[] {
 
 function escapeRegExp(value: string): string {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const DESKTOP_INTENT_HELP_RE = /(?:怎么|如何|教程|步骤|只告诉我|不要真的|别真的|不要执行|别执行|不要操作|无需执行|不用执行)/i;
+const URL_RE = /(?:https?:\/\/|www\.|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|dev|app|ai|cn|jp|co|me|gg|tv|xyz|site|tech)\b)/i;
+const DESKTOP_APP_NAME_RE = /(?:apple\s*music|music|音乐|slack|chrome|safari|finder|terminal|iterm|vscode|vs\s*code|xcode|微信|wechat|qq|飞书|lark|钉钉|dingtalk|spotify|notion|obsidian|figma)/i;
+
+function looksLikeDailyDesktopIntent(prompt: string): boolean {
+  const value = prompt.trim();
+  if (!value) return false;
+  if (/(?:打开|访问|浏览|open|visit|go to|navigate to)/i.test(value) && URL_RE.test(value)) return true;
+  if (/(?:当前网页|读取当前网页|网页正文|截取当前网页|browser screenshot|current page)/i.test(value)) return true;
+  if (/(?:截图|截屏|截个图|屏幕截图|screenshot|capture screen)/i.test(value)) return true;
+  if (/(?:当前窗口是什么|当前窗口|active window|frontmost window)/i.test(value)) return true;
+  if (/^(?:(?:按)\s*|(?:press)\s+)(?:command|cmd|ctrl|control|shift|alt|option|⌘|⌥|⌃)/i.test(value)) return true;
+  if (/^(?:(?:输入|键入)\s*|(?:type)\s+)\S+/i.test(value)) return true;
+  if (/^(?:(?:点击|双击)\s*|(?:click|double click)\s+)\d+\s*[,， ]\s*\d+/i.test(value)) return true;
+  if (/(?:(?:播放|播一下|放一下)\s*\S+|(?:play)\s+\S+)/i.test(value)) return true;
+  if (/(?:(?:打开|启动|运行|切换到|聚焦)\s*\S+|(?:focus|launch|open)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
+  return false;
 }

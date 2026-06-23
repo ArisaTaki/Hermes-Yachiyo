@@ -427,8 +427,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "useYachiyoTaskSubmit",
             "startPublicYachiyoTask({",
             "yachiyoPublicTaskTarget(text, runnables, assistantProfile)",
-            "runnableId: publicTaskTarget.id",
-            "runnableKind: publicTaskTarget.kind",
+            "yachiyoDailyDesktopTaskPrompt(text)",
+            "runnableId: publicTaskTarget?.id || null",
+            "runnableKind: publicTaskTarget?.kind || 'main'",
+            "daily_desktop_intent: Boolean(dailyDesktopTaskPrompt)",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
             "useChatAssistantProfile()",
@@ -542,10 +544,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function useYachiyoTaskSubmit",
             "startYachiyoTask({",
             "runnableKind === 'workflow'",
-            "? { workflow_id: runnableId }",
-            ": { agent_id: runnableId }",
+            "? { workflow_id: cleanRunnableId }",
+            "? { agent_id: cleanRunnableId }",
             "client_message_id: clientMessageId",
-            "runnable_kind: runnableKind",
+            "runnable_kind: runnableKind || 'main'",
+            "...metadata",
             "source: 'chat'",
             "rememberYachiyoTasks([task])",
             "chatRunnableRunningStatusText(runnableLabel)",
@@ -689,6 +692,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function activeMentions",
             "export function yachiyoPublicTaskTarget",
             "export function yachiyoPublicTaskPrompt",
+            "export function yachiyoDailyDesktopTaskPrompt",
+            "DESKTOP_INTENT_HELP_RE",
+            "function looksLikeDailyDesktopIntent",
             "conversation_kind === 'group'",
             "): PublicTaskMentionTarget | null",
             "return mentions[0].kind === 'main' ? null : mentions[0] as PublicTaskMentionTarget;",
@@ -997,6 +1003,43 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function ChatFullPageLoading",
             "role=\"status\"",
             "正在准备对话...",
+        ],
+    )
+
+
+def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "const dailyDesktopTaskPrompt = !publicTaskTarget && outgoingAttachments.length === 0",
+            "yachiyoDailyDesktopTaskPrompt(text)",
+            "if (publicTaskTarget || dailyDesktopTaskPrompt)",
+            "prompt: publicTaskTarget ? yachiyoPublicTaskPrompt(text, publicTaskTarget) : dailyDesktopTaskPrompt || text",
+            "runnableId: publicTaskTarget?.id || null",
+            "runnableKind: publicTaskTarget?.kind || 'main'",
+            "daily_desktop_intent: Boolean(dailyDesktopTaskPrompt)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
+        [
+            "runnableId?: string | null;",
+            "runnableKind?: 'agent' | 'workflow' | 'main';",
+            "const cleanRunnableId = String(runnableId || '').trim();",
+            "runnable_kind: runnableKind || 'main'",
+            "...metadata",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/mentions.ts",
+        [
+            "export function yachiyoDailyDesktopTaskPrompt",
+            "DESKTOP_INTENT_HELP_RE.test(prompt)",
+            "looksLikeDailyDesktopIntent(prompt)",
+            "URL_RE.test(value)",
+            "DESKTOP_APP_NAME_RE.test(value)",
+            "(?:播放|播一下|放一下)\\s*\\S+",
+            "(?:打开|启动|运行|切换到|聚焦)\\s*\\S+",
         ],
     )
 

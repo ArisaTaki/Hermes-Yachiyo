@@ -7,9 +7,10 @@ import type { AgentTaskSnapshot } from '../types';
 type StartPublicYachiyoTaskRequest = {
   clientMessageId: string;
   conversationId: string | null;
+  metadata?: Record<string, unknown>;
   prompt: string;
-  runnableId: string;
-  runnableKind: 'agent' | 'workflow';
+  runnableId?: string | null;
+  runnableKind?: 'agent' | 'workflow' | 'main';
 };
 
 type UseYachiyoTaskSubmitOptions = {
@@ -39,22 +40,28 @@ export function useYachiyoTaskSubmit({
   const startPublicYachiyoTask = useCallback(async ({
     clientMessageId,
     conversationId,
+    metadata,
     prompt,
     runnableId,
     runnableKind,
   }: StartPublicYachiyoTaskRequest) => {
     try {
-      const runnableLabel = runnableKind === 'workflow' ? 'Workflow' : 'Agent';
+      const runnableLabel = runnableKind === 'workflow' ? 'Workflow' : runnableKind === 'agent' ? 'Agent' : '八千代';
+      const cleanRunnableId = String(runnableId || '').trim();
       const task = await startYachiyoTask({
         prompt,
         conversation_id: conversationId,
-        ...(runnableKind === 'workflow'
-          ? { workflow_id: runnableId }
-          : { agent_id: runnableId }),
+        ...(runnableKind === 'workflow' && cleanRunnableId
+          ? { workflow_id: cleanRunnableId }
+          : {}),
+        ...(runnableKind === 'agent' && cleanRunnableId
+          ? { agent_id: cleanRunnableId }
+          : {}),
         metadata: {
           client_message_id: clientMessageId,
           source: 'chat',
-          runnable_kind: runnableKind,
+          runnable_kind: runnableKind || 'main',
+          ...metadata,
         },
       });
       rememberYachiyoTasks([task]);
