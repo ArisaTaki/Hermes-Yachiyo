@@ -114,6 +114,56 @@ class TestNativeAgentUnavailableExecutor:
         assert isinstance(executor, NativeAgentUnavailableExecutor)
         assert executor.reason_code == "model_profile_required"
 
+    @pytest.mark.asyncio
+    async def test_select_executor_keeps_daily_desktop_fallback_when_model_profile_missing(self):
+        calls: list[tuple[str, object]] = []
+
+        class FakeRuntimeService:
+            def start_main_chat_run(self, **payload):
+                calls.append(("start", payload))
+                return {"run_id": "run_daily_desktop_fallback"}
+
+            def execute_main_chat_model_loop(self, run_id, messages, **_kwargs):
+                calls.append(("execute", {"run_id": run_id, "messages": messages}))
+                return {
+                    "run_id": run_id,
+                    "status": "running",
+                    "result": "已打开 Music。",
+                }
+
+            def complete_main_chat_run(self, run_id, result):
+                calls.append(("complete", {"run_id": run_id, "result": result}))
+                return {
+                    "run_id": run_id,
+                    "status": "completed",
+                    "result": result,
+                }
+
+            def fail_main_chat_run(self, *_args):
+                raise AssertionError("daily desktop fallback should not fail")
+
+        runtime = types.SimpleNamespace(
+            native_agent_readiness=lambda: {
+                "ready": False,
+                "reason": "model_profile_required",
+                "message": "请先配置默认对话模型",
+            },
+            chat_session=None,
+            agent_runtime_service=FakeRuntimeService(),
+            main_chat_tool_policy=lambda: {"allowed_tools": ["app.open"], "approval_required": {}},
+            main_chat_workspace_policy=lambda: {},
+        )
+
+        executor = select_executor(runtime)
+        result = await executor.run(_make_task("打开 Apple Music"))
+
+        assert isinstance(executor, NativeAgentUnavailableExecutor)
+        assert result == "已打开 Music。"
+        assert [call[0] for call in calls] == ["start", "execute", "complete"]
+
+        with pytest.raises(NativeAgentError, match="请先配置默认对话模型"):
+            await executor.run(_make_task("写一首诗"))
+
 
 class TestNativeAgentExecutor:
     def test_record_activity_uses_injected_activity_store(self, tmp_path, monkeypatch):

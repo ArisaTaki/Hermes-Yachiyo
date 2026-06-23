@@ -222,12 +222,30 @@ class AppRuntime:
 
     def main_chat_tool_policy(self) -> dict[str, Any]:
         """Tool policy used by the builtin main-chat Native Agent path."""
+        from apps.shell.agent.tools.policy import (
+            DAILY_DESKTOP_TOOL_NAMES,
+            MEDIUM_RISK_BROWSER_TOOL_NAMES,
+            MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+        )
+
+        approval_required = {
+            "workspace.write_patch": True,
+            "terminal.run": True,
+            **{
+                tool: True
+                for tool in (
+                    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+                    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+                )
+            },
+        }
         return {
             "allowed_tools": [
                 "workspace.list",
                 "workspace.read",
                 "workspace.write_patch",
                 "terminal.run",
+                *DAILY_DESKTOP_TOOL_NAMES,
                 "memory.add",
                 "memory.replace",
                 "memory.remove",
@@ -236,10 +254,7 @@ class AppRuntime:
                 "future_task.cancel",
                 "artifact.write",
             ],
-            "approval_required": {
-                "workspace.write_patch": True,
-                "terminal.run": True,
-            },
+            "approval_required": approval_required,
         }
 
     def main_chat_workspace_policy(self) -> dict[str, Any]:

@@ -14,7 +14,7 @@ import apps.shell.chat_api as chat_api_mod
 from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.chat_store import ChatStore
-from apps.core.executor import NativeAgentExecutor
+from apps.core.executor import NativeAgentExecutor, NativeAgentUnavailableExecutor
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 from apps.core.task_runner import TaskRunner
@@ -51,6 +51,14 @@ class _FakeDefaultProfileService:
             "status": "available",
             "enabled": True,
         }
+
+
+class _FakeNoDefaultProfileService:
+    def get_defaults(self):
+        return {"chat": ""}
+
+    def get_profile_private(self, profile_id):
+        raise KeyError(profile_id)
 
 
 def test_task_runner_group_summary_parent_sync_clears_pending_metadata(tmp_path):
@@ -207,6 +215,104 @@ async def test_task_runner_activity_events_use_injected_activity_store(tmp_path,
         assert all(event["tool_name"] == "native_agent" for event in events)
     finally:
         activity_store.close()
+
+
+@pytest.mark.asyncio
+async def test_task_runner_executes_daily_desktop_intent_when_model_profile_missing(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-daily-desktop.db",
+        workspace_dir=tmp_path / "agent-runtime-daily-desktop",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    state = AppState()
+    session = ChatSession(session_id="task-runner-daily-desktop")
+    session.attach_store(store, load_existing=False)
+    open_calls: list[str] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("daily desktop task should not call model"),
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+
+    daily_executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+    )
+    runner = TaskRunner(
+        state,
+        executor=NativeAgentUnavailableExecutor(
+            "Native Agent 当前未就绪，请先配置并选择默认对话模型。",
+            reason="model_profile_required",
+            daily_desktop_executor=daily_executor,
+        ),
+        activity_store=activity_store,
+    )
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        task_runner=runner,
+        store=store,
+        agent_runtime_service=service,
+    )
+    api = ChatAPI(runtime)
+    try:
+        sent = api.send_message("打开 Apple Music")
+        assert sent["ok"] is True
+
+        await runner._execute_with_state(sent["task_id"])
+
+        task = state.get_task(sent["task_id"])
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开 Music。"
+        assert open_calls == ["Music"]
+        assistant = next(
+            message
+            for message in store.load_messages(session.session_id, limit=10)
+            if message.role == "assistant" and message.task_id == sent["task_id"]
+        )
+        assert assistant is not None
+        assert assistant.status == "completed"
+        assert assistant.content == "已打开 Music。"
+        link = service.get_task_run_link(sent["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
 
 
 @pytest.mark.asyncio

@@ -932,27 +932,44 @@ class NativeAgentUnavailableExecutor(ExecutionStrategy):
         message: str | None = None,
         *,
         reason: str = "model_profile_required",
+        daily_desktop_executor: "NativeAgentExecutor | None" = None,
     ) -> None:
         self.reason = str(message or NATIVE_AGENT_NOT_READY_MESSAGE)
         self.code = "native_agent_not_ready"
         self.reason_code = str(reason or "model_profile_required")
+        self._daily_desktop_executor = daily_desktop_executor
 
     @property
     def capabilities(self) -> dict[str, bool]:
         return {
             "model": False,
             "image_input": False,
-            "tools": False,
-            "approval": False,
+            "tools": self._daily_desktop_executor is not None,
+            "approval": self._daily_desktop_executor is not None,
         }
 
     async def run(self, task: TaskInfo) -> str:
+        if self._daily_desktop_executor is not None and self._is_daily_desktop_task(task):
+            logger.info("[NativeAgentUnavailable] 使用日常桌面工具兜底执行任务: %s", task.task_id)
+            return await self._daily_desktop_executor.run(task)
         logger.warning("[NativeAgentUnavailable] 拒绝执行任务: %s | %s", task.task_id, self.reason)
         raise NativeAgentError(
             self.reason,
             code=self.code,
             reason=self.reason_code,
         )
+
+    @staticmethod
+    def _is_daily_desktop_task(task: TaskInfo) -> bool:
+        if getattr(task, "attachments", None):
+            return False
+        try:
+            from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+
+            return bool(daily_desktop_intent_candidates(str(task.description or "")))
+        except Exception:
+            logger.debug("日常桌面意图识别失败", exc_info=True)
+            return False
 
 
 class NativeAgentExecutor(ExecutionStrategy):
@@ -1458,6 +1475,47 @@ def _is_key_activity_event(event: dict[str, Any]) -> bool:
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────
 
+def _native_agent_executor_for_runtime(runtime: "AppRuntime | None" = None) -> NativeAgentExecutor:
+    return NativeAgentExecutor(
+        chat_session=getattr(runtime, "chat_session", None),
+        persona_prompt_getter=(
+            (lambda: runtime.config.assistant.persona_prompt)
+            if runtime is not None and hasattr(runtime, "config")
+            else None
+        ),
+        user_address_getter=(
+            (lambda: runtime.config.assistant.user_address)
+            if runtime is not None and hasattr(runtime, "config")
+            else None
+        ),
+        profile_context_getter=(
+            (lambda: build_runtime_profile_context(runtime))
+            if runtime is not None and hasattr(runtime, "config")
+            else None
+        ),
+        runtime_service_getter=(
+            (lambda: runtime.agent_runtime_service)
+            if runtime is not None and hasattr(runtime, "agent_runtime_service")
+            else None
+        ),
+        tool_policy_getter=(
+            (lambda: runtime.main_chat_tool_policy())
+            if runtime is not None and hasattr(runtime, "main_chat_tool_policy")
+            else None
+        ),
+        workspace_policy_getter=(
+            (lambda: runtime.main_chat_workspace_policy())
+            if runtime is not None and hasattr(runtime, "main_chat_workspace_policy")
+            else None
+        ),
+        activity_store_getter=(
+            (lambda: runtime.activity_store)
+            if runtime is not None and hasattr(runtime, "activity_store")
+            else None
+        ),
+    )
+
+
 def select_executor(runtime: "AppRuntime | None" = None) -> ExecutionStrategy:
     """Select the native TaskRunner adapter."""
     try:
@@ -1477,48 +1535,16 @@ def select_executor(runtime: "AppRuntime | None" = None) -> ExecutionStrategy:
 
     if readiness.get("ready"):
         logger.info("select_executor: 选用 NativeAgentExecutor")
-        return NativeAgentExecutor(
-            chat_session=getattr(runtime, "chat_session", None),
-            persona_prompt_getter=(
-                (lambda: runtime.config.assistant.persona_prompt)
-                if runtime is not None and hasattr(runtime, "config")
-                else None
-            ),
-            user_address_getter=(
-                (lambda: runtime.config.assistant.user_address)
-                if runtime is not None and hasattr(runtime, "config")
-                else None
-            ),
-            profile_context_getter=(
-                (lambda: build_runtime_profile_context(runtime))
-                if runtime is not None and hasattr(runtime, "config")
-                else None
-            ),
-            runtime_service_getter=(
-                (lambda: runtime.agent_runtime_service)
-                if runtime is not None and hasattr(runtime, "agent_runtime_service")
-                else None
-            ),
-            tool_policy_getter=(
-                (lambda: runtime.main_chat_tool_policy())
-                if runtime is not None and hasattr(runtime, "main_chat_tool_policy")
-                else None
-            ),
-            workspace_policy_getter=(
-                (lambda: runtime.main_chat_workspace_policy())
-                if runtime is not None and hasattr(runtime, "main_chat_workspace_policy")
-                else None
-            ),
-            activity_store_getter=(
-                (lambda: runtime.activity_store)
-                if runtime is not None and hasattr(runtime, "activity_store")
-                else None
-            ),
-        )
+        return _native_agent_executor_for_runtime(runtime)
+
+    daily_desktop_executor = None
+    if str(readiness.get("reason") or "") in {"model_profile_required", "model_profile_unavailable"}:
+        daily_desktop_executor = _native_agent_executor_for_runtime(runtime)
 
     return NativeAgentUnavailableExecutor(
         str(readiness.get("message") or NATIVE_AGENT_NOT_READY_MESSAGE),
         reason=str(readiness.get("reason") or "model_profile_required"),
+        daily_desktop_executor=daily_desktop_executor,
     )
 
 
