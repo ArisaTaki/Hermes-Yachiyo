@@ -515,6 +515,191 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_executes_direct_app_status_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    status_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct app status task should not call model")
+        ),
+    )
+
+    def fake_app_status(app_name: str) -> dict:
+        status_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.status",
+            "summary": f"{app_name} is running",
+            "data": {"app_name": app_name, "running": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_status", fake_app_status)
+    try:
+        result = api.send_message("Chrome 开着吗")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "Google Chrome 当前正在运行。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.status"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == "Google Chrome"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "Google Chrome 当前正在运行。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "Google Chrome 当前正在运行。"
+        assert status_calls == ["Google Chrome"]
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    show_calls: list[str] = []
+    hide_calls: list[str] = []
+    minimize_calls: list[str] = []
+    focus_window_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct named app control task should not call model")
+        ),
+    )
+
+    def fake_app_show(app_name: str) -> dict:
+        show_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.show",
+            "summary": f"Showed {app_name}",
+            "data": {"app_name": app_name, "show_status": "shown"},
+        }
+
+    def fake_app_hide(app_name: str) -> dict:
+        hide_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.hide",
+            "summary": f"Hid {app_name}",
+            "data": {"app_name": app_name, "hide_status": "hidden"},
+        }
+
+    def fake_app_minimize(app_name: str) -> dict:
+        minimize_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.minimize",
+            "summary": f"Minimized {app_name}",
+            "data": {"app_name": app_name, "minimize_status": "minimized"},
+        }
+
+    def fake_app_focus_window(app_name: str, title_contains: str) -> dict:
+        focus_window_calls.append((app_name, title_contains))
+        return {
+            "ok": True,
+            "action": "app.focus_window",
+            "summary": f"Focused {app_name} window: {title_contains}",
+            "data": {
+                "app_name": app_name,
+                "title_contains": title_contains,
+                "focus_status": "focused",
+                "window_title": title_contains,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_show", fake_app_show)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_hide", fake_app_hide)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_minimize", fake_app_minimize)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus_window", fake_app_focus_window)
+    try:
+        cases = [
+            ("显示 Slack", "app.show", "已显示 Slack。"),
+            ("隐藏 Slack", "app.hide", "已隐藏 Slack。"),
+            ("最小化 Slack", "app.minimize", "已最小化 Slack。"),
+            ("切到 Slack 的 general 窗口", "app.focus_window", "已切换到 Slack 的 general 窗口。"),
+        ]
+        for prompt, tool_name, summary in cases:
+            result = api.send_message(prompt)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert show_calls == ["Slack"]
+        assert hide_calls == ["Slack"]
+        assert minimize_calls == ["Slack"]
+        assert focus_window_calls == [("Slack", "general")]
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_opens_named_music_app_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

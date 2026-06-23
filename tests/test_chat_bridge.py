@@ -344,6 +344,47 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_app_status_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    status_calls: list[str] = []
+
+    def fake_app_status(app_name: str) -> dict:
+        status_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.status",
+            "summary": f"{app_name} is running",
+            "data": {"app_name": app_name, "running": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_status", fake_app_status)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "Chrome 开着吗",
+    )
+
+    assert result["ok"] is True
+    assert status_calls == ["Google Chrome"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "Google Chrome 当前正在运行。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.status"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert agent_task["tool_calls"][-1]["input_preview"]["app_name"] == "Google Chrome"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
     tmp_path,
     monkeypatch,
