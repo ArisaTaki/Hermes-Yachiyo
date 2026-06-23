@@ -7,6 +7,7 @@ import {
 } from '../approval';
 import {
   runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryRetryAction,
   type RuntimeToolRecoveryAction,
 } from '../toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../toolRecoveryHints';
@@ -110,20 +111,39 @@ export function RuntimeToolCallCard({
       ) : null}
       {recoveryActions.length ? (
         <div className="runtime-tool-call-recovery-actions" data-testid={`${testId}-recovery-actions`}>
-          {recoveryActions.slice(0, 3).map((action) => (
-            <button
-              type="button"
-              data-permission-target={action.permission_target}
-              data-recovery-tool={action.tool}
-              data-testid={`${testId}-run-recovery-action`}
-              disabled={recoveryActionDisabled || !onRunRecoveryAction}
-              key={`${action.tool}:${action.prompt}:${action.permission_target}`}
-              onClick={() => void onRunRecoveryAction?.(toolCall, action)}
-              title={action.prompt}
-            >
-              {action.label}
-            </button>
-          ))}
+          {recoveryActions.slice(0, 3).flatMap((action) => {
+            const retryAction = runtimeToolRecoveryRetryAction(action);
+            return [
+              <button
+                type="button"
+                data-permission-target={action.permission_target}
+                data-recovery-kind="permission_recovery"
+                data-recovery-tool={action.tool}
+                data-testid={`${testId}-run-recovery-action`}
+                disabled={recoveryActionDisabled || !onRunRecoveryAction}
+                key={`${action.tool}:${action.prompt}:${action.permission_target}:recovery`}
+                onClick={() => void onRunRecoveryAction?.(toolCall, action)}
+                title={action.prompt}
+              >
+                {action.label}
+              </button>,
+              retryAction ? (
+                <button
+                  type="button"
+                  data-permission-target={retryAction.permission_target}
+                  data-recovery-kind="retry_original"
+                  data-recovery-tool={retryAction.tool}
+                  data-testid={`${testId}-run-retry-action`}
+                  disabled={recoveryActionDisabled || !onRunRecoveryAction}
+                  key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
+                  onClick={() => void onRunRecoveryAction?.(toolCall, retryAction)}
+                  title={retryAction.prompt}
+                >
+                  {retryAction.label}
+                </button>
+              ) : null,
+            ];
+          })}
         </div>
       ) : null}
       {inputPreviewContent || outputPreviewContent ? (
