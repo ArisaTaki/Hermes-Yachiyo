@@ -576,6 +576,31 @@ def test_app_open_success_records_launch_verification(monkeypatch) -> None:
     assert calls[0][0] == ["open", "-a", "Google Chrome"]
 
 
+def test_app_open_handles_common_finder_folder_aliases(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.app_open("下载文件夹")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.open"
+    assert result["summary"] == "Opened Downloads"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "app_name": "下载文件夹",
+        "path": str(desktop_mod.Path.home() / "Downloads"),
+        "open_target": "folder",
+    }
+    assert calls[0][0] == ["open", str(desktop_mod.Path.home() / "Downloads")]
+
+
 def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:
     open_calls = []
 

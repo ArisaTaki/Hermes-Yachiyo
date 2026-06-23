@@ -8,6 +8,27 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+_COMMON_FOLDER_TARGETS = {
+    "desktop": "Desktop",
+    "desktopfolder": "Desktop",
+    "桌面": "Desktop",
+    "桌面文件夹": "Desktop",
+    "downloads": "Downloads",
+    "downloadsfolder": "Downloads",
+    "下载": "Downloads",
+    "下载文件夹": "Downloads",
+    "documents": "Documents",
+    "documentsfolder": "Documents",
+    "文档": "Documents",
+    "文档文件夹": "Documents",
+    "文稿": "Documents",
+    "文稿文件夹": "Documents",
+    "home": "",
+    "homefolder": "",
+    "主目录": "",
+    "用户文件夹": "",
+}
+
 
 def screen_capture(target_path: Path) -> dict[str, Any]:
     if _desktop_platform() != "macos":
@@ -75,6 +96,9 @@ def app_open(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.open")
     clean_name = _clean_required(app_name, "app_name")
+    folder_path = _common_folder_path(clean_name)
+    if folder_path is not None:
+        return _open_common_folder(clean_name, folder_path)
     try:
         result = subprocess.run(
             ["open", "-a", clean_name],
@@ -96,6 +120,47 @@ def app_open(app_name: str) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def _open_common_folder(label: str, folder_path: Path) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["open", str(folder_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("app.open", exc)
+    if result.returncode != 0:
+        payload = _failed("app.open", result)
+        payload["data"] = {
+            "app_name": label,
+            "path": str(folder_path),
+            "open_target": "folder",
+        }
+        return payload
+    return {
+        "ok": True,
+        "action": "app.open",
+        "summary": f"Opened {folder_path.name or 'Home'}",
+        "data": {
+            "app_name": label,
+            "path": str(folder_path),
+            "open_target": "folder",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _common_folder_path(value: str) -> Path | None:
+    compact = "".join(str(value or "").strip().lower().replace("-", " ").replace("_", " ").split())
+    if compact not in _COMMON_FOLDER_TARGETS:
+        return None
+    folder_name = _COMMON_FOLDER_TARGETS[compact]
+    return Path.home() / folder_name if folder_name else Path.home()
 
 
 def app_focus(app_name: str) -> dict[str, Any]:

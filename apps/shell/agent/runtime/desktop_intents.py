@@ -423,7 +423,7 @@ def _normalize_app_name(value: str) -> str:
 
 def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
-    app = re.sub(r"^(?:一下|下|这个|那个)\s*", "", app)
+    app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
     app = re.sub(r"\s*(?:应用|app|软件|程序)$", "", app, flags=re.IGNORECASE)
     app = re.sub(r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$", "", app, flags=re.IGNORECASE)
     return app.strip()
