@@ -273,6 +273,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_status",
         "app_open",
         "app_focus",
+        "app_focus_window",
         "app_show",
         "app_hide",
         "app_minimize",
@@ -335,6 +336,27 @@ def test_app_show_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.show 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.show", {"app_name": ""})
+
+
+def test_app_focus_window_schema_requires_app_name_and_title() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_window",
+        {"app_name": "Slack", "title_contains": "general"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="app.focus_window 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_window",
+            {"app_name": "", "title_contains": "general"},
+        )
+    with pytest.raises(
+        AgentRuntimeError,
+        match="app.focus_window 参数 title_contains 必须是非空字符串",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_window",
+            {"app_name": "Slack", "title_contains": ""},
+        )
 
 
 def test_app_hide_schema_requires_app_name() -> None:
@@ -412,6 +434,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         {
             "allowed_tools": [
                 "screen.capture",
+                "app.focus_window",
                 "app.show",
                 "app.hide",
                 "app.minimize",
@@ -428,6 +451,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
 
     assert policy["allowed_tools"] == [
         "screen.capture",
+        "app.focus_window",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -576,6 +600,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "app_focus_window",
+        lambda app_name, title_contains: calls.append(("focus_window", app_name, title_contains))
+        or {"ok": True, "app_name": app_name, "title_contains": title_contains},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_show",
         lambda app_name: calls.append(("show_named_app", app_name))
         or {"ok": True, "app_name": app_name},
@@ -614,6 +644,15 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         {"x": 12, "y": 34, "click_count": 2},
     ) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.hide_app", {}) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.focus_window",
+        {"app_name": "Slack", "title_contains": "general"},
+    ) == {
+        "ok": True,
+        "app_name": "Slack",
+        "title_contains": "general",
+    }
     assert dispatch_tool_call(broker, "app.show", {"app_name": "Slack"}) == {
         "ok": True,
         "app_name": "Slack",
@@ -656,6 +695,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
+        ("focus_window", "Slack", "general"),
         ("show_named_app", "Slack"),
         ("hide_named_app", "Slack"),
         ("minimize_named_app", "Slack"),
@@ -1109,6 +1149,58 @@ def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None
     }
     assert result["fallback_used"] is False
     assert osascript_calls == [["Slack"], ["Slack"]]
+
+
+def test_app_focus_window_raises_matching_window(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "focused|Slack|2|general", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_focus_window("Slack", "general")
+
+    assert result == {
+        "ok": True,
+        "action": "app.focus_window",
+        "summary": "Focused Slack window: general",
+        "data": {
+            "app_name": "Slack",
+            "title_contains": "general",
+            "focus_status": "focused",
+            "window_index": 2,
+            "window_title": "general",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert 'perform action "AXRaise"' in calls[0][0]
+    assert 'attribute "AXMinimized"' in calls[0][0]
+    assert calls[0][1] == ["Slack", "general"]
+
+
+def test_app_focus_window_reports_window_not_found(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, args=None: {"ok": True, "stdout": "not_found|Slack|general", "stderr": ""},
+    )
+
+    result = desktop_mod.app_focus_window("Slack", "general")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.focus_window"
+    assert result["summary"] == "No Slack window matched general"
+    assert result["error_code"] == "window_not_found"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "title_contains": "general",
+        "focus_status": "not_found",
+    }
 
 
 def test_app_show_unhides_restores_and_activates_app(monkeypatch) -> None:

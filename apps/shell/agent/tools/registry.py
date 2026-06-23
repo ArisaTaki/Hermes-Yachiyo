@@ -154,6 +154,13 @@ def _app_focus(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[st
     return broker.app_focus(str(payload.get("app_name") or ""))
 
 
+def _app_focus_window(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.app_focus_window(
+        str(payload.get("app_name") or ""),
+        str(payload.get("title_contains") or ""),
+    )
+
+
 def _app_show(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_show(str(payload.get("app_name") or ""))
 
@@ -335,6 +342,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.status": _app_status,
     "app.open": _app_open,
     "app.focus": _app_focus,
+    "app.focus_window": _app_focus_window,
     "app.show": _app_show,
     "app.hide": _app_hide,
     "app.minimize": _app_minimize,

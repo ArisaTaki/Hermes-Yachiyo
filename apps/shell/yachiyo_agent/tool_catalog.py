@@ -311,6 +311,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus": [
             "Uses desktop automation and surfaces focus failures as tool results.",
         ],
+        "app.focus_window": [
+            "Requires Automation and Accessibility permission to raise a matching app window by title substring.",
+        ],
         "app.show": [
             "Requires Automation and Accessibility permission to show, unhide, restore, and activate a local app.",
         ],

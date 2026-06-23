@@ -383,6 +383,55 @@ def test_chat_bridge_quick_message_executes_named_app_show_without_approval(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_named_app_window_focus_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    focus_calls: list[tuple[str, str]] = []
+
+    def fake_app_focus_window(app_name: str, title_contains: str) -> dict:
+        focus_calls.append((app_name, title_contains))
+        return {
+            "ok": True,
+            "action": "app.focus_window",
+            "summary": f"Focused {app_name} window: {title_contains}",
+            "data": {
+                "app_name": app_name,
+                "title_contains": title_contains,
+                "focus_status": "focused",
+                "window_index": 2,
+                "window_title": title_contains,
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus_window",
+        fake_app_focus_window,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "切到 Slack 的 general 窗口",
+    )
+
+    assert result["ok"] is True
+    assert focus_calls == [("Slack", "general")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已切换到 Slack 的 general 窗口。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_window"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_named_app_minimize_without_approval(
     tmp_path,
     monkeypatch,

@@ -401,6 +401,9 @@ class ToolBroker:
     def app_focus(self, app_name: str) -> dict[str, Any]:
         return desktop.app_focus(app_name)
 
+    def app_focus_window(self, app_name: str, title_contains: str) -> dict[str, Any]:
+        return desktop.app_focus_window(app_name, title_contains)
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 

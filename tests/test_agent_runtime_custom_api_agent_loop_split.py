@@ -583,6 +583,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",
         "app.focus",
+        "app.focus_window",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -688,6 +689,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_window",
+        "input": {"app_name": "Slack", "title_contains": "general"},
+    }
+    assert daily_desktop_intent_tool_request("focus Slack window titled general", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_window",
+        "input": {"app_name": "Slack", "title_contains": "general"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", ["app.focus"]) is None
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",
@@ -1866,6 +1878,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"app_name": "Slack", "running": True},
         },
     )
+    app_focus_window = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.focus_window",
+        {"app_name": "Slack", "title_contains": "general"},
+        {
+            "ok": True,
+            "summary": "Focused Slack window: general",
+            "data": {"app_name": "Slack", "window_title": "general"},
+        },
+    )
     app_show = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.show",
         {"app_name": "Slack"},
@@ -1922,6 +1943,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
     assert app_quit == "已退出 Slack。"
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
+    assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"
     assert app_hide == "已隐藏 Slack。"

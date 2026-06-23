@@ -232,6 +232,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
 
+    focus_window_payload = _app_focus_window_payload(text)
+    if focus_window_payload:
+        candidates.append(_request("app.focus_window", focus_window_payload))
+
     app_quit_name = _app_quit_name(text)
     if app_quit_name:
         candidates.append(_request("app.quit", {"app_name": app_quit_name}))
@@ -874,10 +878,41 @@ def _app_focus_name(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _normalize_app_name(match.group("app"))
+        raw_app = match.group("app")
+        if _looks_like_window_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
         if app_name:
             return app_name
     return ""
+
+
+def _app_focus_window_payload(text: str) -> dict[str, str] | None:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"
+        r"\s*的\s*(?:标题(?:包含|为)?|名为|叫)?\s*"
+        r"(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"
+        r"\s*(?:标题(?:包含|为)?|名为|叫)\s*"
+        r"(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"\b(?:focus|activate|switch to)\s+(?P<app>.+?)\s+window\s+"
+        r"(?:(?:titled|called|matching|containing)\s+)?(?P<title>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        raw_title = match.group("title")
+        if _looks_like_local_path(_strip_app_name(raw_app)) or _looks_like_common_path_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        title = _strip_window_title(raw_title)
+        if app_name and title:
+            return {"app_name": app_name, "title_contains": title}
+    return None
 
 
 def _app_quit_name(text: str) -> str:
@@ -1169,6 +1204,17 @@ def _looks_like_common_path_target(value: str) -> bool:
     app = _strip_app_name(value)
     compact = re.sub(r"[\s._-]+", "", app.lower())
     return compact in _COMMON_REVEAL_PATHS
+
+
+def _looks_like_window_target(value: str) -> bool:
+    text = str(value or "")
+    return bool(re.search(r"(?:窗口|window)", text, flags=re.IGNORECASE))
+
+
+def _strip_window_title(value: str) -> str:
+    title = _strip_query(value)
+    title = re.sub(r"^(?:标题|title|named|called|matching|containing)\s*", "", title, flags=re.IGNORECASE)
+    return _strip_query(title)
 
 
 def _music_query(text: str) -> str:

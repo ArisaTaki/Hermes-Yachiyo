@@ -34,6 +34,7 @@ TOOL_FUNCTION_NAMES = {
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
+    "app.focus_window": "app_focus_window",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -71,6 +72,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.status",
     "app.open",
     "app.focus",
+    "app.focus_window",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -270,6 +272,7 @@ class ToolDescriptor:
         if self.name in {
             "app.open",
             "app.focus",
+            "app.focus_window",
             "app.show",
             "app.hide",
             "app.minimize",
@@ -277,6 +280,8 @@ class ToolDescriptor:
             "app.status",
         } and not str(payload.get("app_name") or "").strip():
             raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
+        if self.name == "app.focus_window" and not str(payload.get("title_contains") or "").strip():
+            raise AgentRuntimeError("app.focus_window 参数 title_contains 必须是非空字符串")
         if self.name == "media.apple_music_play" and not str(
             payload.get("query") or ""
         ).strip():
@@ -658,6 +663,18 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Bring a local desktop application to the foreground.",
         properties={"app_name": {"type": "string", "description": "Application name."}},
         required=("app_name",),
+    ),
+    "app.focus_window": ToolDescriptor(
+        name="app.focus_window",
+        description="Bring a matching window of a local desktop application to the foreground.",
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "title_contains": {
+                "type": "string",
+                "description": "Case-insensitive window title substring to focus.",
+            },
+        },
+        required=("app_name", "title_contains"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

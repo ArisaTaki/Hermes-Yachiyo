@@ -14,6 +14,7 @@ from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTO
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
     "app.focus",
+    "app.focus_window",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -53,6 +54,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.open_path": "打开本地路径",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
+    "app.focus_window": "聚焦应用窗口",
     "app.show": "显示应用",
     "app.hide": "隐藏应用",
     "app.minimize": "最小化应用",
@@ -445,6 +447,16 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "app.focus":
                 app_name = _payload_text(result, planned_input, "app_name")
                 return f"已切换到 {app_name}。" if app_name else (result_summary or "已切换到应用。")
+            if tool_name == "app.focus_window":
+                app_name = _payload_text(result, planned_input, "app_name")
+                title = _payload_text(result, planned_input, "window_title") or _payload_text(
+                    result,
+                    planned_input,
+                    "title_contains",
+                )
+                if app_name and title:
+                    return f"已切换到 {app_name} 的 {title} 窗口。"
+                return result_summary or "已切换到指定窗口。"
             if tool_name == "app.show":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -653,7 +665,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_control, system.volume, clipboard.write, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
@@ -664,6 +676,7 @@ class RuntimeCustomApiAgentLoop:
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
             "map single app running/open status questions to app.status; "
+            "map explicit app window focus requests with a title substring to app.focus_window; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "

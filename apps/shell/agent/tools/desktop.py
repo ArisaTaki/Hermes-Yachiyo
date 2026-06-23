@@ -228,6 +228,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.focus_window",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -944,6 +945,138 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "action": "app.focus",
         "summary": f"Focused {clean_name}",
         "data": {"app_name": clean_name},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def app_focus_window(app_name: str, title_contains: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.focus_window")
+    clean_name = _clean_required(app_name, "app_name")
+    clean_title = _clean_required(title_contains, "title_contains")
+    result = _run_osascript(
+        """
+        on lowercaseText(theText)
+            set upperChars to "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            set lowerChars to "abcdefghijklmnopqrstuvwxyz"
+            set outputText to ""
+            repeat with charIndex from 1 to length of theText
+                set oneChar to character charIndex of theText
+                set charOffset to offset of oneChar in upperChars
+                if charOffset > 0 then
+                    set outputText to outputText & character charOffset of lowerChars
+                else
+                    set outputText to outputText & oneChar
+                end if
+            end repeat
+            return outputText
+        end lowercaseText
+
+        on run argv
+            set appName to item 1 of argv
+            set titleQuery to item 2 of argv
+            set loweredQuery to my lowercaseText(titleQuery)
+            tell application "System Events"
+                if not (exists application process appName) then
+                    return "not_running|" & appName & "|" & titleQuery
+                end if
+                set visible of application process appName to true
+                tell application process appName
+                    set windowIndex to 0
+                    set matchedIndex to 0
+                    set matchedTitle to ""
+                    repeat with windowRef in windows
+                        set windowIndex to windowIndex + 1
+                        try
+                            set windowTitle to name of windowRef
+                        on error
+                            set windowTitle to ""
+                        end try
+                        if (my lowercaseText(windowTitle)) contains loweredQuery then
+                            set matchedIndex to windowIndex
+                            set matchedTitle to windowTitle
+                            try
+                                if value of attribute "AXMinimized" of windowRef is true then
+                                    set value of attribute "AXMinimized" of windowRef to false
+                                end if
+                            end try
+                            try
+                                perform action "AXRaise" of windowRef
+                            end try
+                            try
+                                set value of attribute "AXMain" of windowRef to true
+                            end try
+                            exit repeat
+                        end if
+                    end repeat
+                end tell
+            end tell
+            if matchedTitle is "" then
+                return "not_found|" & appName & "|" & titleQuery
+            end if
+            tell application appName to activate
+            return "focused|" & appName & "|" & matchedIndex & "|" & matchedTitle
+        end run
+        """,
+        [clean_name, clean_title],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.focus_window",
+            {
+                **result,
+                "action": "app.focus_window",
+                "summary": "app.focus_window failed",
+                "data": {"app_name": clean_name, "title_contains": clean_title},
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    parts = stdout.split("|", 3) if stdout else []
+    status = parts[0] if parts else "unknown"
+    if status == "not_running":
+        return {
+            "ok": False,
+            "action": "app.focus_window",
+            "summary": f"{clean_name} is not running",
+            "error": "app_not_running",
+            "error_code": "app_not_running",
+            "data": {
+                "app_name": clean_name,
+                "title_contains": clean_title,
+                "focus_status": status,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    if status == "not_found":
+        return {
+            "ok": False,
+            "action": "app.focus_window",
+            "summary": f"No {clean_name} window matched {clean_title}",
+            "error": "window_not_found",
+            "error_code": "window_not_found",
+            "data": {
+                "app_name": clean_name,
+                "title_contains": clean_title,
+                "focus_status": status,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    window_index = _int_value(parts[2] if len(parts) > 2 else 0)
+    window_title = parts[3] if len(parts) > 3 else ""
+    return {
+        "ok": True,
+        "action": "app.focus_window",
+        "summary": f"Focused {clean_name} window: {window_title or clean_title}",
+        "data": {
+            "app_name": clean_name,
+            "title_contains": clean_title,
+            "focus_status": status,
+            "window_index": window_index,
+            "window_title": window_title,
+        },
         "permission_error": False,
         "fallback_used": False,
     }
@@ -2177,6 +2310,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
+        "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
         "app.hide": ["accessibility"],
         "app.minimize": ["accessibility"],
@@ -2200,6 +2334,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
+        "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
         "app.hide": ["accessibility"],
         "app.minimize": ["accessibility"],
