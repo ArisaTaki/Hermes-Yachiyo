@@ -1634,6 +1634,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "refresh"},
     }
+    assert daily_desktop_intent_tool_request("返回上一页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("浏览器后退", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("前进一页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_forward"},
+    }
+    assert daily_desktop_intent_tool_request("go back", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("go forward", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_forward"},
+    }
     assert daily_desktop_intent_tool_request("复制选中内容", ["desktop.hotkey"]) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",

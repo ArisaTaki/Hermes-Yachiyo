@@ -759,7 +759,7 @@ class RuntimeCustomApiAgentLoop:
             "map open window list questions to desktop.windows; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/refresh to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "
             "map explicit named app show/unhide/restore requests to app.show, named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
@@ -1110,6 +1110,8 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "find": "打开查找",
         "new_tab": "新建标签页",
         "refresh": "刷新",
+        "browser_back": "返回上一页",
+        "browser_forward": "前进一页",
     }.get(action, "")
     return f"已{label}。" if label else ""
 

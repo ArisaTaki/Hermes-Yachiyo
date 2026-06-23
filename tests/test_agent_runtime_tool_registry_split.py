@@ -373,6 +373,8 @@ def test_app_hide_schema_requires_app_name() -> None:
 def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "copy"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
@@ -1890,24 +1892,24 @@ def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypa
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
 
-    result = desktop_mod.desktop_safe_shortcut("copy")
+    result = desktop_mod.desktop_safe_shortcut("browser_forward")
 
     assert result == {
         "ok": True,
         "action": "desktop.safe_shortcut",
-        "summary": "Executed safe shortcut: copy",
+        "summary": "Executed safe shortcut: browser forward",
         "data": {
-            "key": "c",
+            "key": "]",
             "modifiers": ["command"],
-            "shortcut_action": "copy",
-            "shortcut_label": "copy",
+            "shortcut_action": "browser_forward",
+            "shortcut_label": "browser forward",
         },
         "permission_error": False,
         "fallback_used": False,
     }
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert 'keystroke keyName using {command down}' in calls[0][0][2]
-    assert calls[0][0][-1] == "c"
+    assert calls[0][0][-1] == "]"
 
 
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:

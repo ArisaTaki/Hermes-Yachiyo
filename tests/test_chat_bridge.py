@@ -1104,10 +1104,10 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         return {
             "ok": True,
             "action": "desktop.safe_shortcut",
-            "summary": "Executed safe shortcut: copy",
+            "summary": "Executed safe shortcut: browser forward",
             "data": {
                 "shortcut_action": action,
-                "key": "c",
+                "key": "]",
                 "modifiers": ["command"],
             },
         }
@@ -1116,14 +1116,14 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "复制选中内容",
+        "前进一页",
     )
 
-    assert shortcut_calls == ["copy"]
+    assert shortcut_calls == ["browser_forward"]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已复制选中内容。"
+    assert agent_task["summary"] == "已前进一页。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"

@@ -342,7 +342,7 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
             "Requires approval and Accessibility permission because it closes the current foreground window.",
         ],
         "desktop.safe_shortcut": [
-            "Requires Accessibility permission and only accepts whitelisted common shortcut actions.",
+            "Requires Accessibility permission and only accepts whitelisted common shortcut actions, including browser back/forward.",
         ],
         "desktop.safe_type_text": [
             "Requires Accessibility permission and only types text explicitly provided by the user.",

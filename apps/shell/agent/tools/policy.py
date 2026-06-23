@@ -75,6 +75,8 @@ SAFE_SHORTCUT_ACTIONS = (
     "find",
     "new_tab",
     "refresh",
+    "browser_back",
+    "browser_forward",
 )
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
@@ -851,8 +853,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.safe_shortcut",
         description=(
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
-            "select all, undo, redo, find, new tab, or refresh. Unlike desktop.hotkey, "
-            "this tool does not accept arbitrary keys."
+            "select all, undo, redo, find, new tab, refresh, browser back, or "
+            "browser forward. Unlike desktop.hotkey, this tool does not accept arbitrary keys."
         ),
         properties={
             "action": {
