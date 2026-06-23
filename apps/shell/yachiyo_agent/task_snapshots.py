@@ -24,6 +24,7 @@ from .links import studio_run_url
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
 _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
+_APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_required"
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
@@ -200,11 +201,14 @@ def _desktop_intent_progress_text(
         if event.event_type not in {
             _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
             _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+            _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
             _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         }:
             continue
         tool_name = _event_tool_name(event)
         label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
+        if event.event_type == _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE:
+            return f"等待批准 · {label}" if label else "等待批准桌面动作"
         if event.event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
             payload = event.payload if isinstance(event.payload, Mapping) else {}
             result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}

@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_tool_request,
 )
 from apps.shell.agent.runtime.events import tool_input_preview
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
@@ -1376,6 +1377,105 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
         "source": "daily_desktop_intent",
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"key": "l", "modifiers": ["command"]},
+    }
+
+
+def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_pause() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "按 Command+L"}]
+
+    def run_tool_requests(*_args, **_kwargs):
+        raise AgentApprovalRequired(
+            {
+                "approval_id": "approval-hotkey",
+                "tool": "desktop.hotkey",
+                "input_preview": {"key": "l", "modifiers": ["command"]},
+                "risk_level": "medium",
+                "policy_reason": "前台快捷键需要确认。",
+            }
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["desktop.hotkey"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approval-required desktop intent should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    try:
+        loop.run(
+            {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+            "ignored context",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            messages=messages,
+            run_id="run-hotkey-approval",
+        )
+    except AgentApprovalRequired as exc:
+        assert exc.pending_approval["approval_id"] == "approval-hotkey"
+    else:
+        raise AssertionError("expected AgentApprovalRequired")
+
+    assert [event["event"] for event in timeline] == [
+        "agent.desktop.intent_planned",
+        "agent.desktop.intent_approval_required",
+    ]
+    assert timeline[-1] == {
+        "event": "agent.desktop.intent_approval_required",
+        "detail": "desktop.hotkey",
+        "tool": "desktop.hotkey",
+        "status": "approval_required",
+        "source": "daily_desktop_intent",
+        "reason": "tool_policy_requires_approval",
+        "input_preview": {"key": "l", "modifiers": ["command"]},
+        "approval_id": "approval-hotkey",
+        "risk_level": "medium",
+        "policy_reason": "前台快捷键需要确认。",
+    }
+    assert appended_events[-1] == {
+        "run_id": "run-hotkey-approval",
+        "event_type": "agent.desktop.intent_approval_required",
+        "payload": {
+            "tool": "desktop.hotkey",
+            "status": "approval_required",
+            "source": "daily_desktop_intent",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "approval_id": "approval-hotkey",
+            "risk_level": "medium",
+            "policy_reason": "前台快捷键需要确认。",
+        },
     }
 
 

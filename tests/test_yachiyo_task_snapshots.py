@@ -131,6 +131,32 @@ def test_agent_task_snapshot_derives_progress_from_unavailable_desktop_intent() 
     assert task.progress_text == "无法执行 · 播放 Apple Music"
 
 
+def test_agent_task_snapshot_derives_progress_from_approval_required_desktop_intent() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-hotkey",
+            "run_id": "run-hotkey",
+            "status": "approval_required",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "detail": "desktop.hotkey",
+                    "payload": {
+                        "tool": "desktop.hotkey",
+                        "status": "approval_required",
+                        "input_preview": {"key": "l", "modifiers": ["command"]},
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "等待批准 · 发送快捷键"
+    assert task.progress_text == "等待批准 · 发送快捷键"
+
+
 def test_agent_task_snapshot_derives_progress_from_completed_desktop_intent() -> None:
     task = agent_task_snapshot_from_payload(
         {

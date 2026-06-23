@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
 )
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
@@ -133,17 +134,27 @@ class RuntimeCustomApiAgentLoop:
                         "agent.desktop.intent_planned",
                         planned_payload,
                     )
-                self._run_tool_requests(
-                    [planned_tool_request],
-                    allowed_tools,
-                    broker,
-                    messages,
-                    timeline,
-                    artifacts,
-                    next_iteration=start_iteration,
-                    run_id=run_id,
-                    budget=budget,
-                )
+                try:
+                    self._run_tool_requests(
+                        [planned_tool_request],
+                        allowed_tools,
+                        broker,
+                        messages,
+                        timeline,
+                        artifacts,
+                        next_iteration=start_iteration,
+                        run_id=run_id,
+                        budget=budget,
+                    )
+                except AgentApprovalRequired as exc:
+                    self._record_desktop_intent_approval_required(
+                        planned_tool,
+                        planned_input,
+                        pending_approval=exc.pending_approval,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    raise
                 direct_result = self._direct_daily_desktop_result(
                     agent,
                     planned_tool,
@@ -258,6 +269,36 @@ class RuntimeCustomApiAgentLoop:
                 ),
             }
         )
+
+    def _record_desktop_intent_approval_required(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        *,
+        pending_approval: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        event_payload = {
+            "tool": tool_name,
+            "status": "approval_required",
+            "source": "daily_desktop_intent",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": tool_input,
+        }
+        for key in ("approval_id", "risk_level", "policy_reason"):
+            value = str(pending_approval.get(key) or "").strip()
+            if value:
+                event_payload[key] = value
+        timeline.append(
+            self._timeline(
+                "agent.desktop.intent_approval_required",
+                tool_name,
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.desktop.intent_approval_required", event_payload)
 
     def _direct_daily_desktop_result(
         self,
