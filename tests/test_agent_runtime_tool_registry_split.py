@@ -373,6 +373,7 @@ def test_app_hide_schema_requires_app_name() -> None:
 def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "copy"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
 

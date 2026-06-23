@@ -1422,6 +1422,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello world"},
     }
+    assert daily_desktop_intent_tool_request("把 hello 复制一下到剪贴板", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello"},
+    }
     assert daily_desktop_intent_tool_request("复制一下 hello world", allowed_tools) is None
     assert daily_desktop_intent_tool_request("copy hello world to clipboard", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1613,7 +1618,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "copy"},
     }
+    assert daily_desktop_intent_tool_request("复制一下选中的内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
     assert daily_desktop_intent_tool_request("粘贴一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("粘贴到这里", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "paste"},
@@ -1648,6 +1663,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开新窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_window"},
+    }
+    assert daily_desktop_intent_tool_request("新建窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_window"},
+    }
+    assert daily_desktop_intent_tool_request("打开新窗口", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开查找", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",

@@ -878,9 +878,9 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
 
 def _clipboard_write_text(text: str) -> str:
     patterns = (
-        r"(?:把|将)\s*(?P<text>.+?)\s*(?:复制|拷贝|写入|放到|放进|保存到)\s*(?:到|进|至)?\s*"
+        r"(?:把|将)\s*(?P<text>.+?)\s*(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)",
-        r"(?:复制|拷贝|写入)\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
+        r"(?:复制|拷贝|写入)(?:一下|下)?\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)",
         r"(?:系统)?(?:剪贴板|粘贴板)\s*(?:写入|放入|放进|保存|保存为)\s*(?P<text>.+)$",
         r"(?:复制|拷贝|写入)(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*"
@@ -1476,6 +1476,8 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         "窗口",
         "当前窗口",
         "这个窗口",
+        "新窗口",
+        "新建窗口",
         "标签页",
         "当前标签页",
         "这个标签页",
@@ -1484,6 +1486,7 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         "window",
         "currentwindow",
         "thiswindow",
+        "newwindow",
         "tab",
         "currenttab",
         "thistab",
@@ -1813,11 +1816,18 @@ def _desktop_safe_shortcut_action(text: str) -> str:
     mapping = {
         "复制": "copy",
         "复制选中内容": "copy",
+        "复制选中的内容": "copy",
         "复制当前选中内容": "copy",
+        "复制当前选中的内容": "copy",
+        "复制一下选中内容": "copy",
+        "复制一下选中的内容": "copy",
         "copy": "copy",
         "copyselection": "copy",
         "copyselectedtext": "copy",
         "粘贴": "paste",
+        "粘贴到这里": "paste",
+        "粘贴到这": "paste",
+        "粘贴在这里": "paste",
         "paste": "paste",
         "全选": "select_all",
         "selectall": "select_all",
@@ -1868,6 +1878,10 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新标签页": "new_tab",
         "打开新标签页": "new_tab",
         "newtab": "new_tab",
+        "新建窗口": "new_window",
+        "新窗口": "new_window",
+        "打开新窗口": "new_window",
+        "newwindow": "new_window",
     }
     return mapping.get(phrase, "")
 

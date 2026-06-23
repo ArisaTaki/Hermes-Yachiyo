@@ -74,6 +74,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "redo",
     "find",
     "new_tab",
+    "new_window",
     "refresh",
     "browser_back",
     "browser_forward",
@@ -853,7 +854,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.safe_shortcut",
         description=(
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
-            "select all, undo, redo, find, new tab, refresh, browser back, or "
+            "select all, undo, redo, find, new tab, new window, refresh, browser back, or "
             "browser forward. Unlike desktop.hotkey, this tool does not accept arbitrary keys."
         ),
         properties={

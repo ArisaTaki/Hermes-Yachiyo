@@ -109,6 +109,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "redo": ("z", ("command", "shift"), "redo"),
     "find": ("f", ("command",), "find"),
     "new_tab": ("t", ("command",), "new tab"),
+    "new_window": ("n", ("command",), "new window"),
     "refresh": ("r", ("command",), "refresh"),
     "browser_back": ("[", ("command",), "browser back"),
     "browser_forward": ("]", ("command",), "browser forward"),
