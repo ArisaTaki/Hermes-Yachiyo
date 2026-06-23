@@ -22,7 +22,10 @@ import time
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_recovery_prompt,
+)
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
@@ -343,9 +346,14 @@ class ChatBridge:
             return result
         if isinstance(result.get("agent_task"), dict):
             return result
-        desktop_candidates = daily_desktop_intent_candidates(text)
+        desktop_prompt = daily_desktop_recovery_prompt(metadata) or text
+        desktop_candidates = daily_desktop_intent_candidates(desktop_prompt)
         if desktop_candidates:
-            executed_task = self._execute_yachiyo_desktop_quick_task(task_id, text)
+            executed_task = self._execute_yachiyo_desktop_quick_task(
+                task_id,
+                text,
+                metadata=metadata,
+            )
             if executed_task is not None:
                 return {**result, "agent_task": executed_task}
         agent_task = self._agent_task_snapshot_for_quick_message(
@@ -368,6 +376,8 @@ class ChatBridge:
         self,
         task_id: str,
         text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         service = _runtime_agent_service(self._runtime)
         if service is None:
@@ -380,6 +390,7 @@ class ChatBridge:
                 task_id=task_id,
                 conversation_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
                 prompt=text,
+                metadata=metadata,
             )
             if payload is not None:
                 return agent_task_snapshot_from_payload(payload).model_dump(mode="json")

@@ -1386,6 +1386,99 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
         store.close()
 
 
+def test_send_message_executes_structured_recovery_action_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("structured recovery action should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "open_target": "system_settings",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        result = api.send_message(
+            "修复屏幕录制",
+            metadata={
+                "source": "chat",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "recovery_tool": "app.open",
+                "recovery_input": {"app_name": "屏幕录制权限"},
+                "recovery_permission_target": "screen_recording",
+                "recovery_risk_level": "low",
+            },
+        )
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user = next(
+            message
+            for message in store.load_messages(runtime.chat_session.session_id)
+            if message.role == "user"
+        )
+        user_metadata = json.loads(user.metadata_json or "{}")
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已打开屏幕录制权限。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert planned_event["payload"]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开屏幕录制权限。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开屏幕录制权限。"
+        assert open_calls == ["屏幕录制权限"]
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert user_metadata["desktop_permission_recovery"] is True
+        assert user_metadata["recovery_tool"] == "app.open"
+        assert user_metadata["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

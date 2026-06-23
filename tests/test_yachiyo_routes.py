@@ -4193,7 +4193,7 @@ async def test_yachiyo_task_route_executes_structured_recovery_action_without_mo
 
         assert open_calls == ["屏幕录制权限"]
         assert started["status"] == "completed"
-        assert started["summary"] == "已打开 屏幕录制权限。"
+        assert started["summary"] == "已打开屏幕录制权限。"
         assert started["tool_calls"][-1]["tool_name"] == "app.open"
         assert started["tool_calls"][-1]["input_preview"]["app_name"] == "屏幕录制权限"
         assert planned_event["payload"]["input_preview"]["app_name"] == "屏幕录制权限"
