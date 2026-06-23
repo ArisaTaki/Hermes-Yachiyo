@@ -22,6 +22,71 @@ export function approvalPreviewValue(record: Record<string, unknown>, keys: stri
   return '';
 }
 
+export function approvalPreviewTarget(record: Record<string, unknown>, toolName = ''): string {
+  const tool = String(toolName || '').trim();
+  if (tool === 'desktop.hotkey') return hotkeyPreview(record);
+  if (tool === 'desktop.type_text') return approvalPreviewValue(record, ['text']);
+  if (tool === 'desktop.click') return coordinateClickPreview(record);
+  if (tool === 'browser.click') {
+    return approvalPreviewValue(record, ['selector'])
+      || coordinateClickPreview(record, ['fallback_x', 'fallback_y']);
+  }
+  if (tool === 'browser.type_text') {
+    const selector = approvalPreviewValue(record, ['selector']);
+    const text = approvalPreviewValue(record, ['text']);
+    return [selector, text].filter(Boolean).join(' · ');
+  }
+  return approvalPreviewValue(record, [
+    'command',
+    'cmd',
+    'path',
+    'file',
+    'target',
+    'app_name',
+    'query',
+    'url',
+    'selector',
+    'key',
+    'reason',
+  ]);
+}
+
+function hotkeyPreview(record: Record<string, unknown>): string {
+  const key = approvalPreviewValue(record, ['key']);
+  const modifiers = Array.isArray(record.modifiers)
+    ? record.modifiers.map((item) => hotkeyPartLabel(item)).filter(Boolean)
+    : [];
+  return [...modifiers, hotkeyPartLabel(key)].filter(Boolean).join('+');
+}
+
+function hotkeyPartLabel(value: unknown): string {
+  const part = String(value || '').trim();
+  if (!part) return '';
+  const normalized = part.toLowerCase();
+  if (normalized === 'cmd' || normalized === 'command') return 'Command';
+  if (normalized === 'ctrl' || normalized === 'control') return 'Control';
+  if (normalized === 'alt' || normalized === 'option') return 'Option';
+  if (normalized === 'shift') return 'Shift';
+  if (normalized === 'return') return 'Return';
+  if (normalized === 'escape') return 'Escape';
+  if (normalized === 'space') return 'Space';
+  if (normalized === 'tab') return 'Tab';
+  if (normalized.length === 1) return normalized.toUpperCase();
+  return part;
+}
+
+function coordinateClickPreview(
+  record: Record<string, unknown>,
+  keys: [string, string] = ['x', 'y'],
+): string {
+  const x = approvalPreviewValue(record, [keys[0]]);
+  const y = approvalPreviewValue(record, [keys[1]]);
+  if (!x || !y) return '';
+  const clickCount = Number(record.click_count || 1);
+  const action = clickCount === 2 ? '双击' : clickCount > 2 ? `点击 x${clickCount}` : '点击';
+  return `${action} ${x}, ${y}`;
+}
+
 export function runtimeToolDisplayLabel(toolName: string): string {
   const tool = String(toolName || '').trim();
   if (tool === 'terminal.run') return '运行终端命令';

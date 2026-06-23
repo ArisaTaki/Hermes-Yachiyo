@@ -1,5 +1,6 @@
 import {
   approvalPreviewRecord,
+  approvalPreviewTarget,
   approvalPreviewValue,
   runtimeToolDisplayLabelOrName,
   runtimeToolFamily,
@@ -40,19 +41,7 @@ export function RuntimeToolCallCard({
   const outputPreview = approvalPreviewRecord(toolCall.output_preview);
   const displayName = runtimeToolDisplayLabelOrName(toolCall.tool_name);
   const rawToolName = String(toolCall.tool_name || '').trim();
-  const target = approvalPreviewValue(inputPreview, [
-    'command',
-    'cmd',
-    'path',
-    'file',
-    'target',
-    'app_name',
-    'query',
-    'url',
-    'selector',
-    'key',
-    'reason',
-  ]);
+  const target = approvalPreviewTarget(inputPreview, toolCall.tool_name);
   const output = approvalPreviewValue(outputPreview, ['summary', 'result', 'output', 'stdout', 'path']);
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);

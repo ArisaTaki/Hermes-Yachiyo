@@ -5,7 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.agent.runtime.events import tool_input_preview
-from apps.shell.agent.tools.policy import HIGH_RISK_AGENT_TOOLS
+from apps.shell.agent.tools.policy import (
+    HIGH_RISK_AGENT_TOOLS,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+)
+
+MEDIUM_RISK_AGENT_TOOLS = {
+    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+}
 
 
 def approval_input_preview(value: Any, *, limit: int = 1200) -> Any:
@@ -63,6 +72,8 @@ def _approval_risk_level(raw: dict[str, Any], tool_name: str) -> str:
         return direct
     if tool_name in HIGH_RISK_AGENT_TOOLS:
         return "high"
+    if tool_name in MEDIUM_RISK_AGENT_TOOLS:
+        return "medium"
     return ""
 
 
@@ -85,6 +96,12 @@ def _approval_policy_reason(
         return "terminal.run 可执行本地命令，按工具策略必须人工确认。"
     if tool_name == "workspace.write_patch":
         return "workspace.write_patch 会修改工作区文件，按工具策略必须人工确认。"
+    if risk_level == "medium":
+        if tool_name in MEDIUM_RISK_DESKTOP_TOOL_NAMES:
+            return "前台输入、点击或快捷键会操作当前桌面窗口，按工具策略需要人工确认。"
+        if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
+            return "网页点击或输入会操作当前浏览器页面，按工具策略需要人工确认。"
+        return "中风险工具调用按当前工具策略需要人工确认。"
     if risk_level == "high":
         return "高风险工具调用按当前工具策略必须人工确认。"
     return ""

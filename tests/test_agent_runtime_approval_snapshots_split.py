@@ -88,6 +88,38 @@ def test_approval_snapshot_preserves_explicit_policy_reason_and_risk() -> None:
     assert snapshot["policy_reason"] == "Plugin can publish external changes."
 
 
+def test_approval_snapshot_marks_foreground_desktop_tools_medium_risk() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-hotkey",
+            "tool": "desktop.hotkey",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["risk_level"] == "medium"
+    assert snapshot["policy_reason"] == (
+        "前台输入、点击或快捷键会操作当前桌面窗口，按工具策略需要人工确认。"
+    )
+
+
+def test_approval_snapshot_marks_browser_input_tools_medium_risk() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-browser-click",
+            "tool": "browser.click",
+            "input_preview": {"selector": "button[type=submit]"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["risk_level"] == "medium"
+    assert snapshot["policy_reason"] == (
+        "网页点击或输入会操作当前浏览器页面，按工具策略需要人工确认。"
+    )
+
+
 def test_workflow_approval_pause_projection_uses_shared_public_snapshot() -> None:
     projection = WorkflowApprovalPauseProjection(
         approval_id="approval-workflow",

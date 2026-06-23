@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react';
 
 import type { ApprovalCardSnapshot } from '../types';
-import { approvalPreviewRecord, approvalPreviewValue, runtimeToolDisplayLabel } from '../approval';
+import {
+  approvalPreviewRecord,
+  approvalPreviewTarget,
+  approvalPreviewValue,
+  runtimeToolDisplayLabel,
+} from '../approval';
 
 export type RuntimeApprovalCardSnapshot = Pick<
   ApprovalCardSnapshot,
@@ -50,7 +55,7 @@ export function RuntimeApprovalCard({
   const toolName = approval.tool_name || 'tool';
   const status = approval.status || 'pending';
   const preview = approvalPreviewRecord(approval.input_preview);
-  const target = approvalPreviewValue(preview, ['command', 'cmd', 'path', 'file', 'target']);
+  const target = approvalPreviewTarget(preview, toolName);
   const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;
   const title = variant === 'compact'
     ? compactApprovalTitle(approval.title, toolName, displayTool)
