@@ -857,6 +857,66 @@ def test_chat_bridge_quick_message_executes_safe_click_without_approval(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
+    tmp_path,
+    monkeypatch,
+):
+    osascript_calls: list[tuple[str, list[str] | None]] = []
+    monkeypatch.setattr("apps.shell.agent.tools.desktop._desktop_platform", lambda: "macos")
+
+    def fake_run_osascript(script: str, args: list[str] | None = None) -> dict:
+        osascript_calls.append((script, args))
+        return {
+            "ok": False,
+            "summary": "osascript failed",
+            "error": "Not authorized to send Apple events to System Events. Accessibility permission denied.",
+            "permission_error": True,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop._run_osascript", fake_run_osascript)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "点击 120, 240",
+    )
+    timeline = result["_task_timeline"]
+    recovery_event = next(
+        event
+        for event in timeline["events"]
+        if event["event_type"] == "agent.desktop.permission_recovery"
+    )
+
+    assert osascript_calls
+    assert osascript_calls[0][1] == ["120", "240", "1"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert "桌面操作未完成：Not authorized to send Apple events to System Events." in agent_task["summary"]
+    assert "缺少权限：accessibility" in agent_task["summary"]
+    assert "可直接打开：打开辅助功能权限。" in agent_task["summary"]
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
+    assert agent_task["tool_calls"][-1]["status"] == "failed"
+    assert agent_task["tool_calls"][-1]["output_preview"]["permission_error"] is True
+    assert agent_task["tool_calls"][-1]["output_preview"]["permission_targets"] == ["accessibility"]
+    assert agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"] == [
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        }
+    ]
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.permission_recovery" in event_types
+    assert "model.request.started" not in event_types
+    assert recovery_event["payload"]["permission_targets"] == ["accessibility"]
+    assert recovery_event["payload"]["affected_tools"] == ["desktop.safe_click"]
+    assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,
