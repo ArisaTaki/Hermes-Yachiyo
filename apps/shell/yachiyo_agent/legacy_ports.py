@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
 from apps.shell.chat_api import ChatAPI
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -70,6 +71,7 @@ class LegacyChatTaskStarter:
             str(request.get("prompt") or ""),
             runnable_id=agent_id,
             client_message_id=client_message_id,
+            metadata=metadata,
         )
         if result.get("ok") is False:
             raise ValueError(str(result.get("error") or "发送 Agent 任务失败"))
@@ -102,7 +104,8 @@ class LegacyChatTaskStarter:
                     "status": result.get("status") or "pending",
                     "user_goal": request.get("prompt") or request.get("goal") or "",
                     "summary": result.get("summary") or result.get("result") or "",
-                    "timeline": result.get("timeline") or [],
+                    "timeline": result.get("timeline")
+                    or _planned_daily_desktop_timeline(str(request.get("prompt") or "")),
                 },
                 conversation_id=conversation_id,
             )
@@ -124,6 +127,28 @@ class LegacyChatTaskStarter:
             {**run, "task_id": task_id, "session_id": conversation_id},
             conversation_id=conversation_id,
         )
+
+
+def _planned_daily_desktop_timeline(prompt: str) -> list[dict[str, Any]]:
+    candidates = daily_desktop_intent_candidates(prompt)
+    if not candidates:
+        return []
+    request = candidates[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return []
+    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+    return [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": tool_name,
+            "tool": tool_name,
+            "status": "planned",
+            "source": "daily_desktop_intent",
+            "planning_reason": "clear_daily_desktop_intent",
+            "input_preview": tool_input,
+        }
+    ]
 
 
 class LegacyStudioPort:

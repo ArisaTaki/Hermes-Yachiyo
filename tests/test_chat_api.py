@@ -1452,6 +1452,11 @@ def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
             "打开 Apple Music",
             runnable_id=MAIN_CHAT_AGENT_ID,
             client_message_id="main-chat-entry-1",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "client_message_id": "untrusted-metadata-id",
+            },
         )
 
         assert result["ok"] is True
@@ -1463,6 +1468,11 @@ def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
         assert len(tasks) == 1
         assert tasks[0].task_id == result["task_id"]
         assert runtime.chat_session.get_messages()[0].task_id == result["task_id"]
+        assert runtime.chat_session.get_messages()[0].metadata == {
+            "source": "launcher",
+            "launcher_mode": "bubble",
+            "client_message_id": "main-chat-entry-1",
+        }
     finally:
         store.close()
 

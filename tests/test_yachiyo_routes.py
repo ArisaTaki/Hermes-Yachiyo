@@ -863,6 +863,7 @@ async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pyte
             *,
             runnable_id: str = "",
             client_message_id: str = "",
+            metadata: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             self._app_runtime.chat_calls.append(
                 {
@@ -870,6 +871,7 @@ async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pyte
                     "text": text,
                     "runnable_id": runnable_id,
                     "client_message_id": client_message_id,
+                    "metadata": metadata,
                 }
             )
             return {
@@ -901,6 +903,7 @@ async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pyte
             "text": "Patch README",
             "runnable_id": "agent-1",
             "client_message_id": "client-1",
+            "metadata": {"client_message_id": "client-1"},
         }
     ]
     assert (
@@ -932,6 +935,7 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
             *,
             runnable_id: str = "",
             client_message_id: str = "",
+            metadata: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             self._app_runtime.chat_calls.append(
                 {
@@ -939,6 +943,7 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
                     "text": text,
                     "runnable_id": runnable_id,
                     "client_message_id": client_message_id,
+                    "metadata": metadata,
                 }
             )
             return {
@@ -966,12 +971,26 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
     assert started["task_id"] == "chat-task-1"
     assert started["status"] == "running"
     assert started["conversation_id"] == "chat-1"
+    assert started["current_step"] == "准备执行 · 播放 Apple Music"
+    assert started["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+    assert started["recent_events"][0]["detail"] == "media.apple_music_play"
+    assert started["recent_events"][0]["payload"] == {
+        "input_preview": {"query": "超时空辉夜姬"},
+        "planning_reason": "clear_daily_desktop_intent",
+        "source": "daily_desktop_intent",
+        "status": "planned",
+        "tool": "media.apple_music_play",
+    }
     assert app_runtime.chat_calls == [
         {
             "session_id": "chat-1",
             "text": "播放超时空辉夜姬",
             "runnable_id": "builtin:yachiyo-main",
             "client_message_id": "client-main-1",
+            "metadata": {
+                "client_message_id": "client-main-1",
+                "daily_desktop_intent": True,
+            },
         }
     ]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)
@@ -1002,6 +1021,7 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
             *,
             runnable_id: str = "",
             client_message_id: str = "",
+            metadata: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             self._app_runtime.chat_calls.append(
                 {
@@ -1009,6 +1029,7 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
                     "text": text,
                     "runnable_id": runnable_id,
                     "client_message_id": client_message_id,
+                    "metadata": metadata,
                 }
             )
             return {
@@ -1037,12 +1058,21 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
     assert started["task_id"] == "launcher-chat-task-1"
     assert started["status"] == "running"
     assert started["conversation_id"] == "chat-1"
+    assert started["current_step"] == "准备执行 · 打开应用"
+    assert started["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+    assert started["recent_events"][0]["detail"] == "app.open"
     assert app_runtime.chat_calls == [
         {
             "session_id": "chat-1",
             "text": "打开 Apple Music",
             "runnable_id": "builtin:yachiyo-main",
             "client_message_id": "launcher-main-1",
+            "metadata": {
+                "client_message_id": "launcher-main-1",
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "desktop_launcher",
+            },
         }
     ]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)

@@ -518,6 +518,17 @@ class ChatAPI:
         next_metadata["client_message_id"] = client_message_id
         return next_metadata
 
+    @staticmethod
+    def _merge_user_metadata(
+        metadata: dict[str, Any] | None,
+        extra: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(extra, dict) or not extra:
+            return metadata
+        merged = dict(extra)
+        merged.update(dict(metadata or {}))
+        return merged
+
     def _idempotent_message_response(self, client_message_id: str) -> Dict[str, Any] | None:
         if not client_message_id:
             return None
@@ -609,6 +620,7 @@ class ChatAPI:
         *,
         runnable_id: str = "",
         client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """发送用户消息并创建对应任务
 
@@ -650,6 +662,7 @@ class ChatAPI:
                 raw_attachments,
                 runnable_id=runnable_id,
                 client_message_id=idempotency_key,
+                metadata=metadata,
             )
             if runnable_command is not None:
                 return runnable_command
@@ -691,6 +704,7 @@ class ChatAPI:
                 should_attach=should_attach_desktop_snapshot,
             )
             user_metadata = self._group_followup_metadata_for_user_message(text, current_context)
+            user_metadata = self._merge_user_metadata(user_metadata, metadata)
             task_description = self._with_group_context_for_main_model(task_description, current_context)
             task_description = self._with_group_followup_context(task_description, user_metadata)
             direct_group_dispatch_directives: list[GroupDispatchDirective] = []
@@ -807,6 +821,7 @@ class ChatAPI:
         *,
         runnable_id: str = "",
         client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Send an Agent/Workflow message through the existing Chat runtime path."""
 
@@ -816,6 +831,7 @@ class ChatAPI:
                 [],
                 runnable_id=runnable_id,
                 client_message_id=client_message_id,
+                metadata=metadata,
             )
             if result.get("ok") is not False:
                 return {**result, "session_id": self._session.session_id}
@@ -910,6 +926,7 @@ class ChatAPI:
         *,
         runnable_id: str = "",
         client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> Dict[str, Any] | None:
         text = (text or "").strip()
         if str(runnable_id or "").strip() == MAIN_CHAT_AGENT_ID:
@@ -1018,6 +1035,7 @@ class ChatAPI:
             "runnable_id": runnable.get("id") or "",
             "run_group_id": run_group_id,
         }
+        user_metadata = self._merge_user_metadata(user_metadata, metadata) or {}
         user_metadata = self._with_client_message_id(user_metadata, client_message_id) or {}
         message_content = text or user_goal
         should_set_runnable_title = (
