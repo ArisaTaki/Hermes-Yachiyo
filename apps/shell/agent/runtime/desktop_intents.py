@@ -7,6 +7,48 @@ from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 
+_APP_ALIASES = {
+    "applemusic": "Music",
+    "music": "Music",
+    "音乐": "Music",
+    "googlechrome": "Google Chrome",
+    "chrome": "Google Chrome",
+    "chrome浏览器": "Google Chrome",
+    "谷歌浏览器": "Google Chrome",
+    "浏览器": "Google Chrome",
+    "browser": "Google Chrome",
+    "safari": "Safari",
+    "finder": "Finder",
+    "访达": "Finder",
+    "terminal": "Terminal",
+    "终端": "Terminal",
+    "命令行": "Terminal",
+    "systemsettings": "System Settings",
+    "settings": "System Settings",
+    "系统设置": "System Settings",
+    "notes": "Notes",
+    "备忘录": "Notes",
+    "calendar": "Calendar",
+    "日历": "Calendar",
+    "reminders": "Reminders",
+    "提醒事项": "Reminders",
+    "mail": "Mail",
+    "邮件": "Mail",
+    "wechat": "WeChat",
+    "微信": "WeChat",
+    "qq": "QQ",
+    "slack": "Slack",
+    "discord": "Discord",
+    "notion": "Notion",
+    "obsidian": "Obsidian",
+    "vscode": "Visual Studio Code",
+    "vsc": "Visual Studio Code",
+    "visualstudiocode": "Visual Studio Code",
+    "code": "Visual Studio Code",
+    "cursor": "Cursor",
+}
+
+
 def daily_desktop_intent_tool_request(
     context: str,
     allowed_tools: list[str],
@@ -326,14 +368,17 @@ def _app_open_name(text: str) -> str:
         return media_app
 
     patterns = (
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+)",
-        r"(?:open|launch|start)\s+(?P<app>[^.!?]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?P<verb>open|launch|start)\s+(?P<app>[^.!?]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _normalize_app_name(match.group("app"))
+        raw_app = match.group("app")
+        app_name = _normalize_app_name(raw_app)
+        if _looks_like_generic_app_open_target(raw_app):
+            continue
         if app_name:
             return app_name
     return ""
@@ -360,46 +405,7 @@ def _normalize_app_name(value: str) -> str:
         return ""
     lowered = app.lower()
     compact = re.sub(r"[\s._-]+", "", lowered)
-    aliases = {
-        "applemusic": "Music",
-        "music": "Music",
-        "音乐": "Music",
-        "googlechrome": "Google Chrome",
-        "chrome": "Google Chrome",
-        "chrome浏览器": "Google Chrome",
-        "谷歌浏览器": "Google Chrome",
-        "浏览器": "Google Chrome",
-        "browser": "Google Chrome",
-        "safari": "Safari",
-        "finder": "Finder",
-        "访达": "Finder",
-        "terminal": "Terminal",
-        "终端": "Terminal",
-        "systemsettings": "System Settings",
-        "settings": "System Settings",
-        "系统设置": "System Settings",
-        "notes": "Notes",
-        "备忘录": "Notes",
-        "calendar": "Calendar",
-        "日历": "Calendar",
-        "reminders": "Reminders",
-        "提醒事项": "Reminders",
-        "mail": "Mail",
-        "邮件": "Mail",
-        "wechat": "WeChat",
-        "微信": "WeChat",
-        "qq": "QQ",
-        "slack": "Slack",
-        "discord": "Discord",
-        "notion": "Notion",
-        "obsidian": "Obsidian",
-        "vscode": "Visual Studio Code",
-        "vsc": "Visual Studio Code",
-        "visualstudiocode": "Visual Studio Code",
-        "code": "Visual Studio Code",
-        "cursor": "Cursor",
-    }
-    return aliases.get(compact, app)
+    return _APP_ALIASES.get(compact, app)
 
 
 def _strip_app_name(value: str) -> str:
@@ -408,6 +414,23 @@ def _strip_app_name(value: str) -> str:
     app = re.sub(r"\s*(?:应用|app|软件|程序)$", "", app, flags=re.IGNORECASE)
     app = re.sub(r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$", "", app, flags=re.IGNORECASE)
     return app.strip()
+
+
+def _looks_like_generic_app_open_target(value: str) -> bool:
+    app = _strip_app_name(value)
+    if not app:
+        return True
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    if compact in _APP_ALIASES:
+        return False
+    lowered = app.lower()
+    if re.search(r"(?:命令|指令|脚本|代码|任务|测试)", lowered):
+        return True
+    if re.search(r"\b(?:command|shell|script|code|test)\b", lowered):
+        return True
+    if re.fullmatch(r"(?:一个|一条|某个|这个|那个).+", app):
+        return True
+    return False
 
 
 def _music_query(text: str) -> str:

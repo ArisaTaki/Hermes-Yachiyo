@@ -96,6 +96,76 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
         store.close()
 
 
+def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text: {
+            "ok": True,
+            "message_id": "message-pending-browser",
+            "task_id": "task-pending-browser",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("打开 GitHub")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-pending-browser"
+        assert result["status"] == "pending"
+        assert result["echo"] == "打开 GitHub"
+        assert result["agent_task"]["task_id"] == "task-pending-browser"
+        assert result["agent_task"]["conversation_id"] == "session-current"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 打开网页"
+        assert result["agent_task"]["progress_text"] == "准备执行 · 打开网页"
+        assert result["agent_task"]["open_in_studio_url"] is None
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "browser.open_url"
+        assert result["agent_task"]["recent_events"][0]["payload"] == {
+            "input_preview": {"url": "https://github.com"},
+            "planning_reason": "clear_daily_desktop_intent",
+            "source": "daily_desktop_intent",
+            "status": "planned",
+            "tool": "browser.open_url",
+        }
+        assert runtime.agent_runtime_service.calls == [("get_task_run_link", "task-pending-browser")]
+    finally:
+        store.close()
+
+
+def test_chat_bridge_quick_message_keeps_plain_chat_without_planned_agent_task(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text: {
+            "ok": True,
+            "message_id": "message-plain",
+            "task_id": "task-plain",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("今天状态怎么样？")
+
+        assert result == {
+            "ok": True,
+            "message_id": "message-plain",
+            "task_id": "task-plain",
+            "status": "pending",
+            "echo": "今天状态怎么样？",
+        }
+        assert runtime.agent_runtime_service.calls == [("get_task_run_link", "task-plain")]
+    finally:
+        store.close()
+
+
 def test_session_summary_uses_processing_and_failed_statuses():
     assert chat_bridge_mod._session_summary([
         {
@@ -174,3 +244,12 @@ class _FakeDesktopIntentRuntimeService:
                 }
             ],
         }
+
+
+class _FakePendingDesktopIntentRuntimeService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get_task_run_link(self, task_id: str):
+        self.calls.append(("get_task_run_link", task_id))
+        raise KeyError(task_id)

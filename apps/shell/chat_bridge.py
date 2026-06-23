@@ -21,7 +21,9 @@ import re
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
 from apps.shell.chat_api import ChatAPI
+from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
 from packages.security import redact_api_error_text
 
@@ -223,6 +225,48 @@ def agent_task_snapshot_for_task(
     return None
 
 
+def planned_agent_task_snapshot_for_quick_message(
+    *,
+    text: str,
+    task_id: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return None
+    candidates = daily_desktop_intent_candidates(text)
+    if not candidates:
+        return None
+    request = candidates[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return None
+    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": task_id,
+            "conversation_id": str(session_id or "").strip(),
+            "title": text,
+            "status": "queued",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event": "agent.desktop.intent_planned",
+                    "detail": tool_name,
+                    "tool": tool_name,
+                    "status": "planned",
+                    "source": "daily_desktop_intent",
+                    "planning_reason": "clear_daily_desktop_intent",
+                    "input_preview": tool_input,
+                }
+            ],
+        }
+    ).model_dump(mode="json")
+    snapshot["open_in_studio_url"] = None
+    return snapshot
+
+
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
     """返回最近一条可触发桌面新消息提醒的 assistant 结果。"""
     for message in reversed(messages):
@@ -284,7 +328,14 @@ class ChatBridge:
             return result
         agent_task = agent_task_snapshot_for_task(self._runtime, task_id)
         if agent_task is None:
-            return result
+            planned_task = planned_agent_task_snapshot_for_quick_message(
+                text=text,
+                task_id=task_id,
+                session_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
+            )
+            if planned_task is None:
+                return result
+            return {**result, "agent_task": planned_task}
         return {**result, "agent_task": agent_task}
 
     def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
