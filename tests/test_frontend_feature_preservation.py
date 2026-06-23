@@ -2877,6 +2877,17 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioLocalState.ts",
+        [
+            "export const emptyAgentDraft: AgentDraft = {",
+            "allow_screen_context: true,",
+            "allow_app_control: true,",
+            "allow_media_control: true,",
+            "allow_foreground_input: false,",
+            "allow_browser_control: true,",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/agents.ts",
         [
             "import type { AgentDraft } from '../types';",
