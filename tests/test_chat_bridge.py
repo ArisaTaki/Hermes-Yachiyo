@@ -711,6 +711,43 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    reveal_calls: list[str] = []
+
+    def fake_reveal_path(path: str) -> dict:
+        reveal_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.reveal_path",
+            "summary": f"Revealed {path}",
+            "data": {
+                "path": path,
+                "open_target": "finder_reveal",
+                "exists": True,
+                "is_dir": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.reveal_path", fake_reveal_path)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "在 Finder 中显示 ~/Downloads/report.pdf",
+    )
+
+    assert reveal_calls == ["~/Downloads/report.pdf"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已在 Finder 中显示：~/Downloads/report.pdf。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
