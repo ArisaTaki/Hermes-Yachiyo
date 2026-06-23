@@ -67,6 +67,8 @@ _DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTA
 _VISION_ATTACHMENT_TOKEN_ESTIMATE = 85
 _DAILY_DESKTOP_APP_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_APP_FOLLOWUP_MAX_CHARS = 120
+_DAILY_DESKTOP_BROWSER_FOLLOWUP_RECENT_LIMIT = 6
+_DAILY_DESKTOP_BROWSER_FOLLOWUP_MAX_CHARS = 120
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS = 80
 _DAILY_DESKTOP_APP_CONTEXT_TOOLS = {
@@ -87,6 +89,31 @@ _DAILY_DESKTOP_APP_CONTEXT_TOOLS = {
     "app.open_and_click_ui_element",
     "app.open_and_type_into_ui_element",
     "app.show",
+}
+_DAILY_DESKTOP_BROWSER_APP_NAMES = {
+    "Arc",
+    "Brave Browser",
+    "Firefox",
+    "Google Chrome",
+    "Microsoft Edge",
+    "Safari",
+}
+_DAILY_DESKTOP_BROWSER_CONTEXT_TOOLS = {
+    "browser.click",
+    "browser.current_page",
+    "browser.extract_text",
+    "browser.open_url",
+    "browser.open_url_and_extract_text",
+    "browser.open_url_and_screenshot",
+    "browser.screenshot",
+    "browser.type_text",
+}
+_DAILY_DESKTOP_BROWSER_FOLLOWUP_TOOLS = {
+    "browser.click",
+    "browser.current_page",
+    "browser.extract_text",
+    "browser.screenshot",
+    "browser.type_text",
 }
 _IMAGE_EXTENSIONS_BY_MIME = {
     "image/png": ".png",
@@ -665,6 +692,9 @@ class ChatAPI:
 
         if current_context.get("conversation_kind") != "main":
             return text
+        browser_followup = self._daily_desktop_browser_followup_goal_text(text)
+        if browser_followup:
+            return browser_followup
         app_followup = self._daily_desktop_app_followup_goal_text(text)
         if app_followup:
             return app_followup
@@ -676,6 +706,95 @@ class ChatAPI:
         if not self._has_recent_daily_desktop_music_context():
             return text
         return f"播放{query}"
+
+    def _daily_desktop_browser_followup_goal_text(self, text: str) -> str:
+        candidate = self._daily_desktop_browser_followup_candidate(text)
+        if not candidate:
+            return ""
+        if not self._recent_daily_desktop_browser_context_is_latest():
+            return ""
+        requests = daily_desktop_entrypoint_tool_requests(
+            candidate,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+        if not requests:
+            return ""
+        if not all(
+            str(request.get("tool") or "").strip() in _DAILY_DESKTOP_BROWSER_FOLLOWUP_TOOLS
+            for request in requests
+        ):
+            return ""
+        return candidate
+
+    @staticmethod
+    def _daily_desktop_browser_followup_candidate(text: str) -> str:
+        value = " ".join(str(text or "").split()).strip()
+        if not value or len(value) > _DAILY_DESKTOP_BROWSER_FOLLOWUP_MAX_CHARS:
+            return ""
+        if "\n" in str(text or "") or re.search(r"https?://|www\.|/|\\", value, flags=re.IGNORECASE):
+            return ""
+        lowered = value.lower()
+        if lowered in {"算了", "算了吧", "不用了", "不要了", "取消", "不了", "不用", "no", "nope", "never mind"}:
+            return ""
+        if re.search(r"[?？]", value):
+            return ""
+        if re.search(
+            r"(?:怎么|如何|为什么|为何|为啥|教程|说明|解释|how\s+to|why|explain|tutorial)",
+            lowered,
+        ):
+            return ""
+        read_patterns = (
+            r"^(?:读取|读一下|读下|读一读|提取|抓取|获取)(?:一下|下)?(?:内容|正文|文字|文本)?$",
+            r"^(?:read|extract|get)(?:\s+(?:content|text|page|this))?$",
+        )
+        if any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in read_patterns):
+            return "读取当前网页内容"
+        screenshot_patterns = (
+            r"^(?:截图|截屏|屏幕截图|抓屏|截一下|截个图|截取)(?:一下|下)?$",
+            r"^(?:screenshot|capture)(?:\s+(?:it|page|this))?$",
+        )
+        if any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in screenshot_patterns):
+            return "当前网页截图"
+        click_match = re.search(
+            r"^(?:点击|点一下|点按|单击|双击|点)\s*(?P<label>[^。！？!?，,]+)$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        if click_match:
+            label = str(click_match.group("label") or "").strip()
+            if label:
+                prefix = "双击" if re.match(r"^(?:双击)", value) else "点击"
+                return f"当前网页{prefix}{label}"
+        english_click = re.search(r"^(?:click|press)\s+(?:the\s+)?(?P<label>[^.!?]+)$", value, flags=re.IGNORECASE)
+        if english_click:
+            label = str(english_click.group("label") or "").strip()
+            if label:
+                return f"click {label} on current page"
+        if re.search(r"^(?:输入|填写|键入|打入|填入)\s*\S+", value, flags=re.IGNORECASE):
+            return f"在当前网页{value}"
+        english_type = re.search(r"^(?:type|enter|fill)\s+(?P<typed>[^.!?]+)$", value, flags=re.IGNORECASE)
+        if english_type:
+            typed = str(english_type.group("typed") or "").strip()
+            if typed:
+                return f"type {typed} into input on current page"
+        return ""
+
+    def _recent_daily_desktop_browser_context_is_latest(self) -> bool:
+        for message in self._recent_daily_desktop_context_messages(
+            _DAILY_DESKTOP_BROWSER_FOLLOWUP_RECENT_LIMIT
+        ):
+            raw_role = getattr(message, "role", "") or ""
+            role = str(getattr(raw_role, "value", raw_role) or "").strip().lower()
+            if role != MessageRole.USER.value:
+                continue
+            content = str(getattr(message, "content", "") or "")
+            if self._message_has_daily_desktop_browser_context(content):
+                return True
+            if self._message_daily_desktop_app_context_name(content):
+                return False
+            if self._message_has_daily_desktop_music_intent(content):
+                return False
+        return False
 
     def _daily_desktop_app_followup_goal_text(self, text: str) -> str:
         clause = self._daily_desktop_app_followup_clause(text)
@@ -735,8 +854,11 @@ class ChatAPI:
             role = str(getattr(raw_role, "value", raw_role) or "").strip().lower()
             if role != MessageRole.USER.value:
                 continue
+            content = str(getattr(message, "content", "") or "")
+            if self._message_has_daily_desktop_browser_context(content):
+                return ""
             app_name = self._message_daily_desktop_app_context_name(
-                str(getattr(message, "content", "") or "")
+                content
             )
             if app_name:
                 return app_name
@@ -757,6 +879,22 @@ class ChatAPI:
             if app_name and app_name != "Music":
                 return app_name
         return ""
+
+    @staticmethod
+    def _message_has_daily_desktop_browser_context(content: str) -> bool:
+        requests = daily_desktop_entrypoint_tool_requests(
+            ChatAPI._main_model_goal_text(content),
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+        for request in requests:
+            tool = str(request.get("tool") or "").strip()
+            if tool in _DAILY_DESKTOP_BROWSER_CONTEXT_TOOLS:
+                return True
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            app_name = str(payload.get("app_name") or "").strip()
+            if tool in _DAILY_DESKTOP_APP_CONTEXT_TOOLS and app_name in _DAILY_DESKTOP_BROWSER_APP_NAMES:
+                return True
+        return False
 
     @staticmethod
     def _daily_desktop_requests_target_app_context(

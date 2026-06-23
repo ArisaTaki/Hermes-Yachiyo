@@ -979,6 +979,139 @@ def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_ent
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    extract_calls: list[str] = []
+
+    def fake_extract_text(selector: str = "") -> dict:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "读取内容",
+        seed_messages=[
+            ("user", "打开 GitHub"),
+            ("assistant", "已打开 GitHub。"),
+        ],
+    )
+
+    assert result["ok"] is True
+    assert extract_calls == [""]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "Yachiyo desktop agent runtime"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-browser-click-followup.db",
+        workspace_dir=tmp_path / "runtime-browser-click-followup",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    runtime.chat_session.add_user_message("打开 GitHub")
+    runtime.chat_session.add_assistant_message("已打开 GitHub。")
+    click_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher browser click follow-up should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_browser_click(selector: str, **kwargs: Any) -> dict:
+        click_calls.append((selector, int(kwargs.get("click_count") or 1)))
+        return {
+            "ok": True,
+            "action": "browser.click",
+            "summary": "Clicked browser selector",
+            "data": {
+                "selector": selector,
+                "label": "登录",
+                "tag": "BUTTON",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "点登录",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert click_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "selector": "text=登录",
+            "click_count": 1,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "browser.click"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert click_calls == [("text=登录", 1)]
+        assert approved.status == "completed"
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

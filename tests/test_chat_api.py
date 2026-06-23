@@ -461,12 +461,96 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         store.close()
 
 
+def test_send_message_executes_browser_read_followup_before_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    extract_calls: list[str] = []
+    runtime.chat_session.add_user_message("打开 GitHub")
+    runtime.chat_session.add_assistant_message("已打开 GitHub。")
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser follow-up desktop task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_extract_text(selector: str = "") -> dict:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    try:
+        result = api.send_message("读取内容")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        messages = store.load_messages(runtime.chat_session.session_id, limit=10)
+        latest_user = [message for message in messages if message.role == "user"][-1]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "Yachiyo desktop agent runtime"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "Yachiyo desktop agent runtime"
+        assert latest_user.content == "读取内容"
+        assert extract_calls == [""]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_daily_desktop_app_followup_clause_stays_conservative():
     assert ChatAPI._daily_desktop_app_followup_clause("搜索张三") == "搜索张三"
     assert ChatAPI._daily_desktop_app_followup_clause("输入 hello") == "输入 hello"
     assert ChatAPI._daily_desktop_app_followup_clause("复制") == "复制"
     assert ChatAPI._daily_desktop_app_followup_clause("打开微信") == ""
     assert ChatAPI._daily_desktop_app_followup_clause("这是为什么？") == ""
+
+
+def test_daily_desktop_browser_followup_candidate_stays_conservative():
+    assert ChatAPI._daily_desktop_browser_followup_candidate("点登录") == "当前网页点击登录"
+    assert ChatAPI._daily_desktop_browser_followup_candidate("读取内容") == "读取当前网页内容"
+    assert ChatAPI._daily_desktop_browser_followup_candidate("截图") == "当前网页截图"
+    assert ChatAPI._daily_desktop_browser_followup_candidate("输入 hello") == "在当前网页输入 hello"
+    assert ChatAPI._daily_desktop_browser_followup_candidate("打开 GitHub") == ""
+    assert ChatAPI._daily_desktop_browser_followup_candidate("这是为什么？") == ""
 
 
 def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_path, monkeypatch):
