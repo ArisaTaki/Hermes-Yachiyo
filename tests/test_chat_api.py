@@ -285,6 +285,115 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
         store.close()
 
 
+def test_send_message_surfaces_music_permission_recovery_when_fallback_opens_music(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    recovery_actions = [
+        {
+            "label": "打开 Apple Music",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "permission_target": "music_app",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("music permission recovery should not call model")
+        ),
+    )
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": False,
+            "action": "media.apple_music_play",
+            "summary": "media.apple_music_play failed",
+            "error": "Not authorized to send Apple events to Music.",
+            "data": {"query": query, "status": "error"},
+            "permission_error": True,
+            "permission_targets": ["music_app", "automation"],
+            "missing_permissions": ["music_app", "automation"],
+            "recovery_hints": [
+                "Open Music.app once, confirm the track exists in the local library.",
+                "Grant Automation permission in System Settings.",
+            ],
+            "recovery_actions": recovery_actions,
+            "fallback_used": True,
+            "fallback_result": {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": "Music"},
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    try:
+        result = api.send_message("播放超时空辉夜姬")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        recovery_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+        tool_call = result["agent_task"]["tool_calls"][-1]
+        summary = result["agent_task"]["summary"]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert "桌面操作未完成：Not authorized to send Apple events to Music." in summary
+        assert "缺少权限：music_app, automation" in summary
+        assert "可直接打开：打开 Apple Music、打开自动化权限。" in summary
+        assert "没能直接播放" not in summary
+        assert tool_call["tool_name"] == "media.apple_music_play"
+        assert tool_call["status"] == "failed"
+        assert tool_call["output_preview"]["permission_error"] is True
+        assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
+        assert tool_call["output_preview"]["recovery_actions"] == recovery_actions
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == summary
+        assert play_calls == ["超时空辉夜姬"]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        assert recovery_event["payload"]["permission_targets"] == ["music_app", "automation"]
+        assert recovery_event["payload"]["affected_tools"] == ["media.apple_music_play"]
+        assert recovery_event["payload"]["recovery_actions"] == recovery_actions
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

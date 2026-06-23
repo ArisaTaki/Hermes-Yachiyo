@@ -1731,9 +1731,27 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
             "error": "Not authorized to send Apple events to Music.",
             "permission_error": True,
             "permission_targets": ["music_app", "automation"],
+            "fallback_used": True,
+            "fallback_result": {"ok": True, "data": {"app_name": "Music"}},
             "recovery_hints": [
                 "Open Music.app once, confirm the track exists in the local library.",
                 "Grant Automation permission in System Settings.",
+            ],
+            "recovery_actions": [
+                {
+                    "label": "打开 Apple Music",
+                    "tool": "app.open",
+                    "input": {"app_name": "Music"},
+                    "permission_target": "music_app",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "打开自动化权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "自动化权限"},
+                    "permission_target": "automation",
+                    "risk_level": "low",
+                },
             ],
         },
     )
@@ -1743,6 +1761,8 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
     assert "你可以这样处理：" in result
     assert "Open Music.app once" in result
     assert "Grant Automation permission" in result
+    assert "没能直接播放" not in result
+    assert "可直接打开：打开 Apple Music、打开自动化权限。" in result
 
 
 def test_main_chat_desktop_intent_permission_failure_records_recovery_event() -> None:

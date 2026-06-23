@@ -577,6 +577,16 @@ class RuntimeCustomApiAgentLoop:
                 return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
             return result_summary or "已执行桌面操作。"
 
+        error = str(result.get("error") or result_summary or "工具返回失败").strip()
+        permission_targets = result.get("permission_targets")
+        if result.get("permission_error") or permission_targets:
+            targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
+            diagnostics = _permission_diagnostics(result)
+            suffix = f" 缺少权限：{targets}。" if targets else ""
+            return _append_recovery_action_summary(
+                f"桌面操作未完成：{_sentence(error)}{suffix}{diagnostics}".strip(),
+                result,
+            )
         fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
         if tool_name == "media.apple_music_play" and fallback.get("ok"):
             query = _payload_text(result, planned_input, "query")
@@ -589,13 +599,6 @@ class RuntimeCustomApiAgentLoop:
             action = _payload_text(result, planned_input, "action")
             label = _apple_music_control_label(action)
             return f"没能直接{label}，但已打开 Apple Music。" if label else "没能直接控制，但已打开 Apple Music。"
-        error = str(result.get("error") or result_summary or "工具返回失败").strip()
-        permission_targets = result.get("permission_targets")
-        if result.get("permission_error") or permission_targets:
-            targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
-            diagnostics = _permission_diagnostics(result)
-            suffix = f" 缺少权限：{targets}。" if targets else ""
-            return f"桌面操作未完成：{_sentence(error)}{suffix}{diagnostics}".strip()
         diagnostics = _permission_diagnostics(result)
         return f"桌面操作未完成：{_sentence(error)}{diagnostics}".strip()
 
