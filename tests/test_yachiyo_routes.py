@@ -1640,6 +1640,303 @@ async def test_yachiyo_task_route_executes_safe_click_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_safe_shortcut_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-safe-shortcut.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-safe-shortcut.db",
+        workspace_dir=tmp_path / "agent-runtime-route-safe-shortcut",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-safe-shortcut")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    shortcut_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe shortcut public task should not call model")
+        ),
+    )
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        shortcut_calls.append(action)
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: copy",
+            "data": {
+                "shortcut_action": action,
+                "key": "c",
+                "modifiers": ["command"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="复制选中内容",
+                conversation_id="chat-main-safe-shortcut",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-safe-shortcut-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-safe-shortcut", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert shortcut_calls == ["copy"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已复制选中内容。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["action"] == "copy"
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["shortcut_action"] == "copy"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_hide_current_app_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-hide-current-app.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-hide-current-app.db",
+        workspace_dir=tmp_path / "agent-runtime-route-hide-current-app",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-hide-current-app")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    hide_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hide current app public task should not call model")
+        ),
+    )
+
+    def fake_hide_app() -> dict[str, Any]:
+        nonlocal hide_calls
+        hide_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.hide_app",
+            "summary": "Hid the foreground app",
+            "data": {"key": "h", "modifiers": ["command"]},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hide_app", fake_hide_app)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="隐藏当前应用",
+                conversation_id="chat-main-hide-current-app",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-hide-current-app-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-hide-current-app", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert hide_calls == 1
+        assert started["status"] == "completed"
+        assert started["summary"] == "已隐藏当前应用。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["key"] == "h"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_minimize_current_window_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-minimize-window.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-minimize-window.db",
+        workspace_dir=tmp_path / "agent-runtime-route-minimize-window",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-minimize-window")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    minimize_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("minimize current window public task should not call model")
+        ),
+    )
+
+    def fake_minimize_window() -> dict[str, Any]:
+        nonlocal minimize_calls
+        minimize_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.minimize_window",
+            "summary": "Minimized the foreground window",
+            "data": {"key": "m", "modifiers": ["command"]},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_minimize_window",
+        fake_minimize_window,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="最小化当前窗口",
+                conversation_id="chat-main-minimize-window",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-minimize-window-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-minimize-window", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert minimize_calls == 1
+        assert started["status"] == "completed"
+        assert started["summary"] == "已最小化当前窗口。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["key"] == "m"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
