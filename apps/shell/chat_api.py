@@ -44,6 +44,7 @@ from apps.locald.screenshot import ScreenCapturePermissionError, capture_screens
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
+    daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
@@ -707,11 +708,15 @@ class ChatAPI:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
+            metadata_desktop_tool_request = daily_desktop_metadata_tool_request(metadata)
             daily_desktop_task_text = daily_desktop_recovery_prompt(metadata) or task_text
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and bool(daily_desktop_intent_candidates(daily_desktop_task_text))
+                and (
+                    bool(metadata_desktop_tool_request)
+                    or bool(daily_desktop_intent_candidates(daily_desktop_task_text))
+                )
             )
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason and not direct_daily_desktop_intent:

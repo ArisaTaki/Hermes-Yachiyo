@@ -285,6 +285,96 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
         store.close()
 
 
+def test_send_message_executes_recovery_retry_metadata_without_prompt_reparse(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recovery retry metadata should not call model")
+        ),
+    )
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    try:
+        result = api.send_message(
+            "恢复后重试原操作",
+            metadata={
+                "source": "chat",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "desktop_permission_retry": True,
+                "recovery_action_kind": "retry_original",
+                "recovery_tool": "media.apple_music_play",
+                "recovery_input": {"query": "超时空辉夜姬"},
+                "recovery_permission_target": "music_app",
+                "recovery_retry_tool": "media.apple_music_play",
+                "recovery_retry_input": {"query": "超时空辉夜姬"},
+                "source_task_id": "task-source-music",
+            },
+        )
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        user = next(
+            message
+            for message in store.load_messages(runtime.chat_session.session_id)
+            if message.role == "user"
+        )
+        user_metadata = json.loads(user.metadata_json or "{}")
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"query": "超时空辉夜姬"}
+        assert planned_event["payload"]["source"] == "daily_desktop_metadata"
+        assert planned_event["payload"]["planning_reason"] == "structured_recovery_metadata"
+        assert planned_event["payload"]["tool"] == "media.apple_music_play"
+        assert planned_event["payload"]["input_preview"] == {"query": "超时空辉夜姬"}
+        assert play_calls == ["超时空辉夜姬"]
+        assert user_metadata["desktop_permission_retry"] is True
+        assert user_metadata["recovery_tool"] == "media.apple_music_play"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_summarizes_apple_music_search_fallback(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

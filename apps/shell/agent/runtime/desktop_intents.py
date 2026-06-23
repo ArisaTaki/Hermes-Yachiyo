@@ -224,6 +224,79 @@ def daily_desktop_intent_tool_request(
     return None
 
 
+_DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
+    "app.focus",
+    "app.focus_window",
+    "app.hide",
+    "app.minimize",
+    "app.open",
+    "app.quit",
+    "app.show",
+    "app.status",
+    "browser.current_page",
+    "browser.extract_text",
+    "browser.open_url",
+    "browser.screenshot",
+    "clipboard.write",
+    "desktop.active_window",
+    "desktop.click",
+    "desktop.close_window",
+    "desktop.hide_app",
+    "desktop.hotkey",
+    "desktop.minimize_window",
+    "desktop.open_path",
+    "desktop.permissions",
+    "desktop.reveal_path",
+    "desktop.running_apps",
+    "desktop.safe_click",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+    "desktop.type_text",
+    "desktop.windows",
+    "media.apple_music_control",
+    "media.apple_music_play",
+    "screen.capture",
+    "system.volume",
+}
+
+
+def daily_desktop_metadata_tool_request(
+    metadata: Mapping[str, Any] | None,
+    allowed_tools: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Return an exact daily desktop request carried by trusted UI metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return None
+    if metadata.get("desktop_permission_recovery") is not True:
+        return None
+
+    if metadata.get("desktop_permission_retry") is True or metadata.get("recovery_action_kind") == "retry_original":
+        tool_name = str(metadata.get("recovery_tool") or metadata.get("recovery_retry_tool") or "").strip()
+        raw_input = metadata.get("recovery_input")
+        if not isinstance(raw_input, Mapping):
+            raw_input = metadata.get("recovery_retry_input")
+    else:
+        if str(metadata.get("recovery_risk_level") or "").strip().lower() != "low":
+            return None
+        tool_name = str(metadata.get("recovery_tool") or "").strip()
+        raw_input = metadata.get("recovery_input")
+
+    if not tool_name or tool_name not in _DIRECT_DAILY_DESKTOP_METADATA_TOOLS:
+        return None
+    if allowed_tools is not None:
+        allowed = {str(tool or "").strip() for tool in allowed_tools}
+        if tool_name not in allowed:
+            return None
+    if not isinstance(raw_input, Mapping):
+        return None
+    return {
+        **_request(tool_name, dict(raw_input)),
+        "source": "daily_desktop_metadata",
+        "planning_reason": "structured_recovery_metadata",
+    }
+
+
 def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     """Build a deterministic low-risk prompt from a structured recovery action."""
 

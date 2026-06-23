@@ -145,6 +145,7 @@ class RuntimeCustomApiAgentLoop:
         artifacts: list[dict[str, Any]],
         *,
         messages: list[dict[str, Any]] | None = None,
+        direct_tool_request: dict[str, Any] | None = None,
         start_iteration: int = 0,
         run_id: str = "",
         budget: Any | None = None,
@@ -169,15 +170,20 @@ class RuntimeCustomApiAgentLoop:
                 return resumed_result
         if default_messages or start_iteration == 0:
             planning_context = context if default_messages else self._latest_user_intent_text(messages)
-            planned_tool_request = daily_desktop_intent_tool_request(planning_context, allowed_tools)
+            planned_tool_request = self._direct_daily_desktop_tool_request(
+                direct_tool_request,
+                allowed_tools,
+            ) or daily_desktop_intent_tool_request(planning_context, allowed_tools)
             if planned_tool_request:
                 planned_tool = str(planned_tool_request.get("tool") or "")
                 planned_input = planned_tool_request.get("input") or {}
                 planned_payload = {
                     "tool": planned_tool,
                     "status": "planned",
-                    "source": "daily_desktop_intent",
-                    "planning_reason": "clear_daily_desktop_intent",
+                    "source": str(planned_tool_request.get("source") or "daily_desktop_intent"),
+                    "planning_reason": str(
+                        planned_tool_request.get("planning_reason") or "clear_daily_desktop_intent"
+                    ),
                     "input_preview": planned_input,
                 }
                 timeline.append(
@@ -224,7 +230,13 @@ class RuntimeCustomApiAgentLoop:
                 if direct_result:
                     return direct_result
             else:
-                candidates = daily_desktop_intent_candidates(planning_context)
+                direct_candidate = (
+                    direct_tool_request
+                    if isinstance(direct_tool_request, dict)
+                    and str(direct_tool_request.get("tool") or "").strip()
+                    else None
+                )
+                candidates = [direct_candidate] if direct_candidate else daily_desktop_intent_candidates(planning_context)
                 if candidates:
                     unavailable_summary = self._record_unavailable_desktop_intent(
                         candidates[0],
@@ -298,6 +310,26 @@ class RuntimeCustomApiAgentLoop:
             "custom_api Agent 工具循环超过上限；"
             f"{self._tool_loop_projection.loop_limit_detail(timeline)}"
         )
+
+    @staticmethod
+    def _direct_daily_desktop_tool_request(
+        tool_request: dict[str, Any] | None,
+        allowed_tools: list[str],
+    ) -> dict[str, Any] | None:
+        if not isinstance(tool_request, dict):
+            return None
+        tool_name = str(tool_request.get("tool") or "").strip()
+        if not tool_name:
+            return None
+        allowed = {str(tool or "").strip() for tool in allowed_tools}
+        if tool_name not in allowed:
+            return None
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        return {
+            **tool_request,
+            "tool": tool_name,
+            "input": dict(payload),
+        }
 
     def _record_unavailable_desktop_intent(
         self,

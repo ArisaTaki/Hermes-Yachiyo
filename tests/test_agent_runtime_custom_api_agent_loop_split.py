@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
+    daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
 from apps.shell.agent.runtime.events import tool_input_preview
@@ -1457,6 +1458,34 @@ def test_daily_desktop_recovery_prompt_accepts_only_low_risk_app_open() -> None:
             "recovery_risk_level": "high",
         }
     ) == ""
+
+
+def test_daily_desktop_metadata_tool_request_filters_retry_actions() -> None:
+    metadata = {
+        "desktop_permission_recovery": True,
+        "desktop_permission_retry": True,
+        "recovery_action_kind": "retry_original",
+        "recovery_tool": "media.apple_music_play",
+        "recovery_input": {"query": "超时空辉夜姬"},
+    }
+
+    assert daily_desktop_metadata_tool_request(metadata) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+        "source": "daily_desktop_metadata",
+        "planning_reason": "structured_recovery_metadata",
+    }
+    assert daily_desktop_metadata_tool_request(metadata, ["media.apple_music_play"]) is not None
+    assert daily_desktop_metadata_tool_request(metadata, ["app.open"]) is None
+    assert daily_desktop_metadata_tool_request(
+        {
+            "desktop_permission_recovery": True,
+            "desktop_permission_retry": True,
+            "recovery_tool": "terminal.run",
+            "recovery_input": {"command": "rm -rf /"},
+        }
+    ) is None
 
 
 def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_before_model() -> None:

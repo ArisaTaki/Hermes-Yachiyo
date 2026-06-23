@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from apps.core.activity_store import get_activity_store
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
+    daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
 from apps.shell.chat_api import ChatAPI
@@ -346,8 +347,11 @@ class ChatBridge:
             return result
         if isinstance(result.get("agent_task"), dict):
             return result
+        metadata_desktop_tool_request = daily_desktop_metadata_tool_request(metadata)
         desktop_prompt = daily_desktop_recovery_prompt(metadata) or text
         desktop_candidates = daily_desktop_intent_candidates(desktop_prompt)
+        if metadata_desktop_tool_request:
+            desktop_candidates = [metadata_desktop_tool_request]
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,

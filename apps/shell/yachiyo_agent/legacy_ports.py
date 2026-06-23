@@ -7,6 +7,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
+    daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
 from apps.shell.chat_api import ChatAPI
@@ -199,8 +200,13 @@ class LegacyChatTaskStarter:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
+        direct_tool_request = daily_desktop_metadata_tool_request(metadata)
         execution_prompt = daily_desktop_recovery_prompt(metadata) or prompt
-        if not task_id or not execution_prompt or not daily_desktop_intent_candidates(execution_prompt):
+        if not task_id:
+            return None
+        if not direct_tool_request and (
+            not execution_prompt or not daily_desktop_intent_candidates(execution_prompt)
+        ):
             return None
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
@@ -228,7 +234,8 @@ class LegacyChatTaskStarter:
                 )
             run = execute_main_chat_model_loop(
                 run_id,
-                [{"role": "user", "content": execution_prompt}],
+                [{"role": "user", "content": execution_prompt or prompt or "执行恢复后的原操作"}],
+                direct_tool_request=direct_tool_request,
             )
             status = str(run.get("status") or "").strip()
             result_text = str(run.get("result") or "").strip()
