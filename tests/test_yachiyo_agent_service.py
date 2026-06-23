@@ -256,6 +256,41 @@ class _DesktopIntentTaskRuntimePort(_FakeRuntimePort):
         return _desktop_intent_task_payload(task_id=task_id)
 
 
+class _CompletedDesktopIntentTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            status="running",
+            current_step="",
+            progress_text="",
+            timeline=[
+                {
+                    "event": "agent.desktop.intent_completed",
+                    "detail": "desktop.windows",
+                    "tool": "desktop.windows",
+                    "source": "daily_desktop_intent",
+                    "input_preview": {"app_name": "Google Chrome"},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.windows",
+                        "data": {
+                            "count": 1,
+                            "windows": [
+                                {
+                                    "app_name": "Google Chrome",
+                                    "title": "ChatGPT",
+                                    "frontmost": True,
+                                }
+                            ],
+                        },
+                    },
+                    "summary": "当前窗口：Google Chrome: ChatGPT。",
+                }
+            ],
+        )
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -340,6 +375,22 @@ def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None
         ("get_task_snapshot", "task-music"),
         ("get_task_timeline", "task-music"),
     ]
+
+
+def test_yachiyo_agent_service_projects_completed_desktop_intent_as_tool_call() -> None:
+    port = _CompletedDesktopIntentTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    timeline = service.get_task_timeline("task-windows")
+
+    assert timeline.events[0].event_type == "agent.desktop.intent_completed"
+    assert len(timeline.tool_calls) == 1
+    assert timeline.tool_calls[0].tool_name == "desktop.windows"
+    assert timeline.tool_calls[0].status == "completed"
+    assert timeline.tool_calls[0].input_preview == {"app_name": "Google Chrome"}
+    assert timeline.tool_calls[0].output_preview["action"] == "desktop.windows"
+    assert timeline.tool_calls[0].output_preview["data"]["count"] == 1
+    assert port.calls == [("get_task_timeline", "task-windows")]
 
 
 def test_yachiyo_agent_service_pages_task_events() -> None:

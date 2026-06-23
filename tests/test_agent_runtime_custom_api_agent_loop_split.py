@@ -1913,6 +1913,7 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
         "payload": {
             "tool": "desktop.hotkey",
             "source": "daily_desktop_intent",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
             "result": {
                 "ok": True,
                 "action": "desktop.hotkey",

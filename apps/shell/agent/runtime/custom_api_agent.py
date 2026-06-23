@@ -379,6 +379,7 @@ class RuntimeCustomApiAgentLoop:
         event_payload = {
             "tool": planned_tool,
             "source": "daily_desktop_intent",
+            "input_preview": planned_input,
             "result": result,
             "summary": summary,
         }

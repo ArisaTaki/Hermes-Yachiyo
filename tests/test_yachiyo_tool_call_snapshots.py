@@ -292,6 +292,128 @@ def test_tool_call_snapshots_from_events_marks_failed_desktop_result() -> None:
     assert snapshots[0].output_preview["permission_error"] is True
 
 
+def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_completion() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-tool-call",
+                run_id="run-daily-desktop",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="desktop.windows",
+                payload={
+                    "tool": "desktop.windows",
+                    "input_preview": {"app_name": "Google Chrome"},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.windows",
+                        "data": {
+                            "count": 1,
+                            "windows": [
+                                {
+                                    "app_name": "Google Chrome",
+                                    "title": "ChatGPT",
+                                    "frontmost": True,
+                                }
+                            ],
+                        },
+                    },
+                },
+                created_at="2026-06-22T00:00:01Z",
+            ),
+            PublicRunEvent(
+                event_id="evt-intent-completed",
+                run_id="run-daily-desktop",
+                sequence=2,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.windows",
+                payload={
+                    "tool": "desktop.windows",
+                    "source": "daily_desktop_intent",
+                    "input_preview": {"app_name": "Google Chrome"},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.windows",
+                        "data": {
+                            "count": 1,
+                            "windows": [
+                                {
+                                    "app_name": "Google Chrome",
+                                    "title": "ChatGPT",
+                                    "frontmost": True,
+                                }
+                            ],
+                        },
+                    },
+                    "summary": "当前窗口：Google Chrome: ChatGPT。",
+                },
+                created_at="2026-06-22T00:00:02Z",
+            ),
+        ]
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tool_name == "desktop.windows"
+    assert snapshots[0].status == "completed"
+    assert snapshots[0].input_preview == {"app_name": "Google Chrome"}
+    assert snapshots[0].output_preview["action"] == "desktop.windows"
+    assert snapshots[0].output_preview["data"]["count"] == 1
+    assert snapshots[0].completed_at == "2026-06-22T00:00:02Z"
+
+
+def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_boundaries() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-intent-approval",
+                run_id="run-daily-desktop",
+                sequence=1,
+                event_type="agent.desktop.intent_approval_required",
+                detail="desktop.hotkey",
+                payload={
+                    "tool": "desktop.hotkey",
+                    "status": "approval_required",
+                    "source": "daily_desktop_intent",
+                    "reason": "tool_policy_requires_approval",
+                    "approval_id": "approval-hotkey",
+                    "risk_level": "medium",
+                    "policy_reason": "前台快捷键需要确认。",
+                    "input_preview": {"key": "l", "modifiers": ["command"]},
+                },
+                created_at="2026-06-22T00:00:01Z",
+            ),
+            PublicRunEvent(
+                event_id="evt-intent-unavailable",
+                run_id="run-daily-desktop",
+                sequence=2,
+                event_type="agent.desktop.intent_unavailable",
+                detail="media.apple_music_play",
+                payload={
+                    "tool": "media.apple_music_play",
+                    "status": "unavailable",
+                    "source": "daily_desktop_intent",
+                    "reason": "tool_not_allowed",
+                    "blocked_by": "agent_tool_policy",
+                    "blocked_summary": "这个 Agent 当前没有开启 media.apple_music_play。",
+                    "input_preview": {"query": "超时空辉夜姬"},
+                },
+                created_at="2026-06-22T00:00:02Z",
+            ),
+        ]
+    )
+
+    assert len(snapshots) == 2
+    assert snapshots[0].tool_name == "desktop.hotkey"
+    assert snapshots[0].status == "waiting_approval"
+    assert snapshots[0].approval_id == "approval-hotkey"
+    assert snapshots[0].risk_level == "medium"
+    assert snapshots[0].completed_at is None
+    assert snapshots[1].tool_name == "media.apple_music_play"
+    assert snapshots[1].status == "blocked"
+    assert snapshots[1].completed_at == "2026-06-22T00:00:02Z"
+    assert snapshots[1].output_preview["blocked_by"] == "agent_tool_policy"
+
+
 def test_tool_call_snapshots_from_payloads_prefers_payload_list_over_event_fallback() -> None:
     snapshots = tool_call_snapshots_from_payloads(
         [
