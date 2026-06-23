@@ -251,10 +251,12 @@ class LegacyRuntimePort:
     def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
         self._assert_task_approval(run_id, decision)
+        approved = self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id))
+        approved = self._complete_main_chat_daily_desktop_approval_if_ready(run_id, approved)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
                 task_id,
-                self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id)),
+                approved,
             )
         )
 
@@ -358,6 +360,43 @@ class LegacyRuntimePort:
             if existing.get(key) and (preserve_workflow_identity or not merged.get(key)):
                 merged[key] = existing[key]
         return merged
+
+    def _complete_main_chat_daily_desktop_approval_if_ready(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if str(payload.get("kind") or "").strip() != "main_chat_run":
+            return payload
+        if str(payload.get("status") or "").strip() not in {"running", "processing"}:
+            return payload
+        if payload.get("pending_approval"):
+            return payload
+        result_text = str(payload.get("result") or "").strip()
+        if not result_text:
+            return payload
+        if not self._has_daily_desktop_intent_completed(payload):
+            return payload
+        complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
+        if not callable(complete_main_chat_run):
+            return payload
+        completed = complete_main_chat_run(run_id, result_text)
+        if not isinstance(completed, dict):
+            return payload
+        return self._run_action_payload(run_id, completed)
+
+    def _has_daily_desktop_intent_completed(self, payload: dict[str, Any]) -> bool:
+        for event in payload.get("timeline") or []:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("event_type") or event.get("event") or "").strip()
+            if event_type != "agent.desktop.intent_completed":
+                continue
+            event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            source = str(event.get("source") or event_payload.get("source") or "").strip()
+            if source == "daily_desktop_intent":
+                return True
+        return False
 
     def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
         items = payload.get(key) if isinstance(payload, dict) else payload
