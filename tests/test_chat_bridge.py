@@ -439,6 +439,73 @@ def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task
         store.close()
 
 
+def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-foreground-approval.db",
+        workspace_dir=tmp_path / "runtime-foreground-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher foreground approval should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_type_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("type_text should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_click",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("click should wait for approval")
+        ),
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        cases = [
+            ("输入 你好八千代", "desktop.type_text", {"text": "你好八千代"}),
+            ("点击 120, 240", "desktop.click", {"x": 120, "y": 240, "click_count": 1}),
+        ]
+        for text, tool_name, input_preview in cases:
+            result = bridge.send_quick_message(
+                text,
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": "bubble",
+                    "launcher_surface": "quick_message",
+                },
+            )
+            task_id = result["task_id"]
+            waiting_task = result["agent_task"]
+            link = service.get_task_run_link(task_id)
+            waiting_run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert waiting_task["status"] == "waiting_approval"
+            assert waiting_task["needs_user_action"] is True
+            assert waiting_task["pending_approvals"][0]["tool_name"] == tool_name
+            assert waiting_run["status"] == "approval_required"
+            assert waiting_run["pending_approval"]["tool"] == tool_name
+            assert waiting_run["pending_approval"]["input_preview"] == input_preview
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_waits_briefly_for_daily_desktop_snapshot(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
