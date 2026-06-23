@@ -921,6 +921,96 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     assert "agent.desktop.intent_completed" in event_types
 
 
+def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    extract_calls: list[str] = []
+
+    def fake_extract_text(selector: str = "") -> dict:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "读一下这个网页",
+    )
+
+    assert extract_calls == [""]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "Yachiyo desktop agent runtime"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_browser_screenshot_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    screenshot_targets: list[str] = []
+
+    def fake_browser_screenshot(target_path) -> dict:
+        screenshot_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "browser.screenshot",
+            "summary": "Captured current browser page",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "format": "png",
+                "size": 10,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_browser_screenshot)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "截取当前网页",
+    )
+
+    assert screenshot_targets
+    assert screenshot_targets[0].endswith("browser/current-page.png")
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已截取当前网页。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.screenshot"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "artifact.created" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_permission_diagnosis_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
