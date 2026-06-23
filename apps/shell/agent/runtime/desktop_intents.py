@@ -3132,6 +3132,15 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新窗口": "new_window",
         "打开新窗口": "new_window",
         "newwindow": "new_window",
+        "新建笔记": "new_note",
+        "新笔记": "new_note",
+        "新建备忘录": "new_note",
+        "新备忘录": "new_note",
+        "newnote": "new_note",
+        "makeanewnote": "new_note",
+        "createanewnote": "new_note",
+        "makenewnote": "new_note",
+        "createnewnote": "new_note",
     }
     return mapping.get(phrase, "")
 

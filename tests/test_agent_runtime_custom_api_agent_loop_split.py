@@ -1099,6 +1099,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_type_text",
         "input": {"app_name": "Notes", "text": "hello yachiyo"},
     }
+    assert daily_desktop_intent_tool_request("open Notes and new note", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("open Notes and make a new note", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Notes 并新建笔记", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
     assert daily_desktop_intent_tool_request("打开 Chrome 并在地址栏输入 github.com", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -2465,6 +2480,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_window"},
+    }
+    assert daily_desktop_intent_tool_request("新建笔记", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_note"},
     }
     assert daily_desktop_intent_tool_request("新建窗口", allowed_tools) == {
         "protocol": "json_fallback",
