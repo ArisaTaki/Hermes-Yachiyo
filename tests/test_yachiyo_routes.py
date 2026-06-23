@@ -943,10 +943,9 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
             )
             return {
                 "ok": True,
-                "run_id": "run-1",
-                "agent_run_id": "run-1",
+                "task_id": "chat-task-1",
                 "session_id": "chat-1",
-                "status": "processing",
+                "status": "pending",
             }
 
     monkeypatch.setattr(legacy_ports, "ChatAPI", FakeChatAPI)
@@ -964,8 +963,9 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
         request,
     )
 
-    assert started["task_id"] == "run-1"
+    assert started["task_id"] == "chat-task-1"
     assert started["status"] == "running"
+    assert started["conversation_id"] == "chat-1"
     assert app_runtime.chat_calls == [
         {
             "session_id": "chat-1",
@@ -974,10 +974,7 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
             "client_message_id": "client-main-1",
         }
     ]
-    assert (
-        "link_task_run",
-        {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
-    ) in runtime.calls
+    assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 
 
@@ -1016,10 +1013,9 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
             )
             return {
                 "ok": True,
-                "run_id": "run-1",
-                "agent_run_id": "run-1",
+                "task_id": "launcher-chat-task-1",
                 "session_id": "chat-1",
-                "status": "processing",
+                "status": "pending",
             }
 
     monkeypatch.setattr(legacy_ports, "ChatAPI", FakeChatAPI)
@@ -1038,8 +1034,9 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
         request,
     )
 
-    assert started["task_id"] == "run-1"
+    assert started["task_id"] == "launcher-chat-task-1"
     assert started["status"] == "running"
+    assert started["conversation_id"] == "chat-1"
     assert app_runtime.chat_calls == [
         {
             "session_id": "chat-1",
@@ -1048,10 +1045,7 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
             "client_message_id": "launcher-main-1",
         }
     ]
-    assert (
-        "link_task_run",
-        {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
-    ) in runtime.calls
+    assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 
 

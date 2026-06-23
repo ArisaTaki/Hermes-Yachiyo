@@ -280,7 +280,7 @@ class ToolBroker:
                 "请提供单文件 unified diff patch"
             )
         target = self._resolve_workspace_path(path, write=True)
-        if not approved and not self.approvals.get("workspace.write_patch"):
+        if not approved:
             return {"ok": False, "approval_required": True, "tool": "workspace.write_patch"}
         mode = "patch"
         if target.exists() and not target.is_file():
@@ -330,7 +330,7 @@ class ToolBroker:
         timeout_seconds: int = 30,
         shell: bool = False,
     ) -> dict[str, Any]:
-        if not approved and not self.approvals.get("terminal.run"):
+        if not approved:
             return {
                 "ok": False,
                 "approval_required": True,

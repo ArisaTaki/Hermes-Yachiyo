@@ -22,10 +22,15 @@ class WorkflowChildPendingApprovalProjection:
         workflow_run_id: str,
         node_info: Mapping[str, Any],
         run_group_id: str = "",
+        private_pending_approval: Mapping[str, Any] | None = None,
     ) -> "WorkflowChildPendingApprovalProjection | None":
         if str(child.get("status") or "") != "approval_required":
             return None
-        pending = child.get("pending_approval")
+        pending = (
+            private_pending_approval
+            if private_pending_approval
+            else child.get("pending_approval")
+        )
         if not isinstance(pending, Mapping) or not pending:
             return None
         next_pending = dict(pending)

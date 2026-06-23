@@ -225,6 +225,7 @@ def build_runtime_workflow_execution_services(
         update_run=update_run,
         update_run_group=update_run_group,
         get_run=get_run,
+        pending_approval_private=pending_approval_private,
         approve_workflow_node=approve_workflow_node,
         runtime_limits=lambda: engine.runtime_limits,
         workflow_loop_iterations_from_timeline=workflow_loop_iterations_from_timeline

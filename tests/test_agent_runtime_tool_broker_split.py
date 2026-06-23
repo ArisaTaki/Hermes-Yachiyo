@@ -52,6 +52,27 @@ def test_tool_broker_payload_approved_field_cannot_bypass_terminal_approval(
     assert result["tool"] == "terminal.run"
 
 
+def test_tool_broker_policy_map_cannot_preapprove_terminal_run(
+    tmp_path: Path,
+) -> None:
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+        approvals={"terminal.run": True},
+    )
+
+    result = broker.call("terminal.run", {"command": "echo no"})
+
+    assert result["approval_required"] is True
+    assert result["tool"] == "terminal.run"
+
+
 def test_tool_broker_policy_approval_blocks_foreground_tool_until_approved(
     tmp_path: Path,
     monkeypatch,

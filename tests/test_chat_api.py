@@ -16,6 +16,7 @@ from apps.core.chat_store import ChatStore, StoredMessage
 import apps.core.chat_store as _store_mod
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
+from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 import apps.shell.chat_api as chat_api_mod
 from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService
 from apps.shell.chat_api import ChatAPI, GroupDispatchDirective
@@ -1435,6 +1436,34 @@ def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypat
         assert session.runnable_id == agent["agent_id"]
     finally:
         service.close()
+        store.close()
+
+
+def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+
+    def fail_agent_runtime_service():
+        raise AssertionError("main chat entry must not resolve as a runnable command")
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", fail_agent_runtime_service)
+    try:
+        result = api.send_runnable_message_in_session(
+            "s1",
+            "打开 Apple Music",
+            runnable_id=MAIN_CHAT_AGENT_ID,
+            client_message_id="main-chat-entry-1",
+        )
+
+        assert result["ok"] is True
+        assert result["session_id"] == "s1"
+        assert result["task_id"]
+        assert "runnable_command" not in result
+        assert "run_id" not in result
+        tasks = runtime.state.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].task_id == result["task_id"]
+        assert runtime.chat_session.get_messages()[0].task_id == result["task_id"]
+    finally:
         store.close()
 
 

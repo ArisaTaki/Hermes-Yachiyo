@@ -80,9 +80,6 @@ class LegacyChatTaskStarter:
             or result.get("workflow_run_id")
             or ""
         ).strip()
-        if not run_id:
-            return None
-
         conversation_id = str(
             result.get("session_id")
             or request.get("conversation_id")
@@ -90,10 +87,26 @@ class LegacyChatTaskStarter:
             or ""
         ).strip()
         task_id = str(
-            metadata.get("task_id")
+            result.get("task_id")
+            or metadata.get("task_id")
             or metadata.get("client_task_id")
             or run_id
         ).strip()
+        if not run_id:
+            if agent_id != MAIN_CHAT_AGENT_ID or not task_id:
+                return None
+            return self._projector.chat_task_payload(
+                {
+                    "task_id": task_id,
+                    "session_id": conversation_id,
+                    "status": result.get("status") or "pending",
+                    "user_goal": request.get("prompt") or request.get("goal") or "",
+                    "summary": result.get("summary") or result.get("result") or "",
+                    "timeline": result.get("timeline") or [],
+                },
+                conversation_id=conversation_id,
+            )
+
         link_task_run = getattr(self._runtime, "link_task_run", None)
         if callable(link_task_run):
             link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)

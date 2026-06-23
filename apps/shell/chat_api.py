@@ -41,6 +41,7 @@ from apps.core.executor import (
 )
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
+from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
@@ -911,6 +912,8 @@ class ChatAPI:
         client_message_id: str = "",
     ) -> Dict[str, Any] | None:
         text = (text or "").strip()
+        if str(runnable_id or "").strip() == MAIN_CHAT_AGENT_ID:
+            return None
         if not runnable_id and self._parse_main_model_mention(text) is not None:
             return None
 

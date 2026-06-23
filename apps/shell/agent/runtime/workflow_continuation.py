@@ -86,6 +86,7 @@ class WorkflowContinuationCoordinator:
         update_run: Any | None = None,
         update_run_group: Any | None = None,
         get_run: Any | None = None,
+        pending_approval_private: Any | None = None,
         approve_workflow_node: Any | None = None,
         runtime_limits: Any | None = None,
         workflow_loop_iterations_from_timeline: Any | None = None,
@@ -175,6 +176,10 @@ class WorkflowContinuationCoordinator:
         self._update_run_callback = port_value(update_run, "update_run")
         self._update_run_group_callback = port_value(update_run_group, "update_run_group")
         self._get_run_callback = port_value(get_run, "get_run")
+        self._pending_approval_private_callback = port_value(
+            pending_approval_private,
+            "pending_approval_private",
+        )
         self._approve_workflow_node_callback = port_value(
             approve_workflow_node,
             "approve_workflow_node",
@@ -951,11 +956,16 @@ class WorkflowContinuationCoordinator:
         *,
         run_group_id: str,
     ) -> dict[str, Any]:
+        private_pending = None
+        child_run_id = str(child.get("run_id") or "").strip()
+        if child_run_id and callable(self._pending_approval_private_callback):
+            private_pending = self._pending_approval_private_callback(child_run_id)
         projection = WorkflowChildPendingApprovalProjection.from_child_run(
             child,
             workflow_run_id=str(run.get("run_id") or ""),
             node_info=handoff.node_info(),
             run_group_id=run_group_id,
+            private_pending_approval=private_pending,
         )
         if projection is None:
             return child
