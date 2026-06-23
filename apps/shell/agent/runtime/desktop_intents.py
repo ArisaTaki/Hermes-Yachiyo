@@ -740,6 +740,8 @@ def _strip_search_query(value: str) -> str:
 
 def _is_browser_current_page_request(text: str) -> bool:
     lowered = text.lower()
+    if re.search(r"(?:刷新|重新加载|reload|refresh)", text, flags=re.IGNORECASE):
+        return False
     return bool(
         re.search(
             r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|浏览器).{0,8}"
@@ -789,6 +791,9 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     level_patterns = (
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
+        r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
+        r"百分之\s*(?P<level>\d{1,3})",
+        r"(?:系统)?(?:音量|声音)\s*(?:设成|设到|调成)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:音量|声音)\s*(?P<level>\d{1,3})\s*%",
         r"\b(?:set|turn)\s+(?:the\s+)?(?:system\s+)?volume\s+(?:to\s+)?"
         r"(?P<level>\d{1,3})\s*%?\b",
@@ -844,6 +849,7 @@ def _clipboard_write_text(text: str) -> str:
         r"(?:系统)?(?:剪贴板|粘贴板)",
         r"(?:复制|拷贝|写入)\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)",
+        r"(?:系统)?(?:剪贴板|粘贴板)\s*(?:写入|放入|放进|保存|保存为)\s*(?P<text>.+)$",
         r"(?:复制|拷贝|写入)(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*"
         r"(?P<text>.+)$",
         r"\b(?:copy|write|put)\s+(?P<text>.+?)\s+(?:to|into)\s+(?:the\s+)?"
@@ -1679,6 +1685,18 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "重做": "redo",
         "redo": "redo",
         "刷新": "refresh",
+        "刷新一下页面": "refresh",
+        "刷新下页面": "refresh",
+        "刷新页面": "refresh",
+        "刷新一下当前页": "refresh",
+        "刷新下当前页": "refresh",
+        "刷新当前页": "refresh",
+        "刷新一下当前网页": "refresh",
+        "刷新下当前网页": "refresh",
+        "刷新当前网页": "refresh",
+        "刷新一下网页": "refresh",
+        "刷新下网页": "refresh",
+        "刷新网页": "refresh",
         "reload": "refresh",
         "refresh": "refresh",
         "查找": "find",

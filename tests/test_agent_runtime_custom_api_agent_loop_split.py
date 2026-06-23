@@ -1198,6 +1198,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "set", "level": 35},
     }
+    assert daily_desktop_intent_tool_request("音量设成 35", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 35},
+    }
+    assert daily_desktop_intent_tool_request("把系统音量调到百分之 20", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 20},
+    }
     assert daily_desktop_intent_tool_request("调大音量", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -1228,6 +1238,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello world"},
     }
+    assert daily_desktop_intent_tool_request("剪贴板写入 hello world", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
+    assert daily_desktop_intent_tool_request("复制一下 hello world", allowed_tools) is None
     assert daily_desktop_intent_tool_request("copy hello world to clipboard", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "clipboard.write",
@@ -1402,6 +1418,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("刷新一下页面", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("刷新当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "refresh"},
     }
     assert daily_desktop_intent_tool_request("复制选中内容", ["desktop.hotkey"]) == {
         "protocol": "json_fallback",
