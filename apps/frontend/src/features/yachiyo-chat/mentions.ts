@@ -215,6 +215,16 @@ function escapeRegExp(value: string): string {
 const DESKTOP_INTENT_HELP_RE = /(?:怎么|如何|教程|步骤|只告诉我|不要真的|别真的|不要执行|别执行|不要操作|无需执行|不用执行)/i;
 const URL_RE = /(?:https?:\/\/|www\.|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|dev|app|ai|cn|jp|co|me|gg|tv|xyz|site|tech)\b)/i;
 const LOCAL_PATH_RE = /(?:~\/|\.{1,2}\/|\/(?:Users|Applications|Volumes|tmp|var|private)\b|(?:下载|桌面|应用程序)(?:文件夹)?)/i;
+const WEB_SITE_NAME_RE = new RegExp([
+  'chatgpt', 'claude', 'perplexity',
+  'github', 'google', '谷歌', 'youtube', 'yt',
+  'bilibili', 'b站', '哔哩哔哩',
+  '小红书', 'xiaohongshu', 'rednote',
+  '微博', 'weibo', '知乎', 'zhihu', '豆瓣', 'douban',
+  '抖音', 'douyin', 'tiktok',
+  'gmail', 'google\\s*drive', 'google\\s*docs',
+  '淘宝', 'taobao', '京东', 'jd', 'jingdong',
+].join('|'), 'i');
 const DESKTOP_APP_NAME_RE = new RegExp([
   'apple\\s*music', 'music', '音乐',
   'google\\s*chrome', 'chrome', 'chrome浏览器', '谷歌浏览器', '浏览器',
@@ -243,12 +253,19 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   const value = prompt.trim();
   if (!value) return false;
   if (/(?:打开|访问|浏览|open|visit|go to|navigate to)/i.test(value) && URL_RE.test(value)) return true;
+  if (/(?:打开|访问|浏览|前往|去|open|visit|go to|navigate to)/i.test(value) && WEB_SITE_NAME_RE.test(value)) return true;
   if (/(?:当前网页|读取当前网页|网页正文|截取当前网页|browser screenshot|current page)/i.test(value)) return true;
   if (/(?:截图|截屏|截个图|屏幕截图|screenshot|capture screen)/i.test(value)) return true;
   if (/(?:当前窗口是什么|当前窗口|active window|frontmost window)/i.test(value)) return true;
-  if (/(?:正在运行的应用|开了哪些应用|运行的应用|列出窗口|有哪些窗口|running apps|what apps are running|show .+ windows)/i.test(value)) return true;
+  if (/(?:正在运行的应用|开了哪些应用|运行的应用|running apps|what apps are running)/i.test(value)) return true;
+  if (/(?:(?:列出|查看|看看|显示|读取).{0,12}(?:窗口|windows?)|(?:窗口|windows?).{0,12}(?:哪些|什么|几个|多少)|show .+ windows)/i.test(value)) return true;
   if (/(?:(?:当前音量|调[大小]音量|声音[大小]一点|静音|取消静音)|(?:volume|mute|unmute))/i.test(value)) return true;
   if (/(?:(?:复制|写入).*(?:剪贴板)|(?:copy|write).+(?:clipboard))/i.test(value)) return true;
+  if (/^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:复制(?:选中|当前选中)?内容?|粘贴|全选|撤销|重做|刷新|查找|新建标签页|新标签页|打开新标签页)(?:一下|下|一次)?[?？。！!]*$/i.test(value)) return true;
+  if (/^(?:copy(?: selected(?: text| content)?)?|paste|select all|undo|redo|refresh|reload|find|new tab)[.!?]*$/i.test(value)) return true;
+  if (/(?:(?:隐藏|收起).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:应用|app|软件|程序)|hide\s+(?:the\s+)?(?:current|foreground|active|this)\s+(?:app|application))/i.test(value)) return true;
+  if (/(?:(?:最小化|收起).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:窗口|window)|(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window)/i.test(value)) return true;
+  if (/(?:(?:关闭|关掉).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:窗口|window)|(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window)/i.test(value)) return true;
   if (/^(?:(?:按)\s*|(?:press)\s+)(?:command|cmd|ctrl|control|shift|alt|option|⌘|⌥|⌃)/i.test(value)) return true;
   if (/^(?:(?:输入|键入)\s*|(?:type)\s+)\S+/i.test(value)) return true;
   if (/^(?:(?:点击|双击)\s*|(?:click|double click)\s+)\d+\s*[,， ]\s*\d+/i.test(value)) return true;
