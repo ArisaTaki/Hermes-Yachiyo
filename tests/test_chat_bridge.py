@@ -64,6 +64,38 @@ def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, m
         store.close()
 
 
+def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_entrypoints(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakeDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text: {
+            "ok": True,
+            "message_id": "message-browser",
+            "task_id": "task-browser",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("打开 GitHub")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-browser"
+        assert result["status"] == "pending"
+        assert result["echo"] == "打开 GitHub"
+        assert result["agent_task"]["task_id"] == "task-browser"
+        assert result["agent_task"]["conversation_id"] == "session-current"
+        assert result["agent_task"]["status"] == "running"
+        assert result["agent_task"]["current_step"] == "已回退执行 · 打开网页 · 系统浏览器"
+        assert result["agent_task"]["open_in_studio_url"] == "#/agents?run_id=run-browser"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_completed"
+        assert result["agent_task"]["recent_events"][0]["payload"]["source"] == "daily_desktop_intent"
+    finally:
+        store.close()
+
+
 def test_session_summary_uses_processing_and_failed_statuses():
     assert chat_bridge_mod._session_summary([
         {
@@ -104,6 +136,41 @@ class _FakeAgentRuntimeService:
                 {
                     "event": "agent.tool.approval_required",
                     "detail": "terminal.run",
+                }
+            ],
+        }
+
+
+class _FakeDesktopIntentRuntimeService:
+    def get_task_run_link(self, task_id: str):
+        assert task_id == "task-browser"
+        return {
+            "task_id": task_id,
+            "run_id": "run-browser",
+            "session_id": "session-current",
+        }
+
+    def get_run(self, run_id: str):
+        assert run_id == "run-browser"
+        return {
+            "run_id": run_id,
+            "kind": "main_chat_run",
+            "user_goal": "打开 GitHub",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "browser.open_url",
+                    "payload": {
+                        "tool": "browser.open_url",
+                        "source": "daily_desktop_intent",
+                        "result": {
+                            "ok": True,
+                            "fallback_used": True,
+                            "fallback": "system_browser",
+                            "data": {"url": "https://github.com"},
+                        },
+                    },
                 }
             ],
         }

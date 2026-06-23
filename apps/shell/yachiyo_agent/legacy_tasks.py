@@ -139,8 +139,12 @@ class LegacyRuntimePort:
         return self._projector.chat_task_payload(run, conversation_id=conversation_id)
 
     def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
+        payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        if not payload.get("task_id"):
+            payload = {**payload, "task_id": task_id}
         return self._projector.chat_task_payload(
-            self._runtime.get_run(self._run_id_for_task(task_id))
+            payload
         )
 
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:

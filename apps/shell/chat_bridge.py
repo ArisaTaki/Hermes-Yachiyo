@@ -276,7 +276,16 @@ class ChatBridge:
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         """快捷发送消息，委托 ChatAPI"""
-        return self._chat_api.send_message(text)
+        result = self._chat_api.send_message(text)
+        if result.get("ok") is False:
+            return result
+        task_id = str(result.get("task_id") or "").strip()
+        if not task_id:
+            return result
+        agent_task = agent_task_snapshot_for_task(self._runtime, task_id)
+        if agent_task is None:
+            return result
+        return {**result, "agent_task": agent_task}
 
     def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
         """获取最近 N 条消息的摘要。
