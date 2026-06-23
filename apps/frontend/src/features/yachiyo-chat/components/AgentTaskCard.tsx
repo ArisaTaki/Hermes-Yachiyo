@@ -2,6 +2,7 @@ import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import {
   runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryRetryAction,
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
@@ -127,21 +128,41 @@ export function AgentTaskCard({
                 className="yachiyo-agent-task-recovery-actions"
                 data-testid="yachiyo-agent-task-recovery-actions"
               >
-                {permissionRecovery.actions.slice(0, 3).map((action) => (
-                  <button
-                    type="button"
-                    data-permission-target={action.permission_target}
-                    data-recovery-tool={action.tool}
-                    data-testid="yachiyo-agent-task-run-recovery-action"
-                    disabled={busy || !onRunRecoveryAction}
-                    key={`${action.tool}:${action.prompt}:${action.permission_target}`}
-                    onClick={() => void onRunRecoveryAction?.(task, action)}
-                    title={action.prompt}
-                  >
-                    <UiIcon name="settings" />
-                    <span>{action.label}</span>
-                  </button>
-                ))}
+                {permissionRecovery.actions.slice(0, 3).flatMap((action) => {
+                  const retryAction = runtimeToolRecoveryRetryAction(action);
+                  return [
+                    <button
+                      type="button"
+                      data-permission-target={action.permission_target}
+                      data-recovery-kind="permission_recovery"
+                      data-recovery-tool={action.tool}
+                      data-testid="yachiyo-agent-task-run-recovery-action"
+                      disabled={busy || !onRunRecoveryAction}
+                      key={`${action.tool}:${action.prompt}:${action.permission_target}:recovery`}
+                      onClick={() => void onRunRecoveryAction?.(task, action)}
+                      title={action.prompt}
+                    >
+                      <UiIcon name="settings" />
+                      <span>{action.label}</span>
+                    </button>,
+                    retryAction ? (
+                      <button
+                        type="button"
+                        data-permission-target={retryAction.permission_target}
+                        data-recovery-kind="retry_original"
+                        data-recovery-tool={retryAction.tool}
+                        data-testid="yachiyo-agent-task-run-retry-action"
+                        disabled={busy || !onRunRecoveryAction}
+                        key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
+                        onClick={() => void onRunRecoveryAction?.(task, retryAction)}
+                        title={retryAction.prompt}
+                      >
+                        <UiIcon name="retry" />
+                        <span>{retryAction.label}</span>
+                      </button>
+                    ) : null,
+                  ];
+                })}
               </div>
             ) : null}
           </div>

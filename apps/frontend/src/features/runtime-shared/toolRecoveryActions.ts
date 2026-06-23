@@ -1,4 +1,5 @@
 export type RuntimeToolRecoveryAction = {
+  action_kind?: 'permission_recovery' | 'retry_original';
   input: Record<string, unknown>;
   label: string;
   permission_target: string;
@@ -37,7 +38,9 @@ export function runtimeToolRecoveryActionTaskMetadata(
     || (action.tool === 'app.open' ? 'low' : '');
   return {
     daily_desktop_intent: true,
+    ...(action.action_kind === 'retry_original' ? { desktop_permission_retry: true } : {}),
     desktop_permission_recovery: true,
+    ...(action.action_kind ? { recovery_action_kind: action.action_kind } : {}),
     recovery_input: action.input,
     recovery_permission_target: action.permission_target,
     recovery_risk_level: riskLevel,
@@ -48,6 +51,30 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.retry_source_event_type ? { recovery_retry_source_event_type: action.retry_source_event_type } : {}),
     ...(action.retry_source_tool_call_id ? { recovery_retry_source_tool_call_id: action.retry_source_tool_call_id } : {}),
     ...extra,
+  };
+}
+
+export function runtimeToolRecoveryRetryAction(
+  action: RuntimeToolRecoveryAction,
+): RuntimeToolRecoveryAction | null {
+  const retryTool = String(action.retry_tool || '').trim();
+  if (!retryTool) return null;
+  const retryInput = objectValue(action.retry_input);
+  const prompt = String(action.retry_prompt || '').trim()
+    || runtimeToolRecoveryRetryPrompt(retryTool, retryInput);
+  if (!prompt) return null;
+  return {
+    action_kind: 'retry_original',
+    input: retryInput,
+    label: '恢复后重试原操作',
+    permission_target: action.permission_target,
+    prompt,
+    retry_input: retryInput,
+    retry_prompt: prompt,
+    retry_source_event_type: action.retry_source_event_type,
+    retry_source_tool_call_id: action.retry_source_tool_call_id,
+    retry_tool: retryTool,
+    tool: retryTool,
   };
 }
 
@@ -89,6 +116,57 @@ export function runtimeToolRecoveryActionsFromRecord(
       tool,
     }];
   });
+}
+
+function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unknown>): string {
+  const appName = String(input.app_name || '').trim();
+  const url = String(input.url || '').trim();
+  const query = String(input.query || '').trim();
+  const path = String(input.path || '').trim();
+  const action = String(input.action || '').trim();
+  const title = String(input.title_contains || input.window_title || '').trim();
+  if (tool === 'app.open' && appName) return `打开${appName}`;
+  if (tool === 'app.focus' && appName) return `切到${appName}`;
+  if (tool === 'app.focus_window' && appName && title) return `切到${appName} ${title}窗口`;
+  if (tool === 'app.show' && appName) return `显示${appName}`;
+  if (tool === 'app.hide' && appName) return `隐藏${appName}`;
+  if (tool === 'app.minimize' && appName) return `最小化${appName}`;
+  if (tool === 'app.quit' && appName) return `退出${appName}`;
+  if (tool === 'app.status' && appName) return `检查${appName}是否打开`;
+  if (tool === 'browser.open_url' && url) return `打开 ${url}`;
+  if (tool === 'browser.current_page') return '查看当前网页';
+  if (tool === 'browser.extract_text') return '读取当前网页正文';
+  if (tool === 'browser.screenshot') return '截取当前网页';
+  if (tool === 'screen.capture') return '截图当前屏幕';
+  if (tool === 'desktop.active_window') return '查看当前窗口';
+  if (tool === 'desktop.running_apps') return '查看正在运行的应用';
+  if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
+  if (tool === 'desktop.permissions') return '检查桌面权限';
+  if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'desktop.reveal_path' && path) return `在 Finder 中显示 ${path}`;
+  if (tool === 'media.apple_music_play' && query) return `播放${query}`;
+  if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
+  if (tool === 'system.volume') return systemVolumeRetryPrompt(action, input);
+  if (tool === 'clipboard.write' && typeof input.text === 'string') return `复制${input.text}到剪贴板`;
+  return '';
+}
+
+function appleMusicControlRetryPrompt(action: string): string {
+  if (action === 'play') return '播放音乐';
+  if (action === 'pause') return '暂停音乐';
+  if (action === 'next') return '下一首';
+  if (action === 'previous') return '上一首';
+  if (action === 'toggle') return '播放暂停';
+  return '';
+}
+
+function systemVolumeRetryPrompt(action: string, input: Record<string, unknown>): string {
+  if (action === 'status') return '当前音量是多少';
+  if (action === 'mute') return '静音';
+  if (action === 'unmute') return '取消静音';
+  const level = typeof input.level === 'number' ? input.level : Number(input.level);
+  if (action === 'set' && Number.isFinite(level)) return `把音量调到 ${level}%`;
+  return '';
 }
 
 function isExecutableRecoveryPrompt(value: string): boolean {
