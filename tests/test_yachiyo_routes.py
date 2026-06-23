@@ -1442,6 +1442,204 @@ async def test_yachiyo_task_route_executes_named_window_focus_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_safe_type_text_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-safe-type.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-safe-type.db",
+        workspace_dir=tmp_path / "agent-runtime-route-safe-type",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-safe-type")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    typed_texts: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe foreground input public task should not call model")
+        ),
+    )
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        typed_texts.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="输入 你好八千代",
+                conversation_id="chat-main-safe-type",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-safe-type-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-safe-type", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert typed_texts == ["你好八千代"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已向前台输入文字（5 个字符）。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["text"] == "你好八千代"
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_text"] is True
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_safe_click_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-safe-click.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-safe-click.db",
+        workspace_dir=tmp_path / "agent-runtime-route-safe-click",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-safe-click")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    clicked: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe foreground click public task should not call model")
+        ),
+    )
+
+    def fake_safe_click(x: int, y: int) -> dict[str, Any]:
+        clicked.append((x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": x,
+                "y": y,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="点击 120, 240",
+                conversation_id="chat-main-safe-click",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-safe-click-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-safe-click", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert clicked == [(120, 240)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已点击前台位置：120, 240。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {"x": 120, "y": 240}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_coordinates"] is True
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
