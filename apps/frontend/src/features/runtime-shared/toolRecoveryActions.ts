@@ -23,12 +23,14 @@ export function runtimeToolRecoveryActionTaskMetadata(
   action: RuntimeToolRecoveryAction,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  const riskLevel = String(action.risk_level || '').trim()
+    || (action.tool === 'app.open' ? 'low' : '');
   return {
     daily_desktop_intent: true,
     desktop_permission_recovery: true,
     recovery_input: action.input,
     recovery_permission_target: action.permission_target,
-    recovery_risk_level: action.risk_level || '',
+    recovery_risk_level: riskLevel,
     recovery_tool: action.tool,
     ...extra,
   };

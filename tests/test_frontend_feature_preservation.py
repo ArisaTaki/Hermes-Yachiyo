@@ -3523,6 +3523,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "const appName = String(input.app_name || '').trim();",
             "return `打开${appName}`;",
             "desktop_permission_recovery: true",
+            "action.tool === 'app.open' ? 'low' : ''",
             "prompt: String(action.prompt || label || `打开${appName}`).trim()",
         ],
     )
