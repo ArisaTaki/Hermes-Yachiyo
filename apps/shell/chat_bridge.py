@@ -24,9 +24,11 @@ from typing import TYPE_CHECKING, Any, Dict
 from apps.core.activity_store import get_activity_store
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
+    daily_desktop_intent_tool_requests,
     daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
@@ -216,6 +218,24 @@ def _runtime_agent_service(runtime: "AppRuntime") -> Any | None:
     return None
 
 
+def _daily_desktop_candidates_for_quick_message(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    metadata_request = daily_desktop_metadata_tool_request(metadata)
+    if metadata_request:
+        return [metadata_request]
+    desktop_prompt = daily_desktop_recovery_prompt(metadata) or text
+    requests = daily_desktop_intent_tool_requests(
+        desktop_prompt,
+        list(DAILY_DESKTOP_TOOL_NAMES),
+    )
+    if requests:
+        return requests
+    return daily_desktop_intent_candidates(desktop_prompt)
+
+
 def agent_task_snapshot_for_task(
     runtime: "AppRuntime",
     task_id: str,
@@ -248,7 +268,11 @@ def planned_agent_task_snapshot_for_quick_message(
     task_id = str(task_id or "").strip()
     if not task_id:
         return None
-    candidates = candidates if candidates is not None else daily_desktop_intent_candidates(text)
+    candidates = (
+        candidates
+        if candidates is not None
+        else _daily_desktop_candidates_for_quick_message(text)
+    )
     if not candidates:
         return None
     request = candidates[0]
@@ -347,11 +371,10 @@ class ChatBridge:
             return result
         if isinstance(result.get("agent_task"), dict):
             return result
-        metadata_desktop_tool_request = daily_desktop_metadata_tool_request(metadata)
-        desktop_prompt = daily_desktop_recovery_prompt(metadata) or text
-        desktop_candidates = daily_desktop_intent_candidates(desktop_prompt)
-        if metadata_desktop_tool_request:
-            desktop_candidates = [metadata_desktop_tool_request]
+        desktop_candidates = _daily_desktop_candidates_for_quick_message(
+            text,
+            metadata=metadata,
+        )
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,

@@ -224,6 +224,50 @@ def test_chat_bridge_quick_message_plans_structured_recovery_for_lightweight_ent
         store.close()
 
 
+def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightweight_entrypoints(
+    tmp_path,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = None
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-multi-step",
+            "task_id": "task-multi-step",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message(
+            "打开 Notes，输入 hello，再复制",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-multi-step"
+        assert result["agent_task"]["task_id"] == "task-multi-step"
+        assert result["agent_task"]["conversation_id"] == "session-current"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 打开应用并输入文字"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["payload"]["tool"] == (
+            "app.open_and_safe_type_text"
+        )
+        assert result["agent_task"]["recent_events"][0]["payload"]["input_preview"] == {
+            "app_name": "Notes",
+            "text": "hello",
+        }
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
