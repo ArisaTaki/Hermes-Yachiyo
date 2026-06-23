@@ -1243,9 +1243,27 @@ async def test_yachiyo_task_route_executes_clipboard_write_without_model(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt", "expected_action", "expected_summary"),
+    [
+        (
+            "播放一下",
+            "play",
+            "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+        ),
+        (
+            "下一首",
+            "next",
+            "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+        ),
+    ],
+)
 async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    expected_action: str,
+    expected_summary: str,
 ) -> None:
     store = ChatStore(db_path=str(tmp_path / "chat-route-media-control.db"))
     service = AgentRuntimeService(
@@ -1300,7 +1318,7 @@ async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_wi
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
-                prompt="下一首",
+                prompt=prompt,
                 conversation_id="chat-main-media-control",
                 agent_id="builtin:yachiyo-main",
                 metadata={
@@ -1321,12 +1339,12 @@ async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_wi
             if message.role == "assistant"
         )
 
-        assert control_calls == ["next"]
+        assert control_calls == [expected_action]
         assert started["status"] == "completed"
-        assert started["summary"] == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert started["summary"] == expected_summary
         assert started["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"]["action"] == "next"
+        assert started["tool_calls"][-1]["input_preview"]["action"] == expected_action
         assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
         assert "agent.desktop.intent_planned" in event_types

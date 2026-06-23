@@ -1340,8 +1340,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello"},
     }
-    assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("播放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None

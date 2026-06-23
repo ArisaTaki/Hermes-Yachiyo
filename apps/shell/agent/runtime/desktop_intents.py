@@ -1367,6 +1367,12 @@ def _music_control_action(text: str) -> str:
     ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
         return "play"
     if re.search(
+        r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?(?:播放|放)一下"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+        lowered,
+    ):
+        return "play"
+    if re.search(
         r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?(?:播放|放)(?:一下)?"
         r"\s*(?:音乐|music|apple\s*music)(?:应用|app|软件|程序)?\s*"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
