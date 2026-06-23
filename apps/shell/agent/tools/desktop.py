@@ -245,6 +245,68 @@ def running_apps() -> dict[str, Any]:
     }
 
 
+def windows(app_name: str = "") -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.windows")
+    clean_app = str(app_name or "").strip()
+    script = """
+    on run argv
+        set appFilter to item 1 of argv
+        tell application "System Events"
+            set rows to {}
+            repeat with proc in (application processes whose background only is false)
+                set appName to name of proc
+                if appFilter is "" or appName is appFilter then
+                    set appPID to unix id of proc
+                    set appFront to frontmost of proc
+                    try
+                        set winCount to count of windows of proc
+                    on error
+                        set winCount to 0
+                    end try
+                    repeat with winIndex from 1 to winCount
+                        try
+                            set winTitle to name of window winIndex of proc
+                        on error
+                            set winTitle to ""
+                        end try
+                        set end of rows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
+                    end repeat
+                end if
+            end repeat
+            set AppleScript's text item delimiters to linefeed
+            set output to rows as text
+            set AppleScript's text item delimiters to ""
+            return output
+        end tell
+    end run
+    """
+    result = _run_osascript(script, [clean_app])
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.windows",
+            {
+                **result,
+                "action": "desktop.windows",
+                "summary": "desktop.windows failed",
+                "data": {"app_name": clean_app},
+            },
+        )
+    windows_payload = _parse_window_rows(result.get("stdout"))
+    return {
+        "ok": True,
+        "action": "desktop.windows",
+        "summary": _windows_summary(windows_payload, clean_app),
+        "data": {
+            "app_name": clean_app,
+            "windows": windows_payload,
+            "count": len(windows_payload),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def app_status(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.status")
@@ -1042,12 +1104,52 @@ def _parse_running_apps(value: Any) -> list[dict[str, Any]]:
     return apps
 
 
+def _parse_window_rows(value: Any) -> list[dict[str, Any]]:
+    windows_payload: list[dict[str, Any]] = []
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split("\t", 4)
+        while len(parts) < 5:
+            parts.append("")
+        app_name, pid_text, index_text, frontmost_text, title = parts
+        if not app_name:
+            continue
+        windows_payload.append(
+            {
+                "app_name": app_name,
+                "pid": int(pid_text) if pid_text.isdigit() else None,
+                "index": int(index_text) if index_text.isdigit() else None,
+                "frontmost": frontmost_text.strip().lower() == "true",
+                "title": title.strip(),
+            }
+        )
+    return windows_payload
+
+
 def _running_apps_summary(names: list[str]) -> str:
     if not names:
         return "No foreground apps are running"
     visible = names[:5]
     suffix = f" (+{len(names) - len(visible)} more)" if len(names) > len(visible) else ""
     return f"Running apps: {', '.join(visible)}{suffix}"
+
+
+def _windows_summary(windows_payload: list[dict[str, Any]], app_name: str = "") -> str:
+    if not windows_payload:
+        return f"No windows found for {app_name}" if app_name else "No desktop windows found"
+    visible = []
+    for item in windows_payload[:5]:
+        app = str(item.get("app_name") or "").strip()
+        title = str(item.get("title") or "").strip()
+        visible.append(f"{app}: {title}" if title else app)
+    suffix = (
+        f" (+{len(windows_payload) - len(visible)} more)"
+        if len(windows_payload) > len(visible)
+        else ""
+    )
+    return f"Open windows: {', '.join(visible)}{suffix}"
 
 
 def _split_status(value: Any) -> tuple[str, str, str]:
@@ -1097,6 +1199,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "screen.capture": ["screen_recording"],
         "desktop.active_window": ["automation_or_accessibility"],
         "desktop.running_apps": ["automation_or_accessibility"],
+        "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
@@ -1112,6 +1215,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "screen.capture": ["screen_recording"],
         "desktop.active_window": ["automation", "accessibility"],
         "desktop.running_apps": ["automation", "accessibility"],
+        "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],

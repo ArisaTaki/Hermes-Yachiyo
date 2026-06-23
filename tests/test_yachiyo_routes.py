@@ -1558,6 +1558,9 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["desktop.running_apps"]["capability_id"] == "active_window"
     assert tools["desktop.running_apps"]["risk_level"] == "low"
     assert any("foreground app list" in note for note in tools["desktop.running_apps"]["fallback_notes"])
+    assert tools["desktop.windows"]["capability_id"] == "active_window"
+    assert tools["desktop.windows"]["risk_level"] == "low"
+    assert any("window titles" in note for note in tools["desktop.windows"]["fallback_notes"])
     assert tools["app.status"]["capability_id"] == "app_control"
     assert tools["app.status"]["risk_level"] == "low"
     assert tools["app.status"]["input_schema"]["required"] == ["app_name"]

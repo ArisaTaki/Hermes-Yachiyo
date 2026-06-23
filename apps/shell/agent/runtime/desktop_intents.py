@@ -165,6 +165,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
 
+    windows_payload = _desktop_windows_request(text)
+    if windows_payload is not None:
+        candidates.append(_request("desktop.windows", windows_payload))
+
     app_status_name = _app_status_name(text)
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
@@ -500,6 +504,67 @@ def _app_status_name(text: str) -> str:
             continue
         return app_name
     return ""
+
+
+def _desktop_windows_request(text: str) -> dict[str, str] | None:
+    if _is_active_window_request(text):
+        return None
+    if _is_general_windows_request(text):
+        return {}
+    app_patterns = (
+        r"(?:list|show|read)\s+(?P<app>[^.!?]+?)\s+windows",
+        r"(?P<app>[^.!?]+?)\s+windows\?",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:列出|查看|看看|显示|读取)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:有|打开了|开了|正在显示)?"
+        r"(?:哪些|什么|几个|多少)?.{0,4}(?:窗口|window)",
+    )
+    for pattern in app_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _looks_like_generic_window_scope(raw_app):
+            return {}
+        app_name = _normalize_app_name(raw_app)
+        if app_name and not _looks_like_generic_app_open_target(raw_app):
+            return {"app_name": app_name}
+    return None
+
+
+def _is_general_windows_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:列出|查看|看看|显示|读取).{0,8}"
+            r"(?:当前|现在|桌面|打开|已打开|所有)?.{0,8}(?:窗口|windows?)",
+            text,
+        )
+        or re.search(r"(?:打开|已打开|现在|当前|桌面|所有).{0,8}(?:有哪些|什么|几个|多少).{0,4}(?:窗口)", text)
+        or re.search(r"\b(?:list|show|read|what|which)\s+(?:open\s+)?windows\b", lowered)
+        or re.search(r"\bopen\s+windows\b", lowered)
+    )
+
+
+def _looks_like_generic_window_scope(value: str) -> bool:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    return compact in {
+        "",
+        "当前",
+        "现在",
+        "桌面",
+        "系统",
+        "所有",
+        "全部",
+        "打开",
+        "打开的",
+        "已打开",
+        "已打开的",
+        "open",
+        "all",
+        "current",
+        "desktop",
+        "windows",
+    }
 
 
 def _looks_like_app_status_request(text: str) -> bool:
@@ -916,7 +981,7 @@ def _is_screen_capture_request(text: str) -> bool:
 
 
 def _is_active_window_request(text: str) -> bool:
-    if _is_running_apps_request(text):
+    if _is_running_apps_request(text) or _is_general_windows_request(text):
         return False
     lowered = text.lower()
     return bool(

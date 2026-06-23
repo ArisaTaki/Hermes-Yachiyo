@@ -130,6 +130,10 @@ def _desktop_running_apps(
     return broker.desktop_running_apps()
 
 
+def _desktop_windows(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.desktop_windows(str(payload.get("app_name") or ""))
+
+
 def _app_status(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_status(str(payload.get("app_name") or ""))
 
@@ -254,6 +258,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "screen.capture": _screen_capture,
     "desktop.active_window": _desktop_active_window,
     "desktop.running_apps": _desktop_running_apps,
+    "desktop.windows": _desktop_windows,
     "app.status": _app_status,
     "app.open": _app_open,
     "app.focus": _app_focus,

@@ -268,6 +268,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "screen_capture",
         "desktop_active_window",
         "desktop_running_apps",
+        "desktop_windows",
         "app_status",
         "app_open",
         "app_focus",
@@ -290,6 +291,14 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
 
 def test_desktop_running_apps_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.running_apps", {})
+
+
+def test_desktop_windows_schema_accepts_optional_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.windows", {})
+    ToolDescriptorRegistry.validate_payload("desktop.windows", {"app_name": "Google Chrome"})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.windows 参数 app_name 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.windows", {"app_name": 123})
 
 
 def test_app_status_schema_requires_app_name() -> None:
@@ -428,6 +437,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_windows",
+        lambda app_name="": calls.append(("windows", app_name)) or {"ok": True, "app_name": app_name},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_status",
         lambda app_name: calls.append(("status", app_name)) or {"ok": True, "app_name": app_name},
     )
@@ -461,6 +475,10 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "ok": True,
         "apps": ["Finder"],
     }
+    assert dispatch_tool_call(broker, "desktop.windows", {"app_name": "Google Chrome"}) == {
+        "ok": True,
+        "app_name": "Google Chrome",
+    }
     assert dispatch_tool_call(
         broker,
         "app.status",
@@ -473,6 +491,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("click", 12, 34, 2),
         ("reveal", "~/Downloads/report.pdf"),
         ("running",),
+        ("windows", "Google Chrome"),
         ("status", "Google Chrome"),
     ]
 
@@ -896,6 +915,71 @@ def test_desktop_running_apps_permission_failure_returns_recovery_targets(monkey
 
     assert result["ok"] is False
     assert result["action"] == "desktop.running_apps"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
+
+
+def test_desktop_windows_returns_window_titles(monkeypatch) -> None:
+    osascript_args = []
+
+    def fake_osascript(_script, args=None):
+        osascript_args.append(args)
+        return {
+            "ok": True,
+            "stdout": "Finder\t101\t1\tfalse\tDownloads\nGoogle Chrome\t202\t1\ttrue\tChatGPT",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.windows()
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.windows"
+    assert result["summary"] == "Open windows: Finder: Downloads, Google Chrome: ChatGPT"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "app_name": "",
+        "windows": [
+            {
+                "app_name": "Finder",
+                "pid": 101,
+                "index": 1,
+                "frontmost": False,
+                "title": "Downloads",
+            },
+            {
+                "app_name": "Google Chrome",
+                "pid": 202,
+                "index": 1,
+                "frontmost": True,
+                "title": "ChatGPT",
+            },
+        ],
+        "count": 2,
+    }
+    assert osascript_args == [[""]]
+
+
+def test_desktop_windows_permission_failure_returns_recovery_targets(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="Not authorized to send Apple events to System Events.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.windows()
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.windows"
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]

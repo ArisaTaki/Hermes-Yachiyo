@@ -588,6 +588,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "screen.capture",
         "desktop.active_window",
         "desktop.running_apps",
+        "desktop.windows",
         "app.status",
         "browser.open_url",
         "browser.current_page",
@@ -881,6 +882,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.running_apps",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("列出窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("现在有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("show Slack windows", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("Chrome 开着吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.status",
@@ -946,6 +967,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
+    assert daily_desktop_intent_tool_request("当前窗口是什么", ["desktop.windows"]) is None
     assert daily_desktop_intent_tool_request("Chrome 开着吗", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("ChatGPT 打开了吗", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("检查一下 Slack 是否在运行", ["browser.open_url"]) is None
@@ -1381,6 +1403,32 @@ def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
     )
 
     assert result == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+
+
+def test_main_chat_desktop_intent_summarizes_windows() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.windows",
+        {"app_name": "Google Chrome"},
+        {
+            "ok": True,
+            "summary": "Open windows: Google Chrome: ChatGPT",
+            "data": {
+                "app_name": "Google Chrome",
+                "windows": [
+                    {
+                        "app_name": "Google Chrome",
+                        "pid": 202,
+                        "index": 1,
+                        "frontmost": True,
+                        "title": "ChatGPT",
+                    }
+                ],
+                "count": 1,
+            },
+        },
+    )
+
+    assert result == "当前窗口：Google Chrome: ChatGPT。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_status() -> None:

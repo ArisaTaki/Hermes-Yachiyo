@@ -29,6 +29,7 @@ TOOL_FUNCTION_NAMES = {
     "screen.capture": "screen_capture",
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
+    "desktop.windows": "desktop_windows",
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
@@ -54,6 +55,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
     "desktop.active_window",
     "desktop.running_apps",
+    "desktop.windows",
     "app.status",
     "app.open",
     "app.focus",
@@ -223,6 +225,9 @@ class ToolDescriptor:
                 raise AgentRuntimeError("terminal.run 参数 timeout_seconds 必须是 1-120 的整数")
         if "shell" in payload and not isinstance(payload.get("shell"), bool):
             raise AgentRuntimeError("terminal.run 参数 shell 必须是布尔值")
+        if self.name == "desktop.windows" and "app_name" in payload:
+            if not isinstance(payload.get("app_name"), str):
+                raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
         if self.name in {"app.open", "app.focus", "app.status"} and not str(
             payload.get("app_name") or ""
         ).strip():
@@ -551,6 +556,19 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Low-risk, observable desktop state."
         ),
         properties={},
+    ),
+    "desktop.windows": ToolDescriptor(
+        name="desktop.windows",
+        description=(
+            "Read open desktop window titles, optionally filtered to one app. "
+            "Low-risk, observable desktop state."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Optional application name to filter windows.",
+            }
+        },
     ),
     "app.status": ToolDescriptor(
         name="app.status",
