@@ -822,6 +822,36 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.click",
         "input": {"selector": "text=Submit", "click_count": 1},
     }
+    assert daily_desktop_intent_tool_request("点击当前网页 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {
+            "selector": "point=120,240",
+            "fallback_x": 120,
+            "fallback_y": 240,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request("点击网页坐标 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {
+            "selector": "point=120,240",
+            "fallback_x": 120,
+            "fallback_y": 240,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request("双击当前网页 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {
+            "selector": "point=120,240",
+            "fallback_x": 120,
+            "fallback_y": 240,
+            "click_count": 2,
+        },
+    }
     assert daily_desktop_intent_tool_request("在网页搜索框输入 yachiyo", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.type_text",
@@ -3374,6 +3404,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"selector": "text=登录", "label": "登录"},
         },
     )
+    browser_click_point = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.click",
+        {"selector": "point=120,240"},
+        {
+            "ok": True,
+            "summary": "Clicked browser selector: point=120,240",
+            "data": {"selector": "point=120,240", "x": 120, "y": 240},
+        },
+    )
     browser_type_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "browser.type_text",
         {"selector": "input[type=\"search\"]", "text": "yachiyo"},
@@ -3406,6 +3445,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert minimize_window == "已最小化当前窗口。"
     assert hide_app == "已隐藏当前应用。"
     assert browser_click == "已点击网页元素：登录。"
+    assert browser_click_point == "已点击网页位置：120, 240。"
     assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 

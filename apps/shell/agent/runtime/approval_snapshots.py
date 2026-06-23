@@ -146,6 +146,9 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
     if tool_name == "browser.click":
         selector = _preview_value(record, "selector")
         if selector:
+            point = _point_selector_preview(selector)
+            if point:
+                return f"将点击当前浏览器页面位置 {point}，按工具策略需要人工确认。"
             return f"将点击当前浏览器页面中的选择器 {selector}，按工具策略需要人工确认。"
         click = _click_preview(record, x_key="fallback_x", y_key="fallback_y")
         if click:
@@ -180,6 +183,21 @@ def _number_preview(value: int | float) -> str:
     if number.is_integer():
         return str(int(number))
     return str(value)
+
+
+def _point_selector_preview(selector: str) -> str:
+    clean = str(selector or "").strip()
+    if not clean.startswith("point="):
+        return ""
+    parts = [part.strip() for part in clean.removeprefix("point=").split(",")]
+    if len(parts) != 2 or not all(parts):
+        return ""
+    try:
+        x = _number_preview(float(parts[0]))
+        y = _number_preview(float(parts[1]))
+    except ValueError:
+        return ""
+    return f"{x}, {y}"
 
 
 def _click_preview(

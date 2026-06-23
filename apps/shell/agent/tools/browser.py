@@ -67,7 +67,9 @@ def click(
     expression = f"""
     (() => {{
       const selector = {json.dumps(clean_selector)};
+      const requestedClickCount = {json.dumps(click_count)};
       const textSelectorPrefix = 'text=';
+      const pointSelectorPrefix = 'point=';
       function normalized(value) {{
         return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
       }}
@@ -89,14 +91,25 @@ def click(
         ));
         return elements.find((el) => normalized(labelFor(el)).includes(target));
       }}
+      function parsePoint(value) {{
+        const parts = value.split(',').map((part) => Number(part.trim()));
+        if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return null;
+        return {{ x: parts[0], y: parts[1] }};
+      }}
+      const point = selector.startsWith(pointSelectorPrefix)
+        ? parsePoint(selector.slice(pointSelectorPrefix.length))
+        : null;
       const el = selector.startsWith(textSelectorPrefix)
         ? findByText(selector.slice(textSelectorPrefix.length))
+        : point
+          ? document.elementFromPoint(point.x, point.y)
         : document.querySelector(selector);
       if (!el) return {{ ok: false, error: 'selector_not_found', selector }};
-      el.scrollIntoView({{ block: 'center', inline: 'center' }});
-      el.click();
+      if (!point) el.scrollIntoView({{ block: 'center', inline: 'center' }});
+      const clickCount = Math.max(1, Math.min(3, Number(requestedClickCount) || 1));
+      for (let index = 0; index < clickCount; index += 1) el.click();
       const label = labelFor(el);
-      return {{ ok: true, selector, tag: el.tagName, label: label.slice(0, 200) }};
+      return {{ ok: true, selector, tag: el.tagName, label: label.slice(0, 200), x: point && point.x, y: point && point.y, click_count: clickCount }};
     }})()
     """
     try:

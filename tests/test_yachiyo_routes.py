@@ -4406,6 +4406,19 @@ async def test_yachiyo_task_route_executes_browser_screenshot_without_model(
             "已点击网页元素：登录。",
         ),
         (
+            "点击当前网页 120 240",
+            "browser.click",
+            {"selector": "point=120,240", "fallback_x": 120, "fallback_y": 240, "click_count": 1},
+            "apps.shell.agent.tools.browser.click",
+            {
+                "ok": True,
+                "action": "browser.click",
+                "summary": "Clicked browser selector",
+                "data": {"selector": "point=120,240", "x": 120, "y": 240, "tag": "BUTTON"},
+            },
+            "已点击网页位置：120, 240。",
+        ),
+        (
             "在网页搜索框输入 yachiyo",
             "browser.type_text",
             {
@@ -5887,6 +5900,7 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "missing desktop permission" in note
         for note in tools["desktop.permissions"]["fallback_notes"]
     )
+    assert "point=x,y" in tools["browser.click"]["input_schema"]["properties"]["selector"]["description"]
     assert any("fallback_x/fallback_y" in note for note in tools["browser.click"]["fallback_notes"])
     assert tools["terminal.run"]["risk_level"] == "high"
     assert tools["terminal.run"]["approval_required"] is True

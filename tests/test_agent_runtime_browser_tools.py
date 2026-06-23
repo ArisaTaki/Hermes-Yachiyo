@@ -140,6 +140,40 @@ def test_browser_click_accepts_text_selector(monkeypatch) -> None:
     assert "findByText" in expressions[0]
 
 
+def test_browser_click_accepts_point_selector(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def fake_evaluate(expression: str) -> dict[str, object]:
+        expressions.append(expression)
+        return {
+            "ok": True,
+            "selector": "point=120,240",
+            "tag": "BUTTON",
+            "label": "继续",
+            "x": 120,
+            "y": 240,
+            "click_count": 1,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", fake_evaluate)
+
+    result = browser_mod.click("point=120,240", fallback_x=120, fallback_y=240)
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.click"
+    assert result["data"] == {
+        "ok": True,
+        "selector": "point=120,240",
+        "tag": "BUTTON",
+        "label": "继续",
+        "x": 120,
+        "y": 240,
+        "click_count": 1,
+    }
+    assert "pointSelectorPrefix" in expressions[0]
+    assert "document.elementFromPoint" in expressions[0]
+
+
 def test_browser_click_without_fallback_coordinates_reports_recovery(monkeypatch) -> None:
     def raise_no_cdp(_expression: str) -> dict[str, object]:
         raise RuntimeError("No debuggable browser page found")

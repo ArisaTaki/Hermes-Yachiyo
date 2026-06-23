@@ -1353,8 +1353,12 @@ def _browser_page_summary(result: dict[str, Any]) -> str:
 
 def _browser_click_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    selector = str(data.get("selector") or planned_input.get("selector") or "").strip()
+    point = _browser_point_selector_label(selector)
+    if point:
+        return f"已点击网页位置：{point}。"
     label = str(data.get("label") or "").strip()
-    target = label or _browser_selector_label(str(data.get("selector") or planned_input.get("selector") or ""))
+    target = label or _browser_selector_label(selector)
     return f"已点击网页元素：{target}。" if target else "已点击网页元素。"
 
 
@@ -1375,6 +1379,9 @@ def _browser_selector_label(selector: str) -> str:
     clean = str(selector or "").strip()
     if clean.startswith("text="):
         return clean.removeprefix("text=").strip()
+    point = _browser_point_selector_label(clean)
+    if point:
+        return f"位置 {point}"
     if clean in {
         'input[type="search"], input[name="q"], textarea[name="q"], input[aria-label*="搜索" i], input[placeholder*="搜索" i], input[aria-label*="search" i], input[placeholder*="search" i]',
     }:
@@ -1382,6 +1389,28 @@ def _browser_selector_label(selector: str) -> str:
     if clean:
         return f"元素 {clean}"
     return ""
+
+
+def _browser_point_selector_label(selector: str) -> str:
+    clean = str(selector or "").strip()
+    if not clean.startswith("point="):
+        return ""
+    parts = [part.strip() for part in clean.removeprefix("point=").split(",")]
+    if len(parts) != 2 or not all(parts):
+        return ""
+    try:
+        x = _browser_point_number_label(parts[0])
+        y = _browser_point_number_label(parts[1])
+    except ValueError:
+        return ""
+    return f"{x}, {y}"
+
+
+def _browser_point_number_label(value: str) -> str:
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
 
 
 def _browser_text_summary(result: dict[str, Any]) -> str:

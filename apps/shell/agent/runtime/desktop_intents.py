@@ -1120,6 +1120,14 @@ def _browser_search_url(text: str) -> str:
 def _browser_click_request(text: str) -> dict[str, Any] | None:
     if not _has_browser_page_context(text):
         return None
+    point = _browser_click_point(text)
+    if point:
+        return {
+            "selector": f"point={point['x']},{point['y']}",
+            "fallback_x": point["x"],
+            "fallback_y": point["y"],
+            "click_count": point["click_count"],
+        }
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:点击|点一下|点按|单击)\s*"
@@ -1137,6 +1145,32 @@ def _browser_click_request(text: str) -> dict[str, Any] | None:
         if not label or _looks_like_click_coordinate_label(label):
             continue
         return {"selector": _browser_selector_from_label(label), "click_count": 1}
+    return None
+
+
+def _browser_click_point(text: str) -> dict[str, Any] | None:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|click)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)(?:上|里|中|内|的|上的)?\s*"
+        r"(?:坐标|位置|coordinate|point)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double2>双击|double\s+click)|点击|点一下|点按|单击|click)?\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?:坐标|位置|coordinate|point)\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        return {
+            "x": _number_value(match.group("x")),
+            "y": _number_value(match.group("y")),
+            "click_count": 2 if groups.get("double") or groups.get("double2") else 1,
+        }
     return None
 
 
