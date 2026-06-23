@@ -356,6 +356,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.close_window",
     "desktop.hotkey",
     "desktop.type_text",
+    "screen.capture",
 }
 
 _APP_SEQUENCE_CONTEXT_TOOLS = {
@@ -517,6 +518,8 @@ def _is_foreground_desktop_sequence(requests: list[dict[str, Any]]) -> bool:
     tools = [str(request.get("tool") or "") for request in requests]
     if not tools or any(tool not in _FOREGROUND_SEQUENCE_TOOLS for tool in tools):
         return False
+    if tools[0] == "screen.capture":
+        return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
     if tools[0] in _APP_SEQUENCE_CONTEXT_TOOLS:
         return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
     return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools)

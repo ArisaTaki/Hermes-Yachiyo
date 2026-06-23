@@ -1078,6 +1078,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "hello"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("看一下屏幕，然后点击 120 240", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_click",
+            "input": {"x": 120, "y": 240},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("截图然后双击 120 240", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click",
+            "input": {"x": 120, "y": 240, "click_count": 2},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("看看屏幕，然后输入 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("切到 Slack，然后查找 yachiyo", allowed_tools) == [
         {
             "protocol": "json_fallback",

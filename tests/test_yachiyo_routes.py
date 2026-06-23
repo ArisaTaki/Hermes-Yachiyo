@@ -2636,6 +2636,129 @@ async def test_yachiyo_task_route_executes_safe_click_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_screen_observe_then_safe_click_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-screen-click.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-screen-click.db",
+        workspace_dir=tmp_path / "agent-runtime-route-screen-click",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-screen-click")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("screen observe then click daily task should not call model")
+        ),
+    )
+
+    def fake_screen_capture(target_path: Path) -> dict[str, Any]:
+        calls.append(("capture", str(target_path)))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    def fake_safe_click(x: int, y: int) -> dict[str, Any]:
+        calls.append(("click", x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": x,
+                "y": y,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="看一下屏幕，然后点击 120 240",
+                conversation_id="chat-main-screen-click",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-screen-click-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-screen-click", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert calls[0][0] == "capture"
+        assert calls[1] == ("click", 120, 240)
+        assert started["status"] == "completed"
+        assert started["summary"] == "已截取当前屏幕。 已点击前台位置：120, 240。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert [call["tool_name"] for call in started["tool_calls"][-2:]] == [
+            "screen.capture",
+            "desktop.safe_click",
+        ]
+        assert started["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert [call["tool_name"] for call in timeline["tool_calls"][-2:]] == [
+            "screen.capture",
+            "desktop.safe_click",
+        ]
+        assert timeline["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_surfaces_safe_click_accessibility_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
