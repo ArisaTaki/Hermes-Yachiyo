@@ -102,6 +102,7 @@ export function AgentTaskCard({
       {permissionRecovery ? (
         <div
           className="yachiyo-agent-task-permission-recovery"
+          data-desktop-tools={permissionRecovery.tools.join(',')}
           data-permission-targets={permissionRecovery.targets.join(',')}
           data-testid="yachiyo-agent-task-permission-recovery"
         >
@@ -230,6 +231,7 @@ type TaskPermissionRecovery = {
   hints: string[];
   labels: string[];
   targets: string[];
+  tools: string[];
 };
 
 const permissionTargetLabels: Record<string, string> = {
@@ -248,16 +250,19 @@ export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['rece
   const targets = uniqueStrings((events || []).flatMap((event) => permissionTargetsFromEvent(event)));
   if (!targets.length) return null;
   const hints = uniqueStrings((events || []).flatMap((event) => recoveryHintsFromEvent(event)));
+  const tools = uniqueStrings((events || []).flatMap((event) => desktopToolsFromEvent(event)));
   const params = new URLSearchParams({
     command: 'native doctor',
     permission_targets: targets.join(','),
     return_to: 'chat',
   });
+  if (tools.length) params.set('desktop_tools', tools.join(','));
   return {
     href: `#/diagnostics?${params.toString()}`,
     hints,
     labels: targets.map((target) => permissionTargetLabels[target] || target),
     targets,
+    tools,
   };
 }
 
@@ -280,6 +285,21 @@ function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_eve
   const result = objectValue(payload.result);
   const sources = [result, payload].filter(Boolean);
   return runtimeToolRecoveryHintsFromRecords(sources);
+}
+
+function desktopToolsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
+  if ((event.sensitivity || 'public') === 'secret') return [];
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  const detailTool = String(event.event_type || '').includes('tool') ? event.detail : '';
+  return [
+    result.action,
+    result.tool,
+    result.tool_name,
+    payload.tool,
+    payload.tool_name,
+    detailTool,
+  ].flatMap((value) => stringList(value));
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

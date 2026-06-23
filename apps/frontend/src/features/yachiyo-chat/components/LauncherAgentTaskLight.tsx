@@ -239,6 +239,7 @@ export function LauncherAgentTaskLight({
         <button
           type="button"
           className="launcher-agent-task-diagnostics"
+          data-desktop-tools={permissionRecovery.tools.join(',')}
           data-permission-targets={permissionRecovery.targets.join(',')}
           data-testid={testIds.diagnostics}
           onClick={(event) => {
@@ -246,6 +247,7 @@ export function LauncherAgentTaskLight({
             event.stopPropagation();
             void openAppView('diagnostics', {
               command: 'native doctor',
+              desktop_tools: permissionRecovery.tools.join(','),
               permission_targets: permissionRecovery.targets.join(','),
               return_to: mode,
             });

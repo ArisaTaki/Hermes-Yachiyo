@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiGet, apiPost, copyText } from '../lib/bridge';
+import { runtimeToolDisplayLabelOrName } from '../features/runtime-shared/approval';
 import { listModelProfiles, type ModelProfile, type ModelProfilesPayload } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -408,6 +409,8 @@ export function DiagnosticsView() {
   const initialCommand = normalizeDiagnosticCommand(currentParam('command'));
   const permissionTargets = diagnosticPermissionTargets(currentParam('permission_targets'));
   const permissionTargetSummary = diagnosticPermissionTargetSummary(permissionTargets);
+  const desktopTools = diagnosticDesktopTools(currentParam('desktop_tools'));
+  const desktopToolSummary = diagnosticDesktopToolSummary(desktopTools);
   const [selectedCommand, setSelectedCommand] = useState(initialCommand || DIAGNOSTIC_ACTIONS[0].command);
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
@@ -932,6 +935,11 @@ export function DiagnosticsView() {
                 Chat 提示的恢复目标：{permissionTargetSummary}
               </p>
             ) : null}
+            {desktopToolSummary ? (
+              <p className="section-caption diagnostic-targeted-caption" data-testid="diagnostics-desktop-tools">
+                相关桌面工具：{desktopToolSummary}
+              </p>
+            ) : null}
           </div>
           <div className="diagnostic-result-actions">
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-screen-probe" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
@@ -1025,6 +1033,19 @@ function diagnosticPermissionTargetAction(token: string): DiagnosticPermissionAc
 
 function diagnosticPermissionTargetSummary(targets: Set<DiagnosticPermissionAction>): string {
   return Array.from(targets).map((target) => diagnosticPermissionLabels[target]).join('、');
+}
+
+function diagnosticDesktopTools(value: string): string[] {
+  const tools: string[] = [];
+  value.split(',').forEach((item) => {
+    const tool = item.trim();
+    if (tool && !tools.includes(tool)) tools.push(tool);
+  });
+  return tools;
+}
+
+function diagnosticDesktopToolSummary(tools: string[]): string {
+  return tools.map((tool) => runtimeToolDisplayLabelOrName(tool)).join('、');
 }
 
 function diagnosticPermissionActionClass(

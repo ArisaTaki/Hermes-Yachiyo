@@ -38,6 +38,7 @@ const PERMISSION_RECOVERY_HINTS: Record<string, string> = {
   chrome_cdp: 'Chrome CDP 不可用；请启动带 remote debugging 的 Chrome，或改用 screen.capture 加前台点击/输入工具。',
   music_app: '先打开 Music.app 并确认资料库里有目标歌曲；如果系统弹出自动化授权，请允许 Oha-Yachiyo 控制 Music。',
   open_command: '确认 macOS open 命令可用，并检查应用名称是否和系统里的应用名称一致。',
+  screen_capture_probe_failed: '屏幕录制探测失败；请在诊断页重新运行截图摘要，并检查屏幕录制授权。',
   screen_recording: '在 macOS「系统设置 > 隐私与安全性 > 屏幕录制」允许 Oha-Yachiyo 或当前终端录制屏幕。',
   unsupported_platform: '当前桌面工具主要支持 macOS；此平台暂时只能使用非桌面 fallback。',
 };
