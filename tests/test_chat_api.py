@@ -1112,6 +1112,155 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_executes_direct_running_apps_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    running_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct running apps task should not call model")
+        ),
+    )
+
+    def fake_running_apps() -> dict:
+        nonlocal running_calls
+        running_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.running_apps",
+            "summary": "Running apps: Finder, Google Chrome, Music",
+            "data": {
+                "apps": [
+                    {"name": "Finder", "pid": 101, "frontmost": False},
+                    {"name": "Google Chrome", "pid": 202, "frontmost": True},
+                    {"name": "Music", "pid": 303, "frontmost": False},
+                ],
+                "frontmost": "Google Chrome",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.running_apps", fake_running_apps)
+    try:
+        result = api.send_message("现在开了哪些应用")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == (
+            "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        )
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        assert running_calls == 1
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_direct_active_window_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    active_window_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct active window task should not call model")
+        ),
+    )
+
+    def fake_active_window() -> dict:
+        nonlocal active_window_calls
+        active_window_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Foreground window: Google Chrome - ChatGPT",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "pid": 202,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    try:
+        result = api.send_message("当前窗口是什么")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.active_window"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "当前前台窗口是 Google Chrome：ChatGPT。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "当前前台窗口是 Google Chrome：ChatGPT。"
+        assert active_window_calls == 1
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

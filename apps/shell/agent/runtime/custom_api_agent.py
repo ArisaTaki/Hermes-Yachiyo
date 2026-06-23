@@ -519,7 +519,7 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "desktop.permissions":
                 return _desktop_permissions_summary(result) or result_summary or "已检查桌面权限。"
             if tool_name == "desktop.active_window":
-                return result_summary or _active_window_summary(result)
+                return _active_window_summary(result) or result_summary or "已读取当前前台窗口。"
             if tool_name == "desktop.running_apps":
                 return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
             if tool_name == "desktop.windows":

@@ -2096,6 +2096,24 @@ def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
     assert result == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
 
 
+def test_main_chat_desktop_intent_summarizes_active_window() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.active_window",
+        {},
+        {
+            "ok": True,
+            "summary": "Active window: Google Chrome - ChatGPT",
+            "data": {
+                "app_name": "Google Chrome",
+                "pid": 202,
+                "title": "ChatGPT",
+            },
+        },
+    )
+
+    assert result == "当前前台窗口是 Google Chrome：ChatGPT。"
+
+
 def test_main_chat_desktop_intent_summarizes_windows() -> None:
     result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.windows",

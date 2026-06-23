@@ -251,6 +251,99 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_running_apps_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    running_calls = 0
+
+    def fake_running_apps() -> dict:
+        nonlocal running_calls
+        running_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.running_apps",
+            "summary": "Running apps: Finder, Google Chrome, Music",
+            "data": {
+                "apps": [
+                    {"name": "Finder", "pid": 101, "frontmost": False},
+                    {"name": "Google Chrome", "pid": 202, "frontmost": True},
+                    {"name": "Music", "pid": 303, "frontmost": False},
+                ],
+                "frontmost": "Google Chrome",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.running_apps", fake_running_apps)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "现在开了哪些应用",
+    )
+
+    assert result["ok"] is True
+    assert running_calls == 1
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_active_window_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    active_window_calls = 0
+
+    def fake_active_window() -> dict:
+        nonlocal active_window_calls
+        active_window_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Foreground window: Google Chrome - ChatGPT",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "pid": 202,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "当前窗口是什么",
+    )
+
+    assert result["ok"] is True
+    assert active_window_calls == 1
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.active_window"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
     tmp_path,
     monkeypatch,
