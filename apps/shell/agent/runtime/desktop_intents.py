@@ -614,7 +614,10 @@ def _browser_named_site_url(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        site = _normalize_site_name(match.group("site"))
+        raw_site = match.group("site")
+        site = _normalize_site_name(raw_site)
+        if not site and _has_browser_open_context(text):
+            site = _normalize_browser_site_name(raw_site)
         if site:
             return site
     return ""
@@ -623,7 +626,7 @@ def _browser_named_site_url(text: str) -> str:
 def _normalize_site_name(value: str) -> str:
     site = _strip_polite_suffix(_strip_query(value))
     site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site)
-    site = re.sub(r"\s*(?:网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
+    site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
     compact = re.sub(r"[\s._-]+", "", site.lower())
     aliases = {
         "google": "https://www.google.com",
@@ -667,13 +670,29 @@ def _normalize_site_name(value: str) -> str:
     return aliases.get(compact, "")
 
 
+def _has_browser_open_context(text: str) -> bool:
+    return bool(re.search(r"(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)", text, flags=re.IGNORECASE))
+
+
+def _normalize_browser_site_name(value: str) -> str:
+    site = _strip_polite_suffix(_strip_query(value))
+    site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
+    compact = re.sub(r"[\s._-]+", "", site.lower())
+    aliases = {
+        "applemusic": "https://music.apple.com",
+        "music": "https://music.apple.com",
+        "音乐": "https://music.apple.com",
+    }
+    return aliases.get(compact, "")
+
+
 def _looks_like_search_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
-            r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*",
+            r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|百度一下|谷歌一下|google\s+一下)\s*",
             text,
         )
         or re.search(r"^(?:search|google|look up)\b\s+", lowered)
@@ -682,9 +701,10 @@ def _looks_like_search_request(text: str) -> bool:
 
 def _browser_search_url(text: str) -> str:
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
-        r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
+        r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*(?P<query>[^。！？!?]+)",
         r"\b(?:search|google|look up)\b\s+(?:for\s+)?(?P<query>[^.!?]+)",
     )
     for pattern in patterns:
@@ -693,6 +713,9 @@ def _browser_search_url(text: str) -> str:
             continue
         query = _strip_search_query(match.group("query"))
         if query:
+            engine = str(match.groupdict().get("engine") or "").strip().lower()
+            if engine in {"百度", "baidu"}:
+                return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
     return ""
 
@@ -752,7 +775,7 @@ def _is_browser_screenshot_request(text: str) -> bool:
             text,
         )
         or re.search(
-            r"(?:截取|截图|截屏|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
+            r"(?:截取|截图|截屏|截一下|截个图|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
             text,
         )
         or "browser screenshot" in lowered

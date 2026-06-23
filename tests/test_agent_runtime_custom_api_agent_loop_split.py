@@ -657,10 +657,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("帮我打开 GitHub 官网", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("用浏览器打开 Apple Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://music.apple.com"},
+    }
     assert daily_desktop_intent_tool_request("搜一下 Yachiyo desktop agent", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://www.google.com/search?q=Yachiyo+desktop+agent"},
+    }
+    assert daily_desktop_intent_tool_request("查 OpenAI 最新消息", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"},
+    }
+    assert daily_desktop_intent_tool_request("百度一下 八千代 agent", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"},
     }
     assert daily_desktop_intent_tool_request("搜索 超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
@@ -685,6 +705,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("截取当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
+    }
+    assert daily_desktop_intent_tool_request("截一下当前网页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.screenshot",
         "input": {"reason": "user asked to capture the browser page"},

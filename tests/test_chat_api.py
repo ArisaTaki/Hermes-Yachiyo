@@ -1122,6 +1122,9 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
         cases = [
             ("打开 ChatGPT", "https://chatgpt.com"),
             ("搜索 open hanako", "https://www.google.com/search?q=open+hanako"),
+            ("查 OpenAI 最新消息", "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"),
+            ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
+            ("帮我打开 GitHub 官网", "https://github.com"),
         ]
         for prompt, url in cases:
             result = api.send_message(prompt)
