@@ -949,6 +949,201 @@ async def test_yachiyo_task_route_executes_named_site_open_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_system_volume_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-system-volume.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-system-volume.db",
+        workspace_dir=tmp_path / "agent-runtime-route-system-volume",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-system-volume")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    volume_calls: list[tuple[str, Any, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("system volume public task should not call model")
+        ),
+    )
+
+    def fake_system_volume(action: str, *, level: Any = None, step: Any = None) -> dict[str, Any]:
+        volume_calls.append((action, level, step))
+        return {
+            "ok": True,
+            "action": "system.volume",
+            "summary": "System volume increased from 40% to 50%",
+            "data": {
+                "requested_action": action,
+                "old_level": 40,
+                "level": 50,
+                "muted": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="调大音量",
+                conversation_id="chat-main-system-volume",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-system-volume-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-system-volume", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert volume_calls == [("up", None, None)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已把系统音量从 40% 调高到 50%。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "system.volume"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["action"] == "up"
+        assert timeline["tool_calls"][-1]["tool_name"] == "system.volume"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["level"] == 50
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_clipboard_write_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-clipboard-write.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-clipboard-write.db",
+        workspace_dir=tmp_path / "agent-runtime-route-clipboard-write",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-clipboard-write")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    clipboard_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("clipboard public task should not call model")
+        ),
+    )
+
+    def fake_clipboard_write(text: str) -> dict[str, Any]:
+        clipboard_calls.append(text)
+        return {
+            "ok": True,
+            "action": "clipboard.write",
+            "summary": "Copied 11 characters to clipboard",
+            "data": {"text_length": len(text)},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_write", fake_clipboard_write)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="copy hello world to clipboard",
+                conversation_id="chat-main-clipboard-write",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-clipboard-write-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-clipboard-write", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert clipboard_calls == ["hello world"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已复制 11 个字符到剪贴板。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "clipboard.write"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["text"] == "hello world"
+        assert timeline["tool_calls"][-1]["tool_name"] == "clipboard.write"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["text_length"] == 11
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
