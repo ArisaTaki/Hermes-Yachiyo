@@ -467,11 +467,17 @@ function BubbleLauncher({
     setQuickBusy('chat');
     setQuickText('');
     try {
-      await apiPost('/ui/launcher/quick-message', {
-        text,
-        mode: data?.mode || 'bubble',
-        session_id: '',
-      });
+      let taskStarted = false;
+      try {
+        taskStarted = Boolean(await startAgentTask(text));
+      } catch {}
+      if (!taskStarted) {
+        await apiPost('/ui/launcher/quick-message', {
+          text,
+          mode: data?.mode || 'bubble',
+          session_id: '',
+        });
+      }
       setQuickInputVisible(false);
       await refresh();
     } finally {
@@ -932,11 +938,17 @@ function Live2DLauncher({
     setQuickBusy('chat');
     setQuickText('');
     try {
-      await apiPost('/ui/launcher/quick-message', {
-        text,
-        mode: data?.mode || 'live2d',
-        session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
-      });
+      let taskStarted = false;
+      try {
+        taskStarted = Boolean(await startAgentTask(text));
+      } catch {}
+      if (!taskStarted) {
+        await apiPost('/ui/launcher/quick-message', {
+          text,
+          mode: data?.mode || 'live2d',
+          session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
+        });
+      }
       setReplyHidden(false);
       setQuickInputVisible(false);
       await refresh();

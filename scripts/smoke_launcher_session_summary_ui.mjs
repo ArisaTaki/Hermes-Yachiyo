@@ -707,9 +707,14 @@ async function main() {
     })();
   \`, true);
   await waitForBridgeState((state) => (
-    Array.isArray(state.quickMessagePayloads)
-    && state.quickMessagePayloads.some((payload) => payload?.text === ${JSON.stringify(BUBBLE_QUICK_TEXT)} && payload?.mode === 'bubble')
-  ), 'bubble quick input payload');
+    Array.isArray(state.taskStartPayloads)
+    && state.taskStartPayloads.some((payload) => (
+      payload?.prompt === ${JSON.stringify(BUBBLE_QUICK_TEXT)}
+      && payload?.metadata?.source === 'launcher'
+      && payload?.metadata?.launcher_mode === 'bubble'
+      && payload?.metadata?.launcher_surface === 'desktop_launcher'
+    ))
+  ), 'bubble quick input public task payload');
   await waitFor(win, () => !document.querySelector('[data-testid="bubble-launcher-quick-input"]'), 'bubble quick input submitted');
   console.log('[electron-smoke] bubble quick input submitted: ' + bubbleQuickText);
 
@@ -855,6 +860,15 @@ async function main() {
       submit.click();
     })();
   \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.taskStartPayloads)
+    && state.taskStartPayloads.some((payload) => (
+      payload?.prompt === ${JSON.stringify(LIVE2D_QUICK_TEXT)}
+      && payload?.metadata?.source === 'launcher'
+      && payload?.metadata?.launcher_mode === 'live2d'
+      && payload?.metadata?.launcher_surface === 'desktop_launcher'
+    ))
+  ), 'live2d quick input public task payload');
   await waitFor(win, () => {
     const quickInput = document.querySelector('[data-testid="live2d-launcher-quick-input"]');
     const reply = document.querySelector('[data-testid="live2d-launcher-reply-text"]');
@@ -956,7 +970,10 @@ function assertMockBridgeContract() {
     throw new Error('launcher public Yachiyo task snapshots were not requested');
   }
   const taskStartPayloads = bridgeState.taskStartPayloads;
-  const bubbleTaskPayload = taskStartPayloads.find((payload) => payload?.metadata?.launcher_mode === 'bubble');
+  const bubbleTaskPayload = taskStartPayloads.find((payload) => (
+    payload?.prompt === BUBBLE_TASK_TEXT
+    && payload?.metadata?.launcher_mode === 'bubble'
+  ));
   if (!bubbleTaskPayload) {
     throw new Error(`bubble delegated task did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
   }
@@ -967,7 +984,23 @@ function assertMockBridgeContract() {
   ) {
     throw new Error(`bubble delegated task metadata mismatch: ${JSON.stringify(bubbleTaskPayload)}`);
   }
-  const live2dTaskPayload = taskStartPayloads.find((payload) => payload?.metadata?.launcher_mode === 'live2d');
+  const bubbleQuickTaskPayload = taskStartPayloads.find((payload) => (
+    payload?.prompt === BUBBLE_QUICK_TEXT
+    && payload?.metadata?.launcher_mode === 'bubble'
+  ));
+  if (!bubbleQuickTaskPayload) {
+    throw new Error(`bubble quick input did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
+  }
+  if (
+    bubbleQuickTaskPayload.metadata?.source !== 'launcher'
+    || bubbleQuickTaskPayload.metadata?.launcher_surface !== 'desktop_launcher'
+  ) {
+    throw new Error(`bubble quick input task metadata mismatch: ${JSON.stringify(bubbleQuickTaskPayload)}`);
+  }
+  const live2dTaskPayload = taskStartPayloads.find((payload) => (
+    payload?.prompt === LIVE2D_TASK_TEXT
+    && payload?.metadata?.launcher_mode === 'live2d'
+  ));
   if (!live2dTaskPayload) {
     throw new Error(`live2d delegated task did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
   }
@@ -977,6 +1010,19 @@ function assertMockBridgeContract() {
     || live2dTaskPayload.metadata?.launcher_surface !== 'desktop_launcher'
   ) {
     throw new Error(`live2d delegated task metadata mismatch: ${JSON.stringify(live2dTaskPayload)}`);
+  }
+  const live2dQuickTaskPayload = taskStartPayloads.find((payload) => (
+    payload?.prompt === LIVE2D_QUICK_TEXT
+    && payload?.metadata?.launcher_mode === 'live2d'
+  ));
+  if (!live2dQuickTaskPayload) {
+    throw new Error(`live2d quick input did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
+  }
+  if (
+    live2dQuickTaskPayload.metadata?.source !== 'launcher'
+    || live2dQuickTaskPayload.metadata?.launcher_surface !== 'desktop_launcher'
+  ) {
+    throw new Error(`live2d quick input task metadata mismatch: ${JSON.stringify(live2dQuickTaskPayload)}`);
   }
   const approvalActions = bridgeState.approvalPayloads.map((payload) => payload?.action);
   if (!approvalActions.includes('approve')) {
@@ -995,29 +1041,8 @@ function assertMockBridgeContract() {
   if (!ackModes.includes('live2d')) {
     throw new Error(`live2d launcher ack was not called: ${JSON.stringify(bridgeState.ackPayloads)}`);
   }
-  const quickPayloads = bridgeState.quickMessagePayloads;
-  const bubbleQuickPayload = quickPayloads.find((payload) => payload?.mode === 'bubble');
-  if (!bubbleQuickPayload) {
-    throw new Error(`bubble quick input did not call /ui/launcher/quick-message: ${JSON.stringify(quickPayloads)}`);
-  }
-  if (bubbleQuickPayload.text !== BUBBLE_QUICK_TEXT) {
-    throw new Error(`bubble quick input text mismatch: ${JSON.stringify(bubbleQuickPayload.text)}`);
-  }
-  if (bubbleQuickPayload.session_id !== '') {
-    throw new Error(`bubble quick input session_id should be empty: ${JSON.stringify(bubbleQuickPayload.session_id)}`);
-  }
-  const quickPayload = bridgeState.quickMessagePayload;
-  if (!quickPayload) {
-    throw new Error('live2d quick input did not call /ui/launcher/quick-message');
-  }
-  if (quickPayload.text !== LIVE2D_QUICK_TEXT) {
-    throw new Error(`live2d quick input text mismatch: ${JSON.stringify(quickPayload.text)}`);
-  }
-  if (quickPayload.mode !== 'live2d') {
-    throw new Error(`live2d quick input mode mismatch: ${JSON.stringify(quickPayload.mode)}`);
-  }
-  if (quickPayload.session_id !== '') {
-    throw new Error(`live2d quick input session_id should be empty without proactive attention: ${JSON.stringify(quickPayload.session_id)}`);
+  if (bridgeState.quickMessagePayloads.length) {
+    throw new Error(`launcher quick input should prefer /yachiyo/tasks before quick-message fallback: ${JSON.stringify(bridgeState.quickMessagePayloads)}`);
   }
 }
 
