@@ -73,6 +73,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
     "desktop.hotkey": "发送快捷键",
+    "desktop.submit_foreground": "发送/提交前台内容",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
     "browser.open_url": "打开网页",

@@ -104,6 +104,22 @@ def test_approval_snapshot_marks_foreground_desktop_tools_medium_risk() -> None:
     )
 
 
+def test_approval_snapshot_marks_foreground_submit_high_risk() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-submit",
+            "tool": "desktop.submit_foreground",
+            "input_preview": {"action": "send"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["risk_level"] == "high"
+    assert snapshot["policy_reason"] == (
+        "将发送当前前台输入框中的内容，可能向外部对象发出消息，按工具策略必须人工确认。"
+    )
+
+
 def test_approval_snapshot_describes_foreground_text_and_click_approval() -> None:
     text_snapshot = public_pending_approval(
         {

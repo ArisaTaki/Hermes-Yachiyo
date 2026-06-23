@@ -126,7 +126,7 @@ def _catalog_item_from_descriptor(
         description=descriptor.description,
         capability_id=capability_id,
         risk_level=_risk_level_for_tool(tool_name),
-        approval_required=tool_name in HIGH_RISK_AGENT_TOOLS,
+        approval_required=_approval_required_for_tool(tool_name),
         input_schema=deepcopy(model_tool_schema["function"]["parameters"]),
         model_tool_schema=deepcopy(model_tool_schema),
         missing_permissions=_missing_permissions_for_tool(
@@ -168,7 +168,7 @@ def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSna
         description=str(payload.get("description") or (descriptor.description if descriptor else "")),
         capability_id=_optional_string(payload.get("capability_id")),
         risk_level=_optional_string(payload.get("risk_level")),
-        approval_required=bool(payload.get("approval_required", tool_name in HIGH_RISK_AGENT_TOOLS)),
+        approval_required=bool(payload.get("approval_required", _approval_required_for_tool(tool_name))),
         input_schema=dict(input_schema),
         model_tool_schema=dict(model_tool_schema),
         missing_permissions=_string_list(payload.get("missing_permissions")),
@@ -245,6 +245,10 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
     if tool_name.startswith("memory.") or tool_name.startswith("future_task."):
         return "low"
     return None
+
+
+def _approval_required_for_tool(tool_name: str) -> bool:
+    return tool_name in HIGH_RISK_AGENT_TOOLS or desktop_tool_risk_level(tool_name) == "high"
 
 
 def _missing_permissions_for_tool(
@@ -418,6 +422,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         ],
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
+        ],
+        "desktop.submit_foreground": [
+            "Always requires approval because it sends, submits, or confirms the current foreground input by pressing Return.",
         ],
         "desktop.type_text": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",

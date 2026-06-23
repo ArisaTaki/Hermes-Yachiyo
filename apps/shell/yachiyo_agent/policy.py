@@ -80,6 +80,7 @@ MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.click",
     }
 )
+HIGH_RISK_DESKTOP_TOOLS = frozenset({"desktop.submit_foreground"})
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
         "browser.open_url",
@@ -133,6 +134,7 @@ MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
 )
 HIGH_RISK_DESKTOP_ACTIONS = frozenset(
     {
+        "foreground_submit",
         "delete_or_overwrite_user_file",
         "delete_user_file",
         "overwrite_user_file",
@@ -186,6 +188,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "foreground_close_window",
     "foreground_type_text",
     "foreground_hotkey",
+    "foreground_submit",
     "delete_or_overwrite_user_file",
     "delete_user_file",
     "overwrite_user_file",
@@ -245,6 +248,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "foreground_close_window": ("desktop.close_window",),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
     "foreground_hotkey": ("desktop.hotkey",),
+    "foreground_submit": ("desktop.submit_foreground",),
     "delete_or_overwrite_user_file": ("workspace.write_patch",),
     "delete_user_file": ("workspace.write_patch",),
     "overwrite_user_file": ("workspace.write_patch",),
@@ -281,6 +285,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "foreground_close_window": "Close foreground window",
     "foreground_type_text": "Type into foreground UI",
     "foreground_hotkey": "Send foreground hotkey",
+    "foreground_submit": "Send or submit foreground content",
     "delete_or_overwrite_user_file": "Delete or overwrite user file",
     "delete_user_file": "Delete user file",
     "overwrite_user_file": "Overwrite user file",
@@ -324,6 +329,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "foreground_close_window": "Close the current foreground window after approval.",
     "foreground_type_text": "Enter text into the current foreground target.",
     "foreground_hotkey": "Send a keyboard shortcut to the foreground target.",
+    "foreground_submit": "Send, submit, or confirm the current foreground input after approval.",
     "delete_or_overwrite_user_file": "Delete or overwrite user-controlled files.",
     "delete_user_file": "Delete a user-controlled file.",
     "overwrite_user_file": "Overwrite a user-controlled file.",
@@ -341,6 +347,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
 DESKTOP_TOOL_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
     **{tool: "low" for tool in LOW_RISK_DESKTOP_TOOLS},
     **{tool: "medium" for tool in MEDIUM_RISK_DESKTOP_TOOLS},
+    **{tool: "high" for tool in HIGH_RISK_DESKTOP_TOOLS},
     **{tool: "low" for tool in LOW_RISK_BROWSER_TOOLS},
     **{tool: "medium" for tool in MEDIUM_RISK_BROWSER_TOOLS},
 }
@@ -393,6 +400,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",
+        "desktop.submit_foreground",
         "desktop.type_text",
         "desktop.click",
         "browser.open_url",
@@ -452,6 +460,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
+        "desktop.submit_foreground",
         "desktop.type_text",
         "desktop.click",
     ),
@@ -567,7 +576,9 @@ def group_tool_policy_for_id(policy_id: str | None) -> dict[str, Any]:
     approval_required = {
         tool: True
         for tool in tools
-        if tool in MEDIUM_RISK_DESKTOP_TOOLS or tool in MEDIUM_RISK_BROWSER_TOOLS
+        if tool in MEDIUM_RISK_DESKTOP_TOOLS
+        or tool in HIGH_RISK_DESKTOP_TOOLS
+        or tool in MEDIUM_RISK_BROWSER_TOOLS
     }
     return {"allowed_tools": list(tools), "approval_required": approval_required}
 

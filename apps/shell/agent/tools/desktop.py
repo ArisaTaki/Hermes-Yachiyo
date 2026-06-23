@@ -293,6 +293,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.close_window",
         "desktop.safe_shortcut",
         "desktop.safe_key",
+        "desktop.submit_foreground",
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.safe_scroll",
@@ -2418,6 +2419,22 @@ def desktop_hotkey(key: str, modifiers: list[str] | None = None) -> dict[str, An
     return payload
 
 
+def desktop_submit_foreground(action: str = "submit") -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.submit_foreground")
+    clean_action = str(action or "submit").strip().lower()
+    if clean_action not in {"send", "submit", "confirm"}:
+        clean_action = "submit"
+    payload = _send_desktop_keystroke("desktop.submit_foreground", "return", [])
+    if not payload.get("ok"):
+        return payload
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    data["submit_action"] = clean_action
+    payload["data"] = data
+    payload["summary"] = f"Submitted foreground {clean_action} action"
+    return payload
+
+
 def desktop_safe_shortcut(action: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.safe_shortcut")
@@ -3291,6 +3308,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
+        "desktop.submit_foreground": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
         "desktop.safe_scroll": ["accessibility"],
@@ -3336,6 +3354,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
+        "desktop.submit_foreground": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
         "desktop.safe_scroll": ["accessibility"],

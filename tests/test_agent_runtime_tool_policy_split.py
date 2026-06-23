@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools.policy import (
     FUTURE_TASK_TOOL_NAMES,
     HIGH_RISK_AGENT_TOOLS,
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
     KNOWN_AGENT_TOOLS,
     LOW_RISK_BROWSER_TOOL_NAMES,
     LOW_RISK_DESKTOP_TOOL_NAMES,
@@ -133,6 +134,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
     assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(HIGH_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
     assert policy["approval_required"] == {
@@ -143,6 +145,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "app.focus_and_type_into_ui_element": True,
         "desktop.close_window": True,
         "desktop.hotkey": True,
+        "desktop.submit_foreground": True,
         "desktop.type_text": True,
         "desktop.click": True,
         "desktop.click_ui_element": True,
@@ -162,6 +165,7 @@ def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools(
     assert set(LOW_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(LOW_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
+    assert set(HIGH_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
 

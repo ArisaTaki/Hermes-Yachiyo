@@ -72,6 +72,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
     "desktop.hotkey": "desktop_hotkey",
+    "desktop.submit_foreground": "desktop_submit_foreground",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
     "browser.open_url": "browser_open_url",
@@ -165,6 +166,9 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.type_text",
     "desktop.click",
 )
+HIGH_RISK_DESKTOP_TOOL_NAMES = (
+    "desktop.submit_foreground",
+)
 LOW_RISK_BROWSER_TOOL_NAMES = (
     "browser.open_url",
     "browser.open_url_and_extract_text",
@@ -178,6 +182,7 @@ DAILY_BROWSER_TOOL_NAMES = (*LOW_RISK_BROWSER_TOOL_NAMES, *MEDIUM_RISK_BROWSER_T
 DAILY_DESKTOP_TOOL_NAMES = (
     *LOW_RISK_DESKTOP_TOOL_NAMES,
     *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    *HIGH_RISK_DESKTOP_TOOL_NAMES,
     *DAILY_BROWSER_TOOL_NAMES,
 )
 
@@ -186,6 +191,7 @@ def _approval_required_agent_tools() -> tuple[str, ...]:
     return (
         *sorted(HIGH_RISK_AGENT_TOOLS),
         *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+        *HIGH_RISK_DESKTOP_TOOL_NAMES,
         *MEDIUM_RISK_BROWSER_TOOL_NAMES,
     )
 
@@ -561,6 +567,12 @@ class ToolDescriptor:
                         "desktop.hotkey 参数 modifiers 只能包含 command/cmd、shift、"
                         "option/alt、control/ctrl"
                     )
+        if self.name == "desktop.submit_foreground":
+            action = str(payload.get("action") or "").strip().lower()
+            if action not in {"send", "submit", "confirm"}:
+                raise AgentRuntimeError(
+                    "desktop.submit_foreground 参数 action 必须是 send、submit 或 confirm"
+                )
         if self.name in {
             "browser.open_url",
             "browser.open_url_and_extract_text",
@@ -1506,6 +1518,22 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("key",),
+    ),
+    "desktop.submit_foreground": ToolDescriptor(
+        name="desktop.submit_foreground",
+        description=(
+            "Submit, send, or confirm the current foreground input/form by pressing Return. "
+            "High-risk and always requires approval because it can send messages, submit forms, "
+            "or trigger irreversible app actions."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": ["send", "submit", "confirm"],
+                "description": "User intent for the foreground submit action.",
+            }
+        },
+        required=("action",),
     ),
     "desktop.type_text": ToolDescriptor(
         name="desktop.type_text",

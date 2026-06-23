@@ -340,6 +340,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.submit_foreground",
     "desktop.type_text",
     "desktop.ui_elements",
     "desktop.windows",
@@ -391,6 +392,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.click",
     "desktop.close_window",
     "desktop.hotkey",
+    "desktop.submit_foreground",
     "desktop.type_text",
     "screen.capture",
 }
@@ -421,6 +423,7 @@ _FOREGROUND_ACTION_TOOLS = {
     "desktop.type_into_ui_element",
     "desktop.close_window",
     "desktop.hotkey",
+    "desktop.submit_foreground",
     "desktop.safe_click",
     "desktop.safe_key",
     "desktop.safe_scroll",
@@ -660,8 +663,9 @@ def _typed_input_followup_requests(
         return False, []
     if _is_input_return_followup(text, input_request):
         return True, [_request("desktop.hotkey", {"key": "return", "modifiers": []})]
-    if _is_external_submit_followup(text):
-        return True, []
+    submit_action = _external_submit_followup_action(text)
+    if submit_action:
+        return True, [_request("desktop.submit_foreground", {"action": submit_action})]
     return False, []
 
 
@@ -701,9 +705,64 @@ def _is_input_return_followup(text: str, input_request: dict[str, Any]) -> bool:
     )
 
 
-def _is_external_submit_followup(text: str) -> bool:
-    phrase = _normalize_named_hotkey_phrase(text)
-    return phrase in {"发送", "发出", "提交", "send", "submit", "post"}
+def _external_submit_followup_action(text: str) -> str:
+    return _submit_foreground_action_for_phrase(_normalize_submit_foreground_phrase(text))
+
+
+def _desktop_submit_foreground_action(text: str) -> str:
+    return _submit_foreground_action_for_phrase(_normalize_submit_foreground_phrase(text))
+
+
+def _normalize_submit_foreground_phrase(text: str) -> str:
+    phrase = _strip_query(text)
+    phrase = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?\s*",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"[\s._-]+", "", phrase.lower())
+
+
+def _submit_foreground_action_for_phrase(phrase: str) -> str:
+    if phrase in {
+        "发送",
+        "发出",
+        "发送当前消息",
+        "发送消息",
+        "把消息发出",
+        "当前消息发送",
+        "消息发送",
+        "send",
+        "sendmessage",
+        "post",
+    }:
+        return "send"
+    if phrase in {
+        "提交",
+        "提交当前表单",
+        "提交表单",
+        "当前表单提交",
+        "表单提交",
+        "submit",
+        "submitform",
+    }:
+        return "submit"
+    if phrase in {
+        "确认当前操作",
+        "确认操作",
+        "确认",
+        "确定",
+        "confirm",
+    }:
+        return "confirm"
+    return ""
 
 
 def _latest_sequence_app_context_is_browser(requests: list[dict[str, Any]]) -> bool:
@@ -910,6 +969,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     hotkey = _desktop_hotkey(text)
     if hotkey:
         candidates.append(_request("desktop.hotkey", hotkey))
+
+    submit_action = _desktop_submit_foreground_action(text)
+    if submit_action:
+        candidates.append(_request("desktop.submit_foreground", {"action": submit_action}))
 
     type_text = _desktop_type_text(text)
     if type_text:

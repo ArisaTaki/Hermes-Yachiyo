@@ -7,6 +7,7 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
 from apps.shell.agent.tools.policy import (
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
     MEDIUM_RISK_BROWSER_TOOL_NAMES,
     MEDIUM_RISK_DESKTOP_TOOL_NAMES,
 )
@@ -14,6 +15,7 @@ from packages.security import redact_api_error_text
 
 _DAILY_DESKTOP_APPROVAL_TOOLS = {
     *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    *HIGH_RISK_DESKTOP_TOOL_NAMES,
     *MEDIUM_RISK_BROWSER_TOOL_NAMES,
 }
 

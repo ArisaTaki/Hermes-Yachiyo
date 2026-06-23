@@ -7,6 +7,7 @@ from typing import Any
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.tools.policy import (
     HIGH_RISK_AGENT_TOOLS,
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
     MEDIUM_RISK_BROWSER_TOOL_NAMES,
     MEDIUM_RISK_DESKTOP_TOOL_NAMES,
 )
@@ -14,6 +15,10 @@ from apps.shell.agent.tools.policy import (
 MEDIUM_RISK_AGENT_TOOLS = {
     *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
     *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+}
+HIGH_RISK_APPROVAL_TOOLS = {
+    *HIGH_RISK_AGENT_TOOLS,
+    *HIGH_RISK_DESKTOP_TOOL_NAMES,
 }
 
 
@@ -70,7 +75,7 @@ def _approval_risk_level(raw: dict[str, Any], tool_name: str) -> str:
     direct = str(raw.get("risk_level") or "").strip().lower()
     if direct in {"low", "medium", "high"}:
         return direct
-    if tool_name in HIGH_RISK_AGENT_TOOLS:
+    if tool_name in HIGH_RISK_APPROVAL_TOOLS:
         return "high"
     if tool_name in MEDIUM_RISK_AGENT_TOOLS:
         return "medium"
@@ -106,6 +111,9 @@ def _approval_policy_reason(
             return "网页点击或输入会操作当前浏览器页面，按工具策略需要人工确认。"
         return "中风险工具调用按当前工具策略需要人工确认。"
     if risk_level == "high":
+        high_risk_foreground_reason = _high_risk_foreground_reason(tool_name, public_input_preview)
+        if high_risk_foreground_reason:
+            return high_risk_foreground_reason
         return "高风险工具调用按当前工具策略必须人工确认。"
     return ""
 
@@ -206,6 +214,20 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
             return f"将向当前浏览器页面选择器 {selector} 输入文字，按工具策略需要人工确认。"
         return "将向当前浏览器页面输入文字，按工具策略需要人工确认。"
     return ""
+
+
+def _high_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:
+    record = public_input_preview if isinstance(public_input_preview, dict) else {}
+    if tool_name != "desktop.submit_foreground":
+        return ""
+    action = _preview_value(record, "action")
+    if action == "send":
+        return "将发送当前前台输入框中的内容，可能向外部对象发出消息，按工具策略必须人工确认。"
+    if action == "submit":
+        return "将提交当前前台表单或输入内容，可能触发外部系统操作，按工具策略必须人工确认。"
+    if action == "confirm":
+        return "将确认当前前台操作，可能触发应用内状态变化，按工具策略必须人工确认。"
+    return "将发送、提交或确认当前前台内容，按工具策略必须人工确认。"
 
 
 def _preview_value(record: dict[str, Any], *keys: str) -> str:

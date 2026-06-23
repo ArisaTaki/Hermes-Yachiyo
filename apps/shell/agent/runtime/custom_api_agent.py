@@ -67,6 +67,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.minimize_window",
     "desktop.close_window",
     "desktop.hotkey",
+    "desktop.submit_foreground",
     "desktop.type_text",
     "desktop.click",
 }
@@ -118,6 +119,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
     "desktop.hotkey": "发送快捷键",
+    "desktop.submit_foreground": "发送/提交前台内容",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
     "browser.open_url": "打开网页",
@@ -876,6 +878,17 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "desktop.hotkey":
                 hotkey = _hotkey_text(result, planned_input)
                 return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
+            if tool_name == "desktop.submit_foreground":
+                action = _payload_text(result, planned_input, "submit_action") or _payload_text(
+                    result,
+                    planned_input,
+                    "action",
+                )
+                return {
+                    "send": "已确认发送前台内容。",
+                    "submit": "已确认提交前台内容。",
+                    "confirm": "已确认前台操作。",
+                }.get(action, result_summary or "已确认前台提交动作。")
             if tool_name == "desktop.type_text":
                 text = _payload_text(result, planned_input, "text")
                 if text:
@@ -1120,7 +1133,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
@@ -1154,6 +1167,7 @@ class RuntimeCustomApiAgentLoop:
             "Map explicit current/foreground app hide requests to desktop.hide_app. "
             "Map explicit current/foreground window minimize requests to desktop.minimize_window. "
             "Map explicit current/foreground window close requests to desktop.close_window. "
+            "Map explicit foreground send/submit/confirm requests to desktop.submit_foreground; it is high-risk and Runtime must show approval before pressing Return. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.open_url_and_extract_text, browser.open_url_and_screenshot, "
             "browser.current_page, browser.click, browser.type_text, browser.extract_text, "

@@ -311,6 +311,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_minimize_window",
         "desktop_close_window",
         "desktop_hotkey",
+        "desktop_submit_foreground",
         "desktop_type_text",
         "desktop_click",
         "browser_open_url",
@@ -654,6 +655,15 @@ def test_desktop_safe_scroll_schema_accepts_direction_and_pages() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.safe_scroll", {"direction": "down", "pages": True})
 
 
+def test_desktop_submit_foreground_schema_requires_known_action() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.submit_foreground", {"action": "send"})
+    ToolDescriptorRegistry.validate_payload("desktop.submit_foreground", {"action": "submit"})
+    ToolDescriptorRegistry.validate_payload("desktop.submit_foreground", {"action": "confirm"})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.submit_foreground 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.submit_foreground", {"action": "return"})
+
+
 def test_app_minimize_schema_requires_app_name() -> None:
     ToolDescriptorRegistry.validate_payload("app.minimize", {"app_name": "Slack"})
 
@@ -933,6 +943,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_submit_foreground",
+        lambda action="submit": calls.append(("submit_foreground", action))
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_click",
         lambda x, y, *, click_count=1: calls.append(("click", x, y, click_count))
         or {"ok": True},
@@ -1161,6 +1177,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.submit_foreground",
+        {"action": "send"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.click",
         {"x": 12, "y": 34, "click_count": 2},
     ) == {"ok": True}
@@ -1309,6 +1330,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("click_ui_element", "Send", "button", 20, 2),
         ("type_into_ui_element", "Search", "hello", "text", 20),
         ("hotkey", "l", ["command"]),
+        ("submit_foreground", "send"),
         ("click", 12, 34, 2),
         ("hide_app",),
         ("focus_window", "Slack", "general"),

@@ -815,6 +815,12 @@ class ToolBroker:
             lambda: desktop.desktop_hotkey(key, modifiers=modifiers),
         )
 
+    def desktop_submit_foreground(self, action: str = "submit") -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.submit_foreground",
+            lambda: desktop.desktop_submit_foreground(action),
+        )
+
     def desktop_type_text(self, text: str) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.type_text",

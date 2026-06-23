@@ -150,6 +150,7 @@ def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, 
     runtime = _make_runtime(tmp_path, monkeypatch)
     from apps.shell.agent.tools.policy import (
         DAILY_DESKTOP_TOOL_NAMES,
+        HIGH_RISK_DESKTOP_TOOL_NAMES,
         MEDIUM_RISK_BROWSER_TOOL_NAMES,
         MEDIUM_RISK_DESKTOP_TOOL_NAMES,
     )
@@ -173,7 +174,11 @@ def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, 
     }
     assert tool_policy["approval_required"]["workspace.write_patch"] is True
     assert tool_policy["approval_required"]["terminal.run"] is True
-    for tool in (*MEDIUM_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_BROWSER_TOOL_NAMES):
+    for tool in (
+        *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+        *HIGH_RISK_DESKTOP_TOOL_NAMES,
+        *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    ):
         assert tool_policy["approval_required"][tool] is True
     assert workspace_policy["readable_scopes"] == ["."]
     assert workspace_policy["writable_scopes"] == ["."]

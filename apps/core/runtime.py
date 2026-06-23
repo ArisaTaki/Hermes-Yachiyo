@@ -224,6 +224,7 @@ class AppRuntime:
         """Tool policy used by the builtin main-chat Native Agent path."""
         from apps.shell.agent.tools.policy import (
             DAILY_DESKTOP_TOOL_NAMES,
+            HIGH_RISK_DESKTOP_TOOL_NAMES,
             MEDIUM_RISK_BROWSER_TOOL_NAMES,
             MEDIUM_RISK_DESKTOP_TOOL_NAMES,
         )
@@ -235,6 +236,7 @@ class AppRuntime:
                 tool: True
                 for tool in (
                     *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+                    *HIGH_RISK_DESKTOP_TOOL_NAMES,
                     *MEDIUM_RISK_BROWSER_TOOL_NAMES,
                 )
             },

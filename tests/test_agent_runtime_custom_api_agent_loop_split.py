@@ -638,6 +638,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
+        "desktop.submit_foreground",
         "desktop.type_text",
         "desktop.click",
     ]
@@ -1402,7 +1403,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
                 "role_filter": "text",
                 "limit": 80,
             },
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
     ]
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2281,6 +2287,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("发送当前消息", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("提交当前表单", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
     }
     assert daily_desktop_intent_tool_request("复制选中内容", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3993,6 +4009,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"selector": "point=120,240", "length": 5, "x": 120, "y": 240},
         },
     )
+    submit_foreground = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.submit_foreground",
+        {"action": "send"},
+        {
+            "ok": True,
+            "summary": "Submitted foreground send action",
+            "data": {"submit_action": "send"},
+        },
+    )
 
     assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
@@ -4026,6 +4051,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_click_point == "已点击网页位置：120, 240。"
     assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"
     assert browser_type_text_point == "已在网页位置：120, 240 输入文字（5 个字符）。"
+    assert submit_foreground == "已确认发送前台内容。"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 

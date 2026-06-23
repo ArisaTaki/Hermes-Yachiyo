@@ -14,6 +14,7 @@ from apps.shell.agent.tools.policy import (
     DAILY_DESKTOP_TOOL_NAMES,
     FUTURE_TASK_TOOL_NAMES,
     HIGH_RISK_AGENT_TOOLS,
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
     MEDIUM_RISK_BROWSER_TOOL_NAMES,
     MEDIUM_RISK_DESKTOP_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
@@ -65,6 +66,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "browser.open_url" in config["instructions"]
     assert "browser.open_url_and_extract_text" in config["instructions"]
     assert "browser.open_url_and_screenshot" in config["instructions"]
+    assert "desktop.submit_foreground" in config["instructions"]
     assert "常见网站名或搜索查询" in config["instructions"]
     assert "desktop.click" in config["instructions"]
     assert "低风险桌面动作默认直接执行" in config["instructions"]
@@ -90,7 +92,11 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
     assert config["tool_policy"]["approval_required"] == {
         tool: True
-        for tool in (*MEDIUM_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_BROWSER_TOOL_NAMES)
+        for tool in (
+            *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+            *HIGH_RISK_DESKTOP_TOOL_NAMES,
+            *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+        )
     }
 
 
@@ -123,7 +129,11 @@ def test_main_chat_config_builder_overlays_daily_desktop_tools_on_explicit_polic
         allowed_tools
     )
     assert policy["approval_required"]["terminal.run"] is True
-    for tool in (*MEDIUM_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_BROWSER_TOOL_NAMES):
+    for tool in (
+        *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+        *HIGH_RISK_DESKTOP_TOOL_NAMES,
+        *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    ):
         assert policy["approval_required"][tool] is True
 
 

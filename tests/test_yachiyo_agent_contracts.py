@@ -443,6 +443,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
+        "desktop.submit_foreground",
         "desktop.type_text",
         "desktop.click",
     ]
@@ -593,6 +594,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.click_ui_element") == "medium"
     assert desktop_tool_risk_level("desktop.type_into_ui_element") == "medium"
+    assert desktop_tool_risk_level("desktop.submit_foreground") == "high"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -625,6 +627,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_click_ui_element") == "medium"
     assert desktop_action_risk_level("foreground_type_into_ui_element") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
+    assert desktop_action_risk_level("foreground_submit") == "high"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
     assert is_high_risk_desktop_action("system_settings") is True
@@ -723,6 +726,9 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_click"].requires_approval is False
     assert catalog["foreground_close_window"].risk_level == "medium"
     assert catalog["foreground_close_window"].tools == ["desktop.close_window"]
+    assert catalog["foreground_submit"].risk_level == "high"
+    assert catalog["foreground_submit"].requires_approval is True
+    assert catalog["foreground_submit"].tools == ["desktop.submit_foreground"]
     assert catalog["delete_or_overwrite_user_file"].risk_level == "high"
     assert catalog["delete_or_overwrite_user_file"].requires_approval is True
     assert catalog["credential_access"].requires_approval is True
@@ -978,6 +984,17 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert close_window.risk_level == "medium"
     assert close_window.input_schema["properties"] == {}
     assert any("foreground window" in note for note in close_window.fallback_notes)
+    submit_foreground = tools["desktop.submit_foreground"]
+    assert submit_foreground.capability_id == "foreground_input"
+    assert submit_foreground.risk_level == "high"
+    assert submit_foreground.approval_required is True
+    assert submit_foreground.input_schema["required"] == ["action"]
+    assert submit_foreground.input_schema["properties"]["action"]["enum"] == [
+        "send",
+        "submit",
+        "confirm",
+    ]
+    assert any("Always requires approval" in note for note in submit_foreground.fallback_notes)
     assert browser.capability_id == "browser_control"
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]
