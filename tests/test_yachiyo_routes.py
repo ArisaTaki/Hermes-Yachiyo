@@ -851,6 +851,119 @@ async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_mod
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-permission.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-permission.db",
+        workspace_dir=tmp_path / "agent-runtime-route-permission",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-daily-permission")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    capture_targets: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("daily desktop permission recovery should not call model")
+        ),
+    )
+
+    class ScreenCapturePermissionError(RuntimeError):
+        pass
+
+    def fake_capture(target_path: Path) -> dict[str, Any]:
+        capture_targets.append(str(target_path))
+        raise ScreenCapturePermissionError("screen recording permission denied")
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop._desktop_platform", lambda: "macos")
+    monkeypatch.setattr("apps.locald.screenshot.capture_screenshot_to_file", fake_capture)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="截个图看看",
+                conversation_id="chat-main-daily-permission",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-permission-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        messages = store.load_messages("chat-main-daily-permission", limit=10)
+        assistant = next(message for message in messages if message.role == "assistant")
+        event_types = [event["event_type"] for event in events["events"]]
+        tool_call = started["tool_calls"][-1]
+        recovery_event = next(
+            event
+            for event in events["events"]
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+
+        assert capture_targets
+        assert capture_targets[0].endswith("screenshots/current-screen.png")
+        assert started["status"] == "completed"
+        assert "桌面操作未完成：screen recording permission denied" in started["summary"]
+        assert "缺少权限：screen_recording" in started["summary"]
+        assert started["needs_user_action"] is False
+        assert tool_call["tool_name"] == "screen.capture"
+        assert tool_call["status"] == "failed"
+        assert tool_call["output_preview"]["permission_error"] is True
+        assert tool_call["output_preview"]["permission_targets"] == ["screen_recording"]
+        assert tool_call["output_preview"]["recovery_actions"] == [
+            {
+                "label": "打开屏幕录制权限",
+                "tool": "app.open",
+                "input": {"app_name": "屏幕录制权限"},
+                "permission_target": "screen_recording",
+                "risk_level": "low",
+            }
+        ]
+        assert timeline["task_id"] == started["task_id"]
+        assert timeline["status"] == "completed"
+        assert timeline["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert timeline["tool_calls"][-1]["status"] == "failed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert recovery_event["payload"]["permission_targets"] == ["screen_recording"]
+        assert recovery_event["payload"]["affected_tools"] == ["screen.capture"]
+        assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     class _RejectRecordingService:
         def __init__(self) -> None:
