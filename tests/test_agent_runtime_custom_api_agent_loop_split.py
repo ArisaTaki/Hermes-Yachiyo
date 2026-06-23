@@ -668,6 +668,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("切到微信", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -918,10 +923,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("看看当前窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("现在有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
         "input": {},
+    }
+    assert daily_desktop_intent_tool_request("列出 Chrome 窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Google Chrome"},
     }
     assert daily_desktop_intent_tool_request("Chrome 有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",

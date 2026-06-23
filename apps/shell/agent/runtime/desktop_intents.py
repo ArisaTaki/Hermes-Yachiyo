@@ -563,14 +563,14 @@ def _app_status_name(text: str) -> str:
 def _desktop_windows_request(text: str) -> dict[str, str] | None:
     if _is_active_window_request(text):
         return None
-    if _is_general_windows_request(text):
-        return {}
     app_patterns = (
         r"(?:list|show|read)\s+(?P<app>[^.!?]+?)\s+windows",
         r"(?P<app>[^.!?]+?)\s+windows\?",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:列出|查看|看看|显示|读取)?\s*"
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:列出|查看|看看|显示|读取)\s+"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:窗口|windows?)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:有|打开了|开了|正在显示)?"
-        r"(?:哪些|什么|几个|多少)?.{0,4}(?:窗口|window)",
+        r"(?:哪些|什么|几个|多少).{0,4}(?:窗口|window)",
     )
     for pattern in app_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -582,6 +582,8 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
         app_name = _normalize_app_name(raw_app)
         if app_name and not _looks_like_generic_app_open_target(raw_app):
             return {"app_name": app_name}
+    if _is_general_windows_request(text):
+        return {}
     return None
 
 
@@ -673,7 +675,7 @@ def _looks_like_local_path(value: str) -> bool:
 
 def _app_focus_name(text: str) -> str:
     patterns = (
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
         r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+)",
     )
     for pattern in patterns:
@@ -1057,7 +1059,9 @@ def _is_screen_capture_request(text: str) -> bool:
 
 
 def _is_active_window_request(text: str) -> bool:
-    if _is_running_apps_request(text) or _is_general_windows_request(text):
+    if _is_running_apps_request(text):
+        return False
+    if re.search(r"(?:哪些|几个|多少).{0,4}(?:窗口|windows?)", text, flags=re.IGNORECASE):
         return False
     lowered = text.lower()
     return bool(
