@@ -2929,7 +2929,7 @@ async def test_yachiyo_task_route_executes_browser_extract_text_without_model(
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
-                prompt="读取当前网页正文",
+                prompt="读一下这个网页",
                 conversation_id="chat-main-browser-extract-text",
                 agent_id="builtin:yachiyo-main",
                 metadata={

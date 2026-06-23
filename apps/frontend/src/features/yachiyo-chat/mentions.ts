@@ -254,7 +254,7 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (!value) return false;
   if (/(?:打开|访问|浏览|open|visit|go to|navigate to)/i.test(value) && URL_RE.test(value)) return true;
   if (/(?:打开|访问|浏览|前往|去|open|visit|go to|navigate to)/i.test(value) && WEB_SITE_NAME_RE.test(value)) return true;
-  if (/(?:当前网页|读取当前网页|网页正文|截取当前网页|browser screenshot|current page)/i.test(value)) return true;
+  if (/(?:当前网页|读取当前网页|网页正文|截取当前网页|browser screenshot|current page|(?:读一下|读取|阅读|提取).{0,8}(?:这个|当前)?网页)/i.test(value)) return true;
   if (/(?:截图|截屏|截个图|屏幕截图|screenshot|capture screen)/i.test(value)) return true;
   if (/(?:当前窗口是什么|当前窗口|active window|frontmost window)/i.test(value)) return true;
   if (/(?:正在运行的应用|开了哪些应用|运行的应用|running apps|what apps are running)/i.test(value)) return true;
