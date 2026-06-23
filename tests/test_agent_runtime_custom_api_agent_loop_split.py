@@ -75,6 +75,34 @@ class RecordingDesktopBroker:
         }
 
 
+class PermissionPreflightDesktopBroker(RecordingDesktopBroker):
+    def desktop_permission_preflight(self) -> dict[str, Any]:
+        self.order.append("preflight")
+        return {
+            "ok": True,
+            "action": "desktop.permission_preflight",
+            "permission_error": True,
+            "permission_targets": ["automation"],
+            "affected_tools": ["media.apple_music_play"],
+            "recovery_hints": ["Grant Automation permission."],
+            "recovery_actions": [
+                {
+                    "label": "打开自动化权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "自动化权限"},
+                    "permission_target": "automation",
+                    "risk_level": "low",
+                }
+            ],
+            "diagnostic_route": "/yachiyo/readiness",
+            "data": {
+                "ready": False,
+                "permission_targets": ["automation"],
+                "affected_tools": ["media.apple_music_play"],
+            },
+        }
+
+
 class RecordingToolCallEvents:
     def __init__(self, events: list[dict[str, Any]]) -> None:
         self.events = events
@@ -3044,6 +3072,124 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
         "agent.desktop.intent_completed",
     ]
     assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+
+
+def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execution() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+    broker = PermissionPreflightDesktopBroker(order)
+    projection = RuntimeToolLoopProjectionBuilder()
+    tool_call_events = RecordingToolCallEvents(run_events)
+    trace_events = NoopTraceEvents()
+    executor = RuntimeToolCallExecutor(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
+        limit_tool_result=lambda value: value,
+        timeline_factory=_timeline,
+        tool_call_events=tool_call_events,
+        trace_events=trace_events,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        allows_tool=PolicyGate.allows_tool,
+    )
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda messages: str(messages[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=projection,
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=executor.execute,
+    )
+    operations = RuntimeToolOperations(
+        tool_request_runner=runner,
+        tool_call_executor=executor,
+    )
+
+    def fail_model(*_args, **_kwargs):
+        raise AssertionError("permission preflight desktop intent should not call model")
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["media.apple_music_play"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=RuntimeToolOperations.model_tool_schemas,
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=fail_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=RuntimeToolOperations.tool_requests_from_message,
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=projection,
+        run_tool_requests=operations.run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "播放超时空辉夜姬",
+        broker=broker,
+        timeline=timeline,
+        artifacts=artifacts,
+        run_id="run-main-chat-desktop-preflight",
+        budget=budget,
+    )
+
+    assert str(result) == "已在 Apple Music 播放：超时空辉夜姬。"
+    assert order == ["preflight", "tool"]
+    assert [event["event"] for event in timeline] == [
+        "agent.desktop.intent_planned",
+        "agent.desktop.permission_preflight",
+        "agent.tool.call",
+        "agent.desktop.intent_completed",
+    ]
+    preflight = timeline[1]
+    assert preflight["tool"] == "media.apple_music_play"
+    assert preflight["permission_targets"] == ["automation"]
+    assert preflight["affected_tools"] == ["media.apple_music_play"]
+    assert preflight["recovery_actions"] == [
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        }
+    ]
+    assert [event["event_type"] for event in run_events[:2]] == [
+        "agent.desktop.intent_planned",
+        "agent.desktop.permission_preflight",
+    ]
+    assert run_events[1]["payload"]["diagnostic_route"] == "/yachiyo/readiness"
+    assert "model.request.started" not in [event["event_type"] for event in run_events]
 
 
 def test_main_chat_browser_search_intent_returns_deterministic_result_without_model() -> None:

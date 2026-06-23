@@ -254,6 +254,12 @@ class RuntimeCustomApiAgentLoop:
                             "agent.desktop.intent_planned",
                             planned_payload,
                         )
+                self._record_desktop_permission_preflight(
+                    planned_tool_requests,
+                    broker,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
                 tool_timeline_start = len(timeline)
                 try:
                     self._run_tool_requests(
@@ -467,6 +473,35 @@ class RuntimeCustomApiAgentLoop:
             "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
             f"{allowed_suffix}"
         )
+
+    def _record_desktop_permission_preflight(
+        self,
+        planned_tool_requests: list[dict[str, Any]],
+        broker: Any,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        payload = _desktop_permission_preflight_event_payload(
+            planned_tool_requests,
+            broker,
+        )
+        if not payload:
+            return
+        detail = str(payload.get("tool") or "desktop.permissions")
+        timeline.append(
+            self._timeline(
+                "agent.desktop.permission_preflight",
+                detail,
+                **payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(
+                run_id,
+                "agent.desktop.permission_preflight",
+                payload,
+            )
 
     def _record_desktop_intent_approval_required(
         self,
@@ -1355,6 +1390,74 @@ def _desktop_permission_recovery_event_payload(
         "affected_tools": affected_tools,
         "recovery_hints": recovery_hints,
         "recovery_actions": recovery_actions,
+    }
+
+
+def _desktop_permission_preflight_event_payload(
+    planned_tool_requests: list[dict[str, Any]],
+    broker: Any,
+) -> dict[str, Any]:
+    planned_tools = _ordered_text_list(
+        [str(request.get("tool") or "") for request in planned_tool_requests]
+    )
+    planned_tools = [tool for tool in planned_tools if tool and tool != "desktop.permissions"]
+    if not planned_tools:
+        return {}
+    desktop_permission_preflight = getattr(broker, "desktop_permission_preflight", None)
+    if not callable(desktop_permission_preflight):
+        return {}
+    try:
+        result = desktop_permission_preflight()
+    except Exception:
+        return {}
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    permission_targets = _ordered_text_list(
+        [
+            *_string_list(result.get("permission_targets")),
+            *_string_list(result.get("missing_permissions")),
+            *_string_list(data.get("permission_targets")),
+            *_string_list(data.get("missing_permissions")),
+        ]
+    )
+    if not permission_targets and not result.get("permission_error"):
+        return {}
+    affected_tools = _ordered_text_list(
+        [
+            *_string_list(result.get("affected_tools")),
+            *_string_list(data.get("affected_tools")),
+        ]
+    )
+    impacted_tools = [
+        tool for tool in planned_tools if not affected_tools or tool in affected_tools
+    ]
+    if affected_tools and not impacted_tools:
+        return {}
+    recovery_hints = _ordered_text_list(
+        [
+            *_string_list(result.get("recovery_hints")),
+            *_string_list(data.get("recovery_hints")),
+            *_permission_target_hints(permission_targets),
+        ]
+    )
+    recovery_actions = _recovery_actions(result)
+    if not permission_targets and not recovery_hints and not recovery_actions:
+        return {}
+    return {
+        "tool": impacted_tools[0] if impacted_tools else planned_tools[0],
+        "tools": planned_tools,
+        "source": "daily_desktop_intent",
+        "status": "permission_preflight_available",
+        "permission_targets": permission_targets,
+        "affected_tools": impacted_tools or affected_tools,
+        "recovery_hints": recovery_hints,
+        "recovery_actions": recovery_actions,
+        "diagnostic_route": str(
+            result.get("diagnostic_route")
+            or data.get("diagnostic_route")
+            or "/yachiyo/readiness"
+        ),
     }
 
 

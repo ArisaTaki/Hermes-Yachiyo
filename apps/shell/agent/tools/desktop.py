@@ -838,6 +838,47 @@ def permissions() -> dict[str, Any]:
     }
 
 
+def permission_preflight() -> dict[str, Any]:
+    """Return cached desktop permission readiness without running fresh probes."""
+
+    from apps.shell.yachiyo_agent.desktop_permissions import (
+        cached_desktop_permission_missing_by_capability,
+    )
+
+    clean_missing = _clean_missing_permissions_by_capability(
+        cached_desktop_permission_missing_by_capability()
+    )
+    missing_targets = _ordered_unique(
+        target for targets in clean_missing.values() for target in targets
+    )
+    affected_tools = _affected_tools_for_missing_permissions(clean_missing)
+    ready = not missing_targets
+    summary = _desktop_permissions_summary(missing_targets, affected_tools)
+    recovery_hints = _permission_recovery_hints_for_targets(missing_targets)
+    recovery_actions = _permission_recovery_actions_for_targets(missing_targets)
+    return {
+        "ok": True,
+        "action": "desktop.permission_preflight",
+        "summary": summary,
+        "data": {
+            "ready": ready,
+            "missing_permissions": clean_missing,
+            "permission_targets": missing_targets,
+            "affected_tools": affected_tools,
+            "recovery_actions": recovery_actions,
+            "diagnostic_route": "/yachiyo/readiness",
+        },
+        "missing_permissions": missing_targets,
+        "permission_targets": missing_targets,
+        "affected_tools": affected_tools,
+        "recovery_hints": recovery_hints,
+        "recovery_actions": recovery_actions,
+        "diagnostic_route": "/yachiyo/readiness",
+        "permission_error": not ready,
+        "fallback_used": False,
+    }
+
+
 def running_apps() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.running_apps")

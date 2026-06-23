@@ -50,6 +50,23 @@ def desktop_permission_missing_by_capability(
     return _copy_missing(missing)
 
 
+def cached_desktop_permission_missing_by_capability(
+    *,
+    platform_name: str | None = None,
+) -> dict[str, list[str]]:
+    """Return cached permission diagnostics without running fresh probes."""
+
+    platform_id = _desktop_platform(platform_name)
+    if platform_id != "macos" or _PERMISSION_CACHE is None:
+        return {}
+    cache_platform, cache_time, cached = _PERMISSION_CACHE
+    if cache_platform != platform_id:
+        return {}
+    if time.monotonic() - cache_time > PERMISSION_PROBE_CACHE_TTL_SECONDS:
+        return {}
+    return _copy_missing(cached)
+
+
 def clear_desktop_permission_probe_cache() -> None:
     """Clear the readiness permission cache after explicit diagnostic changes."""
 

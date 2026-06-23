@@ -386,6 +386,9 @@ class ToolBroker:
     def desktop_permissions(self) -> dict[str, Any]:
         return desktop.permissions()
 
+    def desktop_permission_preflight(self) -> dict[str, Any]:
+        return desktop.permission_preflight()
+
     def desktop_running_apps(self) -> dict[str, Any]:
         return desktop.running_apps()
 

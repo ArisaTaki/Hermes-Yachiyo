@@ -2531,6 +2531,33 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
     assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
 
 
+def test_desktop_permission_preflight_reports_cached_missing_targets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.cached_desktop_permission_missing_by_capability",
+        lambda: {
+            "foreground_input": ["accessibility"],
+        },
+    )
+
+    result = desktop_mod.permission_preflight()
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.permission_preflight"
+    assert result["permission_error"] is True
+    assert result["permission_targets"] == ["accessibility"]
+    assert "desktop.safe_type_text" in result["affected_tools"]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        }
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
+
+
 def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(
