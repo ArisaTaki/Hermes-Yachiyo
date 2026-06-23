@@ -1428,7 +1428,7 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开下载文件夹",
+        "open Finder and open Downloads folder",
     )
 
     assert open_calls == ["~/Downloads"]
@@ -1464,12 +1464,12 @@ def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "在 Finder 中显示 ~/Downloads/report.pdf",
+        "open Finder and show Downloads folder",
     )
 
-    assert reveal_calls == ["~/Downloads/report.pdf"]
+    assert reveal_calls == ["~/Downloads"]
     assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "已在 Finder 中显示：~/Downloads/report.pdf。"
+    assert agent_task["summary"] == "已在 Finder 中显示：~/Downloads。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"

@@ -933,6 +933,14 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if windows_payload is not None:
         candidates.append(_request("desktop.windows", windows_payload))
 
+    open_path = _desktop_open_path(text)
+    if open_path:
+        candidates.append(_request("desktop.open_path", {"path": open_path}))
+
+    reveal_path = _desktop_reveal_path(text)
+    if reveal_path:
+        candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
+
     app_status_name = _app_status_name(text)
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
@@ -978,14 +986,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         search_url = _browser_search_url(text)
         if search_url:
             candidates.append(_request("browser.open_url", {"url": search_url}))
-
-    open_path = _desktop_open_path(text)
-    if open_path:
-        candidates.append(_request("desktop.open_path", {"path": open_path}))
-
-    reveal_path = _desktop_reveal_path(text)
-    if reveal_path:
-        candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
 
     if _is_apple_music_open_and_play_request(text):
         candidates.append(_request("media.apple_music_open_and_play", {}))
@@ -2101,6 +2101,7 @@ def _desktop_open_path(text: str) -> str:
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|开启)\s*(?P<path>{path_token})",
         rf"\bopen\s+(?P<path>{path_token})\b",
+        r"\bopen\s+(?P<path>[^.!?]+)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<path>[^。！？!?，,]+?)\s*(?:打开|开启)(?:一下|下)?"
         r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
@@ -2140,6 +2141,7 @@ def _desktop_reveal_path(text: str) -> str:
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|显示|显示一下|定位|找一下|找到)\s*(?P<path>[^。！？!?，,]+)",
         r"(?:show|reveal|locate|open)\s+(?P<path>[^.!?]+?)\s+in\s+(?:the\s+)?finder",
+        r"(?:show|reveal|locate)\s+(?P<path>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -2154,8 +2156,9 @@ def _desktop_reveal_path(text: str) -> str:
 def _strip_finder_path_prefix(text: str) -> str:
     return re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)\s*"
-        r"(?:并|然后|后|之后|再)\s*",
+        r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)|"
+        r"(?:open|launch|start)\s+(?:the\s+)?(?:finder|file\s+manager|file\s+browser))\s*"
+        r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))\s*",
         "",
         text,
         flags=re.IGNORECASE,

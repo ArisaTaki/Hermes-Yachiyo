@@ -1872,6 +1872,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("open Finder and show Downloads folder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("open Finder then show Downloads folder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("launch Finder and show Desktop folder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Desktop"},
+    }
+    assert daily_desktop_intent_tool_request("open Finder and open Downloads folder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
     assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/测试文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
