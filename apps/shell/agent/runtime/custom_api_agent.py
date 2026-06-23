@@ -24,6 +24,8 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.focus_and_safe_key",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -86,6 +88,8 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.focus_and_safe_key": "聚焦应用并按导航键",
     "app.open_and_safe_scroll": "打开应用并滚动",
     "app.focus_and_safe_scroll": "聚焦应用并滚动",
+    "app.open_and_safe_click": "打开应用并点击",
+    "app.focus_and_safe_click": "聚焦应用并点击",
     "app.show": "显示应用",
     "app.hide": "隐藏应用",
     "app.minimize": "最小化应用",
@@ -717,6 +721,16 @@ class RuntimeCustomApiAgentLoop:
                     return f"已{action}{target or detail}。"
                 target = _display_target_name(app_name, "并滚动前台界面")
                 return result_summary or f"已{action}{target or '并滚动前台界面'}。"
+            if tool_name in {"app.open_and_safe_click", "app.focus_and_safe_click"}:
+                app_name = _payload_text(result, planned_input, "app_name")
+                action = "打开" if tool_name.startswith("app.open") else "切到"
+                click = _click_text(result, planned_input)
+                if click:
+                    detail = f"并点击前台位置：{click}"
+                    target = _display_target_name(app_name, detail)
+                    return f"已{action}{target or detail}。"
+                target = _display_target_name(app_name, "并点击前台界面")
+                return result_summary or f"已{action}{target or '并点击前台界面'}。"
             if tool_name == "app.show":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -1077,7 +1091,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
@@ -1096,6 +1110,7 @@ class RuntimeCustomApiAgentLoop:
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
+            "map app open/focus followed by explicit single-click coordinates to app.open_and_safe_click or app.focus_and_safe_click; "
             "map explicit foreground navigation keys such as Escape, Tab, arrow keys, Home, End, Page Up, and Page Down to desktop.safe_key; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "

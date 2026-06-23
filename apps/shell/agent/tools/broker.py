@@ -579,6 +579,47 @@ class ToolBroker:
             ),
         )
 
+    def app_open_and_safe_click(
+        self,
+        app_name: str,
+        x: Any,
+        y: Any,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_safe_click",
+            lambda: self._app_foreground_action(
+                "app.open_and_safe_click",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=(
+                    "safe_click",
+                    lambda: desktop.desktop_safe_click(x, y),
+                ),
+            ),
+        )
+
+    def app_focus_and_safe_click(
+        self,
+        app_name: str,
+        x: Any,
+        y: Any,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_safe_click",
+            lambda: self._app_foreground_action(
+                "app.focus_and_safe_click",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=(
+                    "safe_click",
+                    lambda: desktop.desktop_safe_click(x, y),
+                ),
+            ),
+        )
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 

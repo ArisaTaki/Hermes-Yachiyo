@@ -290,6 +290,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.focus_and_safe_key",
     "app.focus_and_safe_scroll",
+    "app.focus_and_safe_click",
     "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
@@ -297,6 +298,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.open_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.open_and_safe_scroll",
+    "app.open_and_safe_click",
     "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
@@ -360,6 +362,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_key",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
@@ -388,6 +392,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_key",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
 }
 
 _FOREGROUND_ACTION_TOOLS = {
@@ -463,12 +469,22 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
 
 
 def _split_daily_desktop_sequence(text: str) -> list[str]:
+    coordinate_comma = "__YACHIYO_COORD_COMMA__"
+    protected_text = re.sub(
+        r"(?P<x>\d+(?:\.\d+)?)\s*[,，]\s*(?P<y>\d+(?:\.\d+)?)",
+        lambda match: f"{match.group('x')}{coordinate_comma}{match.group('y')}",
+        str(text or "").strip(),
+    )
     parts = re.split(
         r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|(?:然后|接着|之后|随后|并且|并)\s*)",
-        str(text or "").strip(),
+        protected_text,
         flags=re.IGNORECASE,
     )
-    return [_strip_query(part) for part in parts if _strip_query(part)]
+    return [
+        _strip_query(part.replace(coordinate_comma, ", "))
+        for part in parts
+        if _strip_query(part.replace(coordinate_comma, ", "))
+    ]
 
 
 def _strip_sequence_clause_prefix(text: str) -> str:
@@ -551,6 +567,12 @@ def _app_foreground_sequence_composite(
             return _request(
                 f"app.{mode}_and_safe_scroll",
                 {"app_name": app_name, "direction": direction, "pages": pages},
+            )
+    if action_tool == "desktop.safe_click":
+        if action_input.get("x") is not None and action_input.get("y") is not None:
+            return _request(
+                f"app.{mode}_and_safe_click",
+                {"app_name": app_name, "x": action_input.get("x"), "y": action_input.get("y")},
             )
     return None
 
@@ -1855,6 +1877,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_safe_scroll",
             "input": {"app_name": app_name, **safe_scroll},
+        }
+    safe_click = _desktop_safe_click(followup)
+    if safe_click:
+        return {
+            "tool": f"app.{mode}_and_safe_click",
+            "input": {"app_name": app_name, **safe_click},
         }
     safe_key = _desktop_safe_key(followup)
     if safe_key:

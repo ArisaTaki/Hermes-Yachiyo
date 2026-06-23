@@ -46,6 +46,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_key": "app_focus_and_safe_key",
     "app.open_and_safe_scroll": "app_open_and_safe_scroll",
     "app.focus_and_safe_scroll": "app_focus_and_safe_scroll",
+    "app.open_and_safe_click": "app_open_and_safe_click",
+    "app.focus_and_safe_click": "app_focus_and_safe_click",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -126,6 +128,8 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.focus_and_safe_key",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -233,7 +237,12 @@ class ToolDescriptor:
         if extra_fields:
             raise AgentRuntimeError(f"{self.name} 参数包含未声明字段：{', '.join(extra_fields)}")
         for key in self.required:
-            if self.name in {"desktop.click", "desktop.safe_click"} and key in {"x", "y"}:
+            if self.name in {
+                "desktop.click",
+                "desktop.safe_click",
+                "app.open_and_safe_click",
+                "app.focus_and_safe_click",
+            } and key in {"x", "y"}:
                 if payload.get(key) in (None, ""):
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
                 continue
@@ -448,6 +457,19 @@ class ToolDescriptor:
                 raise AgentRuntimeError(f"{self.name} 参数 pages 必须是 1-10 的整数")
             if pages < 1 or pages > 10:
                 raise AgentRuntimeError(f"{self.name} 参数 pages 必须是 1-10 的整数")
+        if self.name in {"app.open_and_safe_click", "app.focus_and_safe_click"}:
+            for key in ("x", "y"):
+                value = payload.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
+                try:
+                    coordinate = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRuntimeError(
+                        f"{self.name} 参数 {key} 必须是非负坐标数字"
+                    ) from exc
+                if coordinate < 0 or coordinate > 100000:
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.safe_click":
@@ -1070,6 +1092,48 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "direction"),
+    ),
+    "app.open_and_safe_click": ToolDescriptor(
+        name="app.open_and_safe_click",
+        description=(
+            "Open and focus a local desktop application, then single-click explicit "
+            "user-provided foreground coordinates while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen x coordinate in pixels.",
+            },
+            "y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen y coordinate in pixels.",
+            },
+        },
+        required=("app_name", "x", "y"),
+    ),
+    "app.focus_and_safe_click": ToolDescriptor(
+        name="app.focus_and_safe_click",
+        description=(
+            "Focus a local desktop application, then single-click explicit user-provided "
+            "foreground coordinates while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen x coordinate in pixels.",
+            },
+            "y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "User-provided screen y coordinate in pixels.",
+            },
+        },
+        required=("app_name", "x", "y"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

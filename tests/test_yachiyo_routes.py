@@ -2905,6 +2905,120 @@ async def test_yachiyo_task_route_executes_app_open_and_safe_scroll_without_mode
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_app_open_and_safe_click_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-open-safe-click.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-open-safe-click.db",
+        workspace_dir=tmp_path / "agent-runtime-route-open-safe-click",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-open-safe-click")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app safe click public task should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_click(x: Any, y: Any) -> dict[str, Any]:
+        calls.append(("click", x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked foreground coordinates",
+            "data": {
+                "x": int(x),
+                "y": int(y),
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="打开 Chrome 并点击 120, 240",
+                conversation_id="chat-main-open-safe-click",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-open-safe-click-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-open-safe-click", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert calls == [("open", "Google Chrome"), ("focus", "Google Chrome"), ("click", 120, 240)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已打开 Google Chrome 并点击前台位置：120, 240。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "app.open_and_safe_click"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "x": 120,
+            "y": 240,
+        }
+        assert timeline["tool_calls"][-1]["tool_name"] == "app.open_and_safe_click"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["foreground_action"] == "safe_click"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_safe_click_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6691,6 +6805,26 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "up",
         "down",
     ]
+    assert tools["app.open_and_safe_click"]["capability_id"] == "foreground_input"
+    assert tools["app.open_and_safe_click"]["risk_level"] == "low"
+    assert tools["app.open_and_safe_click"]["input_schema"]["required"] == [
+        "app_name",
+        "x",
+        "y",
+    ]
+    assert tools["app.open_and_safe_click"]["input_schema"]["properties"]["x"]["type"] == "number"
+    assert any(
+        "coordinates explicitly provided by the user" in note
+        for note in tools["app.open_and_safe_click"]["fallback_notes"]
+    )
+    assert tools["app.focus_and_safe_click"]["capability_id"] == "foreground_input"
+    assert tools["app.focus_and_safe_click"]["risk_level"] == "low"
+    assert tools["app.focus_and_safe_click"]["input_schema"]["required"] == [
+        "app_name",
+        "x",
+        "y",
+    ]
+    assert tools["app.focus_and_safe_click"]["input_schema"]["properties"]["y"]["type"] == "number"
     assert tools["app.show"]["capability_id"] == "app_control"
     assert tools["app.show"]["risk_level"] == "low"
     assert tools["app.show"]["input_schema"]["required"] == ["app_name"]
