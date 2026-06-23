@@ -1832,6 +1832,35 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
     assert "可直接打开：打开 Apple Music、打开自动化权限。" in result
 
 
+def test_main_chat_desktop_intent_summarizes_apple_music_search_fallback() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_play",
+        {"query": "超时空辉夜姬"},
+        {
+            "ok": False,
+            "error": "Music did not return a playable track",
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "apple_music_search",
+            "fallback_result": {
+                "ok": True,
+                "action": "media.apple_music.search",
+                "data": {
+                    "query": "超时空辉夜姬",
+                    "url": "https://music.apple.com/search?term=%E8%B6%85",
+                },
+            },
+            "data": {
+                "query": "超时空辉夜姬",
+                "status": "not_found",
+                "search_opened": True,
+            },
+        },
+    )
+
+    assert result == "没能直接播放 超时空辉夜姬，但已打开 Apple Music 搜索。"
+
+
 def test_main_chat_desktop_intent_permission_failure_records_recovery_event() -> None:
     appended_events: list[dict[str, Any]] = []
     loop = RuntimeCustomApiAgentLoop(

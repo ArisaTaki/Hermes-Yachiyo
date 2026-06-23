@@ -590,6 +590,12 @@ class RuntimeCustomApiAgentLoop:
         fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
         if tool_name == "media.apple_music_play" and fallback.get("ok"):
             query = _payload_text(result, planned_input, "query")
+            if str(fallback.get("action") or "") == "media.apple_music.search":
+                return (
+                    f"没能直接播放 {query}，但已打开 Apple Music 搜索。"
+                    if query
+                    else "没能直接播放，但已打开 Apple Music 搜索。"
+                )
             return (
                 f"没能直接播放 {query}，但已打开 Apple Music。"
                 if query

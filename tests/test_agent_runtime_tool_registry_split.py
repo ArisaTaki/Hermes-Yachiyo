@@ -1993,6 +1993,71 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
     assert result["fallback_used"] is True
 
 
+def test_apple_music_play_opens_search_when_track_is_not_in_library(monkeypatch) -> None:
+    subprocess_calls = []
+
+    def fake_run(command, *, capture_output=None, text=None, timeout=None, check=None):
+        subprocess_calls.append(
+            {
+                "command": command,
+                "capture_output": capture_output,
+                "text": text,
+                "timeout": timeout,
+                "check": check,
+            }
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": "not_found|超时空辉夜姬|",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    search_url = "https://music.apple.com/search?term=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
+    assert result["ok"] is False
+    assert result["action"] == "media.apple_music_play"
+    assert result["summary"] == "Could not directly play 超时空辉夜姬; opened Apple Music search."
+    assert result["data"] == {
+        "query": "超时空辉夜姬",
+        "status": "not_found",
+        "search_url": search_url,
+        "search_opened": True,
+    }
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "apple_music_search"
+    assert result["fallback_result"] == {
+        "ok": True,
+        "action": "media.apple_music.search",
+        "summary": "Opened Apple Music search for 超时空辉夜姬",
+        "data": {
+            "query": "超时空辉夜姬",
+            "url": search_url,
+            "open_target": "apple_music_search",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert subprocess_calls == [
+        {
+            "command": ["open", "-a", "Music", search_url],
+            "capture_output": True,
+            "text": True,
+            "timeout": 10,
+            "check": False,
+        }
+    ]
+
+
 def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> None:
     calls = []
 

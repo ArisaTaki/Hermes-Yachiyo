@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 _COMMON_FOLDER_TARGETS = {
     "desktop": "Desktop",
@@ -1416,15 +1417,25 @@ def apple_music_play(query: str) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": False,
         }
-    fallback = app_open("Music")
+    fallback = _open_apple_music_search(clean_query)
     payload = {
         "ok": False,
         "action": "media.apple_music_play",
-        "summary": f"Could not directly play {clean_query}; opened Music for manual search.",
+        "summary": (
+            f"Could not directly play {clean_query}; opened Apple Music search."
+            if fallback.get("ok")
+            else f"Could not directly play {clean_query}; Apple Music search fallback failed."
+        ),
         "error": second or first or "Music did not return a playable track",
-        "data": {"query": clean_query, "status": status},
+        "data": {
+            "query": clean_query,
+            "status": status,
+            "search_url": str((fallback.get("data") or {}).get("url") or ""),
+            "search_opened": bool(fallback.get("ok")),
+        },
         "permission_error": status == "error" and _looks_like_permission_error(f"{first}\n{second}"),
         "fallback_used": bool(fallback.get("ok")),
+        "fallback": "apple_music_search",
         "fallback_result": fallback,
     }
     return _with_permission_metadata("media.apple_music_play", payload)
@@ -1516,6 +1527,39 @@ def apple_music_control(action: str) -> dict[str, Any]:
         "fallback_result": fallback,
     }
     return _with_permission_metadata("media.apple_music_control", payload)
+
+
+def _open_apple_music_search(query: str) -> dict[str, Any]:
+    clean_query = _clean_required(query, "query")
+    search_url = f"https://music.apple.com/search?term={quote_plus(clean_query)}"
+    try:
+        result = subprocess.run(
+            ["open", "-a", "Music", search_url],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        payload = _error("media.apple_music.search", exc)
+        payload["data"] = {"query": clean_query, "url": search_url}
+        return payload
+    if result.returncode != 0:
+        payload = _failed("media.apple_music.search", result)
+        payload["data"] = {"query": clean_query, "url": search_url}
+        return payload
+    return {
+        "ok": True,
+        "action": "media.apple_music.search",
+        "summary": f"Opened Apple Music search for {clean_query}",
+        "data": {
+            "query": clean_query,
+            "url": search_url,
+            "open_target": "apple_music_search",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
 
 
 def system_volume(action: str, *, level: Any = None, step: Any = None) -> dict[str, Any]:
