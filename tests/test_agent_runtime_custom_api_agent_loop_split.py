@@ -1098,6 +1098,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Spotify"},
     }
     assert daily_desktop_intent_tool_request("播放 Spotify", ["media.apple_music_play"]) is None
+    assert daily_desktop_intent_tool_request("打开 Spotify 并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_play"]) is None
+    assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_control"]) is None
+    assert daily_desktop_intent_tool_request("打开网易云音乐并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网易云音乐"},
+    }
     assert daily_desktop_intent_tool_request("打开音乐播放器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -1114,6 +1126,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "play"},
     }
     assert daily_desktop_intent_tool_request("来点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("随便放点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("放点歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("帮我播放点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("打开音乐并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},

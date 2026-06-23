@@ -1301,6 +1301,9 @@ def _media_app_open_name(text: str) -> str:
     lowered = text.lower()
     if not re.search(r"(?:播放|放|打开|启动|运行|open|launch|start|play)", lowered):
         return ""
+    generic_play_app = _music_app_generic_play_open_name(text)
+    if generic_play_app:
+        return generic_play_app
     for pattern in (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:播放|放|打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+)",
@@ -1327,6 +1330,25 @@ def _known_music_app_name(value: str) -> str:
     app_compact = re.sub(r"[\s._-]+", "", app_name.lower())
     if raw_compact in _MUSIC_APP_COMPACTS or app_compact in _MUSIC_APP_COMPACTS:
         return app_name
+    return ""
+
+
+def _music_app_generic_play_open_name(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:(?:并|然后|后|之后|再)\s*)?(?:开始)?(?:播放|放一下|播放一下)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
+        r"(?:play|start\s+playing)[.!?]*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _known_music_app_name(match.group("app"))
+        if app_name:
+            return app_name
     return ""
 
 
@@ -1468,7 +1490,7 @@ def _strip_window_title(value: str) -> str:
 
 
 def _music_query(text: str) -> str:
-    if _looks_like_generic_music_play_request(text):
+    if _looks_like_generic_music_play_request(text) or _music_app_generic_play_open_name(text):
         return ""
     patterns = (
         r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
@@ -1561,6 +1583,8 @@ def _music_control_action(text: str) -> str:
         lowered,
     ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
         return "play"
+    if _music_app_generic_play_open_name(text) == "Music":
+        return "play"
     if re.search(
         r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?(?:播放|放)一下"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
@@ -1588,7 +1612,9 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
     return bool(
         re.search(
             r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
-            r"(?:(?:来点|来些)(?:音乐|歌|歌曲)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
+            r"(?:随便|随机)?"
+            r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
+            r"(?:来点|来些)(?:音乐|歌|歌曲)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
             r"(?:放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             lowered,

@@ -184,7 +184,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         fake_apple_music_control,
     )
     try:
-        result = api.send_message("能否帮我播放apple Music?")
+        result = api.send_message("随便放点音乐")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -903,7 +903,7 @@ def test_send_message_opens_named_music_app_without_model(tmp_path, monkeypatch)
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     try:
-        result = api.send_message("播放网易云音乐")
+        result = api.send_message("打开网易云音乐并播放")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
