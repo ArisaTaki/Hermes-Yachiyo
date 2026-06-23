@@ -16,6 +16,9 @@ export type DesktopExecutionCapabilitySnapshot = {
   platform?: string;
   missing_permissions?: string[];
   tools?: string[];
+  available_tools?: string[];
+  degraded_tools?: string[];
+  unavailable_tools?: string[];
   risk_default?: DesktopExecutionRisk;
   diagnostic_route?: string | null;
 };

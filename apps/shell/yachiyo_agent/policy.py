@@ -227,6 +227,14 @@ DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES: dict[str, str | None] = {
     "browser_control": "/ui/native-agent/diagnostics/cache",
 }
 
+DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "browser.open_url": ("chrome_cdp",),
+    "browser.screenshot": ("chrome_cdp",),
+    "browser.click": ("chrome_cdp",),
+    "browser.type_text": ("chrome_cdp",),
+    "media.apple_music_play": ("automation",),
+}
+
 GROUP_TOOL_POLICY_PRESETS: dict[str, tuple[str, ...]] = {
     "desktop_execution": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
     "desktop": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
@@ -347,6 +355,9 @@ def desktop_execution_capability_snapshots(
     missing_by_capability = missing_permissions or {}
     capability_models: dict[str, DesktopExecutionCapabilitySnapshot] = {}
     child_availability: dict[str, bool] = {}
+    child_available_tools: dict[str, list[str]] = {}
+    child_degraded_tools: dict[str, list[str]] = {}
+    child_unavailable_tools: dict[str, list[str]] = {}
 
     for capability_id in DESKTOP_EXECUTION_CAPABILITY_IDS:
         if capability_id == "desktop_execution":
@@ -355,22 +366,57 @@ def desktop_execution_capability_snapshots(
         missing = _missing_permissions(missing_by_capability, capability_id)
         available = supported and bool(tools) and all(tool in registered for tool in tools)
         available = available and not missing
+        available_tools, degraded_tools, unavailable_tools = _capability_tool_availability(
+            capability_id,
+            tools,
+            registered=registered,
+            supported=supported,
+            missing_by_capability=missing_by_capability,
+        )
         child_availability[capability_id] = available
+        child_available_tools[capability_id] = available_tools
+        child_degraded_tools[capability_id] = degraded_tools
+        child_unavailable_tools[capability_id] = unavailable_tools
         capability_models[capability_id] = DesktopExecutionCapabilitySnapshot(
             available=available,
             platform=platform_id,
             missing_permissions=missing,
             tools=tools,
+            available_tools=available_tools,
+            degraded_tools=degraded_tools,
+            unavailable_tools=unavailable_tools,
             risk_default=DESKTOP_CAPABILITY_RISK_DEFAULTS[capability_id],
             diagnostic_route=DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES[capability_id],
         )
 
     root_missing = _missing_permissions(missing_by_capability, "desktop_execution")
+    root_available_tools = _ordered_unique(
+        tool
+        for capability_id in DESKTOP_EXECUTION_CAPABILITY_IDS
+        if capability_id != "desktop_execution"
+        for tool in child_available_tools.get(capability_id, [])
+    )
+    root_degraded_tools = _ordered_unique(
+        tool
+        for capability_id in DESKTOP_EXECUTION_CAPABILITY_IDS
+        if capability_id != "desktop_execution"
+        for tool in child_degraded_tools.get(capability_id, [])
+    )
+    root_unavailable_tools = _ordered_unique(
+        tool
+        for tool in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
+        if tool not in root_available_tools and tool not in root_degraded_tools
+    )
     capability_models["desktop_execution"] = DesktopExecutionCapabilitySnapshot(
         available=supported and any(child_availability.values()) and not root_missing,
         platform=platform_id,
         missing_permissions=root_missing,
         tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"]),
+        available_tools=[] if root_missing else root_available_tools,
+        degraded_tools=[] if root_missing else root_degraded_tools,
+        unavailable_tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"])
+        if root_missing
+        else root_unavailable_tools,
         risk_default=DESKTOP_CAPABILITY_RISK_DEFAULTS["desktop_execution"],
         diagnostic_route=DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES["desktop_execution"],
     )
@@ -408,3 +454,91 @@ def _missing_permissions(
 ) -> list[str]:
     values = missing_permissions.get(capability_id, [])
     return [str(value or "").strip() for value in values if str(value or "").strip()]
+
+
+def _capability_tool_availability(
+    capability_id: str,
+    tools: Iterable[str],
+    *,
+    registered: set[str],
+    supported: bool,
+    missing_by_capability: Mapping[str, Iterable[str]],
+) -> tuple[list[str], list[str], list[str]]:
+    available_tools: list[str] = []
+    degraded_tools: list[str] = []
+    unavailable_tools: list[str] = []
+    for tool in tools:
+        clean_tool = str(tool or "").strip()
+        if not clean_tool:
+            continue
+        missing = _tool_missing_permissions(
+            clean_tool,
+            capability_id=capability_id,
+            missing_by_capability=missing_by_capability,
+        )
+        if supported and clean_tool in registered and not missing:
+            available_tools.append(clean_tool)
+        elif supported and clean_tool in registered and _tool_degrades_with_permissions(
+            clean_tool,
+            missing,
+            missing_by_capability=missing_by_capability,
+        ):
+            degraded_tools.append(clean_tool)
+        else:
+            unavailable_tools.append(clean_tool)
+    return available_tools, degraded_tools, unavailable_tools
+
+
+def _tool_missing_permissions(
+    tool: str,
+    *,
+    capability_id: str,
+    missing_by_capability: Mapping[str, Iterable[str]],
+) -> list[str]:
+    values = [*_missing_permissions(missing_by_capability, "desktop_execution")]
+    capability_missing = _missing_permissions(missing_by_capability, capability_id)
+    if tool == "app.open":
+        values.extend(value for value in capability_missing if value == "open_command")
+    elif tool == "app.focus":
+        values.extend(value for value in capability_missing if value != "open_command")
+    else:
+        values.extend(capability_missing)
+    if tool == "browser.screenshot":
+        values.extend(_missing_permissions(missing_by_capability, "screen_capture"))
+    if tool in {"browser.click", "browser.type_text"}:
+        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+    if tool == "media.apple_music_play":
+        values.extend(
+            value
+            for value in _missing_permissions(missing_by_capability, "app_control")
+            if value == "open_command"
+        )
+    return _ordered_unique(values)
+
+
+def _tool_degrades_with_permissions(
+    tool: str,
+    missing: Iterable[str],
+    *,
+    missing_by_capability: Mapping[str, Iterable[str]],
+) -> bool:
+    missing_values = set(_ordered_unique(missing))
+    fallback_permissions = set(DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS.get(tool, ()))
+    if not missing_values or not fallback_permissions or not missing_values <= fallback_permissions:
+        return False
+    if tool == "browser.screenshot":
+        return not _missing_permissions(missing_by_capability, "screen_capture")
+    if tool in {"browser.click", "browser.type_text"}:
+        return not _missing_permissions(missing_by_capability, "foreground_input")
+    if tool == "media.apple_music_play":
+        return "open_command" not in _missing_permissions(missing_by_capability, "app_control")
+    return True
+
+
+def _ordered_unique(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result

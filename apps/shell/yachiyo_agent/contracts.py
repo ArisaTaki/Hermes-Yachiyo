@@ -40,6 +40,9 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     platform: str = ""
     missing_permissions: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
+    available_tools: list[str] = Field(default_factory=list)
+    degraded_tools: list[str] = Field(default_factory=list)
+    unavailable_tools: list[str] = Field(default_factory=list)
     risk_default: DesktopExecutionRisk = "low"
     diagnostic_route: str | None = None
 

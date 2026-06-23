@@ -323,6 +323,9 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         "platform",
         "missing_permissions",
         "tools",
+        "available_tools",
+        "degraded_tools",
+        "unavailable_tools",
         "risk_default",
         "diagnostic_route",
     ]
@@ -389,7 +392,13 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
     ]
     assert capabilities["desktop_execution"]["available"] is True
     assert capabilities["screen_capture"]["available"] is True
+    assert capabilities["screen_capture"]["available_tools"] == ["screen.capture"]
     assert capabilities["foreground_input"]["available"] is False
+    assert capabilities["foreground_input"]["unavailable_tools"] == [
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
+    ]
     assert capabilities["foreground_input"]["risk_default"] == "medium"
     assert capabilities["browser_control"]["available"] is False
     assert capabilities["screen_capture"]["diagnostic_route"] == "/screen/current"
@@ -420,6 +429,56 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
     assert capabilities["foreground_input"]["available"] is False
     assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
     assert capabilities["media_control"]["available"] is True
+    assert capabilities["media_control"]["available_tools"] == ["media.apple_music_play"]
+
+
+def test_desktop_execution_capability_policy_reports_tool_level_degradation() -> None:
+    capabilities = desktop_execution_capability_snapshots(
+        platform_name="Darwin",
+        registered_tools={
+            "screen.capture",
+            "desktop.active_window",
+            "app.open",
+            "app.focus",
+            "media.apple_music_play",
+            "desktop.hotkey",
+            "desktop.type_text",
+            "desktop.click",
+            "browser.open_url",
+            "browser.current_page",
+            "browser.click",
+            "browser.type_text",
+            "browser.extract_text",
+            "browser.screenshot",
+        },
+        missing_permissions={
+            "app_control": ["automation"],
+            "media_control": ["automation"],
+            "browser_control": ["chrome_cdp"],
+        },
+    )
+
+    app_control = capabilities["app_control"]
+    media_control = capabilities["media_control"]
+    browser_control = capabilities["browser_control"]
+    root = capabilities["desktop_execution"]
+
+    assert app_control["available"] is False
+    assert app_control["available_tools"] == ["app.open"]
+    assert app_control["unavailable_tools"] == ["app.focus"]
+    assert media_control["available"] is False
+    assert media_control["degraded_tools"] == ["media.apple_music_play"]
+    assert browser_control["available"] is False
+    assert browser_control["degraded_tools"] == [
+        "browser.open_url",
+        "browser.click",
+        "browser.type_text",
+        "browser.screenshot",
+    ]
+    assert "browser.current_page" in browser_control["unavailable_tools"]
+    assert "browser.extract_text" in browser_control["unavailable_tools"]
+    assert "app.open" in root["available_tools"]
+    assert "media.apple_music_play" in root["degraded_tools"]
 
 
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
