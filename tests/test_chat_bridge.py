@@ -1882,6 +1882,12 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
             "tool": "app.open",
             "input": {"app_name": "辅助功能权限"},
             "permission_target": "accessibility",
+            "recovery_retry_input": {"x": 120, "y": 240},
+            "recovery_retry_prompt": "点击 120, 240",
+            "recovery_retry_tool": "desktop.safe_click",
+            "retry_input": {"x": 120, "y": 240},
+            "retry_prompt": "点击 120, 240",
+            "retry_tool": "desktop.safe_click",
             "risk_level": "low",
         }
     ]
@@ -1927,6 +1933,12 @@ def test_chat_bridge_quick_message_surfaces_browser_cdp_recovery(
             "tool": "app.open",
             "input": {"app_name": "Google Chrome"},
             "permission_target": "chrome_cdp",
+            "recovery_retry_input": {},
+            "recovery_retry_prompt": "查看当前网页",
+            "recovery_retry_tool": "browser.current_page",
+            "retry_input": {},
+            "retry_prompt": "查看当前网页",
+            "retry_tool": "browser.current_page",
             "risk_level": "low",
         }
     ]

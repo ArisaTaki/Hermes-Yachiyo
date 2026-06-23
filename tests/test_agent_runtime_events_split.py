@@ -74,6 +74,14 @@ def test_run_event_redaction_preserves_recovery_action_input_shape() -> None:
                         "token": "sk-runtime-recovery-secret123456",
                     },
                     "permission_target": "screen_recording",
+                    "retry_input": {
+                        "reason": "user asked to capture the screen",
+                        "token": "sk-runtime-retry-secret123456",
+                    },
+                    "recovery_retry_input": {
+                        "reason": "user asked to capture the screen",
+                        "token": "sk-runtime-retry-secret123456",
+                    },
                     "risk_level": "low",
                 }
             ]
@@ -85,7 +93,12 @@ def test_run_event_redaction_preserves_recovery_action_input_shape() -> None:
 
     assert action["input"]["app_name"] == "屏幕录制权限"
     assert action["input"]["token"] == "[redacted]"
+    assert action["retry_input"]["reason"] == "user asked to capture the screen"
+    assert action["retry_input"]["token"] == "[redacted]"
+    assert action["recovery_retry_input"]["reason"] == "user asked to capture the screen"
+    assert action["recovery_retry_input"]["token"] == "[redacted]"
     assert "sk-runtime-recovery-secret123456" not in json.dumps(redacted, ensure_ascii=False)
+    assert "sk-runtime-retry-secret123456" not in json.dumps(redacted, ensure_ascii=False)
 
 
 def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:

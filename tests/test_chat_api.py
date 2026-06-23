@@ -907,6 +907,18 @@ def test_send_message_surfaces_music_permission_recovery_when_fallback_opens_mus
             "risk_level": "low",
         },
     ]
+    expected_recovery_actions = [
+        {
+            **action,
+            "recovery_retry_input": {"query": "超时空辉夜姬"},
+            "recovery_retry_prompt": "播放超时空辉夜姬",
+            "recovery_retry_tool": "media.apple_music_play",
+            "retry_input": {"query": "超时空辉夜姬"},
+            "retry_prompt": "播放超时空辉夜姬",
+            "retry_tool": "media.apple_music_play",
+        }
+        for action in recovery_actions
+    ]
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -974,7 +986,7 @@ def test_send_message_surfaces_music_permission_recovery_when_fallback_opens_mus
         assert tool_call["status"] == "failed"
         assert tool_call["output_preview"]["permission_error"] is True
         assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
-        assert tool_call["output_preview"]["recovery_actions"] == recovery_actions
+        assert tool_call["output_preview"]["recovery_actions"] == expected_recovery_actions
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert task.result == summary
@@ -984,7 +996,7 @@ def test_send_message_surfaces_music_permission_recovery_when_fallback_opens_mus
         assert "agent.desktop.permission_recovery" in event_types
         assert recovery_event["payload"]["permission_targets"] == ["music_app", "automation"]
         assert recovery_event["payload"]["affected_tools"] == ["media.apple_music_play"]
-        assert recovery_event["payload"]["recovery_actions"] == recovery_actions
+        assert recovery_event["payload"]["recovery_actions"] == expected_recovery_actions
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
     finally:
@@ -2044,6 +2056,12 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
                 "tool": "app.open",
                 "input": {"app_name": "屏幕录制权限"},
                 "permission_target": "screen_recording",
+                "recovery_retry_input": {"reason": "user asked to capture the screen"},
+                "recovery_retry_prompt": "截图当前屏幕",
+                "recovery_retry_tool": "screen.capture",
+                "retry_input": {"reason": "user asked to capture the screen"},
+                "retry_prompt": "截图当前屏幕",
+                "retry_tool": "screen.capture",
                 "risk_level": "low",
             }
         ]
@@ -2217,6 +2235,12 @@ def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatc
                 "tool": "app.open",
                 "input": {"app_name": "Google Chrome"},
                 "permission_target": "chrome_cdp",
+                "recovery_retry_input": {},
+                "recovery_retry_prompt": "查看当前网页",
+                "recovery_retry_tool": "browser.current_page",
+                "retry_input": {},
+                "retry_prompt": "查看当前网页",
+                "retry_tool": "browser.current_page",
                 "risk_level": "low",
             }
         ]

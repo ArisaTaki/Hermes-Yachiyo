@@ -86,9 +86,10 @@ def _restore_recovery_actions(source: Any, target: Any) -> Any:
             restored.append(target_action)
             continue
         action = dict(target_action)
-        source_input = source_action.get("input")
-        if isinstance(source_input, dict):
-            action["input"] = redact_json_value(source_input)
+        for input_key in ("input", "retry_input", "recovery_retry_input"):
+            source_input = source_action.get(input_key)
+            if isinstance(source_input, dict):
+                action[input_key] = redact_json_value(source_input)
         restored.append(action)
     return restored
 

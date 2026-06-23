@@ -3418,6 +3418,17 @@ def test_main_chat_desktop_intent_permission_failure_records_recovery_event() ->
             }
         ],
     }
+    expected_recovery_actions = [
+        {
+            **result_payload["recovery_actions"][0],
+            "recovery_retry_input": {"reason": "user asked to capture the screen"},
+            "recovery_retry_prompt": "截图当前屏幕",
+            "recovery_retry_tool": "screen.capture",
+            "retry_input": {"reason": "user asked to capture the screen"},
+            "retry_prompt": "截图当前屏幕",
+            "retry_tool": "screen.capture",
+        }
+    ]
     timeline = [
         _timeline(
             "agent.desktop.intent_planned",
@@ -3452,9 +3463,9 @@ def test_main_chat_desktop_intent_permission_failure_records_recovery_event() ->
     assert recovery["affected_tools"] == ["screen.capture"]
     assert recovery["recovery_hints"][0] == "Grant Screen Recording permission."
     assert any("屏幕录制" in hint for hint in recovery["recovery_hints"])
-    assert recovery["recovery_actions"] == result_payload["recovery_actions"]
+    assert recovery["recovery_actions"] == expected_recovery_actions
     assert appended_events[-1]["event_type"] == "agent.desktop.permission_recovery"
-    assert appended_events[-1]["payload"]["recovery_actions"] == result_payload["recovery_actions"]
+    assert appended_events[-1]["payload"]["recovery_actions"] == expected_recovery_actions
 
 
 def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_metadata_tool_request,
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
     daily_desktop_intent_tool_requests,
@@ -549,6 +550,8 @@ class RuntimeCustomApiAgentLoop:
         result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
         if result.get("approval_required"):
             return ""
+        result = _with_retry_recovery_action(planned_tool, planned_input, result)
+        tool_event["result"] = result
         summary = self._daily_desktop_summary(planned_tool, planned_input, result)
         if not summary:
             return ""
@@ -629,6 +632,8 @@ class RuntimeCustomApiAgentLoop:
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
             if result.get("approval_required"):
                 return ""
+            result = _with_retry_recovery_action(planned_tool, planned_input, result)
+            tool_event["result"] = result
             summary = self._daily_desktop_summary(planned_tool, planned_input, result)
             if not summary:
                 return ""
@@ -1468,6 +1473,111 @@ def _append_recovery_action_summary(text: str, result: dict[str, Any]) -> str:
     return f"{text}可直接打开：{'、'.join(labels[:4])}。"
 
 
+def _with_retry_recovery_action(
+    tool_name: str,
+    planned_input: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    if not _has_permission_recovery_signal(result):
+        return result
+    if not isinstance(planned_input, dict):
+        return result
+    retry_request = daily_desktop_metadata_tool_request(
+        {
+            "desktop_permission_recovery": True,
+            "desktop_permission_retry": True,
+            "recovery_action_kind": "retry_original",
+            "recovery_tool": tool_name,
+            "recovery_input": planned_input,
+            "recovery_retry_tool": tool_name,
+            "recovery_retry_input": planned_input,
+        },
+        [tool_name],
+    )
+    if retry_request is None:
+        return result
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_actions = result.get("recovery_actions") or data.get("recovery_actions") or []
+    actions = [dict(action) for action in raw_actions if isinstance(action, dict)]
+    if not actions:
+        return result
+    retry_prompt = _daily_desktop_retry_prompt(tool_name, planned_input)
+    enriched_actions: list[dict[str, Any]] = []
+    changed = False
+    for action in actions:
+        if str(action.get("tool") or "").strip() != "app.open":
+            enriched_actions.append(action)
+            continue
+        enriched_action = dict(action)
+        if not str(enriched_action.get("retry_tool") or "").strip():
+            enriched_action["retry_tool"] = tool_name
+            changed = True
+        if not str(enriched_action.get("recovery_retry_tool") or "").strip():
+            enriched_action["recovery_retry_tool"] = tool_name
+            changed = True
+        if not isinstance(enriched_action.get("retry_input"), dict):
+            enriched_action["retry_input"] = dict(planned_input)
+            changed = True
+        if not isinstance(enriched_action.get("recovery_retry_input"), dict):
+            enriched_action["recovery_retry_input"] = dict(planned_input)
+            changed = True
+        if retry_prompt and not str(enriched_action.get("retry_prompt") or "").strip():
+            enriched_action["retry_prompt"] = retry_prompt
+            changed = True
+        if retry_prompt and not str(enriched_action.get("recovery_retry_prompt") or "").strip():
+            enriched_action["recovery_retry_prompt"] = retry_prompt
+            changed = True
+        enriched_actions.append(enriched_action)
+    if not changed:
+        return result
+    enriched = dict(result)
+    enriched["recovery_actions"] = enriched_actions
+    return enriched
+
+
+def _has_permission_recovery_signal(result: dict[str, Any]) -> bool:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return bool(
+        result.get("permission_error")
+        or _string_list(result.get("permission_targets"))
+        or _string_list(result.get("missing_permissions"))
+        or _string_list(data.get("permission_targets"))
+        or _string_list(data.get("missing_permissions"))
+        or _recovery_actions(result)
+    )
+
+
+def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -> str:
+    if tool_name == "media.apple_music_play":
+        query = str(planned_input.get("query") or "").strip()
+        return f"播放{query}" if query else "播放音乐"
+    if tool_name == "browser.extract_text":
+        return "读取当前网页正文"
+    if tool_name == "browser.screenshot":
+        return "截取当前网页"
+    if tool_name == "browser.current_page":
+        return "查看当前网页"
+    if tool_name == "screen.capture":
+        return "截图当前屏幕"
+    if tool_name == "desktop.active_window":
+        return "查看当前窗口"
+    if tool_name == "desktop.permissions":
+        return "检查桌面权限"
+    if tool_name == "desktop.safe_click":
+        x = planned_input.get("x")
+        y = planned_input.get("y")
+        if x is not None and y is not None:
+            return f"点击 {x}, {y}"
+        return ""
+    if tool_name == "app.open":
+        app_name = str(planned_input.get("app_name") or "").strip()
+        return f"打开{app_name}" if app_name else ""
+    if tool_name == "app.focus":
+        app_name = str(planned_input.get("app_name") or "").strip()
+        return f"切到{app_name}" if app_name else ""
+    return ""
+
+
 def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     raw_actions = result.get("recovery_actions") or data.get("recovery_actions") or []
@@ -1486,15 +1596,35 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
         if not tool or key in seen:
             continue
         seen.add(key)
-        actions.append(
-            {
-                "label": label or tool,
-                "tool": tool,
-                "input": dict(action_input),
-                "permission_target": permission_target,
-                "risk_level": str(raw_action.get("risk_level") or "low"),
-            }
-        )
+        action = {
+            "label": label or tool,
+            "tool": tool,
+            "input": dict(action_input),
+            "permission_target": permission_target,
+            "risk_level": str(raw_action.get("risk_level") or "low"),
+        }
+        for text_key in (
+            "action_kind",
+            "recovery_action_kind",
+            "retry_prompt",
+            "recovery_retry_prompt",
+            "retry_source_event_type",
+            "recovery_retry_source_event_type",
+            "retry_source_tool_call_id",
+            "recovery_retry_source_tool_call_id",
+            "retry_tool",
+            "recovery_retry_tool",
+        ):
+            value = str(raw_action.get(text_key) or "").strip()
+            if value:
+                action[text_key] = value
+        for dict_key in ("retry_input", "recovery_retry_input"):
+            value = raw_action.get(dict_key)
+            if isinstance(value, dict):
+                action[dict_key] = dict(value)
+        if raw_action.get("desktop_permission_retry") is True:
+            action["desktop_permission_retry"] = True
+        actions.append(action)
     return actions
 
 

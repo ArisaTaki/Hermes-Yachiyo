@@ -2528,6 +2528,18 @@ async def test_yachiyo_task_route_surfaces_music_permission_recovery_when_fallba
             "risk_level": "low",
         },
     ]
+    expected_recovery_actions = [
+        {
+            **action,
+            "recovery_retry_input": {"query": "超时空辉夜姬"},
+            "recovery_retry_prompt": "播放超时空辉夜姬",
+            "recovery_retry_tool": "media.apple_music_play",
+            "retry_input": {"query": "超时空辉夜姬"},
+            "retry_prompt": "播放超时空辉夜姬",
+            "retry_tool": "media.apple_music_play",
+        }
+        for action in recovery_actions
+    ]
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -2607,7 +2619,7 @@ async def test_yachiyo_task_route_surfaces_music_permission_recovery_when_fallba
         assert tool_call["status"] == "failed"
         assert tool_call["output_preview"]["permission_error"] is True
         assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
-        assert tool_call["output_preview"]["recovery_actions"] == recovery_actions
+        assert tool_call["output_preview"]["recovery_actions"] == expected_recovery_actions
         assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
         assert timeline["tool_calls"][-1]["status"] == "failed"
         assert "agent.desktop.intent_planned" in event_types
@@ -2616,7 +2628,7 @@ async def test_yachiyo_task_route_surfaces_music_permission_recovery_when_fallba
         assert "agent.desktop.permission_recovery" in event_types
         assert recovery_event["payload"]["permission_targets"] == ["music_app", "automation"]
         assert recovery_event["payload"]["affected_tools"] == ["media.apple_music_play"]
-        assert recovery_event["payload"]["recovery_actions"] == recovery_actions
+        assert recovery_event["payload"]["recovery_actions"] == expected_recovery_actions
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert assistant.task_id == started["task_id"]
@@ -3928,7 +3940,13 @@ async def test_yachiyo_task_route_surfaces_safe_click_accessibility_recovery(
                 "tool": "app.open",
                 "input": {"app_name": "辅助功能权限"},
                 "permission_target": "accessibility",
+                "recovery_retry_input": {"x": 120, "y": 240},
+                "recovery_retry_prompt": "点击 120, 240",
+                "recovery_retry_tool": "desktop.safe_click",
                 "risk_level": "low",
+                "retry_input": {"x": 120, "y": 240},
+                "retry_prompt": "点击 120, 240",
+                "retry_tool": "desktop.safe_click",
             }
         ]
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
@@ -4757,14 +4775,26 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
                 "tool": "app.open",
                 "input": {"app_name": "Music"},
                 "permission_target": "music_app",
+                "recovery_retry_input": {},
+                "recovery_retry_prompt": "检查桌面权限",
+                "recovery_retry_tool": "desktop.permissions",
                 "risk_level": "low",
+                "retry_input": {},
+                "retry_prompt": "检查桌面权限",
+                "retry_tool": "desktop.permissions",
             },
             {
                 "label": "打开自动化权限",
                 "tool": "app.open",
                 "input": {"app_name": "自动化权限"},
                 "permission_target": "automation",
+                "recovery_retry_input": {},
+                "recovery_retry_prompt": "检查桌面权限",
+                "recovery_retry_tool": "desktop.permissions",
                 "risk_level": "low",
+                "retry_input": {},
+                "retry_prompt": "检查桌面权限",
+                "retry_tool": "desktop.permissions",
             },
         ]
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.permissions"
@@ -5583,7 +5613,13 @@ async def test_yachiyo_task_route_projects_browser_cdp_recovery(
                 "tool": "app.open",
                 "input": {"app_name": "Google Chrome"},
                 "permission_target": "chrome_cdp",
+                "recovery_retry_input": {},
+                "recovery_retry_prompt": "查看当前网页",
+                "recovery_retry_tool": "browser.current_page",
                 "risk_level": "low",
+                "retry_input": {},
+                "retry_prompt": "查看当前网页",
+                "retry_tool": "browser.current_page",
             }
         ]
         assert timeline["tool_calls"][-1]["tool_name"] == "browser.current_page"
@@ -6192,7 +6228,13 @@ async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
                 "tool": "app.open",
                 "input": {"app_name": "屏幕录制权限"},
                 "permission_target": "screen_recording",
+                "recovery_retry_input": {"reason": "user asked to capture the screen"},
+                "recovery_retry_prompt": "截图当前屏幕",
+                "recovery_retry_tool": "screen.capture",
                 "risk_level": "low",
+                "retry_input": {"reason": "user asked to capture the screen"},
+                "retry_prompt": "截图当前屏幕",
+                "retry_tool": "screen.capture",
             }
         ]
         assert timeline["task_id"] == started["task_id"]
