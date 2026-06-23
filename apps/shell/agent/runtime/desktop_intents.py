@@ -2632,6 +2632,11 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "关闭标签页": ("w", ("command",)),
         "关闭当前标签页": ("w", ("command",)),
         "closetab": ("w", ("command",)),
+        "回车": ("return", ()),
+        "确认": ("return", ()),
+        "确定": ("return", ()),
+        "enter": ("return", ()),
+        "return": ("return", ()),
     }
     combo = mapping.get(phrase)
     if combo is None:

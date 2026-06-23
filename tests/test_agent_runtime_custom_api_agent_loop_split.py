@@ -921,6 +921,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.type_into_ui_element",
         "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
     }
+    assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并确认", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("type yachiyo into search field then enter", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
     assert daily_desktop_intent_tool_request("在搜索框输入 yachiyo", ["desktop.type_text"]) is None
     assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2044,6 +2080,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"key": "return", "modifiers": []},
     }
     assert daily_desktop_intent_tool_request("按确认键", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("enter", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},

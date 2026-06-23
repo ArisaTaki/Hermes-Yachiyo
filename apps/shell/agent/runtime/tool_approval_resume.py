@@ -183,6 +183,8 @@ def _is_daily_desktop_approval_resume(run: dict[str, Any], pending: dict[str, An
     tool_name = _pending_tool_name(pending)
     if tool_name not in _DAILY_DESKTOP_APPROVAL_TOOLS:
         return False
+    if _pending_tool_in_uncompleted_daily_desktop_plan(run, tool_name):
+        return True
     for event in reversed(run.get("timeline") or []):
         if not isinstance(event, dict):
             continue
@@ -194,6 +196,25 @@ def _is_daily_desktop_approval_resume(run: dict[str, Any], pending: dict[str, An
         if event_tool == tool_name:
             return True
     return False
+
+
+def _pending_tool_in_uncompleted_daily_desktop_plan(run: dict[str, Any], tool_name: str) -> bool:
+    planned_tools: list[str] = []
+    for event in run.get("timeline") or []:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event") or "").strip()
+        if event_type == "agent.desktop.intent_completed":
+            planned_tools = []
+            continue
+        if event_type != "agent.desktop.intent_planned":
+            continue
+        if str(event.get("source") or "").strip() != "daily_desktop_intent":
+            continue
+        event_tool = str(event.get("tool") or event.get("detail") or "").strip()
+        if event_tool:
+            planned_tools.append(event_tool)
+    return tool_name in planned_tools
 
 
 def _pending_tool_name(pending: dict[str, Any]) -> str:
