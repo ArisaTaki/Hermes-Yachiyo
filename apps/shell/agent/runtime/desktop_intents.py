@@ -13,55 +13,67 @@ def daily_desktop_intent_tool_request(
 ) -> dict[str, Any] | None:
     """Return a structured low-risk desktop tool request for clear daily Chat intents."""
 
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    for request in daily_desktop_intent_candidates(context):
+        if str(request.get("tool") or "") in allowed:
+            return request
+    return None
+
+
+def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
+    """Return ordered desktop tool candidates before policy filtering."""
+
     text = _clean_text(context)
     if not text or _looks_like_explanation_request(text) or _looks_like_negative_request(text):
-        return None
-    allowed = {str(tool or "").strip() for tool in allowed_tools}
+        return []
 
+    candidates: list[dict[str, Any]] = []
     url = _browser_open_url(text)
-    if url and "browser.open_url" in allowed:
-        return _request("browser.open_url", {"url": url})
+    if url:
+        candidates.append(_request("browser.open_url", {"url": url}))
 
-    if _is_browser_extract_text_request(text) and "browser.extract_text" in allowed:
-        return _request("browser.extract_text", {})
+    if _is_browser_extract_text_request(text):
+        candidates.append(_request("browser.extract_text", {}))
 
-    if _is_browser_screenshot_request(text) and "browser.screenshot" in allowed:
-        return _request("browser.screenshot", {"reason": "user asked to capture the browser page"})
+    if _is_browser_screenshot_request(text):
+        candidates.append(
+            _request("browser.screenshot", {"reason": "user asked to capture the browser page"})
+        )
 
-    if _is_browser_current_page_request(text) and "browser.current_page" in allowed:
-        return _request("browser.current_page", {})
+    if _is_browser_current_page_request(text):
+        candidates.append(_request("browser.current_page", {}))
 
     music = _music_query(text)
-    if music and "media.apple_music_play" in allowed:
-        return _request("media.apple_music_play", {"query": music})
+    if music:
+        candidates.append(_request("media.apple_music_play", {"query": music}))
 
     app_focus_name = _app_focus_name(text)
-    if app_focus_name and "app.focus" in allowed:
-        return _request("app.focus", {"app_name": app_focus_name})
+    if app_focus_name:
+        candidates.append(_request("app.focus", {"app_name": app_focus_name}))
 
     app_name = _app_open_name(text)
-    if app_name and "app.open" in allowed:
-        return _request("app.open", {"app_name": app_name})
+    if app_name:
+        candidates.append(_request("app.open", {"app_name": app_name}))
 
     hotkey = _desktop_hotkey(text)
-    if hotkey and "desktop.hotkey" in allowed:
-        return _request("desktop.hotkey", hotkey)
+    if hotkey:
+        candidates.append(_request("desktop.hotkey", hotkey))
 
     type_text = _desktop_type_text(text)
-    if type_text and "desktop.type_text" in allowed:
-        return _request("desktop.type_text", {"text": type_text})
+    if type_text:
+        candidates.append(_request("desktop.type_text", {"text": type_text}))
 
     click = _desktop_click(text)
-    if click and "desktop.click" in allowed:
-        return _request("desktop.click", click)
+    if click:
+        candidates.append(_request("desktop.click", click))
 
-    if _is_screen_capture_request(text) and "screen.capture" in allowed:
-        return _request("screen.capture", {"reason": "user asked to capture the screen"})
+    if _is_screen_capture_request(text):
+        candidates.append(_request("screen.capture", {"reason": "user asked to capture the screen"}))
 
-    if _is_active_window_request(text) and "desktop.active_window" in allowed:
-        return _request("desktop.active_window", {})
+    if _is_active_window_request(text):
+        candidates.append(_request("desktop.active_window", {}))
 
-    return None
+    return candidates
 
 
 def _request(tool: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -508,4 +520,4 @@ def _is_active_window_request(text: str) -> bool:
     )
 
 
-__all__ = ["daily_desktop_intent_tool_request"]
+__all__ = ["daily_desktop_intent_candidates", "daily_desktop_intent_tool_request"]

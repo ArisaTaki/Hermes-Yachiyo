@@ -7,7 +7,10 @@ from typing import Any
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_tool_request
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_intent_tool_request,
+)
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -493,6 +496,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
+    assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_candidates("怎么截图？") == []
     assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
@@ -605,6 +614,94 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"app_name": "Music"},
     }
+
+
+def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_missing() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+
+    def run_tool_requests(*_args, **_kwargs):
+        raise AssertionError("unavailable desktop intent must not bypass allowed_tools")
+
+    def call_model(_base_url, _model, _api_key, messages, **_kwargs):
+        order.append("model")
+        assert "Desktop intent for media.apple_music_play was not executed" in messages[-1]["content"]
+        return {"role": "assistant", "content": "缺少 media.apple_music_play 工具权限。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["workspace.read"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {
+                "run_id": run_id,
+                "event_type": event_type,
+                "payload": payload,
+            }
+        ),
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "播放超时空辉夜姬",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-missing-tool",
+    )
+
+    assert str(result) == "缺少 media.apple_music_play 工具权限。"
+    assert order == ["model"]
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_unavailable",
+        "detail": "media.apple_music_play",
+        "tool": "media.apple_music_play",
+        "status": "unavailable",
+        "source": "daily_desktop_intent",
+        "reason": "tool_not_allowed",
+        "input_preview": {"query": "超时空辉夜姬"},
+        "allowed_tools": ["workspace.read"],
+    }
+    assert appended_events == [
+        {
+            "run_id": "run-missing-tool",
+            "event_type": "agent.desktop.intent_unavailable",
+            "payload": {
+                "tool": "media.apple_music_play",
+                "status": "unavailable",
+                "source": "daily_desktop_intent",
+                "reason": "tool_not_allowed",
+                "input_preview": {"query": "超时空辉夜姬"},
+                "allowed_tools": ["workspace.read"],
+            },
+        }
+    ]
 
 
 def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runner() -> None:

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_tool_request
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_intent_candidates,
+    daily_desktop_intent_tool_request,
+)
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 
 
@@ -127,6 +130,16 @@ class RuntimeCustomApiAgentLoop:
                     run_id=run_id,
                     budget=budget,
                 )
+            else:
+                candidates = daily_desktop_intent_candidates(planning_context)
+                if candidates:
+                    self._record_unavailable_desktop_intent(
+                        candidates[0],
+                        allowed_tools=allowed_tools,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
         for iteration in range(start_iteration, self._max_tool_iterations):
             self._check_context_budget(budget, messages)
             budget.claim_model_call()
@@ -184,12 +197,51 @@ class RuntimeCustomApiAgentLoop:
             f"{self._tool_loop_projection.loop_limit_detail(timeline)}"
         )
 
+    def _record_unavailable_desktop_intent(
+        self,
+        candidate: dict[str, Any],
+        *,
+        allowed_tools: list[str],
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        tool_name = str(candidate.get("tool") or "").strip()
+        payload = candidate.get("input") if isinstance(candidate.get("input"), dict) else {}
+        event_payload = {
+            "tool": tool_name,
+            "status": "unavailable",
+            "source": "daily_desktop_intent",
+            "reason": "tool_not_allowed",
+            "input_preview": payload,
+            "allowed_tools": [str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()],
+        }
+        timeline.append(
+            self._timeline(
+                "agent.desktop.intent_unavailable",
+                tool_name,
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.desktop.intent_unavailable", event_payload)
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Desktop intent for {tool_name} was not executed because this Agent "
+                    f"does not allow {tool_name}. Allowed tools: "
+                    f"{', '.join(event_payload['allowed_tools']) or 'none'}."
+                ),
+            }
+        )
+
     def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
         for message in reversed(messages):
             if str(message.get("role") or "") != "user":
                 continue
             content = self._message_visible_content_text(message).strip()
-            if content.startswith("Tool result for "):
+            if content.startswith("Tool result for ") or content.startswith("Desktop intent for "):
                 continue
             if content:
                 return content

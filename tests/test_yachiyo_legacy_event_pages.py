@@ -65,9 +65,18 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
                     "input_preview": {"query": "超时空辉夜姬"},
                 },
             },
-            {"event_type": "memory.retrieved", "sequence": 3, "payload": {"memory_id": "mem-1"}},
-            {"event_type": "skill.used", "sequence": 4, "payload": {"skill_id": "skill-1"}},
-            {"event_type": "agent.runtime.compiled", "sequence": 5, "payload": {"internal": True}},
+            {
+                "event_type": "agent.desktop.intent_unavailable",
+                "sequence": 3,
+                "payload": {
+                    "tool": "desktop.hotkey",
+                    "status": "unavailable",
+                    "reason": "tool_not_allowed",
+                },
+            },
+            {"event_type": "memory.retrieved", "sequence": 4, "payload": {"memory_id": "mem-1"}},
+            {"event_type": "skill.used", "sequence": 5, "payload": {"skill_id": "skill-1"}},
+            {"event_type": "agent.runtime.compiled", "sequence": 6, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -80,11 +89,13 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
     assert [event["event_type"] for event in enriched["events"]] == [
         "run.started",
         "agent.desktop.intent_planned",
+        "agent.desktop.intent_unavailable",
         "memory.retrieved",
         "skill.used",
     ]
     assert runtime.requests == [{"run_id": "run-1", "limit": 500}]
     assert is_replay_enrichment_event({"event_type": "agent.desktop.intent_planned"})
+    assert is_replay_enrichment_event({"event_type": "agent.desktop.intent_unavailable"})
     assert is_replay_enrichment_event({"event_type": "memory.retrieved"})
     assert is_replay_enrichment_event({"event_type": "skill.used"})
 
