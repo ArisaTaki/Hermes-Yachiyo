@@ -249,6 +249,9 @@ def daily_desktop_intent_tool_requests(
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
+    app_ui_action = _app_scoped_ui_action_tool_request(context)
+    if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
+        return [app_ui_action]
     for request in daily_desktop_intent_candidates(context):
         if str(request.get("tool") or "") in allowed:
             return [request]
@@ -1999,6 +2002,179 @@ def _desktop_ui_elements_app_name(text: str) -> str:
         if app_name and not _looks_like_generic_app_open_target(raw_app):
             return app_name
     return ""
+
+
+def _app_scoped_ui_action_tool_request(text: str) -> dict[str, Any] | None:
+    click_payload = _app_scoped_click_ui_element_request(text)
+    if click_payload:
+        return _request("app.focus_and_click_ui_element", click_payload)
+    type_payload = _app_scoped_type_into_ui_element_request(text)
+    if type_payload:
+        return _request("app.focus_and_type_into_ui_element", type_payload)
+    return None
+
+
+def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
+    if _has_browser_page_context(text):
+        return None
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|到|切到|切换到|聚焦|激活)\s*(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:里|中|内|上|的)?\s*"
+        r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
+        r"(?P<label>[^。！？!?，,]+?)"
+        r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
+        r"(?:一下|一次)?$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double2>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
+        r"(?P<app2>[^。！？!?，,]+?)\s*的\s*"
+        r"(?P<label2>[^。！？!?，,]+?)"
+        r"(?P<kind2>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
+        r"(?:一下|一次)?$",
+        r"^(?P<verb_en>double\s+click|click|press|tap)\s+"
+        r"(?:the\s+)?(?P<label_en>[^.!?]+?)"
+        r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|menu item|menu|checkbox))?"
+        r"\s+(?:in|on)\s+(?:the\s+)?(?P<app_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _normalize_app_scoped_ui_action_app(
+            groups.get("app") or groups.get("app2") or groups.get("app_en") or ""
+        )
+        label = _strip_app_scoped_ui_action_target(
+            groups.get("label") or groups.get("label2") or groups.get("label_en") or ""
+        )
+        kind = groups.get("kind") or groups.get("kind2") or groups.get("kind_en") or ""
+        verb = str(groups.get("verb_en") or "").strip().lower()
+        if not app_name or not label or _looks_like_click_coordinate_label(label):
+            continue
+        role_filter = _desktop_ui_element_role_filter(kind)
+        if not role_filter and verb == "press":
+            role_filter = "button"
+        return {
+            "app_name": app_name,
+            "target": label,
+            "role_filter": role_filter,
+            "limit": 80,
+            "click_count": (
+                2
+                if groups.get("double") or groups.get("double2") or verb == "double click"
+                else 1
+            ),
+        }
+    return None
+
+
+def _app_scoped_type_into_ui_element_request(text: str) -> dict[str, Any] | None:
+    if _has_browser_page_context(text):
+        return None
+    target_pattern = (
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search\s+field|search\s+box|search\s+bar|message\s+field|message\s+box|"
+        r"chat\s+box|address\s+bar|text\s+field|textbox|input|field|"
+        r"[^。！？!?，,]+?(?:输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
+        r"text\s+field|textbox|input|field|search\s+field|search\s+box|search\s+bar|"
+        r"message\s+field|message\s+box|chat\s+box|address\s+bar))"
+    )
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|给|向)\s*(?P<app>[^。！？!?，,]+)\s*(?:的|里|中|内|上)?\s*"
+        rf"(?P<target>{target_pattern})(?:里|中|内|上)?\s*"
+        r"(?:输入|填写|键入|打入|填入|写入|写)\s*(?P<text>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<text2>[^。！？!?，,]+?)\s*"
+        r"(?:输入|填写|键入|打入|填入|写入|写)\s*(?:到|进|在)\s*"
+        r"(?P<app2>[^。！？!?，,]+)\s*(?:的|里|中|内|上)?\s*"
+        rf"(?P<target2>{target_pattern})$",
+        r"^(?:type|enter|input)\s+(?P<text_en>[^.!?]+?)\s+"
+        r"(?:into|in|to)\s+(?:the\s+)?"
+        rf"(?P<target_en>{target_pattern})\s+"
+        r"(?:in|on)\s+(?:the\s+)?(?P<app_en>[^.!?]+)$",
+        r"^(?:type|enter|input)\s+(?P<text_en2>[^.!?]+?)\s+"
+        r"(?:into|in|to)\s+(?:the\s+)?(?P<app_en2>[^.!?]+?)\s+"
+        rf"(?P<target_en2>{target_pattern})$",
+        r"^fill\s+(?:the\s+)?(?P<target_en3>[^.!?]+?)\s+"
+        r"(?:in|on)\s+(?:the\s+)?(?P<app_en3>[^.!?]+?)\s+"
+        r"with\s+(?P<text_en3>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _normalize_app_scoped_ui_action_app(
+            groups.get("app")
+            or groups.get("app2")
+            or groups.get("app_en")
+            or groups.get("app_en2")
+            or groups.get("app_en3")
+            or ""
+        )
+        raw_target = (
+            groups.get("target")
+            or groups.get("target2")
+            or groups.get("target_en")
+            or groups.get("target_en2")
+            or groups.get("target_en3")
+            or ""
+        )
+        typed_text = _strip_typed_text(
+            groups.get("text")
+            or groups.get("text2")
+            or groups.get("text_en")
+            or groups.get("text_en2")
+            or groups.get("text_en3")
+            or ""
+        )
+        target = _strip_desktop_ui_input_target(raw_target)
+        if not app_name or not target or not typed_text:
+            continue
+        return {
+            "app_name": app_name,
+            "target": target,
+            "text": typed_text,
+            "role_filter": _desktop_ui_element_role_filter(raw_target),
+            "limit": 80,
+        }
+    return None
+
+
+def _normalize_app_scoped_ui_action_app(value: str) -> str:
+    raw_app = _strip_app_name(value)
+    if not raw_app:
+        return ""
+    compact = re.sub(r"[\s._-]+", "", raw_app.lower())
+    if _looks_like_generic_ui_scope(raw_app) or _looks_like_generic_app_open_target(raw_app):
+        return ""
+    if _looks_like_click_coordinate_label(raw_app) or re.search(
+        r"(?:坐标|位置|coordinate|point|\d+\s*(?:,|，|\s)\s*\d+)",
+        raw_app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    if compact not in _APP_ALIASES and re.search(
+        r"(?:按钮|控件|元素|输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
+        r"搜索|消息|聊天|地址|"
+        r"\bbutton\b|\bcontrol\b|\belement\b|\bfield\b|\binput\b|\bbox\b|\bbar\b|"
+        r"\bsearch\b|\bmessage\b|\bchat\b|\baddress\b)",
+        raw_app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    app_name = _normalize_app_name(raw_app)
+    if not app_name or _looks_like_local_path(raw_app) or _normalize_site_name(raw_app):
+        return ""
+    return app_name
+
+
+def _strip_app_scoped_ui_action_target(value: str) -> str:
+    target = _strip_desktop_ui_element_label(value)
+    target = re.sub(r"^(?:the|a|an)\s+", "", target, flags=re.IGNORECASE)
+    target = re.sub(r"^的\s*", "", target)
+    return _strip_query(target)
 
 
 def _looks_like_generic_ui_scope(value: str) -> bool:

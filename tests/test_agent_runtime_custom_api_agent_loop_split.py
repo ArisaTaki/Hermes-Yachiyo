@@ -1202,6 +1202,89 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "click_count": 1,
         },
     }
+    assert daily_desktop_intent_tool_request("click the Send button in Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "Send",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request("press Send in Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "Send",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request("click the login button in Chrome", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Google Chrome",
+            "target": "login",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request(
+        "type hello into message field in Slack",
+        allowed_tools,
+    ) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "message",
+            "text": "hello",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request(
+        "fill search field in Chrome with yachiyo",
+        allowed_tools,
+    ) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Google Chrome",
+            "target": "search",
+            "text": "yachiyo",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request("在 Slack 点击发送按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "发送",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_request("在 Slack 消息框输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "消息",
+            "text": "hello",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
     assert daily_desktop_intent_tool_request("打开 Notes 并输入 hello yachiyo", ["app.open"]) == {
         "protocol": "json_fallback",
         "tool": "app.open",
