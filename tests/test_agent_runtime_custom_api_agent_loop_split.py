@@ -627,7 +627,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("github.com 打开一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("打开 GitHub", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("把 GitHub 打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
@@ -891,7 +901,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("把 Slack 打开一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("打开浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("浏览器打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Google Chrome"},
@@ -1026,7 +1046,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads/report.pdf"},
     }
+    assert daily_desktop_intent_tool_request("把 ~/Downloads/report.pdf 打开一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads/report.pdf"},
+    }
     assert daily_desktop_intent_tool_request("在访达中显示下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("把下载文件夹在 Finder 里显示一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
@@ -1042,6 +1072,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"path": "~/Downloads/report.pdf"},
     }
     assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("把下载文件夹打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
@@ -1581,6 +1616,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么播放 Apple Music？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("别把 GitHub 打开", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
     assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
@@ -1602,9 +1639,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 GitHub", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("把 GitHub 打开一下", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开小红书", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开新标签页", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("把下载文件夹打开一下", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
     assert daily_desktop_intent_tool_request("当前窗口是什么", ["desktop.windows"]) is None

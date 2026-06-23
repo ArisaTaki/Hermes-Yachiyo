@@ -653,7 +653,7 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     try:
-        result = api.send_message("打开 Word")
+        result = api.send_message("把 Word 打开一下")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -997,7 +997,7 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
     monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     try:
-        result = api.send_message("可以帮我打开下载文件夹吗")
+        result = api.send_message("把下载文件夹打开一下")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -1125,6 +1125,7 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("查 OpenAI 最新消息", "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"),
             ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
             ("帮我打开 GitHub 官网", "https://github.com"),
+            ("把 GitHub 打开一下", "https://github.com"),
         ]
         for prompt, url in cases:
             result = api.send_message(prompt)

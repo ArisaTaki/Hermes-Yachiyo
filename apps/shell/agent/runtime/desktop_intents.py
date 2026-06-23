@@ -498,9 +498,14 @@ def _looks_like_negative_request(text: str) -> bool:
             text,
         )
         or re.search(
+            r"(?:不要|不用|无需|不需要|别)\s*(?:把|将)?[^。！？!?，,]{0,24}"
+            r"(?:打开|启动|运行|拉起|开启|访问|浏览|前往)",
+            text,
+        )
+        or re.search(
             r"(?:do not|don't|without|no need to).{0,24}"
             r"(?:execute|perform|call|play|capture|inspect|type|click|press|hotkey|"
-            r"screenshot|read|close|quit|hide|minimi[sz]e)",
+            r"screenshot|read|close|quit|hide|minimi[sz]e|open|launch|start|visit|browse)",
             text.lower(),
         )
     )
@@ -562,6 +567,8 @@ def _browser_open_url(text: str) -> str:
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|访问|浏览|前往|去)\s*(?P<url>{url_token})",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        rf"(?P<url>{url_token})\s*(?:打开|访问|浏览|前往|打开一下|访问一下|浏览一下)",
         rf"(?:open|visit|browse|go to)\s+(?P<url>{url_token})",
         rf"^(?P<url>{url_token})$",
     )
@@ -569,10 +576,19 @@ def _browser_open_url(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
+        if _url_match_inside_local_path(text, match.start("url")):
+            continue
         url = _normalize_url(match.group("url"))
         if url:
             return url
     return ""
+
+
+def _url_match_inside_local_path(text: str, start: int) -> bool:
+    if start <= 0:
+        return False
+    previous = text[start - 1]
+    return previous in {"/", "~", "."}
 
 
 def _normalize_url(value: str) -> str:
@@ -606,6 +622,9 @@ def _browser_named_site_url(text: str) -> str:
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
         r"(?:打开|访问|浏览|前往|去)\s*(?P<site>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<site>[^。！？!?，,]+?)\s*(?:打开|访问|浏览|前往)"
+        r"(?:一下|下)?(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"(?:open|visit|browse|go to)\s+(?P<site>[^.!?]+)"
         r"\s+(?:in|with|using)\s+(?:browser|chrome|google|safari)",
         r"(?:open|visit|browse|go to)\s+(?P<site>[^.!?]+)",
@@ -999,9 +1018,14 @@ def _desktop_open_path(text: str) -> str:
         return ""
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        rf"(?P<path>{path_token})\s*(?:打开|开启)(?:一下|下)?",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|开启)\s*(?P<path>{path_token})",
         rf"\bopen\s+(?P<path>{path_token})\b",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<path>[^。！？!?，,]+?)\s*(?:打开|开启)(?:一下|下)?"
+        r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|开启)\s*(?P<path>[^。！？!?，,]+)",
     )
@@ -1018,6 +1042,9 @@ def _desktop_open_path(text: str) -> str:
 def _desktop_reveal_path(text: str) -> str:
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        rf"(?P<path>{path_token})\s*(?:在\s*(?:finder|访达)\s*(?:中|里|内)?\s*)?"
+        rf"(?:显示|显示一下|定位|找一下|找到)",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:在\s*(?:finder|访达)\s*(?:中|里|内)?\s*)?"
         rf"(?:显示|显示一下|定位|找一下|找到|打开)\s*(?P<path>{path_token})",
@@ -1027,6 +1054,10 @@ def _desktop_reveal_path(text: str) -> str:
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"在\s*(?:finder|访达)\s*(?:中|里|内)?\s*"
         r"(?:显示|显示一下|定位|找一下|找到|打开)\s*(?P<path>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<path>[^。！？!?，,]+?)\s*(?:在\s*(?:finder|访达)\s*(?:中|里|内)?\s*)?"
+        r"(?:显示|显示一下|定位|找一下|找到)(?:一下|下)?"
+        r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|显示|显示一下|定位|找一下|找到)\s*(?P<path>[^。！？!?，,]+)",
         r"(?:show|reveal|locate|open)\s+(?P<path>[^.!?]+?)\s+in\s+(?:the\s+)?finder",
@@ -1261,6 +1292,9 @@ def _app_open_name(text: str) -> str:
         return ""
 
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?P<verb>打开|启动|运行|拉起|开启|开)\s*(?:一下|下)?"
+        r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?P<app>[^。！？!?，,]+)",
         r"(?P<verb>open|launch|start)\s+(?P<app>[^.!?]+)",
     )
@@ -1270,6 +1304,8 @@ def _app_open_name(text: str) -> str:
             continue
         raw_app = match.group("app")
         if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
             continue
         if _normalize_site_name(raw_app):
             continue
