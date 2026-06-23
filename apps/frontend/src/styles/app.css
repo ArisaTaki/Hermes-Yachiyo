@@ -4357,7 +4357,8 @@ button:hover {
   font-size: 10px;
 }
 
-.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-studio {
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-studio,
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-diagnostics {
   padding: 0 8px;
   font-size: 10px;
 }
@@ -4393,6 +4394,7 @@ button:hover {
 
 .launcher-agent-task-main,
 .launcher-agent-task-studio,
+.launcher-agent-task-diagnostics,
 .launcher-agent-task-action {
   min-width: 0;
   border: 0;
@@ -4410,12 +4412,17 @@ button:hover {
   text-align: left;
 }
 
-.launcher-agent-task-studio {
+.launcher-agent-task-studio,
+.launcher-agent-task-diagnostics {
   align-self: stretch;
   padding: 0 5px;
   border-left: 1px solid rgba(255, 244, 203, 0.18);
   color: rgba(255, 247, 223, 0.7);
   font-size: 9px;
+}
+
+.launcher-agent-task-diagnostics {
+  color: #ffd166;
 }
 
 .launcher-agent-task-actions {
@@ -4447,6 +4454,7 @@ button:hover {
 
 .launcher-agent-task-main:hover,
 .launcher-agent-task-studio:hover,
+.launcher-agent-task-diagnostics:hover,
 .launcher-agent-task-action:hover:not(:disabled) {
   color: #fff7df;
 }

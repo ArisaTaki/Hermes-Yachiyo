@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { taskPermissionRecoveryFromEvents } from './AgentTaskCard';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -19,6 +20,7 @@ type LauncherAgentTaskTestIds = {
   approve: string;
   cancel: string;
   detail: string;
+  diagnostics: string;
   light: string;
   openChat: string;
   openStudio: string;
@@ -33,6 +35,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     approve: 'bubble-launcher-agent-task-approve',
     cancel: 'bubble-launcher-agent-task-cancel',
     detail: 'bubble-launcher-agent-task-detail',
+    diagnostics: 'bubble-launcher-agent-task-open-diagnostics',
     light: 'bubble-launcher-agent-task-light',
     openChat: 'bubble-launcher-agent-task-open-chat',
     openStudio: 'bubble-launcher-agent-task-open-studio',
@@ -43,6 +46,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     approve: 'live2d-launcher-agent-task-approve',
     cancel: 'live2d-launcher-agent-task-cancel',
     detail: 'live2d-launcher-agent-task-detail',
+    diagnostics: 'live2d-launcher-agent-task-open-diagnostics',
     light: 'live2d-launcher-agent-task-light',
     openChat: 'live2d-launcher-agent-task-open-chat',
     openStudio: 'live2d-launcher-agent-task-open-studio',
@@ -125,6 +129,7 @@ function launcherAgentTaskTestIds(
     approve: `${testIdPrefix}-agent-task-approve`,
     cancel: `${testIdPrefix}-agent-task-cancel`,
     detail: `${testIdPrefix}-agent-task-detail`,
+    diagnostics: `${testIdPrefix}-agent-task-open-diagnostics`,
     light: `${testIdPrefix}-agent-task-light`,
     openChat: `${testIdPrefix}-agent-task-open-chat`,
     openStudio: `${testIdPrefix}-agent-task-open-studio`,
@@ -161,7 +166,10 @@ export function LauncherAgentTaskLight({
   const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
   const needsAction = Boolean(lightTask.needs_user_action || approval);
   const taskTitle = launcherAgentTaskTitle(currentTask);
-  const detail = lightTask.detail || launcherAgentTaskDetail(currentTask);
+  const permissionRecovery = taskPermissionRecoveryFromEvents(currentTask.recent_events);
+  const detail = permissionRecovery
+    ? `需要权限 · ${permissionRecovery.labels.join('、')}`
+    : lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
@@ -226,6 +234,26 @@ export function LauncherAgentTaskLight({
         >
           Agent Studio
         </a>
+      ) : null}
+      {permissionRecovery ? (
+        <button
+          type="button"
+          className="launcher-agent-task-diagnostics"
+          data-permission-targets={permissionRecovery.targets.join(',')}
+          data-testid={testIds.diagnostics}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void openAppView('diagnostics', {
+              command: 'native doctor',
+              permission_targets: permissionRecovery.targets.join(','),
+              return_to: mode,
+            });
+          }}
+          title={`打开诊断：${permissionRecovery.labels.join('、')}`}
+        >
+          权限
+        </button>
       ) : null}
       {canHandleApproval || canCancel ? (
         <div className="launcher-agent-task-actions" data-testid={testIds.approvalActions}>

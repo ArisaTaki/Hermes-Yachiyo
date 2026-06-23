@@ -169,6 +169,21 @@ function publicAgentTasks() {
           title: 'Approval required',
           detail: 'Launcher public task smoke',
         },
+        {
+          event_id: 'launcher-public-permission-event',
+          run_id: PUBLIC_RUN_ID,
+          sequence: 2,
+          event_type: 'agent.tool.failed',
+          title: 'Music permission required',
+          detail: 'media.apple_music_play',
+          payload: {
+            result: {
+              permission_error: true,
+              permission_targets: ['music_app', 'automation'],
+              recovery_hints: ['Open Music once and allow Automation permissions.'],
+            },
+          },
+        },
       ],
       artifacts: [],
       open_in_studio_url: `#/agents?run_id=${PUBLIC_RUN_ID}`,
@@ -524,6 +539,7 @@ async function main() {
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
     const taskStudio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
+    const taskDiagnostics = document.querySelector('[data-testid="bubble-launcher-agent-task-open-diagnostics"]');
     const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
@@ -538,9 +554,12 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskLight.textContent.includes('需要权限')
       && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
       && taskStudio.textContent.includes('Agent Studio')
+      && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
+      && taskDiagnostics.textContent.includes('权限')
       && taskApprove
       && !taskApprove.disabled
       && taskReject
@@ -577,6 +596,23 @@ async function main() {
     ))
   ), 'bubble launcher task opened Agent Studio');
   console.log('[electron-smoke] bubble launcher task Agent Studio handoff verified');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const diagnostics = document.querySelector('[data-testid="bubble-launcher-agent-task-open-diagnostics"]');
+      if (!diagnostics) throw new Error('missing bubble launcher task diagnostics handoff');
+      diagnostics.click();
+    })();
+  \`, true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'diagnostics'
+      && call?.params?.command === 'native doctor'
+      && call?.params?.permission_targets === 'music_app,automation'
+      && call?.params?.return_to === 'bubble'
+    ))
+  ), 'bubble launcher task opened Diagnostics');
+  console.log('[electron-smoke] bubble launcher task Diagnostics handoff verified');
   await win.webContents.executeJavaScript(\`
     const cancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
     if (!cancel) throw new Error('missing bubble launcher task cancel');
@@ -732,6 +768,7 @@ async function main() {
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
     const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
     const taskStudio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
+    const taskDiagnostics = document.querySelector('[data-testid="live2d-launcher-agent-task-open-diagnostics"]');
     const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="live2d-launcher-agent-task-cancel"]');
@@ -748,9 +785,12 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskLight.textContent.includes('需要权限')
       && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
       && taskStudio.textContent.includes('Agent Studio')
+      && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
+      && taskDiagnostics.textContent.includes('权限')
       && taskApprove
       && !taskApprove.disabled
       && taskReject
