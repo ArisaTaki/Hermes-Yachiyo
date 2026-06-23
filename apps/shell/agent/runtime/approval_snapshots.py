@@ -143,6 +143,11 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
         if click:
             return f"将{click}当前前台窗口，按工具策略需要人工确认。"
         return "将点击当前前台窗口，按工具策略需要人工确认。"
+    if tool_name == "desktop.click_ui_element":
+        target = _preview_value(record, "target")
+        if target:
+            return f"将点击当前前台界面中匹配“{target}”的控件，按工具策略需要人工确认。"
+        return "将点击当前前台界面中匹配名称的控件，按工具策略需要人工确认。"
     if tool_name == "browser.click":
         selector = _preview_value(record, "selector")
         if selector:

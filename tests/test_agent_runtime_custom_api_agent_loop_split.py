@@ -623,6 +623,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.click_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -2269,7 +2270,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
-    assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "发送", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("click Send button", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "Send", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("点击发送按钮", ["desktop.click"]) is None
+    assert daily_desktop_intent_tool_request("点击当前网页上的发送按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {"selector": "text=发送", "click_count": 1},
+    }
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
 
@@ -3248,6 +3264,26 @@ def test_main_chat_desktop_intent_summarizes_ui_elements() -> None:
     )
 
     assert result == "当前 Google Chrome 界面控件：Button Send（120, 240）; TextField Message（80, 220）。"
+
+
+def test_main_chat_desktop_intent_summarizes_click_ui_element() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.click_ui_element",
+        {"target": "发送", "role_filter": "button", "limit": 80, "click_count": 1},
+        {
+            "ok": True,
+            "summary": "Clicked foreground UI element: Send",
+            "data": {
+                "x": 120,
+                "y": 240,
+                "click_count": 1,
+                "target": "发送",
+                "matched_label": "Send",
+            },
+        },
+    )
+
+    assert result == "已点击前台控件：Send（120, 240）。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_status() -> None:

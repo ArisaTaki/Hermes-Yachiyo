@@ -308,6 +308,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "clipboard.write",
     "desktop.active_window",
     "desktop.click",
+    "desktop.click_ui_element",
     "desktop.close_window",
     "desktop.hide_app",
     "desktop.hotkey",
@@ -351,6 +352,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
+    "desktop.click_ui_element",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.click",
@@ -372,6 +374,7 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
 
 _FOREGROUND_ACTION_TOOLS = {
     "desktop.click",
+    "desktop.click_ui_element",
     "desktop.close_window",
     "desktop.hotkey",
     "desktop.safe_click",
@@ -727,6 +730,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     safe_type_text = _desktop_safe_type_text(text)
     if safe_type_text:
         candidates.append(_request("desktop.safe_type_text", {"text": safe_type_text}))
+
+    click_ui_element = _desktop_click_ui_element(text)
+    if click_ui_element:
+        candidates.append(_request("desktop.click_ui_element", click_ui_element))
 
     hotkey = _desktop_hotkey(text)
     if hotkey:
@@ -2844,6 +2851,90 @@ def _desktop_safe_click(text: str) -> dict[str, Any] | None:
     if not payload or payload.get("click_count") != 1:
         return None
     return {"x": payload["x"], "y": payload["y"]}
+
+
+def _desktop_click_ui_element(text: str) -> dict[str, Any] | None:
+    if _has_browser_page_context(text):
+        return None
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
+        r"(?P<context>(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?(?:上|里|中|内|的|里的|中的)?)\s*"
+        r"(?P<label>[^。！？!?，,]+?)"
+        r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
+        r"(?:一下|一次)?$",
+        r"^(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
+        r"(?:the\s+)?(?P<label_en>[^.!?]+?)"
+        r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|menu item|menu|checkbox))?"
+        r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_label = groups.get("label") or groups.get("label_en") or ""
+        kind = groups.get("kind") or groups.get("kind_en") or ""
+        context = groups.get("context") or ""
+        if not kind and not _desktop_ui_click_has_context(text, context):
+            continue
+        label = _strip_desktop_ui_element_label(raw_label)
+        if not label or _looks_like_click_coordinate_label(label):
+            continue
+        return {
+            "target": label,
+            "role_filter": _desktop_ui_element_role_filter(kind or text),
+            "limit": 80,
+            "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
+        }
+    return None
+
+
+def _desktop_ui_click_has_context(text: str, context: str) -> bool:
+    return bool(
+        str(context or "").strip()
+        or re.search(
+            r"(?:当前|前台|界面|窗口|应用|控件|按钮|元素|输入框|文本框|输入栏|菜单|复选框)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:current|foreground)\s+(?:window|app|application|ui)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _strip_desktop_ui_element_label(value: str) -> str:
+    label = _strip_query(value)
+    label = re.sub(
+        r"^(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)(?:上|里|中|内|的|里的|中的)?\s*",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    )
+    label = re.sub(
+        r"\s*(?:按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框|"
+        r"button|control|element|field|input|text field|textbox|menu item|menu|checkbox)$",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(label)
+
+
+def _desktop_ui_element_role_filter(value: str) -> str:
+    lowered = str(value or "").lower()
+    if re.search(r"(?:按钮|button)", lowered, flags=re.IGNORECASE):
+        return "button"
+    if re.search(r"(?:输入框|文本框|输入栏|text field|textbox|input|field)", lowered, flags=re.IGNORECASE):
+        return "text"
+    if re.search(r"(?:菜单项|菜单|menu item|menu)", lowered, flags=re.IGNORECASE):
+        return "menu"
+    if re.search(r"(?:复选框|checkbox)", lowered, flags=re.IGNORECASE):
+        return "checkbox"
+    return ""
 
 
 def _is_close_current_window_request(text: str) -> bool:

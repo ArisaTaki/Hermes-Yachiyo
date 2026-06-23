@@ -289,6 +289,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_safe_shortcut",
         "desktop_safe_type_text",
         "desktop_safe_click",
+        "desktop_click_ui_element",
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
@@ -330,6 +331,28 @@ def test_desktop_ui_elements_schema_accepts_optional_filter_and_limit() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"role_filter": 123})
     with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 limit 必须是 1-200 的整数"):
         ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"limit": 0})
+
+
+def test_desktop_click_ui_element_schema_requires_target_and_valid_options() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.click_ui_element",
+        {"target": "Send", "role_filter": "button", "limit": 20, "click_count": 2},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 target 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.click_ui_element", {"target": ""})
+    with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 role_filter 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.click_ui_element",
+            {"target": "Send", "role_filter": 123},
+        )
+    with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 limit 必须是 1-200"):
+        ToolDescriptorRegistry.validate_payload("desktop.click_ui_element", {"target": "Send", "limit": 0})
+    with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 click_count 必须是 1-3"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.click_ui_element",
+            {"target": "Send", "click_count": 4},
+        )
 
 
 def test_app_status_schema_requires_app_name() -> None:
@@ -515,6 +538,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "app.quit",
                 "desktop.close_window",
                 "desktop.click",
+                "desktop.click_ui_element",
                 "desktop.type_text",
                 "terminal.run",
             ]
@@ -532,6 +556,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.quit",
         "desktop.close_window",
         "desktop.click",
+        "desktop.click_ui_element",
         "desktop.type_text",
         "terminal.run",
     ]
@@ -539,6 +564,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.quit": True,
         "desktop.close_window": True,
         "desktop.click": True,
+        "desktop.click_ui_element": True,
         "desktop.type_text": True,
         "terminal.run": True,
     }
@@ -658,6 +684,14 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         broker,
         "desktop_safe_click",
         lambda x, y: calls.append(("safe_click", x, y)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "desktop_click_ui_element",
+        lambda target, *, role_filter="", limit=80, click_count=1: calls.append(
+            ("click_ui_element", target, role_filter, limit, click_count)
+        )
+        or {"ok": True},
     )
     monkeypatch.setattr(
         broker,
@@ -794,6 +828,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.click_ui_element",
+        {"target": "Send", "role_filter": "button", "limit": 20, "click_count": 2},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -880,6 +919,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("safe_shortcut", "copy"),
         ("safe_type_text", "hello"),
         ("safe_click", 12, 34),
+        ("click_ui_element", "Send", "button", 20, 2),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
@@ -1743,6 +1783,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.running_apps",
         "desktop.windows",
         "desktop.ui_elements",
+        "desktop.click_ui_element",
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
@@ -1971,6 +2012,152 @@ def test_desktop_ui_elements_permission_failure_returns_recovery_targets(monkeyp
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]
+
+
+def test_desktop_click_ui_element_matches_foreground_control_and_clicks_center(
+    monkeypatch,
+) -> None:
+    clicks: list[tuple[str, int, int, int]] = []
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "Google Chrome UI elements: AXButton: Send",
+        "data": {
+            "app_name": "Google Chrome",
+            "title": "ChatGPT",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXTextField",
+                    "name": "",
+                    "description": "Message",
+                    "value": "",
+                    "enabled": True,
+                    "center": {"x": 80, "y": 240},
+                },
+                {
+                    "depth": 0,
+                    "role": "AXButton",
+                    "name": "Send",
+                    "description": "Send message",
+                    "value": "",
+                    "enabled": True,
+                    "center": {"x": 120, "y": 240},
+                },
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "ui_elements",
+        lambda role_filter="", limit=80: observed,
+    )
+
+    def fake_click(action_name, x, y, *, click_count=1):
+        clicks.append((action_name, x, y, click_count))
+        return {
+            "ok": True,
+            "action": action_name,
+            "summary": f"Clicked foreground desktop at ({x}, {y})",
+            "data": {"x": x, "y": y, "click_count": click_count},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(desktop_mod, "_send_desktop_click", fake_click)
+
+    result = desktop_mod.click_ui_element(
+        "Send",
+        role_filter="button",
+        limit=20,
+        click_count=2,
+    )
+
+    assert clicks == [("desktop.click_ui_element", 120, 240, 2)]
+    assert result["ok"] is True
+    assert result["action"] == "desktop.click_ui_element"
+    assert result["summary"] == "Clicked foreground UI element: Send"
+    assert result["data"]["target"] == "Send"
+    assert result["data"]["matched_label"] == "Send"
+    assert result["data"]["role_filter"] == "button"
+    assert result["data"]["match_count"] == 1
+    assert result["data"]["element"]["role"] == "AXButton"
+    assert result["fallback_result"] == {"observe": observed}
+
+
+def test_desktop_click_ui_element_returns_candidates_without_blind_click(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "Notes UI elements",
+        "data": {
+            "app_name": "Notes",
+            "title": "Draft",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXButton",
+                    "name": "Cancel",
+                    "enabled": True,
+                    "center": {"x": 44, "y": 55},
+                }
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_click",
+        lambda *args, **kwargs: pytest.fail("should not click without a UI element match"),
+    )
+
+    result = desktop_mod.click_ui_element("Send", role_filter="button")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.click_ui_element"
+    assert result["error"] == "ui_element_not_found"
+    assert result["data"]["target"] == "Send"
+    assert result["data"]["candidates"] == [
+        {
+            "role": "AXButton",
+            "label": "Cancel",
+            "enabled": True,
+            "center": {"x": 44, "y": 55},
+        }
+    ]
+
+
+def test_desktop_click_ui_element_permission_failure_returns_recovery_targets(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": False,
+        "action": "desktop.ui_elements",
+        "summary": "desktop.ui_elements failed",
+        "error": "Not authorized to send Apple events to System Events.",
+        "data": {},
+        "permission_error": True,
+        "fallback_used": False,
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+
+    result = desktop_mod.click_ui_element("Send")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.click_ui_element"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
+    assert result["data"]["target"] == "Send"
+    assert result["fallback_result"] == {"observe": observed}
 
 
 def test_app_status_reports_running_state(monkeypatch) -> None:

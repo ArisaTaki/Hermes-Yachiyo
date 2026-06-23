@@ -395,6 +395,24 @@ class ToolBroker:
     def desktop_ui_elements(self, role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
         return desktop.ui_elements(role_filter=role_filter, limit=limit)
 
+    def desktop_click_ui_element(
+        self,
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+        click_count: Any = 1,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.click_ui_element",
+            lambda: desktop.click_ui_element(
+                target,
+                role_filter=role_filter,
+                limit=limit,
+                click_count=click_count,
+            ),
+        )
+
     def app_status(self, app_name: str) -> dict[str, Any]:
         return desktop.app_status(app_name)
 

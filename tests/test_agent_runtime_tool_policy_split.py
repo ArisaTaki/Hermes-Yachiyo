@@ -141,6 +141,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "desktop.hotkey": True,
         "desktop.type_text": True,
         "desktop.click": True,
+        "desktop.click_ui_element": True,
         "browser.click": True,
         "browser.type_text": True,
         "terminal.run": True,

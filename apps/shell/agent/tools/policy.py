@@ -32,6 +32,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.running_apps": "desktop_running_apps",
     "desktop.windows": "desktop_windows",
     "desktop.ui_elements": "desktop_ui_elements",
+    "desktop.click_ui_element": "desktop_click_ui_element",
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
@@ -121,6 +122,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.quit",
     "desktop.close_window",
+    "desktop.click_ui_element",
     "desktop.hotkey",
     "desktop.type_text",
     "desktop.click",
@@ -304,13 +306,24 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
-        if self.name == "desktop.ui_elements":
+        if self.name in {"desktop.ui_elements", "desktop.click_ui_element"}:
             if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
-                raise AgentRuntimeError("desktop.ui_elements 参数 role_filter 必须是字符串")
+                raise AgentRuntimeError(f"{self.name} 参数 role_filter 必须是字符串")
             if "limit" in payload:
                 value = payload.get("limit")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
-                    raise AgentRuntimeError("desktop.ui_elements 参数 limit 必须是 1-200 的整数")
+                    raise AgentRuntimeError(f"{self.name} 参数 limit 必须是 1-200 的整数")
+            if self.name == "desktop.click_ui_element":
+                click_count = payload.get("click_count", 1)
+                if click_count not in (None, ""):
+                    if isinstance(click_count, bool) or not isinstance(click_count, int):
+                        raise AgentRuntimeError(
+                            "desktop.click_ui_element 参数 click_count 必须是 1-3 的整数"
+                        )
+                    if click_count < 1 or click_count > 3:
+                        raise AgentRuntimeError(
+                            "desktop.click_ui_element 参数 click_count 必须是 1-3 的整数"
+                        )
         if self.name in {
             "app.open",
             "app.focus",
@@ -755,6 +768,37 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": "Maximum number of UI elements to return. Defaults to 80.",
             },
         },
+    ),
+    "desktop.click_ui_element": ToolDescriptor(
+        name="desktop.click_ui_element",
+        description=(
+            "Click a visible foreground UI element matched by Accessibility label/name/description. "
+            "Use for commands like clicking a named button in the current app. Requires approval "
+            "because the click coordinate is inferred from observed UI state."
+        ),
+        properties={
+            "target": {
+                "type": "string",
+                "description": "Visible UI element label/name/description to match, such as Send.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Optional click count. Defaults to 1.",
+            },
+        },
+        required=("target",),
     ),
     "app.status": ToolDescriptor(
         name="app.status",

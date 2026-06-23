@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import platform
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -239,6 +240,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.running_apps",
         "desktop.windows",
         "desktop.ui_elements",
+        "desktop.click_ui_element",
     ),
     "app_control": (
         "app.status",
@@ -268,6 +270,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.click_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -563,6 +566,97 @@ def ui_elements(role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def click_ui_element(
+    target: str,
+    *,
+    role_filter: str = "",
+    limit: Any = 80,
+    click_count: Any = 1,
+) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.click_ui_element")
+    clean_target = _clean_required(target, "target")
+    clean_filter = str(role_filter or "").strip()
+    clean_count = _clean_click_count(click_count)
+    observed = ui_elements(role_filter=clean_filter, limit=limit)
+    observed_data = observed.get("data") if isinstance(observed.get("data"), dict) else {}
+    if not observed.get("ok"):
+        payload = {
+            **observed,
+            "action": "desktop.click_ui_element",
+            "summary": "Could not observe foreground UI elements before clicking",
+            "data": {
+                **dict(observed_data),
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "click_count": clean_count,
+            },
+            "fallback_result": {"observe": observed},
+        }
+        return _with_permission_metadata("desktop.click_ui_element", payload)
+
+    elements = observed_data.get("elements") if isinstance(observed_data.get("elements"), list) else []
+    matches = _matching_ui_elements(elements, clean_target, clean_filter)
+    if not matches:
+        return {
+            "ok": False,
+            "action": "desktop.click_ui_element",
+            "summary": f"No foreground UI element matched: {clean_target}",
+            "error": "ui_element_not_found",
+            "data": {
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "click_count": clean_count,
+                "app_name": str(observed_data.get("app_name") or ""),
+                "title": str(observed_data.get("title") or ""),
+                "observed_count": len(elements),
+                "candidates": _candidate_ui_element_previews(elements),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {"observe": observed},
+        }
+
+    match = matches[0]
+    center = match.get("center") if isinstance(match.get("center"), dict) else {}
+    x = center.get("x")
+    y = center.get("y")
+    click_result = _send_desktop_click(
+        "desktop.click_ui_element",
+        x,
+        y,
+        click_count=clean_count,
+    )
+    click_data = click_result.get("data") if isinstance(click_result.get("data"), dict) else {}
+    label = _ui_element_display_label(match) or clean_target
+    data = {
+        **dict(click_data),
+        "target": clean_target,
+        "matched_label": label,
+        "role_filter": clean_filter,
+        "app_name": str(observed_data.get("app_name") or ""),
+        "title": str(observed_data.get("title") or ""),
+        "observed_count": len(elements),
+        "match_count": len(matches),
+        "element": match,
+    }
+    if click_result.get("ok"):
+        return {
+            **click_result,
+            "summary": f"Clicked foreground UI element: {label}",
+            "data": data,
+            "fallback_result": {"observe": observed},
+        }
+    payload = {
+        **click_result,
+        "action": "desktop.click_ui_element",
+        "summary": f"Matched foreground UI element but click failed: {label}",
+        "data": data,
+        "fallback_result": {"observe": observed},
+    }
+    return _with_permission_metadata("desktop.click_ui_element", payload)
 
 
 def permissions() -> dict[str, Any]:
@@ -2565,6 +2659,107 @@ def _parse_ui_elements_output(
     }
 
 
+def _matching_ui_elements(
+    elements: list[Any],
+    target: str,
+    role_filter: str = "",
+) -> list[dict[str, Any]]:
+    target_text = _normalize_ui_match_text(target)
+    if not target_text:
+        return []
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for index, raw_element in enumerate(elements):
+        if not isinstance(raw_element, dict):
+            continue
+        element = dict(raw_element)
+        if element.get("enabled") is False:
+            continue
+        center = element.get("center") if isinstance(element.get("center"), dict) else {}
+        if center.get("x") is None or center.get("y") is None:
+            continue
+        score = _ui_element_match_score(element, target_text, role_filter)
+        if score <= 0:
+            continue
+        depth = element.get("depth") if isinstance(element.get("depth"), int) else 0
+        scored.append((score - depth, -index, element))
+    scored.sort(reverse=True, key=lambda item: (item[0], item[1]))
+    return [element for _, _, element in scored]
+
+
+def _ui_element_match_score(
+    element: dict[str, Any],
+    normalized_target: str,
+    role_filter: str = "",
+) -> int:
+    label_texts = [_normalize_ui_match_text(_ui_element_field(element, key)) for key in ("name", "description", "value")]
+    label_texts = [text for text in label_texts if text]
+    searchable = _normalize_ui_match_text(
+        " ".join(
+            _ui_element_field(element, key)
+            for key in ("role", "subrole", "name", "description", "value")
+        )
+    )
+    if not searchable:
+        return 0
+    score = 0
+    if normalized_target in label_texts:
+        score = 100
+    elif any(normalized_target in text for text in label_texts):
+        score = 85
+    elif any(text in normalized_target for text in label_texts if len(text) >= 2):
+        score = 70
+    elif normalized_target in searchable:
+        score = 55
+    if not score:
+        return 0
+    normalized_filter = _normalize_ui_match_text(role_filter)
+    if normalized_filter and normalized_filter in searchable:
+        score += 10
+    if str(element.get("role") or "").strip():
+        score += 2
+    return score
+
+
+def _candidate_ui_element_previews(elements: list[Any], limit: int = 8) -> list[dict[str, Any]]:
+    previews: list[dict[str, Any]] = []
+    for raw_element in elements:
+        if not isinstance(raw_element, dict):
+            continue
+        label = _ui_element_display_label(raw_element)
+        center = raw_element.get("center") if isinstance(raw_element.get("center"), dict) else None
+        if not label and not center:
+            continue
+        preview: dict[str, Any] = {
+            "role": str(raw_element.get("role") or ""),
+            "label": label,
+            "enabled": raw_element.get("enabled"),
+        }
+        if center:
+            preview["center"] = center
+        previews.append(preview)
+        if len(previews) >= limit:
+            break
+    return previews
+
+
+def _ui_element_display_label(element: dict[str, Any]) -> str:
+    return (
+        _ui_element_field(element, "name")
+        or _ui_element_field(element, "description")
+        or _ui_element_field(element, "value")
+        or _ui_element_field(element, "role")
+    )
+
+
+def _ui_element_field(element: dict[str, Any], key: str) -> str:
+    return str(element.get(key) or "").strip()
+
+
+def _normalize_ui_match_text(value: Any) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return normalized.strip("\"'“”‘’[]()（） ")
+
+
 def _ui_element_frame(x: Any, y: Any, width: Any, height: Any) -> dict[str, int] | None:
     values = [_int_or_none(item) for item in (x, y, width, height)]
     if any(value is None for value in values):
@@ -2767,6 +2962,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "desktop.ui_elements": ["automation_or_accessibility"],
+        "desktop.click_ui_element": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
@@ -2820,6 +3016,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.open_and_safe_shortcut": ["accessibility", "open_command"],
         "app.focus_and_safe_shortcut": ["accessibility", "automation"],
         "desktop.click": ["accessibility"],
+        "desktop.click_ui_element": ["automation", "accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
         "osascript": ["automation"],

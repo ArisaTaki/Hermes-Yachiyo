@@ -32,6 +32,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.safe_click",
+    "desktop.click_ui_element",
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
@@ -86,6 +87,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.safe_shortcut": "执行快捷动作",
     "desktop.safe_type_text": "输入前台文字",
     "desktop.safe_click": "点击前台界面",
+    "desktop.click_ui_element": "点击前台控件",
     "desktop.hide_app": "隐藏当前应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
@@ -787,6 +789,8 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "desktop.safe_click":
                 click = _click_text(result, planned_input)
                 return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
+            if tool_name == "desktop.click_ui_element":
+                return _click_ui_element_summary(result, planned_input) or result_summary or "已点击前台控件。"
             if tool_name == "desktop.hotkey":
                 hotkey = _hotkey_text(result, planned_input)
                 return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
@@ -1034,7 +1038,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.click_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
@@ -1045,6 +1049,7 @@ class RuntimeCustomApiAgentLoop:
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
             "map foreground UI control/button/input field list questions to desktop.ui_elements; "
+            "map explicit foreground UI control/button clicks by visible label to desktop.click_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
@@ -1136,6 +1141,19 @@ def _click_text(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
         return ""
     count_text = "双击 " if str(click_count or "") == "2" else ""
     return f"{count_text}{x}, {y}"
+
+
+def _click_ui_element_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    label = str(data.get("matched_label") or data.get("target") or planned_input.get("target") or "").strip()
+    point = _click_text(result, planned_input)
+    if label and point:
+        return f"已点击前台控件：{label}（{point}）。"
+    if label:
+        return f"已点击前台控件：{label}。"
+    if point:
+        return f"已点击前台控件位置：{point}。"
+    return ""
 
 
 def _active_window_summary(result: dict[str, Any]) -> str:

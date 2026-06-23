@@ -58,7 +58,14 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
-    {"app.quit", "desktop.close_window", "desktop.hotkey", "desktop.type_text", "desktop.click"}
+    {
+        "app.quit",
+        "desktop.close_window",
+        "desktop.click_ui_element",
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
+    }
 )
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
@@ -101,6 +108,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
 MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "foreground_click",
+        "foreground_click_ui_element",
         "foreground_close_window",
         "foreground_type_text",
         "foreground_hotkey",
@@ -154,6 +162,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "foreground_safe_click",
     "foreground_hide_app",
     "foreground_minimize_window",
+    "foreground_click_ui_element",
     "foreground_click",
     "foreground_close_window",
     "foreground_type_text",
@@ -201,6 +210,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "foreground_safe_click": ("desktop.safe_click",),
     "foreground_hide_app": ("desktop.hide_app",),
     "foreground_minimize_window": ("desktop.minimize_window",),
+    "foreground_click_ui_element": ("desktop.click_ui_element",),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_close_window": ("desktop.close_window",),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
@@ -233,6 +243,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "foreground_safe_click": "Click explicit foreground coordinate",
     "foreground_hide_app": "Hide foreground app",
     "foreground_minimize_window": "Minimize foreground window",
+    "foreground_click_ui_element": "Click named foreground control",
     "foreground_click": "Click foreground UI",
     "foreground_close_window": "Close foreground window",
     "foreground_type_text": "Type into foreground UI",
@@ -272,6 +283,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "foreground_safe_click": "Single-click a screen coordinate explicitly provided by the user.",
     "foreground_hide_app": "Hide the current foreground app.",
     "foreground_minimize_window": "Minimize the current foreground window.",
+    "foreground_click_ui_element": "Click a visible foreground control matched by Accessibility label after approval.",
     "foreground_click": "Click in the foreground application or browser page.",
     "foreground_close_window": "Close the current foreground window after approval.",
     "foreground_type_text": "Enter text into the current foreground target.",
@@ -305,6 +317,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.running_apps",
         "desktop.windows",
         "desktop.ui_elements",
+        "desktop.click_ui_element",
         "app.status",
         "app.open",
         "app.focus",
@@ -375,6 +388,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.safe_click",
+        "desktop.click_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
