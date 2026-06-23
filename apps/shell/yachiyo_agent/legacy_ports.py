@@ -22,6 +22,7 @@ from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
 from .legacy_tasks import (
     LegacyRuntimePort,
+    MAIN_CHAT_AGENT_ID,
     _approval_id_from_decision,
     _assert_matching_pending_approval,
 )
@@ -49,9 +50,11 @@ class LegacyChatTaskStarter:
         self._projector = LegacyRunPayloadProjector()
 
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None:
-        agent_id = str(request.get("agent_id") or "").strip()
-        if not agent_id:
+        if str(request.get("workflow_id") or "").strip():
             return None
+        agent_id = str(request.get("agent_id") or request.get("runnable_id") or "").strip()
+        if not agent_id:
+            agent_id = MAIN_CHAT_AGENT_ID
         if getattr(self._app_runtime, "chat_session", None) is None:
             return None
 

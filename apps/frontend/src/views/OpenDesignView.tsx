@@ -12,6 +12,7 @@ import {
   startYachiyoTask,
 } from '../features/yachiyo-chat/api';
 import {
+  LAUNCHER_MAIN_AGENT_ID,
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
   launcherTaskConversationId,
@@ -1352,11 +1353,13 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     if (!text) return null;
     const task = await startYachiyoTask({
       prompt: text,
+      agent_id: LAUNCHER_MAIN_AGENT_ID,
       conversation_id: launcherTaskConversationId(mode, data),
       title: launcherTaskTitle(text),
       metadata: {
         source: 'launcher',
         launcher_mode: mode,
+        runnable_kind: 'main',
         launcher_surface: 'mode_page',
       },
     });

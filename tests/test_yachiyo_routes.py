@@ -982,6 +982,80 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeAgentRuntime()
+    runtime.runs["run-1"] = _run_payload(run_id="run-1", status="processing")
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=runtime,
+        chat_session=SimpleNamespace(session_id="chat-1"),
+        chat_calls=[],
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+
+    class FakeChatAPI:
+        def __init__(self, app_runtime: Any) -> None:
+            self._app_runtime = app_runtime
+
+        def send_runnable_message_in_session(
+            self,
+            session_id: str,
+            text: str,
+            *,
+            runnable_id: str = "",
+            client_message_id: str = "",
+        ) -> dict[str, Any]:
+            self._app_runtime.chat_calls.append(
+                {
+                    "session_id": session_id,
+                    "text": text,
+                    "runnable_id": runnable_id,
+                    "client_message_id": client_message_id,
+                }
+            )
+            return {
+                "ok": True,
+                "run_id": "run-1",
+                "agent_run_id": "run-1",
+                "session_id": "chat-1",
+                "status": "processing",
+            }
+
+    monkeypatch.setattr(legacy_ports, "ChatAPI", FakeChatAPI)
+
+    started = await yachiyo.start_task(
+        yachiyo.StartChatTaskRequest(
+            prompt="打开 Apple Music",
+            conversation_id="chat-1",
+            metadata={
+                "client_message_id": "launcher-main-1",
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "desktop_launcher",
+            },
+        ),
+        request,
+    )
+
+    assert started["task_id"] == "run-1"
+    assert started["status"] == "running"
+    assert app_runtime.chat_calls == [
+        {
+            "session_id": "chat-1",
+            "text": "打开 Apple Music",
+            "runnable_id": "builtin:yachiyo-main",
+            "client_message_id": "launcher-main-1",
+        }
+    ]
+    assert (
+        "link_task_run",
+        {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
+    ) in runtime.calls
+    assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
     runtime = _FakeAgentRuntime()
     request = _request(runtime)

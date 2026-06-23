@@ -1,5 +1,7 @@
 import type { AgentTaskSnapshot } from './types';
 
+export const LAUNCHER_MAIN_AGENT_ID = 'builtin:yachiyo-main';
+
 export type LauncherTaskMode = 'bubble' | 'live2d';
 
 type LauncherTaskPayloadContext = {

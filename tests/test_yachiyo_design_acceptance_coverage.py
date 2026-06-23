@@ -1014,8 +1014,10 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
         "apps/frontend/src/views/LauncherView.tsx",
         [
             "startYachiyoTask({",
+            "agent_id: LAUNCHER_MAIN_AGENT_ID,",
             "source: 'launcher'",
             "launcher_mode: mode,",
+            "runnable_kind: 'main',",
             "launcher_surface: 'desktop_launcher'",
             "LauncherAgentTaskLight",
             "onApproveTaskApproval={launcher.approveAgentTaskApproval}",
@@ -1026,6 +1028,7 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/launcherTasks.ts",
         [
+            "LAUNCHER_MAIN_AGENT_ID",
             "launcherPreferredActiveTask",
             "task.status === 'waiting_approval') return 0;",
         ],
