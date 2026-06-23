@@ -245,6 +245,48 @@ def running_apps() -> dict[str, Any]:
     }
 
 
+def app_status(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.status")
+    clean_name = _clean_required(app_name, "app_name")
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            if application appName is running then
+                return "running"
+            end if
+            return "not_running"
+        end run
+        """,
+        [clean_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.status",
+            {
+                **result,
+                "action": "app.status",
+                "summary": "app.status failed",
+                "data": {"app_name": clean_name},
+            },
+        )
+    status = str(result.get("stdout") or "").strip()
+    running = status == "running"
+    return {
+        "ok": True,
+        "action": "app.status",
+        "summary": f"{clean_name} is {'running' if running else 'not running'}",
+        "data": {
+            "app_name": clean_name,
+            "running": running,
+            "status": status or "unknown",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def app_open(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.open")

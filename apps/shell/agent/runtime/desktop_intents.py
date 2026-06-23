@@ -110,6 +110,17 @@ _COMMON_REVEAL_PATHS = {
     "用户文件夹": "~",
 }
 
+_APP_STATUS_PATTERNS = (
+    r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)?\s*"
+    r"(?P<app>[^。！？!?，,]+?)\s*(?:是否|有没有|是不是)?\s*"
+    r"(?:开着|打开着|打开了|开了吗|打开了吗|在运行|正在运行|运行着|启动了|启动着)\s*(?:吗|嘛|呢)?$",
+    r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)\s*"
+    r"(?P<app>[^。！？!?，,]+?)\s*(?:是否|有没有|是不是)?\s*"
+    r"(?:开着|打开着|打开了|在运行|正在运行|运行着|启动了|启动着)",
+    r"(?:is|check if|whether|see if)\s+(?P<app>[^.!?]+?)\s+(?:is\s+)?(?:running|open)",
+    r"(?P<app>[^.!?]+?)\s+(?:running|open)\?",
+)
+
 
 def daily_desktop_intent_tool_request(
     context: str,
@@ -140,10 +151,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if named_site_url:
         candidates.append(_request("browser.open_url", {"url": named_site_url}))
 
-    search_url = _browser_search_url(text)
-    if search_url:
-        candidates.append(_request("browser.open_url", {"url": search_url}))
-
     if _is_browser_extract_text_request(text):
         candidates.append(_request("browser.extract_text", {}))
 
@@ -157,6 +164,15 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
+
+    app_status_name = _app_status_name(text)
+    if app_status_name:
+        candidates.append(_request("app.status", {"app_name": app_status_name}))
+
+    if not _looks_like_app_status_request(text):
+        search_url = _browser_search_url(text)
+        if search_url:
+            candidates.append(_request("browser.open_url", {"url": search_url}))
 
     reveal_path = _desktop_reveal_path(text)
     if reveal_path:
@@ -469,6 +485,29 @@ def _is_running_apps_request(text: str) -> bool:
     )
 
 
+def _app_status_name(text: str) -> str:
+    if not _looks_like_app_status_request(text):
+        return ""
+    for pattern in _APP_STATUS_PATTERNS:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        app_name = _normalize_app_name(raw_app)
+        if not app_name or _looks_like_generic_app_open_target(raw_app):
+            continue
+        if _normalize_site_name(raw_app):
+            continue
+        return app_name
+    return ""
+
+
+def _looks_like_app_status_request(text: str) -> bool:
+    if _is_running_apps_request(text):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APP_STATUS_PATTERNS)
+
+
 def _desktop_reveal_path(text: str) -> str:
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
@@ -532,7 +571,11 @@ def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
-    if _looks_like_search_request(text) or _is_running_apps_request(text):
+    if (
+        _looks_like_search_request(text)
+        or _is_running_apps_request(text)
+        or _looks_like_app_status_request(text)
+    ):
         return ""
 
     patterns = (

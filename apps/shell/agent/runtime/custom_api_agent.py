@@ -19,6 +19,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "screen.capture",
     "desktop.active_window",
     "desktop.running_apps",
+    "app.status",
     "desktop.reveal_path",
     "browser.open_url",
     "browser.current_page",
@@ -33,6 +34,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
     "desktop.running_apps": "读取运行中应用",
+    "app.status": "检查应用状态",
     "desktop.reveal_path": "在 Finder 中显示",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
@@ -434,6 +436,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or _active_window_summary(result)
             if tool_name == "desktop.running_apps":
                 return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
+            if tool_name == "app.status":
+                return _app_status_summary(result, planned_input) or result_summary or "已检查应用状态。"
             if tool_name == "desktop.reveal_path":
                 path = _payload_text(result, planned_input, "path")
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
@@ -590,13 +594,14 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.active_window, desktop.running_apps, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
+            "desktop.active_window, desktop.running_apps, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
             "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
+            "map single app running/open status questions to app.status; "
             "map 'show/reveal in Finder' requests to desktop.reveal_path. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
@@ -706,6 +711,15 @@ def _running_apps_summary(result: dict[str, Any]) -> str:
     frontmost = str(data.get("frontmost") or "").strip()
     frontmost_text = f"前台是 {frontmost}。" if frontmost else ""
     return f"正在运行的应用：{', '.join(visible)}{suffix}。{frontmost_text}"
+
+
+def _app_status_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    app_name = str(data.get("app_name") or planned_input.get("app_name") or "").strip()
+    running = data.get("running")
+    if not app_name or not isinstance(running, bool):
+        return ""
+    return f"{app_name} 当前{'正在运行' if running else '没有运行'}。"
 
 
 def _browser_page_summary(result: dict[str, Any]) -> str:

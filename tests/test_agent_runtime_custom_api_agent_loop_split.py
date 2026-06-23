@@ -588,6 +588,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "screen.capture",
         "desktop.active_window",
         "desktop.running_apps",
+        "app.status",
         "browser.open_url",
         "browser.current_page",
         "browser.extract_text",
@@ -880,6 +881,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.running_apps",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("Chrome 开着吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("Music 在运行吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "Music"},
+    }
+    assert daily_desktop_intent_tool_request("is Slack running", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("检查一下 Slack 是否在运行", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("按 Command+L", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
@@ -925,6 +946,9 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
+    assert daily_desktop_intent_tool_request("Chrome 开着吗", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("ChatGPT 打开了吗", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("检查一下 Slack 是否在运行", ["browser.open_url"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
@@ -1357,6 +1381,30 @@ def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
     )
 
     assert result == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+
+
+def test_main_chat_desktop_intent_summarizes_app_status() -> None:
+    running = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.status",
+        {"app_name": "Google Chrome"},
+        {
+            "ok": True,
+            "summary": "Google Chrome is running",
+            "data": {"app_name": "Google Chrome", "running": True},
+        },
+    )
+    stopped = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.status",
+        {"app_name": "Slack"},
+        {
+            "ok": True,
+            "summary": "Slack is not running",
+            "data": {"app_name": "Slack", "running": False},
+        },
+    )
+
+    assert running == "Google Chrome 当前正在运行。"
+    assert stopped == "Slack 当前没有运行。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details() -> None:

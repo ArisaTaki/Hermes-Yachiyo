@@ -29,6 +29,7 @@ TOOL_FUNCTION_NAMES = {
     "screen.capture": "screen_capture",
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
+    "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
     "desktop.reveal_path": "desktop_reveal_path",
@@ -53,6 +54,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
     "desktop.active_window",
     "desktop.running_apps",
+    "app.status",
     "app.open",
     "app.focus",
     "desktop.reveal_path",
@@ -221,7 +223,7 @@ class ToolDescriptor:
                 raise AgentRuntimeError("terminal.run 参数 timeout_seconds 必须是 1-120 的整数")
         if "shell" in payload and not isinstance(payload.get("shell"), bool):
             raise AgentRuntimeError("terminal.run 参数 shell 必须是布尔值")
-        if self.name in {"app.open", "app.focus"} and not str(
+        if self.name in {"app.open", "app.focus", "app.status"} and not str(
             payload.get("app_name") or ""
         ).strip():
             raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
@@ -549,6 +551,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Low-risk, observable desktop state."
         ),
         properties={},
+    ),
+    "app.status": ToolDescriptor(
+        name="app.status",
+        description="Check whether a local desktop application is currently running.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
     ),
     "app.open": ToolDescriptor(
         name="app.open",

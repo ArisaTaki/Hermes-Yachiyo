@@ -386,6 +386,9 @@ class ToolBroker:
     def desktop_running_apps(self) -> dict[str, Any]:
         return desktop.running_apps()
 
+    def app_status(self, app_name: str) -> dict[str, Any]:
+        return desktop.app_status(app_name)
+
     def app_open(self, app_name: str) -> dict[str, Any]:
         return desktop.app_open(app_name)
 

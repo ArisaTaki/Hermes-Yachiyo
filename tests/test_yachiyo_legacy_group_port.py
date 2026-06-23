@@ -186,6 +186,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "workspace.read" in allowed_tools
     assert "screen.capture" in allowed_tools
     assert "desktop.running_apps" in allowed_tools
+    assert "app.status" in allowed_tools
     assert "media.apple_music_play" in allowed_tools
     assert "media.apple_music_control" in allowed_tools
     assert "desktop.reveal_path" in allowed_tools

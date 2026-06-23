@@ -375,6 +375,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         registered_tools={
             "screen.capture",
             "desktop.active_window",
+            "app.status",
             "app.open",
             "app.focus",
             "media.apple_music_play",
@@ -471,7 +472,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 
     assert app_control["available"] is False
     assert app_control["available_tools"] == ["app.open"]
-    assert app_control["unavailable_tools"] == ["app.focus"]
+    assert app_control["unavailable_tools"] == ["app.status", "app.focus"]
     assert media_control["available"] is False
     assert media_control["degraded_tools"] == [
         "media.apple_music_play",
@@ -494,6 +495,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
+    assert desktop_tool_risk_level("app.status") == "low"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -511,10 +513,11 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:10] == [
+    assert list(catalog)[:11] == [
         "read_screen",
         "read_active_window",
         "read_running_apps",
+        "read_app_status",
         "open_app",
         "focus_app",
         "reveal_path",
@@ -527,6 +530,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_screen"].tools == ["screen.capture"]
     assert catalog["read_running_apps"].risk_level == "low"
     assert catalog["read_running_apps"].tools == ["desktop.running_apps"]
+    assert catalog["read_app_status"].risk_level == "low"
+    assert catalog["read_app_status"].tools == ["app.status"]
     assert catalog["reveal_path"].risk_level == "low"
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["play_or_pause_media"].tools == [

@@ -268,6 +268,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "screen_capture",
         "desktop_active_window",
         "desktop_running_apps",
+        "app_status",
         "app_open",
         "app_focus",
         "desktop_reveal_path",
@@ -289,6 +290,13 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
 
 def test_desktop_running_apps_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.running_apps", {})
+
+
+def test_app_status_schema_requires_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload("app.status", {"app_name": "Google Chrome"})
+
+    with pytest.raises(AgentRuntimeError, match="app.status 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("app.status", {"app_name": ""})
 
 
 def test_desktop_reveal_path_schema_accepts_local_path() -> None:
@@ -418,6 +426,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop_running_apps",
         lambda: calls.append(("running",)) or {"ok": True, "apps": ["Finder"]},
     )
+    monkeypatch.setattr(
+        broker,
+        "app_status",
+        lambda app_name: calls.append(("status", app_name)) or {"ok": True, "app_name": app_name},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -448,6 +461,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "ok": True,
         "apps": ["Finder"],
     }
+    assert dispatch_tool_call(
+        broker,
+        "app.status",
+        {"app_name": "Google Chrome"},
+    ) == {"ok": True, "app_name": "Google Chrome"}
     assert calls == [
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
@@ -455,6 +473,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("click", 12, 34, 2),
         ("reveal", "~/Downloads/report.pdf"),
         ("running",),
+        ("status", "Google Chrome"),
     ]
 
 
@@ -880,6 +899,48 @@ def test_desktop_running_apps_permission_failure_returns_recovery_targets(monkey
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]
+
+
+def test_app_status_reports_running_state(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {"ok": True, "stdout": "running", "stderr": ""},
+    )
+
+    result = desktop_mod.app_status("Google Chrome")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.status"
+    assert result["summary"] == "Google Chrome is running"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "running": True,
+        "status": "running",
+    }
+
+
+def test_app_status_reports_not_running_state(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {"ok": True, "stdout": "not_running", "stderr": ""},
+    )
+
+    result = desktop_mod.app_status("Slack")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.status"
+    assert result["summary"] == "Slack is not running"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "running": False,
+        "status": "not_running",
+    }
 
 
 def test_desktop_type_text_permission_failure_returns_accessibility_target(monkeypatch) -> None:

@@ -53,6 +53,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "screen.capture" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]
     assert "desktop.running_apps" in config["instructions"]
+    assert "app.status" in config["instructions"]
     assert "desktop.reveal_path" in config["instructions"]
     assert "browser.open_url" in config["instructions"]
     assert "常见网站名或搜索查询" in config["instructions"]

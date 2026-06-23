@@ -31,6 +31,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
     "desktop.running_apps": "读取运行中应用",
+    "app.status": "检查应用状态",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "desktop.reveal_path": "在 Finder 中显示",
@@ -302,6 +303,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.click": "桌面点击",
         "desktop.type_text": "桌面输入",
         "desktop.running_apps": "运行中应用",
+        "app.status": "应用状态",
         "app.open": "打开应用",
         "desktop.reveal_path": "Finder 定位",
     }
