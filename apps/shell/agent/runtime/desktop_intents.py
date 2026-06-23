@@ -282,6 +282,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if music:
         candidates.append(_request("media.apple_music_play", {"query": music}))
 
+    safe_shortcut_action = _desktop_safe_shortcut_action(text)
+    if safe_shortcut_action:
+        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
+
     app_focus_name = _app_focus_name(text)
     if app_focus_name:
         candidates.append(_request("app.focus", {"app_name": app_focus_name}))
@@ -289,10 +293,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_name = _app_open_name(text)
     if app_name:
         candidates.append(_request("app.open", {"app_name": app_name}))
-
-    safe_shortcut_action = _desktop_safe_shortcut_action(text)
-    if safe_shortcut_action:
-        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
     safe_type_text = _desktop_safe_type_text(text)
     if safe_type_text:
@@ -463,7 +463,10 @@ def _normalize_url(value: str) -> str:
 def _browser_named_site_url(text: str) -> str:
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
         r"(?:打开|访问|浏览|前往|去)\s*(?P<site>[^。！？!?，,]+)",
+        r"(?:open|visit|browse|go to)\s+(?P<site>[^.!?]+)"
+        r"\s+(?:in|with|using)\s+(?:browser|chrome|google|safari)",
         r"(?:open|visit|browse|go to)\s+(?P<site>[^.!?]+)",
     )
     for pattern in patterns:
@@ -799,6 +802,9 @@ def _looks_like_generic_window_scope(value: str) -> bool:
         "打开的",
         "已打开",
         "已打开的",
+        "有",
+        "有哪",
+        "有哪些",
         "open",
         "all",
         "current",
@@ -909,6 +915,9 @@ def _app_focus_window_payload(text: str) -> dict[str, str] | None:
         r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"
         r"\s*(?:标题(?:包含|为)?|名为|叫)\s*"
         r"(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,\s]+?)"
+        r"\s+(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
         r"\b(?:focus|activate|switch to)\s+(?P<app>.+?)\s+window\s+"
         r"(?:(?:titled|called|matching|containing)\s+)?(?P<title>[^.!?]+)$",
     )
@@ -1143,6 +1152,24 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
     compact = re.sub(r"[\s._-]+", "", app.lower())
     if compact in _APP_ALIASES:
         return False
+    if compact in {
+        "窗口",
+        "当前窗口",
+        "这个窗口",
+        "标签页",
+        "当前标签页",
+        "这个标签页",
+        "新标签页",
+        "新建标签页",
+        "window",
+        "currentwindow",
+        "thiswindow",
+        "tab",
+        "currenttab",
+        "thistab",
+        "newtab",
+    }:
+        return True
     lowered = app.lower()
     if re.search(r"(?:命令|指令|脚本|代码|任务|测试)", lowered):
         return True

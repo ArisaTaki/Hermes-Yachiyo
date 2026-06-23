@@ -645,6 +645,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://chatgpt.com"},
     }
+    assert daily_desktop_intent_tool_request("用浏览器打开 ChatGPT", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://chatgpt.com"},
+    }
     assert daily_desktop_intent_tool_request("可以帮我打开 GitHub 吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -693,6 +698,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "WeChat"},
     }
     assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_window",
+        "input": {"app_name": "Slack", "title_contains": "general"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack general 窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_window",
         "input": {"app_name": "Slack", "title_contains": "general"},
@@ -1140,6 +1150,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("列出 Chrome 窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
@@ -1235,6 +1250,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开新标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_tab"},
+    }
     assert daily_desktop_intent_tool_request("复制选中内容", ["desktop.hotkey"]) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
@@ -1297,6 +1317,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 GitHub", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开小红书", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("打开新标签页", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
