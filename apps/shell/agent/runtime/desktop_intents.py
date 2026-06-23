@@ -335,6 +335,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _looks_like_explanation_request(text):
         return []
 
+    safe_shortcut_action = _desktop_safe_shortcut_action(text)
+    if safe_shortcut_action:
+        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
+
     url = _browser_open_url(text)
     if url:
         candidates.append(_request("browser.open_url", {"url": url}))
@@ -402,7 +406,7 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _is_close_current_window_request(text):
         candidates.append(_request("desktop.close_window", {}))
 
-    if not _looks_like_app_status_request(text):
+    if not safe_shortcut_action and not _looks_like_app_status_request(text):
         search_url = _browser_search_url(text)
         if search_url:
             candidates.append(_request("browser.open_url", {"url": search_url}))
@@ -422,10 +426,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     music = _music_query(text)
     if music:
         candidates.append(_request("media.apple_music_play", {"query": music}))
-
-    safe_shortcut_action = _desktop_safe_shortcut_action(text)
-    if safe_shortcut_action:
-        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
     app_focus_name = _app_focus_name(text)
     if app_focus_name:
@@ -1256,6 +1256,7 @@ def _app_open_name(text: str) -> str:
         _looks_like_search_request(text)
         or _is_running_apps_request(text)
         or _looks_like_app_status_request(text)
+        or _desktop_safe_shortcut_action(text)
     ):
         return ""
 
@@ -1677,7 +1678,15 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "reload": ("r", ("command",)),
         "refresh": ("r", ("command",)),
         "查找": ("f", ("command",)),
+        "打开查找": ("f", ("command",)),
+        "打开查找框": ("f", ("command",)),
+        "打开搜索框": ("f", ("command",)),
+        "页面查找": ("f", ("command",)),
+        "页面内查找": ("f", ("command",)),
+        "页面里查找": ("f", ("command",)),
+        "当前页查找": ("f", ("command",)),
         "find": ("f", ("command",)),
+        "findinpage": ("f", ("command",)),
         "新建标签页": ("t", ("command",)),
         "新标签页": ("t", ("command",)),
         "打开新标签页": ("t", ("command",)),
@@ -1726,7 +1735,15 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "reload": "refresh",
         "refresh": "refresh",
         "查找": "find",
+        "打开查找": "find",
+        "打开查找框": "find",
+        "打开搜索框": "find",
+        "页面查找": "find",
+        "页面内查找": "find",
+        "页面里查找": "find",
+        "当前页查找": "find",
         "find": "find",
+        "findinpage": "find",
         "新建标签页": "new_tab",
         "新标签页": "new_tab",
         "打开新标签页": "new_tab",

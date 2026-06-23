@@ -1756,17 +1756,17 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         return {
             "ok": True,
             "action": "desktop.safe_shortcut",
-            "summary": "Executed safe shortcut: refresh",
+            "summary": "Executed safe shortcut: find",
             "data": {
                 "shortcut_action": action,
-                "key": "r",
+                "key": "f",
                 "modifiers": ["command"],
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     try:
-        result = api.send_message("刷新一下页面")
+        result = api.send_message("打开查找框")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -1778,18 +1778,18 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
 
         assert result["ok"] is True
         assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已刷新。"
+        assert result["agent_task"]["summary"] == "已打开查找。"
         assert result["agent_task"]["needs_user_action"] is False
         assert result["agent_task"]["pending_approvals"] == []
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
         assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已刷新。"
+        assert task.result == "已打开查找。"
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已刷新。"
-        assert shortcut_calls == ["refresh"]
+        assert assistant.content == "已打开查找。"
+        assert shortcut_calls == ["find"]
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

@@ -1456,6 +1456,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开查找", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "find"},
+    }
+    assert daily_desktop_intent_tool_request("页面里查找", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "find"},
+    }
+    assert daily_desktop_intent_tool_request("打开查找", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("刷新一下页面", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
