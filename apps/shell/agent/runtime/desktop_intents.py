@@ -956,6 +956,7 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
     app_patterns = (
         r"(?:list|show|read)\s+(?P<app>[^.!?]+?)\s+windows",
         r"(?P<app>[^.!?]+?)\s+windows\?",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*(?:窗口|windows?)\s*(?:列表|清单|list)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:列出|查看|看看|看一下|看下|显示|读取)\s+"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:有|打开了|开了|正在显示)?"
         r"(?:哪些|什么|几个|多少).{0,4}(?:窗口|window)",
@@ -986,10 +987,12 @@ def _is_general_windows_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"(?:列出|查看|看看|显示|读取).{0,8}"
+            r"(?:列出|列一下|列下|查看|看看|显示|读取).{0,8}"
             r"(?:当前|现在|桌面|打开|已打开|所有)?.{0,8}(?:窗口|windows?)",
             text,
         )
+        or re.search(r"(?:窗口|windows?)\s*(?:列表|清单|list)$", text, flags=re.IGNORECASE)
+        or re.search(r"(?:当前|现在|桌面|所有|全部)?(?:窗口|windows?).{0,8}(?:列出|列一下|列下|列表|清单)", text)
         or re.search(r"(?:打开|已打开|现在|当前|桌面|所有).{0,8}(?:有哪些|什么|几个|多少).{0,4}(?:窗口)", text)
         or re.search(r"\b(?:list|show|read|what|which)\s+(?:open\s+)?windows\b", lowered)
         or re.search(r"\bopen\s+windows\b", lowered)
@@ -1001,6 +1004,13 @@ def _looks_like_generic_window_scope(value: str) -> bool:
     return compact in {
         "",
         "当前",
+        "当前应用",
+        "当前app",
+        "当前软件",
+        "前台",
+        "前台应用",
+        "前台app",
+        "前台软件",
         "现在",
         "桌面",
         "系统",
@@ -1013,9 +1023,21 @@ def _looks_like_generic_window_scope(value: str) -> bool:
         "有",
         "有哪",
         "有哪些",
+        "看看",
+        "查看",
+        "看一下",
+        "看下",
+        "列出",
+        "列一下",
+        "列下",
+        "显示",
+        "读取",
         "open",
         "all",
         "current",
+        "currentapp",
+        "foreground",
+        "foregroundapp",
         "desktop",
         "windows",
     }
@@ -2112,6 +2134,13 @@ def _is_active_window_request(text: str) -> bool:
     if re.search(r"(?:关闭|关掉|退出|结束|close|quit|exit)", text, flags=re.IGNORECASE):
         return False
     if re.search(r"(?:哪些|几个|多少).{0,4}(?:窗口|windows?)", text, flags=re.IGNORECASE):
+        return False
+    if re.search(
+        r"(?:列出|列一下|列下|显示|读取).{0,12}(?:窗口|windows?)|"
+        r"(?:窗口|windows?).{0,8}(?:列表|清单|列出|列一下|列下)",
+        text,
+        flags=re.IGNORECASE,
+    ):
         return False
     lowered = text.lower()
     return bool(

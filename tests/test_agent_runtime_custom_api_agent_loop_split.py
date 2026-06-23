@@ -1493,6 +1493,36 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("当前应用有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("前台应用有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("列一下当前应用窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("看看打开了哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("窗口列表", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("所有窗口列一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
@@ -1507,6 +1537,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.windows",
         "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("Slack窗口列表", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("帮我看看 Slack 有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",

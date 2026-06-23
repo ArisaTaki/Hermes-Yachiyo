@@ -392,6 +392,52 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_named_windows_list_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    windows_calls: list[str] = []
+
+    def fake_windows(app_name: str = "") -> dict:
+        windows_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "desktop.windows",
+            "summary": "Read Slack windows",
+            "data": {
+                "app_name": app_name,
+                "windows": [
+                    {"app_name": app_name or "Slack", "title": "general"},
+                ],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "Slack窗口列表",
+    )
+
+    assert result["ok"] is True
+    assert windows_calls == ["Slack"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "当前窗口：Slack: general。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.windows"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Slack"}
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_app_status_without_model(
     tmp_path,
     monkeypatch,
