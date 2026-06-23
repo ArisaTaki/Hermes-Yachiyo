@@ -587,6 +587,35 @@ class ChatAPI:
             return store
         return get_activity_store()
 
+    def _execute_direct_daily_desktop_task(
+        self,
+        *,
+        task_id: str,
+        prompt: str,
+    ) -> dict[str, Any] | None:
+        try:
+            service = self._agent_runtime_service()
+            if service is None:
+                return None
+            from apps.shell.yachiyo_agent.legacy_ports import LegacyChatTaskStarter
+            from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
+
+            starter = LegacyChatTaskStarter(self._runtime, service)
+            payload = starter.execute_existing_main_chat_task(
+                task_id=task_id,
+                conversation_id=str(getattr(self._session, "session_id", "") or ""),
+                prompt=prompt,
+            )
+            if payload is None:
+                return None
+            return {
+                "payload": payload,
+                "agent_task": agent_task_snapshot_from_payload(payload).model_dump(mode="json"),
+            }
+        except Exception:
+            logger.debug("主聊天日常桌面任务直接执行失败: %s", task_id, exc_info=True)
+            return None
+
     def _with_session(self, session_id: str, callback):
         """Run a small ChatAPI mutation against a specific persisted session."""
         session_id = str(session_id or "").strip()
@@ -754,6 +783,12 @@ class ChatAPI:
 
             # 3. 关联消息与任务
             self._session.link_message_to_task(message_id, task_id)
+            direct_daily_desktop_task: dict[str, Any] | None = None
+            if direct_daily_desktop_intent:
+                direct_daily_desktop_task = self._execute_direct_daily_desktop_task(
+                    task_id=task_id,
+                    prompt=task_text,
+                )
             if direct_group_dispatch_directives:
                 source_text = self._format_group_dispatch_direct_source()
                 self._state.update_task_status(
@@ -792,6 +827,22 @@ class ChatAPI:
                     "task_id": task_id,
                     "assistant_message_id": assistant_id,
                     "status": "completed",
+                    "attachments": self._serialize_attachments(saved_attachments),
+                    **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
+                }
+            if direct_daily_desktop_task is not None:
+                payload = direct_daily_desktop_task["payload"]
+                agent_task = direct_daily_desktop_task["agent_task"]
+                status = str(agent_task.get("status") or payload.get("status") or "pending")
+                assistant = self._session.get_assistant_message_for_task(task_id)
+                return {
+                    "ok": True,
+                    "message_id": message_id,
+                    "task_id": task_id,
+                    "assistant_message_id": str(getattr(assistant, "message_id", "") or ""),
+                    "status": status,
+                    "run_id": str(payload.get("run_id") or ""),
+                    "agent_task": agent_task,
                     "attachments": self._serialize_attachments(saved_attachments),
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
                 }

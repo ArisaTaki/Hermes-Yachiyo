@@ -341,6 +341,8 @@ class ChatBridge:
         task_id = str(result.get("task_id") or "").strip()
         if not task_id:
             return result
+        if isinstance(result.get("agent_task"), dict):
+            return result
         desktop_candidates = daily_desktop_intent_candidates(text)
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(task_id, text)
