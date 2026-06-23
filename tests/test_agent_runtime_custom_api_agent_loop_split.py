@@ -805,13 +805,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "下载文件夹"},
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("打开下载", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "下载"},
+        "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
         "protocol": "json_fallback",

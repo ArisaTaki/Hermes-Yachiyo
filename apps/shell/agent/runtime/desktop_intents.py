@@ -641,6 +641,8 @@ def _desktop_reveal_path(text: str) -> str:
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"在\s*(?:finder|访达)\s*(?:中|里|内)?\s*"
         r"(?:显示|显示一下|定位|找一下|找到|打开)\s*(?P<path>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|显示|显示一下|定位|找一下|找到)\s*(?P<path>[^。！？!?，,]+)",
         r"(?:show|reveal|locate|open)\s+(?P<path>[^.!?]+?)\s+in\s+(?:the\s+)?finder",
     )
     for pattern in patterns:

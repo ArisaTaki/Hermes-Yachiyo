@@ -272,6 +272,72 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    reveal_calls: list[str] = []
+    app_open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct folder task should not call model")
+        ),
+    )
+
+    def fake_reveal_path(path: str) -> dict:
+        reveal_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.reveal_path",
+            "summary": f"Revealed {path}",
+            "data": {
+                "path": path,
+                "open_target": "finder_reveal",
+                "exists": True,
+                "is_dir": True,
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict:
+        app_open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.reveal_path", fake_reveal_path)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        result = api.send_message("打开下载文件夹")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已在 Finder 中显示：~/Downloads。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已在 Finder 中显示：~/Downloads。"
+        assert reveal_calls == ["~/Downloads"]
+        assert app_open_calls == []
+        assert run["status"] == "completed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_is_idempotent_for_client_message_id(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:
