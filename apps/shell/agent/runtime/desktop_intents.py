@@ -155,6 +155,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
 
+    if _is_running_apps_request(text):
+        candidates.append(_request("desktop.running_apps", {}))
+
     reveal_path = _desktop_reveal_path(text)
     if reveal_path:
         candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
@@ -443,6 +446,29 @@ def _is_browser_screenshot_request(text: str) -> bool:
     )
 
 
+def _is_running_apps_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:现在|当前|桌面|电脑|系统|前台|后台)?.{0,8}"
+            r"(?:开了|打开了|运行着|正在运行|在运行|启动了).{0,8}"
+            r"(?:哪些|什么|什么样的|几个)?.{0,4}(?:应用|app|软件|程序)",
+            text,
+        )
+        or re.search(
+            r"(?:列出|查看|看看|显示|读取).{0,8}"
+            r"(?:正在运行|在运行|打开|已打开|运行中).{0,8}(?:应用|app|软件|程序)",
+            text,
+        )
+        or re.search(
+            r"\b(?:what|which|list|show|read)\s+(?:apps?|applications?|programs?)\s+"
+            r"(?:are\s+)?(?:running|open)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:running|open)\s+(?:apps?|applications?|programs?)\b", lowered)
+    )
+
+
 def _desktop_reveal_path(text: str) -> str:
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
@@ -506,7 +532,7 @@ def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
-    if _looks_like_search_request(text):
+    if _looks_like_search_request(text) or _is_running_apps_request(text):
         return ""
 
     patterns = (
@@ -847,6 +873,8 @@ def _is_screen_capture_request(text: str) -> bool:
 
 
 def _is_active_window_request(text: str) -> bool:
+    if _is_running_apps_request(text):
+        return False
     lowered = text.lower()
     return bool(
         re.search(

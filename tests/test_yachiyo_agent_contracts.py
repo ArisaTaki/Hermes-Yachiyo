@@ -493,6 +493,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
+    assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -510,9 +511,10 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:9] == [
+    assert list(catalog)[:10] == [
         "read_screen",
         "read_active_window",
+        "read_running_apps",
         "open_app",
         "focus_app",
         "reveal_path",
@@ -523,6 +525,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
+    assert catalog["read_running_apps"].risk_level == "low"
+    assert catalog["read_running_apps"].tools == ["desktop.running_apps"]
     assert catalog["reveal_path"].risk_level == "low"
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["play_or_pause_media"].tools == [

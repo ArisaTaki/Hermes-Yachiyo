@@ -122,6 +122,14 @@ def _desktop_active_window(
     return broker.desktop_active_window()
 
 
+def _desktop_running_apps(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_running_apps()
+
+
 def _app_open(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_open(str(payload.get("app_name") or ""))
 
@@ -241,6 +249,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "artifact.write": _artifact_write,
     "screen.capture": _screen_capture,
     "desktop.active_window": _desktop_active_window,
+    "desktop.running_apps": _desktop_running_apps,
     "app.open": _app_open,
     "app.focus": _app_focus,
     "desktop.reveal_path": _desktop_reveal_path,

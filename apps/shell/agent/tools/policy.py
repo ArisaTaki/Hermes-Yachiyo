@@ -28,6 +28,7 @@ TOOL_FUNCTION_NAMES = {
     "artifact.write": "artifact_write",
     "screen.capture": "screen_capture",
     "desktop.active_window": "desktop_active_window",
+    "desktop.running_apps": "desktop_running_apps",
     "app.open": "app_open",
     "app.focus": "app_focus",
     "desktop.reveal_path": "desktop_reveal_path",
@@ -51,6 +52,7 @@ FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_ta
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
     "desktop.active_window",
+    "desktop.running_apps",
     "app.open",
     "app.focus",
     "desktop.reveal_path",
@@ -538,6 +540,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "desktop.active_window": ToolDescriptor(
         name="desktop.active_window",
         description="Read the current foreground app and window title.",
+        properties={},
+    ),
+    "desktop.running_apps": ToolDescriptor(
+        name="desktop.running_apps",
+        description=(
+            "Read the list of currently running foreground desktop applications. "
+            "Low-risk, observable desktop state."
+        ),
         properties={},
     ),
     "app.open": ToolDescriptor(

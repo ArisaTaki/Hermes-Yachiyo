@@ -587,6 +587,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_control",
         "screen.capture",
         "desktop.active_window",
+        "desktop.running_apps",
         "browser.open_url",
         "browser.current_page",
         "browser.extract_text",
@@ -864,6 +865,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.active_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("现在开了哪些应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("列出正在运行的应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("what apps are running", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("按 Command+L", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
@@ -907,6 +923,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 GitHub", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开小红书", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
@@ -1318,6 +1336,27 @@ def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:
     )
 
     assert result == "已在 Finder 中显示：~/Downloads/report.pdf。"
+
+
+def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.running_apps",
+        {},
+        {
+            "ok": True,
+            "summary": "Running apps: Finder, Google Chrome, Music",
+            "data": {
+                "apps": [
+                    {"name": "Finder", "pid": 101, "frontmost": False},
+                    {"name": "Google Chrome", "pid": 202, "frontmost": True},
+                    {"name": "Music", "pid": 303, "frontmost": False},
+                ],
+                "frontmost": "Google Chrome",
+            },
+        },
+    )
+
+    assert result == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details() -> None:

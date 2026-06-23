@@ -205,6 +205,46 @@ def active_window() -> dict[str, Any]:
     }
 
 
+def running_apps() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.running_apps")
+    script = """
+    tell application "System Events"
+        set rows to {}
+        repeat with proc in (application processes whose background only is false)
+            set appName to name of proc
+            set appPID to unix id of proc
+            set appFront to frontmost of proc
+            set end of rows to appName & "|" & appPID & "|" & appFront
+        end repeat
+        set AppleScript's text item delimiters to linefeed
+        set output to rows as text
+        set AppleScript's text item delimiters to ""
+        return output
+    end tell
+    """
+    result = _run_osascript(script)
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.running_apps",
+            {**result, "action": "desktop.running_apps", "summary": "desktop.running_apps failed"},
+        )
+    apps = _parse_running_apps(result.get("stdout"))
+    names = [str(app.get("name") or "") for app in apps if str(app.get("name") or "")]
+    return {
+        "ok": True,
+        "action": "desktop.running_apps",
+        "summary": _running_apps_summary(names),
+        "data": {
+            "apps": apps,
+            "count": len(apps),
+            "frontmost": next((app.get("name") for app in apps if app.get("frontmost")), ""),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def app_open(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.open")
@@ -941,6 +981,33 @@ def _clean_modifiers(modifiers: list[str]) -> list[str]:
     return clean
 
 
+def _parse_running_apps(value: Any) -> list[dict[str, Any]]:
+    apps: list[dict[str, Any]] = []
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        name, pid_text, frontmost_text = _split_status(line)
+        if not name:
+            continue
+        apps.append(
+            {
+                "name": name,
+                "pid": int(pid_text) if pid_text.isdigit() else None,
+                "frontmost": frontmost_text.strip().lower() == "true",
+            }
+        )
+    return apps
+
+
+def _running_apps_summary(names: list[str]) -> str:
+    if not names:
+        return "No foreground apps are running"
+    visible = names[:5]
+    suffix = f" (+{len(names) - len(visible)} more)" if len(names) > len(visible) else ""
+    return f"Running apps: {', '.join(visible)}{suffix}"
+
+
 def _split_status(value: Any) -> tuple[str, str, str]:
     parts = str(value or "").strip().split("|", 2)
     while len(parts) < 3:
@@ -987,6 +1054,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
     return {
         "screen.capture": ["screen_recording"],
         "desktop.active_window": ["automation_or_accessibility"],
+        "desktop.running_apps": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
@@ -1001,6 +1069,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
     return {
         "screen.capture": ["screen_recording"],
         "desktop.active_window": ["automation", "accessibility"],
+        "desktop.running_apps": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],

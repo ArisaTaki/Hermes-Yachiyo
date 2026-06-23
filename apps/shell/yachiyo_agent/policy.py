@@ -28,6 +28,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
     {
         "screen.capture",
         "desktop.active_window",
+        "desktop.running_apps",
         "app.open",
         "app.focus",
         "desktop.reveal_path",
@@ -51,6 +52,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "read_screen",
         "read_active_window",
+        "read_running_apps",
         "open_app",
         "focus_app",
         "reveal_path",
@@ -89,6 +91,7 @@ DESKTOP_ACTION_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
 DESKTOP_ACTION_RISK_ORDER = (
     "read_screen",
     "read_active_window",
+    "read_running_apps",
     "open_app",
     "focus_app",
     "reveal_path",
@@ -113,6 +116,7 @@ DESKTOP_ACTION_RISK_ORDER = (
 DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_screen": ("screen.capture",),
     "read_active_window": ("desktop.active_window",),
+    "read_running_apps": ("desktop.running_apps",),
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
     "reveal_path": ("desktop.reveal_path",),
@@ -184,6 +188,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "desktop_execution": (
         "screen.capture",
         "desktop.active_window",
+        "desktop.running_apps",
         "app.open",
         "app.focus",
         "desktop.reveal_path",
@@ -200,7 +205,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "browser.screenshot",
     ),
     "screen_capture": ("screen.capture",),
-    "active_window": ("desktop.active_window",),
+    "active_window": ("desktop.active_window", "desktop.running_apps"),
     "app_control": ("app.open", "app.focus"),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),

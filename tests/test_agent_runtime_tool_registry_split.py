@@ -267,6 +267,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
     assert {
         "screen_capture",
         "desktop_active_window",
+        "desktop_running_apps",
         "app_open",
         "app_focus",
         "desktop_reveal_path",
@@ -284,6 +285,10 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
     }.issubset(schemas)
     assert "terminal.run" in HIGH_RISK_AGENT_TOOLS
     assert "workspace.write_patch" in HIGH_RISK_AGENT_TOOLS
+
+
+def test_desktop_running_apps_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.running_apps", {})
 
 
 def test_desktop_reveal_path_schema_accepts_local_path() -> None:
@@ -408,6 +413,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop_reveal_path",
         lambda path: calls.append(("reveal", path)) or {"ok": True, "path": path},
     )
+    monkeypatch.setattr(
+        broker,
+        "desktop_running_apps",
+        lambda: calls.append(("running",)) or {"ok": True, "apps": ["Finder"]},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -434,12 +444,17 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.reveal_path",
         {"path": "~/Downloads/report.pdf"},
     ) == {"ok": True, "path": "~/Downloads/report.pdf"}
+    assert dispatch_tool_call(broker, "desktop.running_apps", {}) == {
+        "ok": True,
+        "apps": ["Finder"],
+    }
     assert calls == [
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("reveal", "~/Downloads/report.pdf"),
+        ("running",),
     ]
 
 
@@ -814,6 +829,57 @@ def test_desktop_active_window_permission_failure_returns_recovery_targets(monke
             "in macOS System Settings > Privacy & Security > Accessibility."
         ),
     ]
+
+
+def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": "Finder|101|false\nGoogle Chrome|202|true\nMusic|303|false",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.running_apps()
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.running_apps"
+    assert result["summary"] == "Running apps: Finder, Google Chrome, Music"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "apps": [
+            {"name": "Finder", "pid": 101, "frontmost": False},
+            {"name": "Google Chrome", "pid": 202, "frontmost": True},
+            {"name": "Music", "pid": 303, "frontmost": False},
+        ],
+        "count": 3,
+        "frontmost": "Google Chrome",
+    }
+
+
+def test_desktop_running_apps_permission_failure_returns_recovery_targets(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="Not authorized to send Apple events to System Events.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.running_apps()
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.running_apps"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
 
 
 def test_desktop_type_text_permission_failure_returns_accessibility_target(monkeypatch) -> None:

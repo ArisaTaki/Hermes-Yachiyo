@@ -287,6 +287,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.active_window": [
             "Requires Automation or Accessibility permission to read the foreground window.",
         ],
+        "desktop.running_apps": [
+            "Requires Automation or Accessibility permission to read the foreground app list.",
+        ],
         "app.open": [
             "Uses the local app launcher and surfaces launch failures as tool results.",
         ],

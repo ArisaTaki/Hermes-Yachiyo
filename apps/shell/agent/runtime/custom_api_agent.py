@@ -18,6 +18,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_control",
     "screen.capture",
     "desktop.active_window",
+    "desktop.running_apps",
     "desktop.reveal_path",
     "browser.open_url",
     "browser.current_page",
@@ -31,6 +32,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
 _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
+    "desktop.running_apps": "读取运行中应用",
     "desktop.reveal_path": "在 Finder 中显示",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
@@ -430,6 +432,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.active_window":
                 return result_summary or _active_window_summary(result)
+            if tool_name == "desktop.running_apps":
+                return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
             if tool_name == "desktop.reveal_path":
                 path = _payload_text(result, planned_input, "path")
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
@@ -586,13 +590,14 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.active_window, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
+            "desktop.active_window, desktop.running_apps, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
             "media.apple_music_control, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
-            "before answering; map 'show/reveal in Finder' requests to desktop.reveal_path. "
+            "before answering; map running/open app list questions to desktop.running_apps; "
+            "map 'show/reveal in Finder' requests to desktop.reveal_path. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "
@@ -680,6 +685,27 @@ def _active_window_summary(result: dict[str, Any]) -> str:
     if app_name:
         return f"当前前台应用是 {app_name}。"
     return "已读取当前前台窗口。"
+
+
+def _running_apps_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_apps = data.get("apps")
+    if not isinstance(raw_apps, list):
+        return ""
+    names = []
+    for item in raw_apps:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    if not names:
+        return "当前没有读取到正在运行的前台应用。"
+    visible = names[:8]
+    suffix = f" 等 {len(names)} 个应用" if len(names) > len(visible) else ""
+    frontmost = str(data.get("frontmost") or "").strip()
+    frontmost_text = f"前台是 {frontmost}。" if frontmost else ""
+    return f"正在运行的应用：{', '.join(visible)}{suffix}。{frontmost_text}"
 
 
 def _browser_page_summary(result: dict[str, Any]) -> str:
