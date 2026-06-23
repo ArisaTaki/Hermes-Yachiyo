@@ -601,6 +601,74 @@ def test_app_open_handles_common_finder_folder_aliases(monkeypatch) -> None:
     assert calls[0][0] == ["open", str(desktop_mod.Path.home() / "Downloads")]
 
 
+def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.app_open("屏幕录制权限")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.open"
+    assert result["summary"] == "Opened System Settings: Screen Recording Permission"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"] == {
+        "app_name": "屏幕录制权限",
+        "open_target": "system_settings",
+        "settings_label": "Screen Recording Permission",
+        "settings_url": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        "fallback_used": False,
+    }
+    assert calls[0][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ]
+
+
+def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            1 if len(calls) == 1 else 0,
+            stdout="",
+            stderr="unsupported URL" if len(calls) == 1 else "",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.app_open("设置的隐私与安全性")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.open"
+    assert result["summary"] == "Opened System Settings: Privacy & Security"
+    assert result["fallback_used"] is True
+    assert result["data"] == {
+        "app_name": "设置的隐私与安全性",
+        "open_target": "system_settings",
+        "settings_label": "Privacy & Security",
+        "settings_url": "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+        "fallback_used": True,
+    }
+    assert calls[0][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy",
+    ]
+    assert calls[1][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+    ]
+
+
 def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:
     open_calls = []
 

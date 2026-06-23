@@ -733,6 +733,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Activity Monitor"},
     }
+    assert daily_desktop_intent_tool_request("打开设置的隐私与安全性", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "设置的隐私与安全性"},
+    }
+    assert daily_desktop_intent_tool_request("打开屏幕录制权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "屏幕录制权限"},
+    }
+    assert daily_desktop_intent_tool_request("打开辅助功能权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "辅助功能权限"},
+    }
     assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

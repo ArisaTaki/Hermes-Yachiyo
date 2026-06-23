@@ -29,6 +29,119 @@ _COMMON_FOLDER_TARGETS = {
     "用户文件夹": "",
 }
 
+_PRIVACY_SECURITY_URLS = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy",
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+)
+
+_SYSTEM_SETTINGS_TARGETS = {
+    "privacysecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "privacyandsecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "securityprivacy": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "securityandprivacy": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "隐私与安全性": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "隐私和安全性": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "隐私安全": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "安全性与隐私": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "安全与隐私": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "accessibility": (
+        "Accessibility Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
+    ),
+    "assistive": (
+        "Accessibility Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
+    ),
+    "辅助功能": (
+        "Accessibility Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
+    ),
+    "无障碍": (
+        "Accessibility Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
+    ),
+    "screenrecording": (
+        "Screen Recording Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",),
+    ),
+    "screencapture": (
+        "Screen Recording Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",),
+    ),
+    "屏幕录制": (
+        "Screen Recording Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",),
+    ),
+    "屏幕录像": (
+        "Screen Recording Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",),
+    ),
+    "automation": (
+        "Automation Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",),
+    ),
+    "appleevents": (
+        "Automation Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",),
+    ),
+    "自动化": (
+        "Automation Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",),
+    ),
+    "fulldiskaccess": (
+        "Full Disk Access",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",),
+    ),
+    "完全磁盘访问": (
+        "Full Disk Access",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",),
+    ),
+    "filesandfolders": (
+        "Files and Folders Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ApplicationData",),
+    ),
+    "文件和文件夹": (
+        "Files and Folders Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ApplicationData",),
+    ),
+    "inputmonitoring": (
+        "Input Monitoring Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",),
+    ),
+    "输入监控": (
+        "Input Monitoring Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",),
+    ),
+    "microphone": (
+        "Microphone Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",),
+    ),
+    "麦克风": (
+        "Microphone Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",),
+    ),
+    "camera": (
+        "Camera Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",),
+    ),
+    "摄像头": (
+        "Camera Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",),
+    ),
+    "相机": (
+        "Camera Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",),
+    ),
+    "locationservices": (
+        "Location Services Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",),
+    ),
+    "定位服务": (
+        "Location Services Permission",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",),
+    ),
+}
+
 
 def screen_capture(target_path: Path) -> dict[str, Any]:
     if _desktop_platform() != "macos":
@@ -96,6 +209,9 @@ def app_open(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.open")
     clean_name = _clean_required(app_name, "app_name")
+    settings_target = _system_settings_target(clean_name)
+    if settings_target is not None:
+        return _open_system_settings_target(clean_name, settings_target)
     folder_path = _common_folder_path(clean_name)
     if folder_path is not None:
         return _open_common_folder(clean_name, folder_path)
@@ -153,6 +269,100 @@ def _open_common_folder(label: str, folder_path: Path) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def _open_system_settings_target(
+    label: str,
+    target: tuple[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    settings_label, urls = target
+    errors: list[str] = []
+    for index, url in enumerate(urls):
+        try:
+            result = subprocess.run(
+                ["open", url],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception as exc:
+            return _error("app.open", exc)
+        if result.returncode == 0:
+            return {
+                "ok": True,
+                "action": "app.open",
+                "summary": f"Opened System Settings: {settings_label}",
+                "data": {
+                    "app_name": label,
+                    "open_target": "system_settings",
+                    "settings_label": settings_label,
+                    "settings_url": url,
+                    "fallback_used": index > 0,
+                },
+                "permission_error": False,
+                "fallback_used": index > 0,
+            }
+        error = "\n".join(
+            part.strip()
+            for part in (result.stderr, result.stdout)
+            if isinstance(part, str) and part.strip()
+        )
+        errors.append(error or f"{url}: exit code {result.returncode}")
+    payload = _failed("app.open", result)
+    payload["data"] = {
+        "app_name": label,
+        "open_target": "system_settings",
+        "settings_label": settings_label,
+        "attempted_urls": list(urls),
+        "settings_errors": errors,
+    }
+    return payload
+
+
+def _system_settings_target(value: str) -> tuple[str, tuple[str, ...]] | None:
+    variants = _system_settings_alias_variants(value)
+    for variant in variants:
+        target = _SYSTEM_SETTINGS_TARGETS.get(variant)
+        if target is not None:
+            return target
+    return None
+
+
+def _system_settings_alias_variants(value: str) -> list[str]:
+    normalized = str(value or "").strip().lower()
+    normalized = normalized.replace("&", "and")
+    normalized = normalized.replace("-", " ").replace("_", " ")
+    normalized = normalized.replace("设置的", " ")
+    variants = [_compact_alias(normalized)]
+    simplified = _strip_system_settings_noise(normalized)
+    simplified_compact = _compact_alias(simplified)
+    if simplified_compact and simplified_compact not in variants:
+        variants.append(simplified_compact)
+    return [variant for variant in variants if variant]
+
+
+def _strip_system_settings_noise(value: str) -> str:
+    return (
+        str(value or "")
+        .replace("系统设置", " ")
+        .replace("设置", " ")
+        .replace("权限", " ")
+        .replace("页面", " ")
+        .replace("面板", " ")
+        .replace("settings", " ")
+        .replace("setting", " ")
+        .replace("preferences", " ")
+        .replace("preference", " ")
+        .replace("permissions", " ")
+        .replace("permission", " ")
+        .replace("pane", " ")
+        .replace("page", " ")
+    )
+
+
+def _compact_alias(value: str) -> str:
+    return "".join(str(value or "").strip().split())
 
 
 def _common_folder_path(value: str) -> Path | None:
