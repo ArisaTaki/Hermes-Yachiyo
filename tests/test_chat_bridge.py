@@ -78,6 +78,9 @@ def _run_launcher_daily_desktop_quick_message(
         agent_task = result["agent_task"]
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
+        task_timeline = YachiyoAgentService(LegacyRuntimePort(service)).get_task_timeline(
+            result["task_id"]
+        ).model_dump(mode="json")
         event_types = [
             event["event_type"]
             for event in service.list_run_events(run["run_id"])["events"]
@@ -94,6 +97,7 @@ def _run_launcher_daily_desktop_quick_message(
         assert user_metadata["source"] == "launcher"
         assert user_metadata["launcher_mode"] == "live2d"
         assert assistant.content == agent_task["summary"]
+        result["_task_timeline"] = task_timeline
         return result, agent_task, run, event_types
     finally:
         service.close()
@@ -510,6 +514,18 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     assert agent_task["summary"] == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert result["_task_timeline"]["run_id"] == run["run_id"]
+    assert result["_task_timeline"]["task_id"] == result["task_id"]
+    assert result["_task_timeline"]["status"] == "completed"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+    assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
+    assert result["_task_timeline"]["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
+    timeline_event_types = [
+        event["event_type"] for event in result["_task_timeline"]["events"]
+    ]
+    assert timeline_event_types.index("agent.desktop.intent_planned") < timeline_event_types.index(
+        "agent.tool.call"
+    ) < timeline_event_types.index("agent.desktop.intent_completed")
     assert run["status"] == "completed"
     assert "agent.desktop.intent_planned" in event_types
     assert "agent.tool.call" in event_types
