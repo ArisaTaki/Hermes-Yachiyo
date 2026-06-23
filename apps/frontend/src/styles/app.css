@@ -4458,6 +4458,7 @@ button:hover {
 .launcher-agent-task-main,
 .launcher-agent-task-studio,
 .launcher-agent-task-diagnostics,
+.launcher-agent-task-recovery,
 .launcher-agent-task-action {
   min-width: 0;
   border: 0;
@@ -4476,7 +4477,8 @@ button:hover {
 }
 
 .launcher-agent-task-studio,
-.launcher-agent-task-diagnostics {
+.launcher-agent-task-diagnostics,
+.launcher-agent-task-recovery {
   align-self: stretch;
   padding: 0 5px;
   border-left: 1px solid rgba(255, 244, 203, 0.18);
@@ -4486,6 +4488,10 @@ button:hover {
 
 .launcher-agent-task-diagnostics {
   color: #ffd166;
+}
+
+.launcher-agent-task-recovery {
+  color: #9ef0c5;
 }
 
 .launcher-agent-task-actions {
@@ -4518,6 +4524,7 @@ button:hover {
 .launcher-agent-task-main:hover,
 .launcher-agent-task-studio:hover,
 .launcher-agent-task-diagnostics:hover,
+.launcher-agent-task-recovery:hover:not(:disabled),
 .launcher-agent-task-action:hover:not(:disabled) {
   color: #fff7df;
 }
@@ -9478,7 +9485,8 @@ body.electron-window .hy-traffic {
   white-space: normal;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a {
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a,
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -9495,14 +9503,32 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a:hover {
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery button {
+  cursor: pointer;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a:hover,
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery button:not(:disabled):hover {
   border-color: oklch(82% 0.135 76 / 0.44);
   color: var(--hy-fg);
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a .ui-icon {
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a .ui-icon,
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery button .ui-icon {
   width: 14px;
   height: 14px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
 }
 
 .hy-content .open-chat-shell .yachiyo-agent-task-tools {

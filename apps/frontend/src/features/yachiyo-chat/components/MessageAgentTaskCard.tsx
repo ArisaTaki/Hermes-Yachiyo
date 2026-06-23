@@ -3,7 +3,7 @@ import {
   type YachiyoTaskChatMessage,
 } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
-import { AgentTaskCard } from './AgentTaskCard';
+import { AgentTaskCard, type TaskPermissionRecoveryAction } from './AgentTaskCard';
 
 export function MessageAgentTaskCard({
   busy,
@@ -14,6 +14,7 @@ export function MessageAgentTaskCard({
   onCancelTask,
   onOpenStudio,
   onRejectApproval,
+  onRunRecoveryAction,
   publicTaskSnapshot = null,
 }: {
   busy: boolean;
@@ -24,6 +25,7 @@ export function MessageAgentTaskCard({
   onCancelTask: (task: AgentTaskSnapshot) => void;
   onOpenStudio: (runId: string | undefined, studioUrl?: string) => void;
   onRejectApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
+  onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void;
   publicTaskSnapshot?: AgentTaskSnapshot | null;
 }) {
   if (hidden) return null;
@@ -36,6 +38,7 @@ export function MessageAgentTaskCard({
       onCancelTask={onCancelTask}
       onOpenStudio={onOpenStudio}
       onRejectApproval={onRejectApproval}
+      onRunRecoveryAction={onRunRecoveryAction}
       task={task}
     />
   );

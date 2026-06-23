@@ -25,6 +25,7 @@ import { ChatHeader } from '../features/yachiyo-chat/components/ChatHeader';
 import { ChatSessionSidebar } from '../features/yachiyo-chat/components/ChatSessionSidebar';
 import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
+import type { TaskPermissionRecoveryAction } from '../features/yachiyo-chat/components/AgentTaskCard';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import {
   approvalRequiredItems,
@@ -427,6 +428,45 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     rememberYachiyoTasks,
     setStatus,
   });
+
+  const runYachiyoTaskRecoveryAction = useCallback(async (
+    task: AgentTaskSnapshot,
+    action: TaskPermissionRecoveryAction,
+  ) => {
+    const prompt = String(action.prompt || action.label || '').trim();
+    if (!prompt || approvalActionMessageId) return;
+    const busyId = `task:${task.task_id || 'unknown'}:recovery:${action.permission_target || action.tool}`;
+    setApprovalActionMessageId(busyId);
+    setStatus(`正在执行权限恢复：${action.label || prompt}...`);
+    try {
+      const handled = await startPublicYachiyoTask({
+        clientMessageId: createClientMessageId(),
+        conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+        prompt,
+        runnableId: null,
+        runnableKind: 'main',
+        metadata: {
+          daily_desktop_intent: true,
+          desktop_permission_recovery: true,
+          recovery_input: action.input,
+          recovery_permission_target: action.permission_target,
+          recovery_tool: action.tool,
+          source_task_id: task.task_id,
+        },
+      });
+      if (!handled) setStatus('权限恢复动作提交失败');
+    } finally {
+      setApprovalActionMessageId('');
+      focusComposerSoon();
+    }
+  }, [
+    approvalActionMessageId,
+    focusComposerSoon,
+    sessions?.current_session_id,
+    setApprovalActionMessageId,
+    setStatus,
+    startPublicYachiyoTask,
+  ]);
 
   useEffect(() => {
     const currentSessionId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId;
@@ -1648,6 +1688,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                     onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}
                     onOpenRunDetails={openRunDetails}
                     onOpenWorkflowStudio={openWorkflowStudio}
+                    onRunTaskRecoveryAction={(task, action) => void runYachiyoTaskRecoveryAction(task, action)}
                     registerMessageNode={registerMessageNode}
                     runnables={runnables}
                   />

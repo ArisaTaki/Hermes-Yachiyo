@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { taskPermissionRecoveryFromEvents } from './AgentTaskCard';
+import { taskPermissionRecoveryFromEvents, type TaskPermissionRecoveryAction } from './AgentTaskCard';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -15,6 +15,10 @@ type LauncherTaskApprovalHandler = (
   approval: ApprovalCardSnapshot,
 ) => unknown | Promise<unknown>;
 type LauncherTaskCancelHandler = (task: AgentTaskSnapshot) => unknown | Promise<unknown>;
+type LauncherTaskRecoveryHandler = (
+  task: AgentTaskSnapshot,
+  action: TaskPermissionRecoveryAction,
+) => unknown | Promise<unknown>;
 type LauncherAgentTaskTestIds = {
   approvalActions: string;
   approve: string;
@@ -24,6 +28,7 @@ type LauncherAgentTaskTestIds = {
   light: string;
   openChat: string;
   openStudio: string;
+  recovery: string;
   reject: string;
 };
 
@@ -39,6 +44,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     light: 'bubble-launcher-agent-task-light',
     openChat: 'bubble-launcher-agent-task-open-chat',
     openStudio: 'bubble-launcher-agent-task-open-studio',
+    recovery: 'bubble-launcher-agent-task-run-recovery-action',
     reject: 'bubble-launcher-agent-task-reject',
   },
   live2d: {
@@ -50,6 +56,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     light: 'live2d-launcher-agent-task-light',
     openChat: 'live2d-launcher-agent-task-open-chat',
     openStudio: 'live2d-launcher-agent-task-open-studio',
+    recovery: 'live2d-launcher-agent-task-run-recovery-action',
     reject: 'live2d-launcher-agent-task-reject',
   },
 };
@@ -153,6 +160,7 @@ function launcherAgentTaskTestIds(
     light: `${testIdPrefix}-agent-task-light`,
     openChat: `${testIdPrefix}-agent-task-open-chat`,
     openStudio: `${testIdPrefix}-agent-task-open-studio`,
+    recovery: `${testIdPrefix}-agent-task-run-recovery-action`,
     reject: `${testIdPrefix}-agent-task-reject`,
   };
 }
@@ -162,6 +170,7 @@ export function LauncherAgentTaskLight({
   onApproveApproval,
   onCancelTask,
   onRejectApproval,
+  onRunRecoveryAction,
   task,
   testIdPrefix = `${mode}-launcher`,
   variant = 'launcher',
@@ -170,6 +179,7 @@ export function LauncherAgentTaskLight({
   onApproveApproval?: LauncherTaskApprovalHandler;
   onCancelTask?: LauncherTaskCancelHandler;
   onRejectApproval?: LauncherTaskApprovalHandler;
+  onRunRecoveryAction?: LauncherTaskRecoveryHandler;
   task: LauncherAgentTask;
   testIdPrefix?: string;
   variant?: 'launcher' | 'panel';
@@ -193,6 +203,7 @@ export function LauncherAgentTaskLight({
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
+  const primaryRecoveryAction = permissionRecovery?.actions[0] || null;
   async function handleApproval(action: LauncherTaskApprovalAction) {
     if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
@@ -275,6 +286,24 @@ export function LauncherAgentTaskLight({
           title={`打开诊断：${permissionRecovery.labels.join('、')}`}
         >
           权限
+        </button>
+      ) : null}
+      {primaryRecoveryAction ? (
+        <button
+          type="button"
+          className="launcher-agent-task-recovery"
+          data-permission-target={primaryRecoveryAction.permission_target}
+          data-recovery-tool={primaryRecoveryAction.tool}
+          data-testid={testIds.recovery}
+          disabled={Boolean(taskAction) || !onRunRecoveryAction}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void onRunRecoveryAction?.(currentTask, primaryRecoveryAction);
+          }}
+          title={primaryRecoveryAction.prompt}
+        >
+          恢复
         </button>
       ) : null}
       {canHandleApproval || canCancel ? (

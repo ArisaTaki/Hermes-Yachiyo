@@ -44,6 +44,7 @@ import { messageAvatar } from './ChatAvatars';
 import { MessageActivityList } from './MessageActivityList';
 import { MessageAgentTaskCard } from './MessageAgentTaskCard';
 import { MessageApprovalRequestCard } from './MessageApprovalRequestCard';
+import type { TaskPermissionRecoveryAction } from './AgentTaskCard';
 
 type MessageBubbleProps = {
   approvalBusy: boolean;
@@ -68,6 +69,7 @@ type MessageBubbleProps = {
   onReject: () => void;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
   onRetry: () => void;
+  onRunTaskRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
   runnables: RunnableSummary[];
 };
@@ -95,6 +97,7 @@ export function MessageBubble({
   onReject,
   onRejectTaskApproval,
   onRetry,
+  onRunTaskRecoveryAction,
   registerMessageNode,
   runnables,
 }: MessageBubbleProps) {
@@ -214,6 +217,7 @@ export function MessageBubble({
           onCancelTask={onCancelTask}
           onOpenStudio={onOpenRunDetails}
           onRejectApproval={onRejectTaskApproval}
+          onRunRecoveryAction={onRunTaskRecoveryAction}
           publicTaskSnapshot={publicTaskSnapshot}
         />
         {followupNotice ? (

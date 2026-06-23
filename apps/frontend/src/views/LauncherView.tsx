@@ -572,6 +572,7 @@ function BubbleLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
+        onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice
@@ -1168,6 +1169,7 @@ function Live2DLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
+        onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice

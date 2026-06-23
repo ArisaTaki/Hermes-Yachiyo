@@ -19,6 +19,7 @@ export function AgentTaskCard({
   onCancelTask,
   onOpenStudio,
   onRejectApproval,
+  onRunRecoveryAction,
   task,
 }: {
   busy?: boolean;
@@ -26,6 +27,7 @@ export function AgentTaskCard({
   onCancelTask?: (task: AgentTaskSnapshot) => void | Promise<void>;
   onOpenStudio?: (runId: string | undefined, studioUrl?: string) => void;
   onRejectApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
+  onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
   task: AgentTaskSnapshot;
 }) {
   const status = task.status || 'running';
@@ -116,6 +118,28 @@ export function AgentTaskCard({
             {permissionRecovery.hints.map((hint) => (
               <span className="yachiyo-agent-task-recovery-hint" key={hint}>{hint}</span>
             ))}
+            {permissionRecovery.actions.length ? (
+              <div
+                className="yachiyo-agent-task-recovery-actions"
+                data-testid="yachiyo-agent-task-recovery-actions"
+              >
+                {permissionRecovery.actions.slice(0, 3).map((action) => (
+                  <button
+                    type="button"
+                    data-permission-target={action.permission_target}
+                    data-recovery-tool={action.tool}
+                    data-testid="yachiyo-agent-task-run-recovery-action"
+                    disabled={busy || !onRunRecoveryAction}
+                    key={`${action.tool}:${action.prompt}:${action.permission_target}`}
+                    onClick={() => void onRunRecoveryAction?.(task, action)}
+                    title={action.prompt}
+                  >
+                    <UiIcon name="settings" />
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <a
             href={permissionRecovery.href}
@@ -230,11 +254,21 @@ function taskStatusLabel(status: string) {
 }
 
 type TaskPermissionRecovery = {
+  actions: TaskPermissionRecoveryAction[];
   href: string;
   hints: string[];
   labels: string[];
   targets: string[];
   tools: string[];
+};
+
+export type TaskPermissionRecoveryAction = {
+  input: Record<string, unknown>;
+  label: string;
+  permission_target: string;
+  prompt: string;
+  risk_level?: string;
+  tool: string;
 };
 
 const permissionTargetLabels: Record<string, string> = {
@@ -254,6 +288,7 @@ export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['rece
   if (!targets.length) return null;
   const hints = uniqueStrings((events || []).flatMap((event) => recoveryHintsFromEvent(event)));
   const tools = uniqueStrings((events || []).flatMap((event) => desktopToolsFromEvent(event)));
+  const actions = executableRecoveryActionsFromEvents(events || []);
   const params = new URLSearchParams({
     command: 'native doctor',
     permission_targets: targets.join(','),
@@ -261,12 +296,50 @@ export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['rece
   });
   if (tools.length) params.set('desktop_tools', tools.join(','));
   return {
+    actions,
     href: `#/diagnostics?${params.toString()}`,
     hints,
     labels: targets.map((target) => permissionTargetLabels[target] || target),
     targets,
     tools,
   };
+}
+
+function executableRecoveryActionsFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecoveryAction[] {
+  const byKey = new Map<string, TaskPermissionRecoveryAction>();
+  (events || []).flatMap((event) => recoveryActionsFromEvent(event)).forEach((action) => {
+    const key = `${action.tool}:${JSON.stringify(action.input)}:${action.permission_target}`;
+    if (!byKey.has(key)) byKey.set(key, action);
+  });
+  return Array.from(byKey.values());
+}
+
+function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): TaskPermissionRecoveryAction[] {
+  if ((event.sensitivity || 'public') === 'secret') return [];
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  return [result, payload].filter(Boolean).flatMap((source) => recoveryActionsFromRecord(source));
+}
+
+function recoveryActionsFromRecord(source: Record<string, unknown>): TaskPermissionRecoveryAction[] {
+  const rawActions = Array.isArray(source.recovery_actions) ? source.recovery_actions : [];
+  return rawActions.flatMap((rawAction) => {
+    const action = objectValue(rawAction);
+    const tool = String(action.tool || '').trim();
+    const input = objectValue(action.input);
+    if (tool !== 'app.open') return [];
+    const appName = String(input.app_name || '').trim();
+    if (!appName) return [];
+    const label = String(action.label || appName || tool).trim();
+    return [{
+      input,
+      label,
+      permission_target: String(action.permission_target || '').trim(),
+      prompt: label || `打开 ${appName}`,
+      risk_level: String(action.risk_level || '').trim() || undefined,
+      tool,
+    }];
+  });
 }
 
 function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {

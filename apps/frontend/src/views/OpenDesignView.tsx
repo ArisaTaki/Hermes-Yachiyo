@@ -1435,6 +1435,7 @@ export function BubbleModePage() {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
+            onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
             task={agentTask}
             testIdPrefix="bubble-mode"
             variant="panel"
@@ -1515,6 +1516,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
+            onRunRecoveryAction={(_task, action) => void startAgentTask(action.prompt)}
             task={agentTask}
             testIdPrefix="live2d-mode"
             variant="panel"
