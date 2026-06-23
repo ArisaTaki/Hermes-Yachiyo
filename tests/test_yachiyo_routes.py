@@ -2742,6 +2742,117 @@ async def test_yachiyo_task_route_executes_browser_current_page_without_model(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt", "tool_name", "input_preview", "patched_tool"),
+    [
+        (
+            "关闭当前窗口",
+            "desktop.close_window",
+            {},
+            "apps.shell.agent.tools.desktop.desktop_close_window",
+        ),
+        (
+            "退出 Slack",
+            "app.quit",
+            {"app_name": "Slack"},
+            "apps.shell.agent.tools.desktop.app_quit",
+        ),
+    ],
+)
+async def test_yachiyo_task_route_pauses_medium_risk_desktop_intent_for_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    tool_name: str,
+    input_preview: dict[str, Any],
+    patched_tool: str,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / f"chat-route-{tool_name}.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / f"agent-runtime-route-{tool_name}.db",
+        workspace_dir=tmp_path / f"agent-runtime-route-{tool_name}",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id=f"chat-main-{tool_name}")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("medium-risk desktop public task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        patched_tool,
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(f"{tool_name} should wait for approval")
+        ),
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt=prompt,
+                conversation_id=f"chat-main-{tool_name}",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": f"route-main-{tool_name}-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages(f"chat-main-{tool_name}", limit=10)
+            if message.role == "assistant"
+        )
+        link = service.get_task_run_link(started["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert started["status"] == "waiting_approval"
+        assert started["needs_user_action"] is True
+        assert started["tool_calls"][-1]["tool_name"] == tool_name
+        assert started["tool_calls"][-1]["status"] == "waiting_approval"
+        assert started["pending_approvals"][0]["tool_name"] == tool_name
+        assert started["pending_approvals"][0]["input_preview"] == input_preview
+        assert timeline["status"] == "approval_required"
+        assert timeline["pending_approval"]["tool_name"] == tool_name
+        assert timeline["pending_approval"]["input_preview"] == input_preview
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == tool_name
+        assert run["pending_approval"]["input_preview"] == input_preview
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.PROCESSING
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
