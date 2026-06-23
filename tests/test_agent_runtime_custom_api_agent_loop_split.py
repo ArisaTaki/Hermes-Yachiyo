@@ -622,6 +622,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.focus_and_safe_shortcut",
         "app.open_and_safe_key",
         "app.focus_and_safe_key",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
         "app.open_and_safe_scroll",
         "app.focus_and_safe_scroll",
         "app.open_and_safe_click",
@@ -1253,13 +1255,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Notes，然后按 Command+L，再复制", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Notes"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "tool": "app.open_and_hotkey",
+            "input": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
         },
         {
             "protocol": "json_fallback",
@@ -1270,13 +1267,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("open Chrome and press command l", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "tool": "app.open_and_hotkey",
+            "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
         },
     ]
     assert daily_desktop_intent_tool_requests(
@@ -4878,21 +4870,12 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
     timeline = [
         {
             "event": "agent.desktop.intent_planned",
-            "detail": "app.open",
-            "tool": "app.open",
+            "detail": "app.open_and_hotkey",
+            "tool": "app.open_and_hotkey",
             "status": "planned",
             "source": "daily_desktop_intent",
             "planning_reason": "clear_daily_desktop_intent",
-            "input_preview": {"app_name": "Notes"},
-        },
-        {
-            "event": "agent.desktop.intent_planned",
-            "detail": "desktop.hotkey",
-            "tool": "desktop.hotkey",
-            "status": "planned",
-            "source": "daily_desktop_intent",
-            "planning_reason": "clear_daily_desktop_intent",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
         },
         {
             "event": "agent.desktop.intent_planned",
@@ -4904,32 +4887,22 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
             "input_preview": {"action": "copy"},
         },
         {
-            "event": "agent.tool.call",
-            "detail": "app.open",
-            "input_preview": {"app_name": "Notes"},
-            "result": {
-                "ok": True,
-                "action": "app.open",
-                "data": {"app_name": "Notes", "launch_verified": True},
-            },
-        },
-        {
             "event": "agent.desktop.intent_approval_required",
-            "detail": "desktop.hotkey",
-            "tool": "desktop.hotkey",
+            "detail": "app.open_and_hotkey",
+            "tool": "app.open_and_hotkey",
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
         },
         {
             "event": "agent.tool.call",
-            "detail": "desktop.hotkey",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "detail": "app.open_and_hotkey",
+            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
             "result": {
                 "ok": True,
-                "action": "desktop.hotkey",
-                "data": {"key": "l", "modifiers": ["command"]},
+                "action": "app.open_and_hotkey",
+                "data": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
             },
         },
         {
@@ -4954,8 +4927,7 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
         compile_agent_runtime=lambda _agent: {
             "tool_policy": {
                 "allowed_tools": [
-                    "app.open",
-                    "desktop.hotkey",
+                    "app.open_and_hotkey",
                     "desktop.safe_shortcut",
                 ]
             }
@@ -4996,19 +4968,18 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
         artifacts=[],
         messages=[
             {"role": "user", "content": "打开 Notes，然后按 Command+L，再复制"},
-            {"role": "user", "content": "Tool result for desktop.hotkey: ok"},
+            {"role": "user", "content": "Tool result for app.open_and_hotkey: ok"},
         ],
         start_iteration=0,
         run_id="run-sequence-resume",
         budget=budget,
     )
 
-    assert str(result) == "已打开 Notes。 已发送快捷键：Command+L。 已复制选中内容。"
+    assert str(result) == "已打开 Notes 并发送快捷键：Command+L。 已复制选中内容。"
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
-    assert timeline[-1]["tools"] == ["app.open", "desktop.hotkey", "desktop.safe_shortcut"]
+    assert timeline[-1]["tools"] == ["app.open_and_hotkey", "desktop.safe_shortcut"]
     assert [step["tool"] for step in timeline[-1]["steps"]] == [
-        "app.open",
-        "desktop.hotkey",
+        "app.open_and_hotkey",
         "desktop.safe_shortcut",
     ]
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"

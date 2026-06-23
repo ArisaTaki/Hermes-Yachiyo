@@ -424,6 +424,8 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "app.focus_and_safe_shortcut",
         "app.open_and_safe_key",
         "app.focus_and_safe_key",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
         "app.open_and_safe_scroll",
         "app.focus_and_safe_scroll",
         "app.open_and_safe_click",
@@ -573,6 +575,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("app.focus_and_safe_shortcut") == "low"
     assert desktop_tool_risk_level("app.open_and_safe_key") == "low"
     assert desktop_tool_risk_level("app.focus_and_safe_key") == "low"
+    assert desktop_tool_risk_level("app.open_and_hotkey") == "medium"
+    assert desktop_tool_risk_level("app.focus_and_hotkey") == "medium"
     assert desktop_tool_risk_level("app.open_and_safe_scroll") == "low"
     assert desktop_tool_risk_level("app.focus_and_safe_scroll") == "low"
     assert desktop_tool_risk_level("app.open_and_safe_click") == "low"
@@ -830,6 +834,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     focus_safe_shortcut = tools["app.focus_and_safe_shortcut"]
     open_safe_key = tools["app.open_and_safe_key"]
     focus_safe_key = tools["app.focus_and_safe_key"]
+    open_hotkey = tools["app.open_and_hotkey"]
+    focus_hotkey = tools["app.focus_and_hotkey"]
     open_safe_scroll = tools["app.open_and_safe_scroll"]
     focus_safe_scroll = tools["app.focus_and_safe_scroll"]
     open_safe_click = tools["app.open_and_safe_click"]
@@ -897,6 +903,14 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert focus_safe_key.risk_level == "low"
     assert focus_safe_key.input_schema["required"] == ["app_name", "action"]
     assert "arrow_down" in focus_safe_key.input_schema["properties"]["action"]["enum"]
+    assert open_hotkey.capability_id == "foreground_input"
+    assert open_hotkey.risk_level == "medium"
+    assert open_hotkey.input_schema["required"] == ["app_name", "key"]
+    assert "command" in open_hotkey.input_schema["properties"]["modifiers"]["items"]["enum"]
+    assert any("approval is required" in note for note in open_hotkey.fallback_notes)
+    assert focus_hotkey.capability_id == "foreground_input"
+    assert focus_hotkey.risk_level == "medium"
+    assert focus_hotkey.input_schema["required"] == ["app_name", "key"]
     assert open_safe_scroll.capability_id == "foreground_input"
     assert open_safe_scroll.risk_level == "low"
     assert open_safe_scroll.input_schema["required"] == ["app_name", "direction"]

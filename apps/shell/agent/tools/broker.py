@@ -539,6 +539,49 @@ class ToolBroker:
             ),
         )
 
+    def app_open_and_hotkey(
+        self,
+        app_name: str,
+        key: str,
+        *,
+        modifiers: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_hotkey",
+            lambda: self._app_foreground_action(
+                "app.open_and_hotkey",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=(
+                    "hotkey",
+                    lambda: desktop.desktop_hotkey(key, modifiers=modifiers),
+                ),
+            ),
+        )
+
+    def app_focus_and_hotkey(
+        self,
+        app_name: str,
+        key: str,
+        *,
+        modifiers: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_hotkey",
+            lambda: self._app_foreground_action(
+                "app.focus_and_hotkey",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=(
+                    "hotkey",
+                    lambda: desktop.desktop_hotkey(key, modifiers=modifiers),
+                ),
+            ),
+        )
+
     def app_open_and_safe_scroll(
         self,
         app_name: str,

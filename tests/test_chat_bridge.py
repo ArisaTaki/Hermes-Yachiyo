@@ -2360,6 +2360,11 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
                 "desktop.click_ui_element",
                 {"target": "search", "role_filter": "text", "limit": 80, "click_count": 1},
             ),
+            (
+                "open Chrome and press command l",
+                "app.open_and_hotkey",
+                {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            ),
             ("send current message", "desktop.submit_foreground", {"action": "send"}),
         ]
         for text, tool_name, input_preview in cases:

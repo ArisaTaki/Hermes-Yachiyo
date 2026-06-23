@@ -348,6 +348,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus_and_safe_key": [
             "Focuses the app before pressing only whitelisted foreground navigation keys.",
         ],
+        "app.open_and_hotkey": [
+            "Opens and focuses the app before sending an explicit keyboard shortcut; approval is required.",
+        ],
+        "app.focus_and_hotkey": [
+            "Focuses the app before sending an explicit keyboard shortcut; approval is required.",
+        ],
         "app.open_and_safe_scroll": [
             "Opens and focuses the app before scrolling only explicit foreground up/down page requests.",
         ],

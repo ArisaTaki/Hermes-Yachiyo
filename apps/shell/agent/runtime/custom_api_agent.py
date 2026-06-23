@@ -23,6 +23,8 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
     "app.open_and_safe_click",
@@ -92,6 +94,8 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.focus_and_safe_shortcut": "聚焦应用并执行快捷动作",
     "app.open_and_safe_key": "打开应用并按导航键",
     "app.focus_and_safe_key": "聚焦应用并按导航键",
+    "app.open_and_hotkey": "打开应用并发送快捷键",
+    "app.focus_and_hotkey": "聚焦应用并发送快捷键",
     "app.open_and_safe_scroll": "打开应用并滚动",
     "app.focus_and_safe_scroll": "聚焦应用并滚动",
     "app.open_and_safe_click": "打开应用并点击",
@@ -761,6 +765,16 @@ class RuntimeCustomApiAgentLoop:
                     return f"已{action}{target or detail}。"
                 target = _display_target_name(app_name, "并按前台导航键")
                 return result_summary or f"已{action}{target or '并按前台导航键'}。"
+            if tool_name in {"app.open_and_hotkey", "app.focus_and_hotkey"}:
+                app_name = _payload_text(result, planned_input, "app_name")
+                action = "打开" if tool_name.startswith("app.open") else "切到"
+                hotkey = _hotkey_text(result, planned_input)
+                if hotkey:
+                    detail = f"并发送快捷键：{hotkey}"
+                    target = _display_target_name(app_name, detail)
+                    return f"已{action}{target or detail}。"
+                target = _display_target_name(app_name, "并发送快捷键")
+                return result_summary or f"已{action}{target or '并发送快捷键'}。"
             if tool_name in {"app.open_and_safe_scroll", "app.focus_and_safe_scroll"}:
                 app_name = _payload_text(result, planned_input, "app_name")
                 action = "打开" if tool_name.startswith("app.open") else "切到"
@@ -1172,7 +1186,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
@@ -1190,6 +1204,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
+            "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
             "map app open/focus followed by explicit single-click coordinates to app.open_and_safe_click or app.focus_and_safe_click; "
             "map app open/focus followed by explicit foreground UI control/button clicks by visible label to app.open_and_click_ui_element or app.focus_and_click_ui_element; "

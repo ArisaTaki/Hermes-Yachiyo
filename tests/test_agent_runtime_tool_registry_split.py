@@ -281,6 +281,8 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_focus_and_safe_shortcut",
         "app_open_and_safe_key",
         "app_focus_and_safe_key",
+        "app_open_and_hotkey",
+        "app_focus_and_hotkey",
         "app_open_and_safe_scroll",
         "app_focus_and_safe_scroll",
         "app_open_and_safe_click",
@@ -536,6 +538,14 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.open_and_hotkey",
+        {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_hotkey",
+        {"app_name": "Slack", "key": "k", "modifiers": ["command"]},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.open_and_safe_scroll",
         {"app_name": "Google Chrome", "direction": "down"},
     )
@@ -571,6 +581,11 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_key",
             {"app_name": "Slack", "action": "tab", "repeat_count": 0},
+        )
+    with pytest.raises(AgentRuntimeError, match="app.open_and_hotkey 参数 modifiers 只能包含"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_and_hotkey",
+            {"app_name": "Slack", "key": "l", "modifiers": ["meta"]},
         )
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_scroll 参数 direction 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -745,6 +760,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "app.focus_and_click_ui_element",
                 "app.open_and_type_into_ui_element",
                 "app.focus_and_type_into_ui_element",
+                "app.open_and_hotkey",
+                "app.focus_and_hotkey",
                 "desktop.close_window",
                 "desktop.click",
                 "desktop.click_ui_element",
@@ -770,6 +787,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.focus_and_click_ui_element",
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
         "desktop.close_window",
         "desktop.click",
         "desktop.click_ui_element",
@@ -783,6 +802,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.focus_and_click_ui_element": True,
         "app.open_and_type_into_ui_element": True,
         "app.focus_and_type_into_ui_element": True,
+        "app.open_and_hotkey": True,
+        "app.focus_and_hotkey": True,
         "desktop.close_window": True,
         "desktop.click": True,
         "desktop.click_ui_element": True,
@@ -1043,6 +1064,22 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "app_open_and_hotkey",
+        lambda app_name, key, *, modifiers=None: calls.append(
+            ("open_hotkey", app_name, key, list(modifiers or []))
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "app_focus_and_hotkey",
+        lambda app_name, key, *, modifiers=None: calls.append(
+            ("focus_hotkey", app_name, key, list(modifiers or []))
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_open_and_safe_scroll",
         lambda app_name, direction, *, pages=1: calls.append(
             ("open_scroll", app_name, direction, pages)
@@ -1227,6 +1264,16 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "app.open_and_hotkey",
+        {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.focus_and_hotkey",
+        {"app_name": "Slack", "key": "k", "modifiers": ["command"]},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "app.open_and_safe_scroll",
         {"app_name": "Google Chrome", "direction": "down"},
     ) == {"ok": True}
@@ -1340,6 +1387,8 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("focus_shortcut", "Slack", "paste"),
         ("open_key", "Google Chrome", "tab", 1),
         ("focus_key", "Slack", "arrow_down", 3),
+        ("open_hotkey", "Google Chrome", "l", ["command"]),
+        ("focus_hotkey", "Slack", "k", ["command"]),
         ("open_scroll", "Google Chrome", "down", 1),
         ("focus_scroll", "Slack", "up", 3),
         ("open_click", "Google Chrome", 120, 240),
@@ -1457,6 +1506,50 @@ def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
         "explicit_user_key": True,
     }
     assert list(result["fallback_result"]) == ["open", "focus", "safe_key"]
+
+
+def test_tool_broker_app_open_and_hotkey_sequences_foreground_action(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: calls.append(("open", app_name))
+        or {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_hotkey",
+        lambda key, *, modifiers=None: calls.append(("hotkey", key))
+        or {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "data": {"key": key, "modifiers": list(modifiers or [])},
+        },
+    )
+
+    result = broker.app_open_and_hotkey("Google Chrome", "l", modifiers=["command"])
+
+    assert calls == [("open", "Google Chrome"), ("focus", "Google Chrome"), ("hotkey", "l")]
+    assert result["ok"] is True
+    assert result["action"] == "app.open_and_hotkey"
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "foreground_action": "hotkey",
+        "key": "l",
+        "modifiers": ["command"],
+    }
+    assert list(result["fallback_result"]) == ["open", "focus", "hotkey"]
 
 
 def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(

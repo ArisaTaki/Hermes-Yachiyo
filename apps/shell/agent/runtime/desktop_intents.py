@@ -311,6 +311,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus_window",
     "app.focus_and_safe_shortcut",
     "app.focus_and_safe_key",
+    "app.focus_and_hotkey",
     "app.focus_and_safe_scroll",
     "app.focus_and_safe_click",
     "app.focus_and_click_ui_element",
@@ -321,6 +322,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.open",
     "app.open_and_safe_shortcut",
     "app.open_and_safe_key",
+    "app.open_and_hotkey",
     "app.open_and_safe_scroll",
     "app.open_and_safe_click",
     "app.open_and_click_ui_element",
@@ -387,6 +389,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
     "app.open_and_safe_click",
@@ -422,6 +426,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
     "app.open_and_safe_scroll",
     "app.focus_and_safe_scroll",
     "app.open_and_safe_click",
@@ -598,6 +604,18 @@ def _app_foreground_sequence_composite(
             return _request(
                 f"app.{mode}_and_safe_key",
                 {"app_name": app_name, "action": action, "repeat_count": repeat_count},
+            )
+    if action_tool == "desktop.hotkey":
+        key = str(action_input.get("key") or "").strip()
+        modifiers = action_input.get("modifiers")
+        if key:
+            return _request(
+                f"app.{mode}_and_hotkey",
+                {
+                    "app_name": app_name,
+                    "key": key,
+                    "modifiers": modifiers if isinstance(modifiers, list) else [],
+                },
             )
     if action_tool == "desktop.safe_scroll":
         direction = str(action_input.get("direction") or "").strip()
@@ -2105,6 +2123,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_safe_key",
             "input": {"app_name": app_name, **safe_key},
+        }
+    hotkey = _desktop_hotkey(followup)
+    if hotkey:
+        return {
+            "tool": f"app.{mode}_and_hotkey",
+            "input": {"app_name": app_name, **hotkey},
         }
     typed_text = _desktop_safe_type_text(followup)
     if typed_text:

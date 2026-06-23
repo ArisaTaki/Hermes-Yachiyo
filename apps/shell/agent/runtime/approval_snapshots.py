@@ -141,6 +141,16 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
         if hotkey:
             return f"将向当前前台窗口发送快捷键 {hotkey}，按工具策略需要人工确认。"
         return "将向当前前台窗口发送快捷键，按工具策略需要人工确认。"
+    if tool_name in {"app.open_and_hotkey", "app.focus_and_hotkey"}:
+        app_name = _preview_value(record, "app_name")
+        hotkey = _hotkey_preview(record)
+        if app_name and hotkey:
+            return f"将切换到应用 {app_name} 并发送快捷键 {hotkey}，按工具策略需要人工确认。"
+        if app_name:
+            return f"将切换到应用 {app_name} 并发送快捷键，按工具策略需要人工确认。"
+        if hotkey:
+            return f"将切换到目标应用并发送快捷键 {hotkey}，按工具策略需要人工确认。"
+        return "将切换到目标应用并发送快捷键，按工具策略需要人工确认。"
     if tool_name == "desktop.type_text":
         text = _preview_value(record, "text")
         if text:

@@ -885,6 +885,15 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
             "data": {"app_name": app_name, "launch_verified": True},
         }
 
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
     def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
         calls.append(("hotkey", key, list(modifiers or [])))
         return {
@@ -904,6 +913,7 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
@@ -920,7 +930,7 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         assert task.status == TaskStatus.RUNNING
         assert waiting_message is not None
         assert waiting_message.status == MessageStatus.PROCESSING
-        assert calls == [("open", "Notes")]
+        assert calls == []
 
         approved = await yachiyo.approve_task(sent["task_id"], None, request)
         completed_task = state.get_task(sent["task_id"])
@@ -943,9 +953,10 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         ]
 
         assert approved["status"] == "completed"
-        assert approved["summary"] == "已打开 Notes。 已发送快捷键：Command+L。 已复制选中内容。"
+        assert approved["summary"] == "已打开 Notes 并发送快捷键：Command+L。 已复制选中内容。"
         assert calls == [
             ("open", "Notes"),
+            ("focus", "Notes"),
             ("hotkey", "l", ["command"]),
             ("shortcut", "copy"),
         ]
@@ -960,14 +971,12 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
         assert [event["detail"] for event in successful_tool_events] == [
-            "app.open",
-            "desktop.hotkey",
+            "app.open_and_hotkey",
             "desktop.safe_shortcut",
         ]
-        assert [event["detail"] for event in approval_tool_events] == ["desktop.hotkey"]
+        assert [event["detail"] for event in approval_tool_events] == ["app.open_and_hotkey"]
         assert completed_events[-1]["tools"] == [
-            "app.open",
-            "desktop.hotkey",
+            "app.open_and_hotkey",
             "desktop.safe_shortcut",
         ]
     finally:
@@ -7331,6 +7340,23 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "action",
     ]
     assert "arrow_down" in tools["app.focus_and_safe_key"]["input_schema"]["properties"]["action"]["enum"]
+    assert tools["app.open_and_hotkey"]["capability_id"] == "foreground_input"
+    assert tools["app.open_and_hotkey"]["risk_level"] == "medium"
+    assert tools["app.open_and_hotkey"]["input_schema"]["required"] == [
+        "app_name",
+        "key",
+    ]
+    assert "command" in tools["app.open_and_hotkey"]["input_schema"]["properties"]["modifiers"]["items"]["enum"]
+    assert any(
+        "approval is required" in note
+        for note in tools["app.open_and_hotkey"]["fallback_notes"]
+    )
+    assert tools["app.focus_and_hotkey"]["capability_id"] == "foreground_input"
+    assert tools["app.focus_and_hotkey"]["risk_level"] == "medium"
+    assert tools["app.focus_and_hotkey"]["input_schema"]["required"] == [
+        "app_name",
+        "key",
+    ]
     assert tools["app.open_and_safe_scroll"]["capability_id"] == "foreground_input"
     assert tools["app.open_and_safe_scroll"]["risk_level"] == "low"
     assert tools["app.open_and_safe_scroll"]["input_schema"]["required"] == [

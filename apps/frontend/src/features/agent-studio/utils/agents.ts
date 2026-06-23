@@ -68,6 +68,8 @@ export const foregroundInputTools = [
   'app.focus_and_safe_type_text',
   'app.open_and_safe_shortcut',
   'app.focus_and_safe_shortcut',
+  'app.open_and_hotkey',
+  'app.focus_and_hotkey',
   'desktop.safe_shortcut',
   'desktop.safe_type_text',
   'desktop.safe_click',

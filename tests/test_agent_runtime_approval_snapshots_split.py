@@ -104,6 +104,26 @@ def test_approval_snapshot_marks_foreground_desktop_tools_medium_risk() -> None:
     )
 
 
+def test_approval_snapshot_describes_app_scoped_hotkey() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-app-hotkey",
+            "tool": "app.open_and_hotkey",
+            "input_preview": {
+                "app_name": "Google Chrome",
+                "key": "l",
+                "modifiers": ["command"],
+            },
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["risk_level"] == "medium"
+    assert snapshot["policy_reason"] == (
+        "将切换到应用 Google Chrome 并发送快捷键 Command+L，按工具策略需要人工确认。"
+    )
+
+
 def test_approval_snapshot_marks_foreground_submit_high_risk() -> None:
     snapshot = public_pending_approval(
         {

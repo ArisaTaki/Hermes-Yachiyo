@@ -44,6 +44,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_shortcut": "app_focus_and_safe_shortcut",
     "app.open_and_safe_key": "app_open_and_safe_key",
     "app.focus_and_safe_key": "app_focus_and_safe_key",
+    "app.open_and_hotkey": "app_open_and_hotkey",
+    "app.focus_and_hotkey": "app_focus_and_hotkey",
     "app.open_and_safe_scroll": "app_open_and_safe_scroll",
     "app.focus_and_safe_scroll": "app_focus_and_safe_scroll",
     "app.open_and_safe_click": "app_open_and_safe_click",
@@ -159,6 +161,8 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.focus_and_click_ui_element",
     "app.open_and_type_into_ui_element",
     "app.focus_and_type_into_ui_element",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
     "desktop.close_window",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
@@ -395,6 +399,8 @@ class ToolDescriptor:
             "app.focus_and_safe_shortcut",
             "app.open_and_safe_key",
             "app.focus_and_safe_key",
+            "app.open_and_hotkey",
+            "app.focus_and_hotkey",
             "app.open_and_safe_scroll",
             "app.focus_and_safe_scroll",
             "app.open_and_safe_click",
@@ -554,17 +560,17 @@ class ToolDescriptor:
                     raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
                 if click_count < 1 or click_count > 3:
                     raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
-        if self.name == "desktop.hotkey":
+        if self.name in {"desktop.hotkey", "app.open_and_hotkey", "app.focus_and_hotkey"}:
             if not str(payload.get("key") or "").strip():
-                raise AgentRuntimeError("desktop.hotkey 参数 key 必须是非空字符串")
+                raise AgentRuntimeError(f"{self.name} 参数 key 必须是非空字符串")
             modifiers = payload.get("modifiers", [])
             if modifiers not in (None, "") and not isinstance(modifiers, list):
-                raise AgentRuntimeError("desktop.hotkey 参数 modifiers 必须是字符串数组")
+                raise AgentRuntimeError(f"{self.name} 参数 modifiers 必须是字符串数组")
             allowed_modifiers = {"command", "cmd", "shift", "option", "alt", "control", "ctrl"}
             for modifier in modifiers or []:
                 if str(modifier or "").strip().lower() not in allowed_modifiers:
                     raise AgentRuntimeError(
-                        "desktop.hotkey 参数 modifiers 只能包含 command/cmd、shift、"
+                        f"{self.name} 参数 modifiers 只能包含 command/cmd、shift、"
                         "option/alt、control/ctrl"
                     )
         if self.name == "desktop.submit_foreground":
@@ -1095,6 +1101,48 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "action"),
+    ),
+    "app.open_and_hotkey": ToolDescriptor(
+        name="app.open_and_hotkey",
+        description=(
+            "Open and focus a local desktop application, then send an explicit keyboard "
+            "shortcut while holding the foreground action lock. Requires approval because "
+            "arbitrary shortcuts can change app state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "key": {"type": "string", "description": "Key to press."},
+            "modifiers": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["command", "cmd", "shift", "option", "alt", "control", "ctrl"],
+                },
+                "description": "Optional modifier keys.",
+            },
+        },
+        required=("app_name", "key"),
+    ),
+    "app.focus_and_hotkey": ToolDescriptor(
+        name="app.focus_and_hotkey",
+        description=(
+            "Focus a local desktop application, then send an explicit keyboard shortcut "
+            "while holding the foreground action lock. Requires approval because arbitrary "
+            "shortcuts can change app state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "key": {"type": "string", "description": "Key to press."},
+            "modifiers": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["command", "cmd", "shift", "option", "alt", "control", "ctrl"],
+                },
+                "description": "Optional modifier keys.",
+            },
+        },
+        required=("app_name", "key"),
     ),
     "app.open_and_safe_scroll": ToolDescriptor(
         name="app.open_and_safe_scroll",

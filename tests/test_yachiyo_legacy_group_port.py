@@ -205,6 +205,8 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
         "app.focus_and_click_ui_element": True,
         "app.open_and_type_into_ui_element": True,
         "app.focus_and_type_into_ui_element": True,
+        "app.open_and_hotkey": True,
+        "app.focus_and_hotkey": True,
         "desktop.close_window": True,
         "desktop.hotkey": True,
         "desktop.submit_foreground": True,
