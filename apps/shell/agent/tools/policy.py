@@ -42,6 +42,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_type_text": "app_focus_and_safe_type_text",
     "app.open_and_safe_shortcut": "app_open_and_safe_shortcut",
     "app.focus_and_safe_shortcut": "app_focus_and_safe_shortcut",
+    "app.open_and_safe_key": "app_open_and_safe_key",
+    "app.focus_and_safe_key": "app_focus_and_safe_key",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -118,6 +120,8 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.focus_and_safe_type_text",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -420,6 +424,17 @@ class ToolDescriptor:
                 raise AgentRuntimeError(
                     f"{self.name} 参数 action 必须是 " + "、".join(SAFE_SHORTCUT_ACTIONS)
                 )
+        if self.name in {"app.open_and_safe_key", "app.focus_and_safe_key"}:
+            action = str(payload.get("action") or "").strip().lower()
+            if action not in SAFE_KEY_ACTIONS:
+                raise AgentRuntimeError(
+                    f"{self.name} 参数 action 必须是 " + "、".join(SAFE_KEY_ACTIONS)
+                )
+            repeat_count = payload.get("repeat_count", 1)
+            if isinstance(repeat_count, bool) or not isinstance(repeat_count, int):
+                raise AgentRuntimeError(f"{self.name} 参数 repeat_count 必须是 1-20 的整数")
+            if repeat_count < 1 or repeat_count > 20:
+                raise AgentRuntimeError(f"{self.name} 参数 repeat_count 必须是 1-20 的整数")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.safe_click":
@@ -951,6 +966,50 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "type": "string",
                 "enum": list(SAFE_SHORTCUT_ACTIONS),
                 "description": "Whitelisted shortcut action to execute.",
+            },
+        },
+        required=("app_name", "action"),
+    ),
+    "app.open_and_safe_key": ToolDescriptor(
+        name="app.open_and_safe_key",
+        description=(
+            "Open and focus a local desktop application, then press a whitelisted safe "
+            "foreground navigation key while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_KEY_ACTIONS),
+                "description": "Whitelisted foreground key action to press.",
+            },
+            "repeat_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Number of times to press the key. Defaults to 1.",
+            },
+        },
+        required=("app_name", "action"),
+    ),
+    "app.focus_and_safe_key": ToolDescriptor(
+        name="app.focus_and_safe_key",
+        description=(
+            "Focus a local desktop application, then press a whitelisted safe foreground "
+            "navigation key while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_KEY_ACTIONS),
+                "description": "Whitelisted foreground key action to press.",
+            },
+            "repeat_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Number of times to press the key. Defaults to 1.",
             },
         },
         required=("app_name", "action"),

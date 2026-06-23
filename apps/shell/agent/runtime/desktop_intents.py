@@ -288,11 +288,13 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus",
     "app.focus_window",
     "app.focus_and_safe_shortcut",
+    "app.focus_and_safe_key",
     "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
     "app.open",
     "app.open_and_safe_shortcut",
+    "app.open_and_safe_key",
     "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
@@ -352,6 +354,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_type_text",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
@@ -376,6 +380,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_type_text",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
 }
 
 _FOREGROUND_ACTION_TOOLS = {
@@ -523,6 +529,14 @@ def _app_foreground_sequence_composite(
             return _request(
                 f"app.{mode}_and_safe_shortcut",
                 {"app_name": app_name, "action": action},
+            )
+    if action_tool == "desktop.safe_key":
+        action = str(action_input.get("action") or "").strip()
+        repeat_count = action_input.get("repeat_count", 1)
+        if action:
+            return _request(
+                f"app.{mode}_and_safe_key",
+                {"app_name": app_name, "action": action, "repeat_count": repeat_count},
             )
     return None
 
@@ -1821,6 +1835,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_safe_shortcut",
             "input": {"app_name": app_name, "action": shortcut_action},
+        }
+    safe_key = _desktop_safe_key(followup)
+    if safe_key:
+        return {
+            "tool": f"app.{mode}_and_safe_key",
+            "input": {"app_name": app_name, **safe_key},
         }
     typed_text = _desktop_safe_type_text(followup)
     if typed_text:

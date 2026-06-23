@@ -275,6 +275,12 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_open",
         "app_focus",
         "app_focus_window",
+        "app_open_and_safe_type_text",
+        "app_focus_and_safe_type_text",
+        "app_open_and_safe_shortcut",
+        "app_focus_and_safe_shortcut",
+        "app_open_and_safe_key",
+        "app_focus_and_safe_key",
         "app_show",
         "app_hide",
         "app_minimize",
@@ -439,6 +445,14 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         "app.focus_and_safe_shortcut",
         {"app_name": "Slack", "action": "paste"},
     )
+    ToolDescriptorRegistry.validate_payload(
+        "app.open_and_safe_key",
+        {"app_name": "Google Chrome", "action": "tab"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_key",
+        {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
+    )
 
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_type_text 参数 text 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -449,6 +463,16 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "close_tab"},
+        )
+    with pytest.raises(AgentRuntimeError, match="app.open_and_safe_key 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_and_safe_key",
+            {"app_name": "Slack", "action": "return"},
+        )
+    with pytest.raises(AgentRuntimeError, match="app.focus_and_safe_key 参数 repeat_count 必须是"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_key",
+            {"app_name": "Slack", "action": "tab", "repeat_count": 0},
         )
 
 
@@ -858,6 +882,22 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "app_open_and_safe_key",
+        lambda app_name, action, *, repeat_count=1: calls.append(
+            ("open_key", app_name, action, repeat_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "app_focus_and_safe_key",
+        lambda app_name, action, *, repeat_count=1: calls.append(
+            ("focus_key", app_name, action, repeat_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_show",
         lambda app_name: calls.append(("show_named_app", app_name))
         or {"ok": True, "app_name": app_name},
@@ -965,6 +1005,16 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "app.focus_and_safe_shortcut",
         {"app_name": "Slack", "action": "paste"},
     ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.open_and_safe_key",
+        {"app_name": "Google Chrome", "action": "tab"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.focus_and_safe_key",
+        {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
+    ) == {"ok": True}
     assert dispatch_tool_call(broker, "app.show", {"app_name": "Slack"}) == {
         "ok": True,
         "app_name": "Slack",
@@ -1025,6 +1075,8 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("focus_type", "Notes", "hello"),
         ("open_shortcut", "Google Chrome", "new_tab"),
         ("focus_shortcut", "Slack", "paste"),
+        ("open_key", "Google Chrome", "tab", 1),
+        ("focus_key", "Slack", "arrow_down", 3),
         ("show_named_app", "Slack"),
         ("hide_named_app", "Slack"),
         ("minimize_named_app", "Slack"),
@@ -1081,6 +1133,59 @@ def test_tool_broker_app_open_and_safe_type_text_sequences_foreground_action(
         "explicit_user_text": True,
     }
     assert list(result["fallback_result"]) == ["open", "focus", "safe_type_text"]
+
+
+def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: calls.append(("open", app_name))
+        or {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_safe_key",
+        lambda action, *, repeat_count=1: calls.append(("key", action))
+        or {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "data": {
+                "key_action": action,
+                "key_label": "Tab",
+                "key_code": 48,
+                "repeat_count": repeat_count,
+                "explicit_user_key": True,
+            },
+        },
+    )
+
+    result = broker.app_open_and_safe_key("Google Chrome", "tab", repeat_count=2)
+
+    assert calls == [("open", "Google Chrome"), ("focus", "Google Chrome"), ("key", "tab")]
+    assert result["ok"] is True
+    assert result["action"] == "app.open_and_safe_key"
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "foreground_action": "safe_key",
+        "key_action": "tab",
+        "key_label": "Tab",
+        "key_code": 48,
+        "repeat_count": 2,
+        "explicit_user_key": True,
+    }
+    assert list(result["fallback_result"]) == ["open", "focus", "safe_key"]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(

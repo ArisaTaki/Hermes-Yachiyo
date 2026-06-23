@@ -591,6 +591,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.focus_and_safe_type_text",
         "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -1031,6 +1033,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并按 Tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_key",
+        "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 并按三次下箭头", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_key",
+        "input": {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
+    }
     assert daily_desktop_intent_tool_request("打开 Notes 并输入 hello yachiyo", ["app.open"]) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -1076,6 +1088,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "tool": "desktop.safe_shortcut",
             "input": {"action": "paste"},
         },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome，然后按 Tab", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+        }
     ]
     assert daily_desktop_intent_tool_requests("打开 Notes，然后按 Command+L，再复制", allowed_tools) == [
         {
@@ -3621,6 +3640,23 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    app_open_safe_key = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_key",
+        {"app_name": "Google Chrome", "action": "tab"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Google Chrome",
+                "foreground_action": "safe_key",
+                "key_action": "tab",
+                "key_label": "Tab",
+                "key_code": 48,
+                "repeat_count": 1,
+                "explicit_user_key": True,
+            },
+        },
+    )
     app_open_safe_type_text_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.open_and_safe_type_text",
         {"app_name": "Notes", "text": "hello"},
@@ -3762,6 +3798,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert safe_type_text == "已向前台输入文字（5 个字符）。"
     assert app_open_safe_type_text == "已打开 Notes 并输入文字（5 个字符）。"
     assert app_focus_safe_shortcut == "已切到 Slack 并粘贴。"
+    assert app_open_safe_key == "已打开 Google Chrome 并按Tab。"
     assert app_open_safe_type_text_failed == (
         "已打开 Notes，但没能输入文字。 缺少权限：accessibility。"
         " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"
