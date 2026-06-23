@@ -35,6 +35,10 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "app.open",
         "app.focus",
         "app.focus_window",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -298,6 +302,10 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.open",
         "app.focus",
         "app.focus_window",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -345,6 +353,10 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
     ),
     "foreground_input": (
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
@@ -686,6 +698,26 @@ def _tool_missing_permissions(
     elif tool in {"app.focus_window", "app.show"}:
         values.extend(value for value in capability_missing if value != "open_command")
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+    elif tool in {
+        "app.open_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+    }:
+        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+        values.extend(
+            value
+            for value in _missing_permissions(missing_by_capability, "app_control")
+            if value == "open_command"
+        )
+    elif tool in {
+        "app.focus_and_safe_type_text",
+        "app.focus_and_safe_shortcut",
+    }:
+        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+        values.extend(
+            value
+            for value in _missing_permissions(missing_by_capability, "app_control")
+            if value != "open_command"
+        )
     elif tool in {"app.hide", "app.minimize"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
     else:

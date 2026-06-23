@@ -417,6 +417,10 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
     assert capabilities["screen_capture"]["available_tools"] == ["screen.capture"]
     assert capabilities["foreground_input"]["available"] is False
     assert capabilities["foreground_input"]["unavailable_tools"] == [
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
@@ -546,6 +550,10 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("app.status") == "low"
     assert desktop_tool_risk_level("app.show") == "low"
     assert desktop_tool_risk_level("app.focus_window") == "low"
+    assert desktop_tool_risk_level("app.open_and_safe_type_text") == "low"
+    assert desktop_tool_risk_level("app.focus_and_safe_type_text") == "low"
+    assert desktop_tool_risk_level("app.open_and_safe_shortcut") == "low"
+    assert desktop_tool_risk_level("app.focus_and_safe_shortcut") == "low"
     assert desktop_tool_risk_level("app.hide") == "low"
     assert desktop_tool_risk_level("app.minimize") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
@@ -757,6 +765,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     quit_app = tools["app.quit"]
     named_show_app = tools["app.show"]
     named_focus_window = tools["app.focus_window"]
+    open_safe_type_text = tools["app.open_and_safe_type_text"]
+    focus_safe_shortcut = tools["app.focus_and_safe_shortcut"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
@@ -793,6 +803,15 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any(
         "matching app window" in note for note in named_focus_window.fallback_notes
     )
+    assert open_safe_type_text.capability_id == "foreground_input"
+    assert open_safe_type_text.risk_level == "low"
+    assert open_safe_type_text.input_schema["required"] == ["app_name", "text"]
+    assert any("typing only text explicitly provided" in note for note in open_safe_type_text.fallback_notes)
+    assert focus_safe_shortcut.capability_id == "foreground_input"
+    assert focus_safe_shortcut.risk_level == "low"
+    assert focus_safe_shortcut.input_schema["required"] == ["app_name", "action"]
+    assert "paste" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert any("whitelisted safe shortcuts" in note for note in focus_safe_shortcut.fallback_notes)
     assert named_hide_app.capability_id == "app_control"
     assert named_hide_app.risk_level == "low"
     assert named_hide_app.input_schema["required"] == ["app_name"]

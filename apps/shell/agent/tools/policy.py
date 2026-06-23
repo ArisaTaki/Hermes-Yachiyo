@@ -35,6 +35,10 @@ TOOL_FUNCTION_NAMES = {
     "app.open": "app_open",
     "app.focus": "app_focus",
     "app.focus_window": "app_focus_window",
+    "app.open_and_safe_type_text": "app_open_and_safe_type_text",
+    "app.focus_and_safe_type_text": "app_focus_and_safe_type_text",
+    "app.open_and_safe_shortcut": "app_open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut": "app_focus_and_safe_shortcut",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -92,6 +96,10 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.open",
     "app.focus",
     "app.focus_window",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -298,6 +306,10 @@ class ToolDescriptor:
             "app.open",
             "app.focus",
             "app.focus_window",
+            "app.open_and_safe_type_text",
+            "app.focus_and_safe_type_text",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
             "app.show",
             "app.hide",
             "app.minimize",
@@ -346,6 +358,16 @@ class ToolDescriptor:
             payload.get("text") or ""
         ).strip():
             raise AgentRuntimeError("desktop.safe_type_text 参数 text 必须是非空字符串")
+        if self.name in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"} and not str(
+            payload.get("text") or ""
+        ).strip():
+            raise AgentRuntimeError(f"{self.name} 参数 text 必须是非空字符串")
+        if self.name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+            action = str(payload.get("action") or "").strip().lower()
+            if action not in SAFE_SHORTCUT_ACTIONS:
+                raise AgentRuntimeError(
+                    f"{self.name} 参数 action 必须是 " + "、".join(SAFE_SHORTCUT_ACTIONS)
+                )
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.safe_click":
@@ -733,6 +755,62 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "title_contains"),
+    ),
+    "app.open_and_safe_type_text": ToolDescriptor(
+        name="app.open_and_safe_type_text",
+        description=(
+            "Open and focus a local desktop application, then type text explicitly provided "
+            "by the user into the foreground app while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "text": {"type": "string", "description": "User-provided text to type."},
+        },
+        required=("app_name", "text"),
+    ),
+    "app.focus_and_safe_type_text": ToolDescriptor(
+        name="app.focus_and_safe_type_text",
+        description=(
+            "Focus a local desktop application, then type text explicitly provided by the user "
+            "into the foreground app while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "text": {"type": "string", "description": "User-provided text to type."},
+        },
+        required=("app_name", "text"),
+    ),
+    "app.open_and_safe_shortcut": ToolDescriptor(
+        name="app.open_and_safe_shortcut",
+        description=(
+            "Open and focus a local desktop application, then execute a whitelisted safe "
+            "foreground shortcut while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_SHORTCUT_ACTIONS),
+                "description": "Whitelisted shortcut action to execute.",
+            },
+        },
+        required=("app_name", "action"),
+    ),
+    "app.focus_and_safe_shortcut": ToolDescriptor(
+        name="app.focus_and_safe_shortcut",
+        description=(
+            "Focus a local desktop application, then execute a whitelisted safe foreground "
+            "shortcut while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_SHORTCUT_ACTIONS),
+                "description": "Whitelisted shortcut action to execute.",
+            },
+        },
+        required=("app_name", "action"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

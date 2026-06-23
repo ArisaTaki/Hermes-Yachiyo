@@ -323,6 +323,18 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus_window": [
             "Requires Automation and Accessibility permission to raise a matching app window by title substring.",
         ],
+        "app.open_and_safe_type_text": [
+            "Opens and focuses the app before typing only text explicitly provided by the user.",
+        ],
+        "app.focus_and_safe_type_text": [
+            "Focuses the app before typing only text explicitly provided by the user.",
+        ],
+        "app.open_and_safe_shortcut": [
+            "Opens and focuses the app before executing only whitelisted safe shortcuts.",
+        ],
+        "app.focus_and_safe_shortcut": [
+            "Focuses the app before executing only whitelisted safe shortcuts.",
+        ],
         "app.show": [
             "Requires Automation and Accessibility permission to show, unhide, restore, and activate a local app.",
         ],

@@ -161,6 +161,50 @@ def _app_focus_window(broker: Any, payload: dict[str, Any], _approved: bool) -> 
     )
 
 
+def _app_open_and_safe_type_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_open_and_safe_type_text(
+        str(payload.get("app_name") or ""),
+        str(payload.get("text") or ""),
+    )
+
+
+def _app_focus_and_safe_type_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_focus_and_safe_type_text(
+        str(payload.get("app_name") or ""),
+        str(payload.get("text") or ""),
+    )
+
+
+def _app_open_and_safe_shortcut(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_open_and_safe_shortcut(
+        str(payload.get("app_name") or ""),
+        str(payload.get("action") or ""),
+    )
+
+
+def _app_focus_and_safe_shortcut(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_focus_and_safe_shortcut(
+        str(payload.get("app_name") or ""),
+        str(payload.get("action") or ""),
+    )
+
+
 def _app_show(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_show(str(payload.get("app_name") or ""))
 
@@ -397,6 +441,10 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.open": _app_open,
     "app.focus": _app_focus,
     "app.focus_window": _app_focus_window,
+    "app.open_and_safe_type_text": _app_open_and_safe_type_text,
+    "app.focus_and_safe_type_text": _app_focus_and_safe_type_text,
+    "app.open_and_safe_shortcut": _app_open_and_safe_shortcut,
+    "app.focus_and_safe_shortcut": _app_focus_and_safe_shortcut,
     "app.show": _app_show,
     "app.hide": _app_hide,
     "app.minimize": _app_minimize,

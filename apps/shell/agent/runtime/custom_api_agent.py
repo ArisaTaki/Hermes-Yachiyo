@@ -15,6 +15,10 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
     "app.focus",
     "app.focus_window",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -61,6 +65,10 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "app.focus_window": "聚焦应用窗口",
+    "app.open_and_safe_type_text": "打开应用并输入文字",
+    "app.focus_and_safe_type_text": "聚焦应用并输入文字",
+    "app.open_and_safe_shortcut": "打开应用并执行快捷动作",
+    "app.focus_and_safe_shortcut": "聚焦应用并执行快捷动作",
     "app.show": "显示应用",
     "app.hide": "隐藏应用",
     "app.minimize": "最小化应用",
@@ -520,6 +528,26 @@ class RuntimeCustomApiAgentLoop:
                 if app_name and title:
                     return f"已切换到{_display_target_name(app_name, f'的 {title} 窗口')}。"
                 return result_summary or "已切换到指定窗口。"
+            if tool_name in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"}:
+                app_name = _payload_text(result, planned_input, "app_name")
+                text = _payload_text(result, planned_input, "text")
+                action = "打开" if tool_name.startswith("app.open") else "切到"
+                if text:
+                    detail = f"并输入文字（{len(text)} 个字符）"
+                    target = _display_target_name(app_name, detail)
+                    return f"已{action}{target or detail}。"
+                target = _display_target_name(app_name, "并输入文字")
+                return result_summary or f"已{action}{target or '并输入文字'}。"
+            if tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+                app_name = _payload_text(result, planned_input, "app_name")
+                action = "打开" if tool_name.startswith("app.open") else "切到"
+                shortcut = _safe_shortcut_summary(result, planned_input)
+                if shortcut:
+                    detail = f"并{shortcut.removeprefix('已').removesuffix('。')}"
+                    target = _display_target_name(app_name, detail)
+                    return f"已{action}{target or detail}。"
+                target = _display_target_name(app_name, "并执行快捷动作")
+                return result_summary or f"已{action}{target or '并执行快捷动作'}。"
             if tool_name == "app.show":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -645,6 +673,26 @@ class RuntimeCustomApiAgentLoop:
                 )
                 return _append_recovery_action_summary(
                     f"{partial_summary}{suffix}{diagnostics}".strip(),
+                    result,
+                )
+        if tool_name in {
+            "app.open_and_safe_type_text",
+            "app.focus_and_safe_type_text",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+        }:
+            setup_key = "focus"
+            setup = fallback.get(setup_key) if isinstance(fallback.get(setup_key), dict) else {}
+            if setup.get("ok"):
+                app_name = _payload_text(result, planned_input, "app_name")
+                action = "打开" if tool_name.startswith("app.open") else "切到"
+                target = _display_target_name(app_name)
+                failed_action = "输入文字" if tool_name.endswith("safe_type_text") else "执行快捷动作"
+                targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
+                diagnostics = _permission_diagnostics(result)
+                suffix = f" 缺少权限：{targets}。" if targets else ""
+                return _append_recovery_action_summary(
+                    f"已{action}{target}，但没能{failed_action}。{suffix}{diagnostics}".strip(),
                     result,
                 )
         if result.get("permission_error") or permission_targets:
@@ -787,7 +835,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
@@ -1243,6 +1291,7 @@ def _permission_target_hints(targets: list[str]) -> list[str]:
         "music_app": "先打开 Music.app，确认歌曲在资料库里，并在系统弹窗出现时允许自动化控制 Music。",
         "screen_recording": "在 macOS 系统设置 > 隐私与安全性 > 屏幕录制 中允许 Oha-Yachiyo 或当前运行环境。",
         "chrome_cdp": "启动或配置 Chrome DevTools/CDP 连接后再重试浏览器控制。",
+        "open_command": "确认当前运行环境可以调用 macOS open 命令，且目标 App 名称正确。",
     }
     hints: list[str] = []
     for target in targets:

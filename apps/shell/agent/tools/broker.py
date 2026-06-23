@@ -404,6 +404,56 @@ class ToolBroker:
     def app_focus_window(self, app_name: str, title_contains: str) -> dict[str, Any]:
         return desktop.app_focus_window(app_name, title_contains)
 
+    def app_open_and_safe_type_text(self, app_name: str, text: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_safe_type_text",
+            lambda: self._app_foreground_action(
+                "app.open_and_safe_type_text",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=("safe_type_text", lambda: desktop.desktop_safe_type_text(text)),
+            ),
+        )
+
+    def app_focus_and_safe_type_text(self, app_name: str, text: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_safe_type_text",
+            lambda: self._app_foreground_action(
+                "app.focus_and_safe_type_text",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=("safe_type_text", lambda: desktop.desktop_safe_type_text(text)),
+            ),
+        )
+
+    def app_open_and_safe_shortcut(self, app_name: str, action: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_safe_shortcut",
+            lambda: self._app_foreground_action(
+                "app.open_and_safe_shortcut",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=("safe_shortcut", lambda: desktop.desktop_safe_shortcut(action)),
+            ),
+        )
+
+    def app_focus_and_safe_shortcut(self, app_name: str, action: str) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_safe_shortcut",
+            lambda: self._app_foreground_action(
+                "app.focus_and_safe_shortcut",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=("safe_shortcut", lambda: desktop.desktop_safe_shortcut(action)),
+            ),
+        )
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 
@@ -496,6 +546,62 @@ class ToolBroker:
             "desktop.click",
             lambda: desktop.desktop_click(x, y, click_count=click_count),
         )
+
+    def _app_foreground_action(
+        self,
+        tool_name: str,
+        app_name: str,
+        *,
+        setup_steps: tuple[tuple[str, Any], ...],
+        action_step: tuple[str, Any],
+    ) -> dict[str, Any]:
+        clean_app_name = str(app_name or "").strip()
+        step_results: dict[str, dict[str, Any]] = {}
+        fallback_used = False
+        for step_name, step in setup_steps:
+            result = step()
+            step_results[step_name] = result
+            fallback_used = fallback_used or bool(result.get("fallback_used"))
+            if not result.get("ok"):
+                result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                data = dict(result_data)
+                if clean_app_name:
+                    data["app_name"] = clean_app_name
+                return {
+                    **result,
+                    "action": tool_name,
+                    "summary": f"Could not {step_name} app before foreground action",
+                    "data": data,
+                    "fallback_used": fallback_used,
+                    "fallback_result": dict(step_results),
+                }
+
+        action_name, action = action_step
+        action_result = action()
+        action_data = action_result.get("data") if isinstance(action_result.get("data"), dict) else {}
+        data = dict(action_data)
+        if clean_app_name:
+            data["app_name"] = clean_app_name
+        data["foreground_action"] = action_name
+        fallback_used = fallback_used or bool(action_result.get("fallback_used"))
+        fallback_result = {**step_results, action_name: action_result}
+        if action_result.get("ok"):
+            return {
+                **action_result,
+                "action": tool_name,
+                "summary": "Focused app and completed foreground action",
+                "data": data,
+                "fallback_used": fallback_used,
+                "fallback_result": fallback_result,
+            }
+        return {
+            **action_result,
+            "action": tool_name,
+            "summary": "Focused app but could not complete foreground action",
+            "data": data,
+            "fallback_used": fallback_used,
+            "fallback_result": fallback_result,
+        }
 
     def browser_open_url(self, url: str) -> dict[str, Any]:
         return browser.open_url(url)

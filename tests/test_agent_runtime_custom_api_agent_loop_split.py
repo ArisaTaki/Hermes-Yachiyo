@@ -586,6 +586,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.open",
         "app.focus",
         "app.focus_window",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -851,6 +855,41 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Slack", "title_contains": "general"},
     }
     assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", ["app.focus"]) is None
+    assert daily_desktop_intent_tool_request("打开 Notes 并输入 hello yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "Notes", "text": "hello yachiyo"},
+    }
+    assert daily_desktop_intent_tool_request("open Notes and type hello yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "Notes", "text": "hello yachiyo"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 并粘贴", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("focus Chrome and then new tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Notes 并输入 hello yachiyo", ["app.open"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Notes"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 并粘贴", ["app.focus"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",
@@ -2929,6 +2968,48 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"character_count": 5, "explicit_user_text": True},
         },
     )
+    app_open_safe_type_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_type_text",
+        {"app_name": "Notes", "text": "hello"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Notes",
+                "foreground_action": "safe_type_text",
+                "character_count": 5,
+                "explicit_user_text": True,
+            },
+        },
+    )
+    app_focus_safe_shortcut = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Slack", "action": "paste"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Slack",
+                "foreground_action": "safe_shortcut",
+                "shortcut_action": "paste",
+            },
+        },
+    )
+    app_open_safe_type_text_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_type_text",
+        {"app_name": "Notes", "text": "hello"},
+        {
+            "ok": False,
+            "action": "app.open_and_safe_type_text",
+            "permission_error": True,
+            "permission_targets": ["accessibility"],
+            "fallback_result": {
+                "open": {"ok": True, "action": "app.open"},
+                "focus": {"ok": True, "action": "app.focus"},
+                "safe_type_text": {"ok": False, "action": "desktop.safe_type_text"},
+            },
+        },
+    )
     safe_click = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.safe_click",
         {"x": 120, "y": 240},
@@ -3002,6 +3083,12 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert safe_shortcut == "已复制选中内容。"
     assert safe_type_text == "已向前台输入文字（5 个字符）。"
+    assert app_open_safe_type_text == "已打开 Notes 并输入文字（5 个字符）。"
+    assert app_focus_safe_shortcut == "已切到 Slack 并粘贴。"
+    assert app_open_safe_type_text_failed == (
+        "已打开 Notes，但没能输入文字。 缺少权限：accessibility。"
+        " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"
+    )
     assert safe_click == "已点击前台位置：120, 240。"
     assert app_show == "已显示 Slack。"
     assert app_show_launched == "已打开并显示 Slack。"

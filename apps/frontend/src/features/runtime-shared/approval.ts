@@ -118,6 +118,10 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'desktop.active_window') return '读取当前窗口';
   if (tool === 'app.open') return '打开应用';
   if (tool === 'app.focus') return '聚焦应用';
+  if (tool === 'app.open_and_safe_type_text') return '打开应用并输入文字';
+  if (tool === 'app.focus_and_safe_type_text') return '聚焦应用并输入文字';
+  if (tool === 'app.open_and_safe_shortcut') return '打开应用并执行快捷动作';
+  if (tool === 'app.focus_and_safe_shortcut') return '聚焦应用并执行快捷动作';
   if (tool === 'media.apple_music_play') return '播放 Apple Music';
   if (tool === 'media.apple_music_control') return '控制 Apple Music';
   if (tool === 'desktop.safe_shortcut') return '执行快捷动作';

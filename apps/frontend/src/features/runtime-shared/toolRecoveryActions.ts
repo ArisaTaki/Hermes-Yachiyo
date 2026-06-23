@@ -127,6 +127,10 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   const title = String(input.title_contains || input.window_title || '').trim();
   if (tool === 'app.open' && appName) return `打开${appName}`;
   if (tool === 'app.focus' && appName) return `切到${appName}`;
+  if (tool === 'app.open_and_safe_type_text' && appName) return `打开${appName}并输入文字`;
+  if (tool === 'app.focus_and_safe_type_text' && appName) return `切到${appName}并输入文字`;
+  if (tool === 'app.open_and_safe_shortcut' && appName) return `打开${appName}并执行快捷动作`;
+  if (tool === 'app.focus_and_safe_shortcut' && appName) return `切到${appName}并执行快捷动作`;
   if (tool === 'app.focus_window' && appName && title) return `切到${appName} ${title}窗口`;
   if (tool === 'app.show' && appName) return `显示${appName}`;
   if (tool === 'app.hide' && appName) return `隐藏${appName}`;

@@ -230,9 +230,13 @@ def daily_desktop_intent_tool_request(
 _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus",
     "app.focus_window",
+    "app.focus_and_safe_shortcut",
+    "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
     "app.open",
+    "app.open_and_safe_shortcut",
+    "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
     "app.status",
@@ -337,6 +341,15 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _looks_like_explanation_request(text):
         return []
+
+    app_foreground_payload = _app_open_or_focus_foreground_action_request(text)
+    if app_foreground_payload:
+        candidates.append(
+            _request(
+                str(app_foreground_payload["tool"]),
+                dict(app_foreground_payload["input"]),
+            )
+        )
 
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
@@ -1252,6 +1265,74 @@ def _looks_like_local_path(value: str) -> bool:
     return bool(re.match(r"^(?:~|/|\./|\../)", str(value or "").strip()))
 
 
+def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | None:
+    open_match = _app_foreground_action_match(
+        text,
+        (
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:并且|并|然后|之后|后|再)\s*(?P<followup>.+)$",
+            r"(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and|then)\s+(?P<followup>.+)$",
+        ),
+    )
+    if open_match:
+        return _app_foreground_action_request_from_match("open", open_match)
+
+    focus_match = _app_foreground_action_match(
+        text,
+        (
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:并且|并|然后|之后|后|再)\s*(?P<followup>.+)$",
+            r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+?)\s+"
+            r"(?:and|then)\s+(?P<followup>.+)$",
+        ),
+    )
+    if focus_match:
+        return _app_foreground_action_request_from_match("focus", focus_match)
+    return None
+
+
+def _app_foreground_action_match(
+    text: str,
+    patterns: tuple[str, ...],
+) -> tuple[str, str] | None:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        followup = _strip_app_foreground_followup_prefix(_strip_query(match.group("followup")))
+        if raw_app and followup:
+            return raw_app, followup
+    return None
+
+
+def _app_foreground_action_request_from_match(
+    mode: str,
+    match: tuple[str, str],
+) -> dict[str, Any] | None:
+    raw_app, followup = match
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    app_name = _normalize_app_name(raw_app)
+    if not app_name or _looks_like_generic_app_open_target(raw_app):
+        return None
+    shortcut_action = _desktop_safe_shortcut_action(followup)
+    if shortcut_action:
+        return {
+            "tool": f"app.{mode}_and_safe_shortcut",
+            "input": {"app_name": app_name, "action": shortcut_action},
+        }
+    typed_text = _desktop_safe_type_text(followup)
+    if typed_text:
+        return {
+            "tool": f"app.{mode}_and_safe_type_text",
+            "input": {"app_name": app_name, "text": typed_text},
+        }
+    return None
+
+
 def _app_focus_name(text: str) -> str:
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -1638,10 +1719,42 @@ def _normalize_app_name(value: str) -> str:
 
 def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
+    app = _strip_app_foreground_followup(app)
     app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
     app = re.sub(r"\s*(?:应用|app|软件|程序)$", "", app, flags=re.IGNORECASE)
     app = _strip_polite_suffix(app)
     return app.strip()
+
+
+def _strip_app_foreground_followup(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|后|再)\s*"
+        r"(?:输入|打字|键入|敲入|打入|打上|打|写入|写|复制|粘贴|全选|撤销|重做|"
+        r"查找|打开查找|新建标签页|新标签页|打开新标签页|新建窗口|新窗口|打开新窗口|"
+        r"刷新|返回上一页|回到上一页|后退|前进).*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and|then)\s+"
+        r"(?:type|enter text|copy|paste|select all|undo|redo|find|new tab|new window|"
+        r"refresh|reload|go back|back|go forward|forward).*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip()
+
+
+def _strip_app_foreground_followup_prefix(value: str) -> str:
+    return re.sub(
+        r"^(?:并且|并|然后|之后|后|再|and|then)\s+",
+        "",
+        str(value or "").strip(),
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def _looks_like_generic_app_open_target(value: str) -> bool:
