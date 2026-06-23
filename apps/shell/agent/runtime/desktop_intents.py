@@ -494,13 +494,13 @@ def _looks_like_negative_request(text: str) -> bool:
         re.search(
             r"(?:不要|不用|无需|不需要|别).{0,12}"
             r"(?:执行|操作|调用|真的|实际|播放|截图|截屏|读取|查看|"
-            r"输入|打字|点击|按键|快捷键|网页)",
+            r"输入|打字|点击|按键|快捷键|网页|关闭|关掉|退出|隐藏|收起|最小化)",
             text,
         )
         or re.search(
             r"(?:do not|don't|without|no need to).{0,24}"
             r"(?:execute|perform|call|play|capture|inspect|type|click|press|hotkey|"
-            r"screenshot|read)",
+            r"screenshot|read|close|quit|hide|minimi[sz]e)",
             text.lower(),
         )
     )
@@ -1894,6 +1894,12 @@ def _is_close_current_window_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:关闭|关掉)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\b(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
             lowered,
         )
@@ -1910,6 +1916,12 @@ def _is_minimize_current_window_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\b(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
             lowered,
         )
@@ -1922,6 +1934,12 @@ def _is_hide_current_app_request(text: str) -> bool:
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:隐藏|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)",
             text,
             flags=re.IGNORECASE,
         )

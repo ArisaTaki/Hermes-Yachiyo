@@ -831,8 +831,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.minimize_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("把当前窗口最小化", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("把这个窗口最小化", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("最小化 Slack", ["desktop.minimize_window"]) is None
     assert daily_desktop_intent_tool_request("关闭当前窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.close_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("把当前窗口关掉", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
         "input": {},
@@ -852,11 +867,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hide_app",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("把当前应用隐藏一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("hide current app", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hide_app",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("别关闭当前窗口", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要关掉这个窗口", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要隐藏当前应用", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("别最小化当前窗口", allowed_tools) is None
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
