@@ -2422,7 +2422,7 @@ async def test_yachiyo_task_route_executes_desktop_permission_diagnosis_without_
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
-                prompt="检查桌面权限",
+                prompt="为什么不能控制桌面？",
                 conversation_id="chat-main-permission-diagnosis",
                 agent_id="builtin:yachiyo-main",
                 metadata={
