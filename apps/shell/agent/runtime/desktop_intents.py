@@ -289,12 +289,14 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus_window",
     "app.focus_and_safe_shortcut",
     "app.focus_and_safe_key",
+    "app.focus_and_safe_scroll",
     "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
     "app.open",
     "app.open_and_safe_shortcut",
     "app.open_and_safe_key",
+    "app.open_and_safe_scroll",
     "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
@@ -356,6 +358,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
@@ -382,6 +386,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
 }
 
 _FOREGROUND_ACTION_TOOLS = {
@@ -537,6 +543,14 @@ def _app_foreground_sequence_composite(
             return _request(
                 f"app.{mode}_and_safe_key",
                 {"app_name": app_name, "action": action, "repeat_count": repeat_count},
+            )
+    if action_tool == "desktop.safe_scroll":
+        direction = str(action_input.get("direction") or "").strip()
+        pages = action_input.get("pages", 1)
+        if direction:
+            return _request(
+                f"app.{mode}_and_safe_scroll",
+                {"app_name": app_name, "direction": direction, "pages": pages},
             )
     return None
 
@@ -1835,6 +1849,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_safe_shortcut",
             "input": {"app_name": app_name, "action": shortcut_action},
+        }
+    safe_scroll = _desktop_safe_scroll(followup)
+    if safe_scroll:
+        return {
+            "tool": f"app.{mode}_and_safe_scroll",
+            "input": {"app_name": app_name, **safe_scroll},
         }
     safe_key = _desktop_safe_key(followup)
     if safe_key:

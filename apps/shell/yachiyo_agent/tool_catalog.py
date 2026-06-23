@@ -344,6 +344,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus_and_safe_key": [
             "Focuses the app before pressing only whitelisted foreground navigation keys.",
         ],
+        "app.open_and_safe_scroll": [
+            "Opens and focuses the app before scrolling only explicit foreground up/down page requests.",
+        ],
+        "app.focus_and_safe_scroll": [
+            "Focuses the app before scrolling only explicit foreground up/down page requests.",
+        ],
         "app.show": [
             "Requires Automation and Accessibility permission to show, unhide, restore, and activate a local app.",
         ],

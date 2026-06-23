@@ -44,6 +44,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_shortcut": "app_focus_and_safe_shortcut",
     "app.open_and_safe_key": "app_open_and_safe_key",
     "app.focus_and_safe_key": "app_focus_and_safe_key",
+    "app.open_and_safe_scroll": "app_open_and_safe_scroll",
+    "app.focus_and_safe_scroll": "app_focus_and_safe_scroll",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -122,6 +124,8 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
     "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
     "app.show",
     "app.hide",
     "app.minimize",
@@ -435,6 +439,15 @@ class ToolDescriptor:
                 raise AgentRuntimeError(f"{self.name} 参数 repeat_count 必须是 1-20 的整数")
             if repeat_count < 1 or repeat_count > 20:
                 raise AgentRuntimeError(f"{self.name} 参数 repeat_count 必须是 1-20 的整数")
+        if self.name in {"app.open_and_safe_scroll", "app.focus_and_safe_scroll"}:
+            direction = str(payload.get("direction") or "").strip().lower()
+            if direction not in {"up", "down"}:
+                raise AgentRuntimeError(f"{self.name} 参数 direction 必须是 up 或 down")
+            pages = payload.get("pages", 1)
+            if isinstance(pages, bool) or not isinstance(pages, int):
+                raise AgentRuntimeError(f"{self.name} 参数 pages 必须是 1-10 的整数")
+            if pages < 1 or pages > 10:
+                raise AgentRuntimeError(f"{self.name} 参数 pages 必须是 1-10 的整数")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
         if self.name == "desktop.safe_click":
@@ -1013,6 +1026,50 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "action"),
+    ),
+    "app.open_and_safe_scroll": ToolDescriptor(
+        name="app.open_and_safe_scroll",
+        description=(
+            "Open and focus a local desktop application, then scroll the foreground UI up "
+            "or down by an explicit page count while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "direction": {
+                "type": "string",
+                "enum": ["up", "down"],
+                "description": "Foreground scroll direction.",
+            },
+            "pages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Number of pages to scroll. Defaults to 1.",
+            },
+        },
+        required=("app_name", "direction"),
+    ),
+    "app.focus_and_safe_scroll": ToolDescriptor(
+        name="app.focus_and_safe_scroll",
+        description=(
+            "Focus a local desktop application, then scroll the foreground UI up or down "
+            "by an explicit page count while holding the foreground action lock."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "direction": {
+                "type": "string",
+                "enum": ["up", "down"],
+                "description": "Foreground scroll direction.",
+            },
+            "pages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Number of pages to scroll. Defaults to 1.",
+            },
+        },
+        required=("app_name", "direction"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

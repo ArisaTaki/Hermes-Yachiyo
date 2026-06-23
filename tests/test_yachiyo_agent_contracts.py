@@ -424,6 +424,8 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "app.focus_and_safe_shortcut",
         "app.open_and_safe_key",
         "app.focus_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
@@ -564,6 +566,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("app.focus_and_safe_shortcut") == "low"
     assert desktop_tool_risk_level("app.open_and_safe_key") == "low"
     assert desktop_tool_risk_level("app.focus_and_safe_key") == "low"
+    assert desktop_tool_risk_level("app.open_and_safe_scroll") == "low"
+    assert desktop_tool_risk_level("app.focus_and_safe_scroll") == "low"
     assert desktop_tool_risk_level("app.hide") == "low"
     assert desktop_tool_risk_level("app.minimize") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
@@ -800,6 +804,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     focus_safe_shortcut = tools["app.focus_and_safe_shortcut"]
     open_safe_key = tools["app.open_and_safe_key"]
     focus_safe_key = tools["app.focus_and_safe_key"]
+    open_safe_scroll = tools["app.open_and_safe_scroll"]
+    focus_safe_scroll = tools["app.focus_and_safe_scroll"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
@@ -859,6 +865,15 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert focus_safe_key.risk_level == "low"
     assert focus_safe_key.input_schema["required"] == ["app_name", "action"]
     assert "arrow_down" in focus_safe_key.input_schema["properties"]["action"]["enum"]
+    assert open_safe_scroll.capability_id == "foreground_input"
+    assert open_safe_scroll.risk_level == "low"
+    assert open_safe_scroll.input_schema["required"] == ["app_name", "direction"]
+    assert open_safe_scroll.input_schema["properties"]["direction"]["enum"] == ["up", "down"]
+    assert any("explicit foreground up/down page requests" in note for note in open_safe_scroll.fallback_notes)
+    assert focus_safe_scroll.capability_id == "foreground_input"
+    assert focus_safe_scroll.risk_level == "low"
+    assert focus_safe_scroll.input_schema["required"] == ["app_name", "direction"]
+    assert focus_safe_scroll.input_schema["properties"]["direction"]["enum"] == ["up", "down"]
     assert named_hide_app.capability_id == "app_control"
     assert named_hide_app.risk_level == "low"
     assert named_hide_app.input_schema["required"] == ["app_name"]

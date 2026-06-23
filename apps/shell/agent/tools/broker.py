@@ -536,6 +536,49 @@ class ToolBroker:
             ),
         )
 
+    def app_open_and_safe_scroll(
+        self,
+        app_name: str,
+        direction: str,
+        *,
+        pages: Any = 1,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_safe_scroll",
+            lambda: self._app_foreground_action(
+                "app.open_and_safe_scroll",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=(
+                    "safe_scroll",
+                    lambda: desktop.desktop_safe_scroll(direction, pages=pages),
+                ),
+            ),
+        )
+
+    def app_focus_and_safe_scroll(
+        self,
+        app_name: str,
+        direction: str,
+        *,
+        pages: Any = 1,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_safe_scroll",
+            lambda: self._app_foreground_action(
+                "app.focus_and_safe_scroll",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=(
+                    "safe_scroll",
+                    lambda: desktop.desktop_safe_scroll(direction, pages=pages),
+                ),
+            ),
+        )
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 

@@ -262,6 +262,30 @@ def _app_focus_and_safe_key(
     )
 
 
+def _app_open_and_safe_scroll(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_open_and_safe_scroll(
+        str(payload.get("app_name") or ""),
+        str(payload.get("direction") or ""),
+        pages=payload.get("pages", 1),
+    )
+
+
+def _app_focus_and_safe_scroll(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_focus_and_safe_scroll(
+        str(payload.get("app_name") or ""),
+        str(payload.get("direction") or ""),
+        pages=payload.get("pages", 1),
+    )
+
+
 def _app_show(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_show(str(payload.get("app_name") or ""))
 
@@ -531,6 +555,8 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.focus_and_safe_shortcut": _app_focus_and_safe_shortcut,
     "app.open_and_safe_key": _app_open_and_safe_key,
     "app.focus_and_safe_key": _app_focus_and_safe_key,
+    "app.open_and_safe_scroll": _app_open_and_safe_scroll,
+    "app.focus_and_safe_scroll": _app_focus_and_safe_scroll,
     "app.show": _app_show,
     "app.hide": _app_hide,
     "app.minimize": _app_minimize,
