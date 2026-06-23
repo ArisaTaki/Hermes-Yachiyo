@@ -1339,6 +1339,140 @@ async def test_yachiyo_task_route_executes_named_app_hide_without_model(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt", "tool_name", "patched_tool", "action", "summary", "data_key", "data_value"),
+    [
+        (
+            "切换到 Slack",
+            "app.focus",
+            "apps.shell.agent.tools.desktop.app_focus",
+            "app.focus",
+            "已切换到 Slack。",
+            "focus_status",
+            "focused",
+        ),
+        (
+            "显示 Slack",
+            "app.show",
+            "apps.shell.agent.tools.desktop.app_show",
+            "app.show",
+            "已显示 Slack。",
+            "show_status",
+            "shown",
+        ),
+        (
+            "最小化 Slack",
+            "app.minimize",
+            "apps.shell.agent.tools.desktop.app_minimize",
+            "app.minimize",
+            "已最小化 Slack。",
+            "minimize_status",
+            "minimized",
+        ),
+    ],
+)
+async def test_yachiyo_task_route_executes_named_app_control_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    tool_name: str,
+    patched_tool: str,
+    action: str,
+    summary: str,
+    data_key: str,
+    data_value: str,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / f"chat-route-{tool_name}.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / f"agent-runtime-route-{tool_name}.db",
+        workspace_dir=tmp_path / f"agent-runtime-route-{tool_name}",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id=f"chat-main-{tool_name}")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    control_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("named app control public task should not call model")
+        ),
+    )
+
+    def fake_named_app_control(app_name: str) -> dict[str, Any]:
+        control_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": action,
+            "summary": f"{action} {app_name}",
+            "data": {"app_name": app_name, data_key: data_value},
+        }
+
+    monkeypatch.setattr(patched_tool, fake_named_app_control)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt=prompt,
+                conversation_id=f"chat-main-{tool_name}",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": f"route-main-{tool_name}-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages(f"chat-main-{tool_name}", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert control_calls == ["Slack"]
+        assert started["status"] == "completed"
+        assert started["summary"] == summary
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == tool_name
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
+        assert timeline["tool_calls"][-1]["tool_name"] == tool_name
+        assert timeline["tool_calls"][-1]["output_preview"]["data"][data_key] == data_value
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_named_window_focus_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
