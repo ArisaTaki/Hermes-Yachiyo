@@ -1108,6 +1108,8 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "剪贴板",
             "复制(?:选中|当前选中)?内容?",
             "打开新标签页",
+            "显示|还原|恢复|取消隐藏|隐藏|收起|最小化",
+            "show|unhide|restore|hide|minimi[sz]e",
             "hide\\s+(?:the\\s+)?(?:current|foreground|active|this)\\s+(?:app|application)",
             "(?:close|dismiss)\\s+(?:the\\s+)?(?:current|foreground|active|this)\\s+window",
             "开着吗",

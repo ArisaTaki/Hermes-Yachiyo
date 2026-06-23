@@ -263,6 +263,7 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:(?:复制|写入).*(?:剪贴板)|(?:copy|write).+(?:clipboard))/i.test(value)) return true;
   if (/^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:复制(?:选中|当前选中)?内容?|粘贴|全选|撤销|重做|刷新|查找|新建标签页|新标签页|打开新标签页)(?:一下|下|一次)?[?？。！!]*$/i.test(value)) return true;
   if (/^(?:copy(?: selected(?: text| content)?)?|paste|select all|undo|redo|refresh|reload|find|new tab)[.!?]*$/i.test(value)) return true;
+  if (/(?:(?:显示|还原|恢复|取消隐藏|隐藏|收起|最小化)\s*\S+|(?:show|unhide|restore|hide|minimi[sz]e)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
   if (/(?:(?:隐藏|收起).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:应用|app|软件|程序)|hide\s+(?:the\s+)?(?:current|foreground|active|this)\s+(?:app|application))/i.test(value)) return true;
   if (/(?:(?:最小化|收起).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:窗口|window)|(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window)/i.test(value)) return true;
   if (/(?:(?:关闭|关掉).{0,8}(?:当前|现在|前台|这个|该).{0,4}(?:窗口|window)|(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window)/i.test(value)) return true;

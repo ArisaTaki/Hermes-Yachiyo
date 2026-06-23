@@ -951,6 +951,101 @@ async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_wi
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_named_app_hide_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-app-hide.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-app-hide.db",
+        workspace_dir=tmp_path / "agent-runtime-route-app-hide",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-app-hide")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    hide_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("named app hide public task should not call model")
+        ),
+    )
+
+    def fake_app_hide(app_name: str) -> dict[str, Any]:
+        hide_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.hide",
+            "summary": f"Hid {app_name}",
+            "data": {"app_name": app_name, "hide_status": "hidden"},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_hide", fake_app_hide)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="隐藏 Slack",
+                conversation_id="chat-main-app-hide",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-app-hide-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-app-hide", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert hide_calls == ["Slack"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已隐藏 Slack。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "app.hide"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
+        assert timeline["tool_calls"][-1]["tool_name"] == "app.hide"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["hide_status"] == "hidden"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
