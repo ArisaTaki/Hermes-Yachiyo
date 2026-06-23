@@ -85,7 +85,7 @@ def _approval_policy_reason(
     public_input_preview: Any,
 ) -> str:
     direct = str(raw.get("policy_reason") or "").strip()
-    if direct:
+    if direct and direct != "当前工具策略要求人工确认后再执行。":
         return direct
     criteria = _workflow_approval_criteria(raw, public_input_preview)
     if tool_name == "workflow.approval":
@@ -121,6 +121,11 @@ def _workflow_approval_criteria(raw: dict[str, Any], public_input_preview: Any) 
 
 def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:
     record = public_input_preview if isinstance(public_input_preview, dict) else {}
+    if tool_name == "app.quit":
+        app_name = _preview_value(record, "app_name")
+        if app_name:
+            return f"将退出应用 {app_name}，可能导致未保存内容丢失，按工具策略需要人工确认。"
+        return "将退出本地应用，可能导致未保存内容丢失，按工具策略需要人工确认。"
     if tool_name == "desktop.hotkey":
         hotkey = _hotkey_preview(record)
         if hotkey:

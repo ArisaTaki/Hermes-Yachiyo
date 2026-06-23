@@ -273,6 +273,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_status",
         "app_open",
         "app_focus",
+        "app_quit",
         "desktop_reveal_path",
         "desktop_open_path",
         "media_apple_music_play",
@@ -314,6 +315,13 @@ def test_app_status_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.status 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.status", {"app_name": ""})
+
+
+def test_app_quit_schema_requires_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload("app.quit", {"app_name": "Slack"})
+
+    with pytest.raises(AgentRuntimeError, match="app.quit 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("app.quit", {"app_name": ""})
 
 
 def test_desktop_reveal_path_schema_accepts_local_path() -> None:
@@ -362,16 +370,26 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
 
     policy = compiler.compile_tool_policy(
         "custom",
-        {"allowed_tools": ["screen.capture", "desktop.click", "desktop.type_text", "terminal.run"]},
+        {
+            "allowed_tools": [
+                "screen.capture",
+                "app.quit",
+                "desktop.click",
+                "desktop.type_text",
+                "terminal.run",
+            ]
+        },
     )
 
     assert policy["allowed_tools"] == [
         "screen.capture",
+        "app.quit",
         "desktop.click",
         "desktop.type_text",
         "terminal.run",
     ]
     assert policy["approval_required"] == {
+        "app.quit": True,
         "desktop.click": True,
         "desktop.type_text": True,
         "terminal.run": True,
@@ -955,6 +973,35 @@ def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) ->
         "focus_fallback": "app.open",
     }
     assert open_calls[0][0] == ["open", "-a", "Slack"]
+    assert osascript_calls == [["Slack"], ["Slack"]]
+
+
+def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None:
+    osascript_calls = []
+
+    def fake_osascript(script, args=None):
+        osascript_calls.append(args)
+        if len(osascript_calls) == 1:
+            return {"ok": True, "stdout": "quit|Slack", "stderr": ""}
+        return {"ok": True, "stdout": "not_running", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_quit("Slack")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.quit"
+    assert result["summary"] == "Quit Slack"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "quit_status": "quit",
+        "quit_verified": True,
+        "running": False,
+        "launch_verified": False,
+        "launch_status": "not_running",
+    }
+    assert result["fallback_used"] is False
     assert osascript_calls == [["Slack"], ["Slack"]]
 
 

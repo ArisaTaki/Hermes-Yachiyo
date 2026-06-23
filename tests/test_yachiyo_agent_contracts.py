@@ -391,6 +391,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "app.status",
             "app.open",
             "app.focus",
+            "app.quit",
             "media.apple_music_play",
             "media.apple_music_control",
         },
@@ -486,7 +487,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
 
     assert app_control["available"] is False
     assert app_control["available_tools"] == ["app.open"]
-    assert app_control["unavailable_tools"] == ["app.status", "app.focus"]
+    assert app_control["unavailable_tools"] == ["app.status", "app.focus", "app.quit"]
     assert media_control["available"] is False
     assert media_control["degraded_tools"] == [
         "media.apple_music_play",
@@ -512,6 +513,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
+    assert desktop_tool_risk_level("app.quit") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -526,6 +528,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("open_path") == "low"
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
+    assert desktop_action_risk_level("quit_app") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
@@ -536,7 +539,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:16] == [
+    assert list(catalog)[:17] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -545,6 +548,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "read_app_status",
         "open_app",
         "focus_app",
+        "quit_app",
         "reveal_path",
         "open_path",
         "play_or_pause_media",
@@ -564,6 +568,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_windows"].tools == ["desktop.windows"]
     assert catalog["read_app_status"].risk_level == "low"
     assert catalog["read_app_status"].tools == ["app.status"]
+    assert catalog["quit_app"].risk_level == "medium"
+    assert catalog["quit_app"].tools == ["app.quit"]
     assert catalog["reveal_path"].risk_level == "low"
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["open_path"].risk_level == "low"
@@ -670,6 +676,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
 
     music = tools["media.apple_music_play"]
     permissions = tools["desktop.permissions"]
+    quit_app = tools["app.quit"]
     browser = tools["browser.open_url"]
     terminal = tools["terminal.run"]
 
@@ -681,6 +688,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert permissions.capability_id == "desktop_execution"
     assert permissions.risk_level == "low"
     assert any("missing desktop permission" in note for note in permissions.fallback_notes)
+    assert quit_app.capability_id == "app_control"
+    assert quit_app.risk_level == "medium"
+    assert quit_app.approval_required is False
+    assert quit_app.input_schema["required"] == ["app_name"]
+    assert any("approval" in note for note in quit_app.fallback_notes)
     assert browser.capability_id == "browser_control"
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]

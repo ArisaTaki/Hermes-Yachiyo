@@ -43,7 +43,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
-    {"desktop.hotkey", "desktop.type_text", "desktop.click"}
+    {"app.quit", "desktop.hotkey", "desktop.type_text", "desktop.click"}
 )
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
@@ -76,6 +76,7 @@ MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
         "foreground_click",
         "foreground_type_text",
         "foreground_hotkey",
+        "quit_app",
     }
 )
 HIGH_RISK_DESKTOP_ACTIONS = frozenset(
@@ -109,6 +110,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "read_app_status",
     "open_app",
     "focus_app",
+    "quit_app",
     "reveal_path",
     "open_path",
     "play_or_pause_media",
@@ -140,6 +142,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_app_status": ("app.status",),
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
+    "quit_app": ("app.quit",),
     "reveal_path": ("desktop.reveal_path",),
     "open_path": ("desktop.open_path",),
     "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
@@ -161,6 +164,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "read_active_window": "Read active window",
     "open_app": "Open app",
     "focus_app": "Focus app",
+    "quit_app": "Quit app",
     "open_path": "Open local path",
     "play_or_pause_media": "Play or pause media",
     "control_system_volume": "Control system volume",
@@ -188,6 +192,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "read_active_window": "Read the foreground application and window title.",
     "open_app": "Launch a local desktop application.",
     "focus_app": "Bring a local desktop application to the foreground.",
+    "quit_app": "Quit a local desktop application after approval.",
     "open_path": "Open a safe local file or folder with the system default app.",
     "play_or_pause_media": "Control local media playback such as Apple Music.",
     "control_system_volume": "Read or adjust local system output volume.",
@@ -226,6 +231,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
@@ -244,7 +250,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     ),
     "screen_capture": ("screen.capture",),
     "active_window": ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
-    "app_control": ("app.status", "app.open", "app.focus"),
+    "app_control": ("app.status", "app.open", "app.focus", "app.quit"),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
     "browser_control": (

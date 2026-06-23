@@ -154,6 +154,10 @@ def _app_focus(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[st
     return broker.app_focus(str(payload.get("app_name") or ""))
 
 
+def _app_quit(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.app_quit(str(payload.get("app_name") or ""))
+
+
 def _desktop_reveal_path(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.desktop_reveal_path(str(payload.get("path") or ""))
 
@@ -295,6 +299,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.status": _app_status,
     "app.open": _app_open,
     "app.focus": _app_focus,
+    "app.quit": _app_quit,
     "desktop.reveal_path": _desktop_reveal_path,
     "desktop.open_path": _desktop_open_path,
     "media.apple_music_play": _media_apple_music_play,

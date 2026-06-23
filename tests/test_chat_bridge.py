@@ -547,6 +547,88 @@ def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task
         store.close()
 
 
+def test_chat_bridge_quick_message_requires_approval_for_app_quit(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-app-quit-approval.db",
+        workspace_dir=tmp_path / "runtime-app-quit-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    quit_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher app quit approval should not call model")
+        ),
+    )
+
+    def fake_app_quit(app_name: str) -> dict:
+        quit_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.quit",
+            "summary": f"Quit {app_name}",
+            "data": {"app_name": app_name, "running": False},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_quit", fake_app_quit)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "退出 Slack",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert quit_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "app.quit"
+        assert "退出应用 Slack" in waiting_task["pending_approvals"][0]["policy_reason"]
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "app.quit"
+        assert waiting_run["pending_approval"]["input_preview"] == {"app_name": "Slack"}
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert quit_calls == ["Slack"]
+        assert approved.status == "completed"
+        assert approved.summary == "已退出 Slack。"
+        assert approved.needs_user_action is False
+        assert approved.pending_approvals == []
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.output.completed" in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
     tmp_path,
     monkeypatch,

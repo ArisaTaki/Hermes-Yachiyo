@@ -37,6 +37,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "app.status": "检查应用状态",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
+    "app.quit": "退出应用",
     "desktop.reveal_path": "在 Finder 中显示",
     "desktop.open_path": "打开本地路径",
     "media.apple_music_play": "播放 Apple Music",
@@ -316,6 +317,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.windows": "窗口列表",
         "app.status": "应用状态",
         "app.open": "打开应用",
+        "app.quit": "退出应用",
         "desktop.reveal_path": "Finder 定位",
         "desktop.open_path": "打开本地路径",
     }

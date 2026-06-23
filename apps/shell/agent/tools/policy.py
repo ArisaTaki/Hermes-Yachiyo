@@ -34,6 +34,7 @@ TOOL_FUNCTION_NAMES = {
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
+    "app.quit": "app_quit",
     "desktop.reveal_path": "desktop_reveal_path",
     "desktop.open_path": "desktop_open_path",
     "media.apple_music_play": "media_apple_music_play",
@@ -71,7 +72,12 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "system.volume",
     "clipboard.write",
 )
-MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text", "desktop.click")
+MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
+    "app.quit",
+    "desktop.hotkey",
+    "desktop.type_text",
+    "desktop.click",
+)
 LOW_RISK_BROWSER_TOOL_NAMES = (
     "browser.open_url",
     "browser.current_page",
@@ -249,7 +255,7 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
-        if self.name in {"app.open", "app.focus", "app.status"} and not str(
+        if self.name in {"app.open", "app.focus", "app.quit", "app.status"} and not str(
             payload.get("app_name") or ""
         ).strip():
             raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
@@ -632,6 +638,15 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "app.focus": ToolDescriptor(
         name="app.focus",
         description="Bring a local desktop application to the foreground.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "app.quit": ToolDescriptor(
+        name="app.quit",
+        description=(
+            "Quit a local desktop application by display name. Requires approval because "
+            "unsaved work in that application may be lost."
+        ),
         properties={"app_name": {"type": "string", "description": "Application name."}},
         required=("app_name",),
     ),

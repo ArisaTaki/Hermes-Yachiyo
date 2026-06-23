@@ -136,6 +136,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
     assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
     assert policy["approval_required"] == {
+        "app.quit": True,
         "desktop.hotkey": True,
         "desktop.type_text": True,
         "desktop.click": True,

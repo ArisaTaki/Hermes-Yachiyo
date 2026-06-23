@@ -401,6 +401,9 @@ class ToolBroker:
     def app_focus(self, app_name: str) -> dict[str, Any]:
         return desktop.app_focus(app_name)
 
+    def app_quit(self, app_name: str) -> dict[str, Any]:
+        return desktop.app_quit(app_name)
+
     def desktop_reveal_path(self, path: str) -> dict[str, Any]:
         return desktop.reveal_path(path)
 

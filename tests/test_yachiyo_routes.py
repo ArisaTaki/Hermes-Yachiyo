@@ -1665,6 +1665,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["app.status"]["capability_id"] == "app_control"
     assert tools["app.status"]["risk_level"] == "low"
     assert tools["app.status"]["input_schema"]["required"] == ["app_name"]
+    assert tools["app.quit"]["capability_id"] == "app_control"
+    assert tools["app.quit"]["risk_level"] == "medium"
+    assert tools["app.quit"]["input_schema"]["required"] == ["app_name"]
+    assert any("approval" in note for note in tools["app.quit"]["fallback_notes"])
     assert tools["browser.open_url"]["missing_permissions"] == ["chrome_cdp"]
     assert any("Chrome CDP" in note for note in tools["browser.open_url"]["fallback_notes"])
     assert tools["desktop.reveal_path"]["capability_id"] == "desktop_execution"

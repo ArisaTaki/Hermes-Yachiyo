@@ -311,6 +311,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus": [
             "Uses desktop automation and surfaces focus failures as tool results.",
         ],
+        "app.quit": [
+            "Requires approval because quitting an app can discard unsaved work; Automation failures are surfaced as tool results.",
+        ],
         "desktop.reveal_path": [
             "Reveals a local file or folder in Finder without opening or executing it.",
         ],

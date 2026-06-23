@@ -228,7 +228,9 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.quit",
         "desktop.reveal_path",
+        "desktop.open_path",
     ),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
@@ -932,6 +934,64 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "action": "app.focus",
         "summary": f"Focused {clean_name}",
         "data": {"app_name": clean_name},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def app_quit(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.quit")
+    clean_name = _clean_required(app_name, "app_name")
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            if application appName is running then
+                tell application appName to quit
+                delay 0.2
+                if application appName is running then
+                    return "quit_requested_running|" & appName
+                end if
+                return "quit|" & appName
+            end if
+            return "not_running|" & appName
+        end run
+        """,
+        [clean_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.quit",
+            {
+                **result,
+                "action": "app.quit",
+                "summary": "app.quit failed",
+                "data": {"app_name": clean_name},
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    status = stdout.split("|", 1)[0] if stdout else "unknown"
+    verification = _app_running_verification(clean_name)
+    running = verification.get("launch_verified")
+    still_running = running is True
+    if status == "not_running":
+        summary = f"{clean_name} was not running"
+    elif still_running:
+        summary = f"Sent quit request to {clean_name}"
+    else:
+        summary = f"Quit {clean_name}"
+    return {
+        "ok": True,
+        "action": "app.quit",
+        "summary": summary,
+        "data": {
+            "app_name": clean_name,
+            "quit_status": status,
+            "quit_verified": running is False,
+            "running": running,
+            **verification,
+        },
         "permission_error": False,
         "fallback_used": False,
     }
@@ -1802,6 +1862,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
+        "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "desktop.click": ["accessibility"],
@@ -1818,6 +1879,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
+        "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "desktop.click": ["accessibility"],

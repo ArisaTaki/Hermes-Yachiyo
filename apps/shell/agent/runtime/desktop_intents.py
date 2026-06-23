@@ -232,6 +232,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
 
+    app_quit_name = _app_quit_name(text)
+    if app_quit_name:
+        candidates.append(_request("app.quit", {"app_name": app_quit_name}))
+
     if not _looks_like_app_status_request(text):
         search_url = _browser_search_url(text)
         if search_url:
@@ -855,6 +859,33 @@ def _app_focus_name(text: str) -> str:
     return ""
 
 
+def _app_quit_name(text: str) -> str:
+    if (
+        _looks_like_search_request(text)
+        or _is_running_apps_request(text)
+        or _looks_like_app_status_request(text)
+    ):
+        return ""
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:退出|关闭|关掉|结束|终止)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:quit|close|exit|shut down|terminate)\s+(?P<app>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_generic_app_quit_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
 def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
@@ -954,6 +985,37 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
     if re.fullmatch(r"(?:一个|一条|某个|这个|那个).+", app):
         return True
     return False
+
+
+def _looks_like_generic_app_quit_target(value: str) -> bool:
+    app = _strip_app_name(value)
+    if not app:
+        return True
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    if compact in _APP_ALIASES:
+        return False
+    if compact in {
+        "窗口",
+        "当前窗口",
+        "这个窗口",
+        "当前页面",
+        "这个页面",
+        "标签页",
+        "当前标签页",
+        "window",
+        "currentwindow",
+        "thiswindow",
+        "tab",
+        "currenttab",
+        "page",
+        "currentpage",
+    }:
+        return True
+    if re.search(r"(?:窗口|标签页|页面)", app):
+        return True
+    if re.search(r"\b(?:window|tab|page)\b", app.lower()):
+        return True
+    return _looks_like_generic_app_open_target(value)
 
 
 def _music_query(text: str) -> str:
@@ -1247,6 +1309,8 @@ def _is_screen_capture_request(text: str) -> bool:
 
 def _is_active_window_request(text: str) -> bool:
     if _is_running_apps_request(text):
+        return False
+    if re.search(r"(?:关闭|关掉|退出|结束|close|quit|exit)", text, flags=re.IGNORECASE):
         return False
     if re.search(r"(?:哪些|几个|多少).{0,4}(?:窗口|windows?)", text, flags=re.IGNORECASE):
         return False
