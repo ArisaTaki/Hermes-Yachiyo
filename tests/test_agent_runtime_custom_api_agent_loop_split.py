@@ -606,6 +606,33 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开 GitHub", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 B站", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.bilibili.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 ChatGPT", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://chatgpt.com"},
+    }
+    assert daily_desktop_intent_tool_request("搜一下 Yachiyo desktop agent", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.google.com/search?q=Yachiyo+desktop+agent"},
+    }
+    assert daily_desktop_intent_tool_request("搜索 超时空辉夜姬", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {
+            "url": "https://www.google.com/search?q=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
+        },
+    }
     assert daily_desktop_intent_tool_request("当前网页是什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.current_page",
@@ -738,6 +765,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
@@ -984,6 +1012,116 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
         "agent.desktop.intent_completed",
     ]
     assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+
+
+def test_main_chat_browser_search_intent_returns_deterministic_result_without_model() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+    broker = RecordingDesktopBroker(order)
+    projection = RuntimeToolLoopProjectionBuilder()
+    tool_call_events = RecordingToolCallEvents(run_events)
+    trace_events = NoopTraceEvents()
+    executor = RuntimeToolCallExecutor(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
+        limit_tool_result=lambda value: value,
+        timeline_factory=_timeline,
+        tool_call_events=tool_call_events,
+        trace_events=trace_events,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        allows_tool=PolicyGate.allows_tool,
+    )
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda messages: str(messages[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=projection,
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=executor.execute,
+    )
+    operations = RuntimeToolOperations(
+        tool_request_runner=runner,
+        tool_call_executor=executor,
+    )
+
+    def fail_model(*_args, **_kwargs):
+        raise AssertionError("main chat browser search intent should not call the model")
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["browser.open_url"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=RuntimeToolOperations.model_tool_schemas,
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=fail_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=RuntimeToolOperations.tool_requests_from_message,
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=projection,
+        run_tool_requests=operations.run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "搜一下 Yachiyo desktop agent",
+        broker=broker,
+        timeline=timeline,
+        artifacts=artifacts,
+        run_id="run-main-chat-browser-search",
+        budget=budget,
+    )
+
+    url = "https://www.google.com/search?q=Yachiyo+desktop+agent"
+    assert str(result) == f"已打开网页：{url}。"
+    assert order == ["tool"]
+    assert broker.calls == [("browser.open_url", {"url": url}, False)]
+    assert budget.tool_claims == [("browser.open_url", False)]
+    assert budget.claims == 0
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_planned",
+        "detail": "browser.open_url",
+        "tool": "browser.open_url",
+        "status": "planned",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
+        "input_preview": {"url": url},
+    }
+    assert timeline[-1]["event"] == "agent.desktop.intent_completed"
+    assert timeline[-1]["summary"] == f"已打开网页：{url}。"
+    assert run_events[-1]["event_type"] == "agent.desktop.intent_completed"
+    assert run_events[-1]["payload"]["summary"] == f"已打开网页：{url}。"
 
 
 def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() -> None:

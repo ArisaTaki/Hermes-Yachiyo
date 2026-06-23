@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 
 def daily_desktop_intent_tool_request(
@@ -31,6 +31,14 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     url = _browser_open_url(text)
     if url:
         candidates.append(_request("browser.open_url", {"url": url}))
+
+    named_site_url = _browser_named_site_url(text)
+    if named_site_url:
+        candidates.append(_request("browser.open_url", {"url": named_site_url}))
+
+    search_url = _browser_search_url(text)
+    if search_url:
+        candidates.append(_request("browser.open_url", {"url": search_url}))
 
     if _is_browser_extract_text_request(text):
         candidates.append(_request("browser.extract_text", {}))
@@ -168,6 +176,87 @@ def _normalize_url(value: str) -> str:
     if re.fullmatch(domain_pattern, candidate):
         return f"https://{candidate}"
     return ""
+
+
+def _browser_named_site_url(text: str) -> str:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|访问|浏览|前往|去)\s*(?P<site>[^。！？!?，,]+)",
+        r"(?:open|visit|browse|go to)\s+(?P<site>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        site = _normalize_site_name(match.group("site"))
+        if site:
+            return site
+    return ""
+
+
+def _normalize_site_name(value: str) -> str:
+    site = _strip_query(value)
+    site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site)
+    site = re.sub(r"\s*(?:网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
+    compact = re.sub(r"[\s._-]+", "", site.lower())
+    aliases = {
+        "google": "https://www.google.com",
+        "谷歌": "https://www.google.com",
+        "github": "https://github.com",
+        "youtube": "https://www.youtube.com",
+        "yt": "https://www.youtube.com",
+        "youtubemusic": "https://music.youtube.com",
+        "bilibili": "https://www.bilibili.com",
+        "b站": "https://www.bilibili.com",
+        "哔哩哔哩": "https://www.bilibili.com",
+        "百度": "https://www.baidu.com",
+        "baidu": "https://www.baidu.com",
+        "gmail": "https://mail.google.com",
+        "googledrive": "https://drive.google.com",
+        "googledocs": "https://docs.google.com",
+        "chatgpt": "https://chatgpt.com",
+        "claude": "https://claude.ai",
+        "perplexity": "https://www.perplexity.ai",
+        "twitter": "https://x.com",
+        "x": "https://x.com",
+        "reddit": "https://www.reddit.com",
+    }
+    return aliases.get(compact, "")
+
+
+def _browser_search_url(text: str) -> str:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
+        r"(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
+        r"(?:search|google|look up)\s+(?:for\s+)?(?P<query>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_search_query(match.group("query"))
+        if query:
+            return f"https://www.google.com/search?q={quote_plus(query)}"
+    return ""
+
+
+def _strip_search_query(value: str) -> str:
+    query = _strip_query(value)
+    query = re.sub(r"^(?:一下|下|这个|那个)\s*", "", query)
+    query = re.sub(
+        r"\s*(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)(?:里|中|上|内)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"\s*(?:in|on|with|using)\s+(?:browser|chrome|google|safari)$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(query)
 
 
 def _is_browser_current_page_request(text: str) -> bool:
