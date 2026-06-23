@@ -129,6 +129,14 @@ def test_approval_snapshot_describes_foreground_text_and_click_approval() -> Non
             "requested_at": "2026-06-15T00:00:00+00:00",
         }
     )
+    type_into_ui_element_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-type-into-ui-element",
+            "tool": "desktop.type_into_ui_element",
+            "input_preview": {"target": "搜索", "text": "hello"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
 
     assert text_snapshot["risk_level"] == "medium"
     assert text_snapshot["policy_reason"] == (
@@ -141,6 +149,10 @@ def test_approval_snapshot_describes_foreground_text_and_click_approval() -> Non
     assert click_ui_element_snapshot["risk_level"] == "medium"
     assert click_ui_element_snapshot["policy_reason"] == (
         "将点击当前前台界面中匹配“发送”的控件，按工具策略需要人工确认。"
+    )
+    assert type_into_ui_element_snapshot["risk_level"] == "medium"
+    assert type_into_ui_element_snapshot["policy_reason"] == (
+        "将点击当前前台界面中匹配“搜索”的输入控件并输入文字（5 个字符），按工具策略需要人工确认。"
     )
 
 

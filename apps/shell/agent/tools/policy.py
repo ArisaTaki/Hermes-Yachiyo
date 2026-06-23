@@ -33,6 +33,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.windows": "desktop_windows",
     "desktop.ui_elements": "desktop_ui_elements",
     "desktop.click_ui_element": "desktop_click_ui_element",
+    "desktop.type_into_ui_element": "desktop_type_into_ui_element",
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
@@ -123,6 +124,7 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.quit",
     "desktop.close_window",
     "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
     "desktop.hotkey",
     "desktop.type_text",
     "desktop.click",
@@ -306,7 +308,7 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
-        if self.name in {"desktop.ui_elements", "desktop.click_ui_element"}:
+        if self.name in {"desktop.ui_elements", "desktop.click_ui_element", "desktop.type_into_ui_element"}:
             if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
                 raise AgentRuntimeError(f"{self.name} 参数 role_filter 必须是字符串")
             if "limit" in payload:
@@ -799,6 +801,36 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("target",),
+    ),
+    "desktop.type_into_ui_element": ToolDescriptor(
+        name="desktop.type_into_ui_element",
+        description=(
+            "Focus a visible foreground text input matched by Accessibility label/name/description, "
+            "then type user-provided text into it. Use for commands like typing into a named search "
+            "field or message box in the current app. Requires approval because the focus coordinate "
+            "and typing target are inferred from observed UI state."
+        ),
+        properties={
+            "target": {
+                "type": "string",
+                "description": "Visible UI input label/name/description to match, such as Search.",
+            },
+            "text": {
+                "type": "string",
+                "description": "User-provided text to type into the matched foreground input.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter. Defaults to text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+        },
+        required=("target", "text"),
     ),
     "app.status": ToolDescriptor(
         name="app.status",

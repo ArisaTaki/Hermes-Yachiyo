@@ -290,6 +290,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_safe_type_text",
         "desktop_safe_click",
         "desktop_click_ui_element",
+        "desktop_type_into_ui_element",
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
@@ -352,6 +353,28 @@ def test_desktop_click_ui_element_schema_requires_target_and_valid_options() -> 
         ToolDescriptorRegistry.validate_payload(
             "desktop.click_ui_element",
             {"target": "Send", "click_count": 4},
+        )
+
+
+def test_desktop_type_into_ui_element_schema_requires_target_text_and_valid_options() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.type_into_ui_element",
+        {"target": "Search", "text": "hello", "role_filter": "text", "limit": 20},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.type_into_ui_element 参数 target 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.type_into_ui_element", {"target": "", "text": "hello"})
+    with pytest.raises(AgentRuntimeError, match="desktop.type_into_ui_element 参数 text 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.type_into_ui_element", {"target": "Search", "text": ""})
+    with pytest.raises(AgentRuntimeError, match="desktop.type_into_ui_element 参数 role_filter 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.type_into_ui_element",
+            {"target": "Search", "text": "hello", "role_filter": 123},
+        )
+    with pytest.raises(AgentRuntimeError, match="desktop.type_into_ui_element 参数 limit 必须是 1-200"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.type_into_ui_element",
+            {"target": "Search", "text": "hello", "limit": 0},
         )
 
 
@@ -539,6 +562,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "desktop.close_window",
                 "desktop.click",
                 "desktop.click_ui_element",
+                "desktop.type_into_ui_element",
                 "desktop.type_text",
                 "terminal.run",
             ]
@@ -557,6 +581,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "desktop.close_window",
         "desktop.click",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
         "desktop.type_text",
         "terminal.run",
     ]
@@ -565,6 +590,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "desktop.close_window": True,
         "desktop.click": True,
         "desktop.click_ui_element": True,
+        "desktop.type_into_ui_element": True,
         "desktop.type_text": True,
         "terminal.run": True,
     }
@@ -690,6 +716,14 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop_click_ui_element",
         lambda target, *, role_filter="", limit=80, click_count=1: calls.append(
             ("click_ui_element", target, role_filter, limit, click_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "desktop_type_into_ui_element",
+        lambda target, text, *, role_filter="", limit=80: calls.append(
+            ("type_into_ui_element", target, text, role_filter, limit)
         )
         or {"ok": True},
     )
@@ -833,6 +867,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.type_into_ui_element",
+        {"target": "Search", "text": "hello", "role_filter": "text", "limit": 20},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
@@ -920,6 +959,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("safe_type_text", "hello"),
         ("safe_click", 12, 34),
         ("click_ui_element", "Send", "button", 20, 2),
+        ("type_into_ui_element", "Search", "hello", "text", 20),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
@@ -1784,6 +1824,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.windows",
         "desktop.ui_elements",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
@@ -2157,6 +2198,163 @@ def test_desktop_click_ui_element_permission_failure_returns_recovery_targets(
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]
     assert result["data"]["target"] == "Send"
+    assert result["fallback_result"] == {"observe": observed}
+
+
+def test_desktop_type_into_ui_element_matches_input_focuses_and_types(
+    monkeypatch,
+) -> None:
+    clicks: list[tuple[str, int, int, int]] = []
+    typed: list[tuple[str, str, str]] = []
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "Google Chrome UI elements: AXTextField: Search",
+        "data": {
+            "app_name": "Google Chrome",
+            "title": "Search",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXTextField",
+                    "name": "Search",
+                    "description": "Search field",
+                    "value": "",
+                    "enabled": True,
+                    "center": {"x": 120, "y": 240},
+                }
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+
+    def fake_click(action_name, x, y, *, click_count=1):
+        clicks.append((action_name, x, y, click_count))
+        return {
+            "ok": True,
+            "action": action_name,
+            "summary": f"Clicked foreground desktop at ({x}, {y})",
+            "data": {"x": x, "y": y, "click_count": click_count},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    def fake_type(action_name, text, *, summary):
+        typed.append((action_name, text, summary))
+        return {
+            "ok": True,
+            "action": action_name,
+            "summary": summary,
+            "data": {"character_count": len(text)},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(desktop_mod, "_send_desktop_click", fake_click)
+    monkeypatch.setattr(desktop_mod, "_send_desktop_text", fake_type)
+
+    result = desktop_mod.type_into_ui_element("Search", "yachiyo", role_filter="text", limit=20)
+
+    assert clicks == [("desktop.type_into_ui_element", 120, 240, 1)]
+    assert typed == [
+        (
+            "desktop.type_into_ui_element",
+            "yachiyo",
+            "Typed into foreground UI element: Search",
+        )
+    ]
+    assert result["ok"] is True
+    assert result["action"] == "desktop.type_into_ui_element"
+    assert result["summary"] == "Typed into foreground UI element: Search"
+    assert result["data"]["target"] == "Search"
+    assert result["data"]["matched_label"] == "Search"
+    assert result["data"]["role_filter"] == "text"
+    assert result["data"]["character_count"] == 7
+    assert result["data"]["match_count"] == 1
+    assert result["data"]["element"]["role"] == "AXTextField"
+    assert "text" not in result["data"]
+    assert list(result["fallback_result"]) == ["observe", "focus", "type_text"]
+
+
+def test_desktop_type_into_ui_element_returns_candidates_without_blind_typing(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "Notes UI elements",
+        "data": {
+            "app_name": "Notes",
+            "title": "Draft",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXTextField",
+                    "name": "Title",
+                    "enabled": True,
+                    "center": {"x": 44, "y": 55},
+                }
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_click",
+        lambda *args, **kwargs: pytest.fail("should not focus without a UI element match"),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_text",
+        lambda *args, **kwargs: pytest.fail("should not type without a UI element match"),
+    )
+
+    result = desktop_mod.type_into_ui_element("Search", "hello")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.type_into_ui_element"
+    assert result["error"] == "ui_element_not_found"
+    assert result["data"]["target"] == "Search"
+    assert result["data"]["character_count"] == 5
+    assert result["data"]["candidates"] == [
+        {
+            "role": "AXTextField",
+            "label": "Title",
+            "enabled": True,
+            "center": {"x": 44, "y": 55},
+        }
+    ]
+
+
+def test_desktop_type_into_ui_element_permission_failure_returns_recovery_targets(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": False,
+        "action": "desktop.ui_elements",
+        "summary": "desktop.ui_elements failed",
+        "error": "Not authorized to send Apple events to System Events.",
+        "data": {},
+        "permission_error": True,
+        "fallback_used": False,
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+
+    result = desktop_mod.type_into_ui_element("Search", "hello")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.type_into_ui_element"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
+    assert result["data"]["target"] == "Search"
+    assert result["data"]["character_count"] == 5
     assert result["fallback_result"] == {"observe": observed}
 
 

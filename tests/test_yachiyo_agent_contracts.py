@@ -429,6 +429,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -567,6 +568,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.safe_click") == "low"
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.click_ui_element") == "medium"
+    assert desktop_tool_risk_level("desktop.type_into_ui_element") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -595,6 +597,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("quit_app") == "medium"
     assert desktop_action_risk_level("foreground_close_window") == "medium"
     assert desktop_action_risk_level("foreground_click_ui_element") == "medium"
+    assert desktop_action_risk_level("foreground_type_into_ui_element") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
@@ -674,6 +677,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_minimize_window"].tools == ["desktop.minimize_window"]
     assert catalog["foreground_click_ui_element"].risk_level == "medium"
     assert catalog["foreground_click_ui_element"].tools == ["desktop.click_ui_element"]
+    assert catalog["foreground_type_into_ui_element"].risk_level == "medium"
+    assert catalog["foreground_type_into_ui_element"].tools == ["desktop.type_into_ui_element"]
     assert catalog["foreground_click"].risk_level == "medium"
     assert catalog["foreground_click"].requires_approval is False
     assert catalog["foreground_close_window"].risk_level == "medium"
@@ -784,6 +789,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     safe_type_text = tools["desktop.safe_type_text"]
     safe_click = tools["desktop.safe_click"]
     click_ui_element = tools["desktop.click_ui_element"]
+    type_into_ui_element = tools["desktop.type_into_ui_element"]
     minimize_window = tools["desktop.minimize_window"]
     close_window = tools["desktop.close_window"]
     browser = tools["browser.open_url"]
@@ -852,6 +858,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert click_ui_element.risk_level == "medium"
     assert click_ui_element.input_schema["required"] == ["target"]
     assert any("inferred coordinate" in note for note in click_ui_element.fallback_notes)
+    assert type_into_ui_element.capability_id == "foreground_input"
+    assert type_into_ui_element.risk_level == "medium"
+    assert type_into_ui_element.input_schema["required"] == ["target", "text"]
+    assert any("types user-provided text" in note for note in type_into_ui_element.fallback_notes)
     assert minimize_window.capability_id == "foreground_input"
     assert minimize_window.risk_level == "low"
     assert minimize_window.input_schema["properties"] == {}

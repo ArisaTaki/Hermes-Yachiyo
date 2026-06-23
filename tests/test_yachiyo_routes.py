@@ -4808,6 +4808,12 @@ async def test_yachiyo_task_route_approves_browser_interaction_intent_without_mo
             {"target": "发送", "role_filter": "button", "limit": 80, "click_count": 1},
             "apps.shell.agent.tools.desktop.click_ui_element",
         ),
+        (
+            "在搜索框输入 hello",
+            "desktop.type_into_ui_element",
+            {"target": "搜索", "text": "hello", "role_filter": "text", "limit": 80},
+            "apps.shell.agent.tools.desktop.type_into_ui_element",
+        ),
     ],
 )
 async def test_yachiyo_task_route_pauses_medium_risk_desktop_intent_for_approval(
@@ -6120,6 +6126,13 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert any(
         "inferred coordinate" in note
         for note in tools["desktop.click_ui_element"]["fallback_notes"]
+    )
+    assert tools["desktop.type_into_ui_element"]["capability_id"] == "foreground_input"
+    assert tools["desktop.type_into_ui_element"]["risk_level"] == "medium"
+    assert tools["desktop.type_into_ui_element"]["input_schema"]["required"] == ["target", "text"]
+    assert any(
+        "types user-provided text" in note
+        for note in tools["desktop.type_into_ui_element"]["fallback_notes"]
     )
     assert tools["desktop.minimize_window"]["capability_id"] == "foreground_input"
     assert tools["desktop.minimize_window"]["risk_level"] == "low"

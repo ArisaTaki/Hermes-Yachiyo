@@ -624,6 +624,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -898,6 +899,29 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "text": "yachiyo",
         },
     }
+    assert daily_desktop_intent_tool_request("在当前网页搜索框输入 yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.type_text",
+        "input": {
+            "selector": (
+                'input[type="search"], input[name="q"], textarea[name="q"], '
+                'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                'input[aria-label*="search" i], input[placeholder*="search" i]'
+            ),
+            "text": "yachiyo",
+        },
+    }
+    assert daily_desktop_intent_tool_request("在搜索框输入 yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.type_into_ui_element",
+        "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("type yachiyo into search field", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.type_into_ui_element",
+        "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("在搜索框输入 yachiyo", ["desktop.type_text"]) is None
     assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus",
@@ -3284,6 +3308,24 @@ def test_main_chat_desktop_intent_summarizes_click_ui_element() -> None:
     )
 
     assert result == "已点击前台控件：Send（120, 240）。"
+
+
+def test_main_chat_desktop_intent_summarizes_type_into_ui_element() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.type_into_ui_element",
+        {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        {
+            "ok": True,
+            "summary": "Typed into foreground UI element: Search",
+            "data": {
+                "target": "搜索",
+                "matched_label": "Search",
+                "character_count": 7,
+            },
+        },
+    )
+
+    assert result == "已在前台控件 Search 输入文字（7 个字符）。"
 
 
 def test_main_chat_desktop_intent_summarizes_app_status() -> None:

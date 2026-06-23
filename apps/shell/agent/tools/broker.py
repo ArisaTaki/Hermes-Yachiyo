@@ -413,6 +413,24 @@ class ToolBroker:
             ),
         )
 
+    def desktop_type_into_ui_element(
+        self,
+        target: str,
+        text: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.type_into_ui_element",
+            lambda: desktop.type_into_ui_element(
+                target,
+                text,
+                role_filter=role_filter,
+                limit=limit,
+            ),
+        )
+
     def app_status(self, app_name: str) -> dict[str, Any]:
         return desktop.app_status(app_name)
 

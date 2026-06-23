@@ -377,6 +377,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.click_ui_element": [
             "Requires approval plus Automation or Accessibility permission because it observes foreground UI controls and clicks an inferred coordinate.",
         ],
+        "desktop.type_into_ui_element": [
+            "Requires approval plus Automation or Accessibility permission because it observes foreground UI controls, focuses an inferred input coordinate, and types user-provided text.",
+        ],
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
         ],

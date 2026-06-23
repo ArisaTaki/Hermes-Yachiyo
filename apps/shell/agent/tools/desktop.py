@@ -241,6 +241,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.windows",
         "desktop.ui_elements",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
     ),
     "app_control": (
         "app.status",
@@ -271,6 +272,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -657,6 +659,113 @@ def click_ui_element(
         "fallback_result": {"observe": observed},
     }
     return _with_permission_metadata("desktop.click_ui_element", payload)
+
+
+def type_into_ui_element(
+    target: str,
+    text: str,
+    *,
+    role_filter: str = "",
+    limit: Any = 80,
+) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.type_into_ui_element")
+    clean_target = _clean_required(target, "target")
+    clean_text = _clean_required(text, "text")
+    clean_filter = str(role_filter or "").strip() or "text"
+    observed = ui_elements(role_filter=clean_filter, limit=limit)
+    observed_data = observed.get("data") if isinstance(observed.get("data"), dict) else {}
+    if not observed.get("ok"):
+        payload = {
+            **observed,
+            "action": "desktop.type_into_ui_element",
+            "summary": "Could not observe foreground UI elements before typing",
+            "data": {
+                **dict(observed_data),
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "character_count": len(clean_text),
+            },
+            "fallback_result": {"observe": observed},
+        }
+        return _with_permission_metadata("desktop.type_into_ui_element", payload)
+
+    elements = observed_data.get("elements") if isinstance(observed_data.get("elements"), list) else []
+    matches = _matching_ui_elements(elements, clean_target, clean_filter)
+    if not matches:
+        return {
+            "ok": False,
+            "action": "desktop.type_into_ui_element",
+            "summary": f"No foreground UI element matched for typing: {clean_target}",
+            "error": "ui_element_not_found",
+            "data": {
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "character_count": len(clean_text),
+                "app_name": str(observed_data.get("app_name") or ""),
+                "title": str(observed_data.get("title") or ""),
+                "observed_count": len(elements),
+                "candidates": _candidate_ui_element_previews(elements),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {"observe": observed},
+        }
+
+    match = matches[0]
+    center = match.get("center") if isinstance(match.get("center"), dict) else {}
+    label = _ui_element_display_label(match) or clean_target
+    click_result = _send_desktop_click(
+        "desktop.type_into_ui_element",
+        center.get("x"),
+        center.get("y"),
+        click_count=1,
+    )
+    click_data = click_result.get("data") if isinstance(click_result.get("data"), dict) else {}
+    base_data = {
+        **dict(click_data),
+        "target": clean_target,
+        "matched_label": label,
+        "role_filter": clean_filter,
+        "character_count": len(clean_text),
+        "app_name": str(observed_data.get("app_name") or ""),
+        "title": str(observed_data.get("title") or ""),
+        "observed_count": len(elements),
+        "match_count": len(matches),
+        "element": match,
+    }
+    if not click_result.get("ok"):
+        payload = {
+            **click_result,
+            "action": "desktop.type_into_ui_element",
+            "summary": f"Matched foreground UI element but focus click failed: {label}",
+            "data": base_data,
+            "fallback_result": {"observe": observed, "focus": click_result},
+        }
+        return _with_permission_metadata("desktop.type_into_ui_element", payload)
+
+    type_result = _send_desktop_text(
+        "desktop.type_into_ui_element",
+        clean_text,
+        summary=f"Typed into foreground UI element: {label}",
+    )
+    type_data = type_result.get("data") if isinstance(type_result.get("data"), dict) else {}
+    data = {**base_data, **dict(type_data)}
+    if type_result.get("ok"):
+        return {
+            **type_result,
+            "summary": f"Typed into foreground UI element: {label}",
+            "data": data,
+            "fallback_result": {"observe": observed, "focus": click_result, "type_text": type_result},
+        }
+    payload = {
+        **type_result,
+        "action": "desktop.type_into_ui_element",
+        "summary": f"Focused foreground UI element but typing failed: {label}",
+        "data": data,
+        "fallback_result": {"observe": observed, "focus": click_result, "type_text": type_result},
+    }
+    return _with_permission_metadata("desktop.type_into_ui_element", payload)
 
 
 def permissions() -> dict[str, Any]:
@@ -2963,6 +3072,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.windows": ["automation_or_accessibility"],
         "desktop.ui_elements": ["automation_or_accessibility"],
         "desktop.click_ui_element": ["automation_or_accessibility"],
+        "desktop.type_into_ui_element": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
@@ -3017,6 +3127,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.focus_and_safe_shortcut": ["accessibility", "automation"],
         "desktop.click": ["accessibility"],
         "desktop.click_ui_element": ["automation", "accessibility"],
+        "desktop.type_into_ui_element": ["automation", "accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
         "osascript": ["automation"],

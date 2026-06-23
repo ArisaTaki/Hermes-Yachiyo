@@ -309,6 +309,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.active_window",
     "desktop.click",
     "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
     "desktop.close_window",
     "desktop.hide_app",
     "desktop.hotkey",
@@ -353,6 +354,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.minimize_window",
     "desktop.safe_click",
     "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.click",
@@ -375,6 +377,7 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
 _FOREGROUND_ACTION_TOOLS = {
     "desktop.click",
     "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
     "desktop.close_window",
     "desktop.hotkey",
     "desktop.safe_click",
@@ -694,6 +697,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_close_current_window_request(text):
         candidates.append(_request("desktop.close_window", {}))
+
+    type_into_ui_element = _desktop_type_into_ui_element(text)
+    if type_into_ui_element:
+        candidates.append(_request("desktop.type_into_ui_element", type_into_ui_element))
 
     if not safe_shortcut_action and not _looks_like_app_status_request(text):
         search_url = _browser_search_url(text)
@@ -2789,6 +2796,8 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
 
 
 def _desktop_type_text(text: str) -> str:
+    if _browser_type_text_request(text) or _desktop_type_into_ui_element(text):
+        return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在前台|向前台|给当前窗口)?"
         r"(?:输入|打字|键入|敲入|打入|打上)\s*(?P<text>.+)$",
@@ -2808,6 +2817,49 @@ def _desktop_type_text(text: str) -> str:
         if typed_text:
             return typed_text
     return ""
+
+
+def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
+    if _has_browser_page_context(text):
+        return None
+    target_pattern = (
+        r"[^。！？!?，,]+?(?:输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
+        r"text\s+field|textbox|input|field|search\s+field|search\s+box|search\s+bar|"
+        r"message\s+field|message\s+box|chat\s+box|address\s+bar)"
+    )
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|向|给)?\s*(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
+        r"(?:上|里|中|内|的|里的|中的)?\s*"
+        rf"(?P<target>{target_pattern})(?:里|中|内|上)?\s*"
+        r"(?:输入|填写|键入|打入|填入|写入|写)\s*(?P<text>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:填写|填入|把|将)?\s*(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
+        r"(?:上|里|中|内|的|里的|中的)?\s*"
+        rf"(?P<target2>{target_pattern})\s*(?:为|成|:|：)\s*(?P<text2>[^。！？!?]+)$",
+        r"^(?:type|enter|fill)\s+(?P<text_en>[^.!?]+?)\s+"
+        r"(?:into|in)\s+(?:the\s+)?"
+        rf"(?P<target_en>{target_pattern})"
+        r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_target = groups.get("target") or groups.get("target2") or groups.get("target_en") or ""
+        raw_text = groups.get("text") or groups.get("text2") or groups.get("text_en") or ""
+        typed_text = _strip_typed_text(raw_text)
+        target = _strip_desktop_ui_input_target(raw_target)
+        if not target or not typed_text:
+            continue
+        return {
+            "target": target,
+            "text": typed_text,
+            "role_filter": _desktop_ui_element_role_filter(raw_target),
+            "limit": 80,
+        }
+    return None
 
 
 def _desktop_safe_type_text(text: str) -> str:
@@ -2916,7 +2968,9 @@ def _strip_desktop_ui_element_label(value: str) -> str:
     )
     label = re.sub(
         r"\s*(?:按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框|"
-        r"button|control|element|field|input|text field|textbox|menu item|menu|checkbox)$",
+        r"搜索框|搜索栏|消息框|聊天框|地址栏|"
+        r"button|control|element|field|input|text field|textbox|search field|search box|"
+        r"search bar|message field|message box|chat box|address bar|menu item|menu|checkbox)$",
         "",
         label,
         flags=re.IGNORECASE,
@@ -2924,11 +2978,43 @@ def _strip_desktop_ui_element_label(value: str) -> str:
     return _strip_query(label)
 
 
+def _strip_desktop_ui_input_target(value: str) -> str:
+    target = _strip_desktop_ui_element_label(value)
+    if target and target not in {"在", "向", "给"}:
+        return target
+    compact = _strip_query(value)
+    compact = re.sub(r"^(?:在|向|给)\s*", "", compact)
+    target = _strip_desktop_ui_element_label(compact)
+    if target:
+        return target
+    fallback_targets = {
+        "搜索框": "搜索",
+        "搜索栏": "搜索",
+        "消息框": "消息",
+        "聊天框": "聊天",
+        "地址栏": "地址",
+        "search field": "search",
+        "search box": "search",
+        "search bar": "search",
+        "message field": "message",
+        "message box": "message",
+        "chat box": "chat",
+        "address bar": "address",
+    }
+    return fallback_targets.get(compact.lower(), compact)
+
+
 def _desktop_ui_element_role_filter(value: str) -> str:
     lowered = str(value or "").lower()
     if re.search(r"(?:按钮|button)", lowered, flags=re.IGNORECASE):
         return "button"
-    if re.search(r"(?:输入框|文本框|输入栏|text field|textbox|input|field)", lowered, flags=re.IGNORECASE):
+    if re.search(
+        r"(?:输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
+        r"text field|textbox|input|field|search field|search box|search bar|"
+        r"message field|message box|chat box|address bar)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
         return "text"
     if re.search(r"(?:菜单项|菜单|menu item|menu)", lowered, flags=re.IGNORECASE):
         return "menu"

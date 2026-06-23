@@ -162,6 +162,19 @@ def _desktop_click_ui_element(
     )
 
 
+def _desktop_type_into_ui_element(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_type_into_ui_element(
+        str(payload.get("target") or ""),
+        str(payload.get("text") or ""),
+        role_filter=str(payload.get("role_filter") or ""),
+        limit=payload.get("limit", 80),
+    )
+
+
 def _app_status(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_status(str(payload.get("app_name") or ""))
 
@@ -461,6 +474,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.windows": _desktop_windows,
     "desktop.ui_elements": _desktop_ui_elements,
     "desktop.click_ui_element": _desktop_click_ui_element,
+    "desktop.type_into_ui_element": _desktop_type_into_ui_element,
     "app.status": _app_status,
     "app.open": _app_open,
     "app.focus": _app_focus,
