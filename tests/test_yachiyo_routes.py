@@ -886,6 +886,139 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_approvals(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-foreground-sequence.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-foreground-sequence.db",
+        workspace_dir=tmp_path / "agent-runtime-foreground-sequence",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-foreground-sequence-approval")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("foreground sequence approval should not call model")
+        ),
+    )
+
+    def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
+        calls.append(("hotkey", key, list(modifiers or [])))
+        return {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "summary": "Sent hotkey",
+            "data": {"key": key, "modifiers": list(modifiers or [])},
+        }
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed text",
+            "data": {"text": text, "character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    try:
+        sent = ChatAPI(app_runtime).send_message("按 Command+L，再输入 github.com，再按回车")
+        task = state.get_task(sent["task_id"])
+        waiting_message = session.get_assistant_message_for_task(sent["task_id"])
+
+        assert sent["ok"] is True
+        assert sent["status"] == "waiting_approval"
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING
+        assert waiting_message is not None
+        assert waiting_message.status == MessageStatus.PROCESSING
+        assert calls == []
+
+        after_first = await yachiyo.approve_task(sent["task_id"], None, request)
+        first_waiting_task = state.get_task(sent["task_id"])
+        first_waiting_message = session.get_assistant_message_for_task(sent["task_id"])
+        first_waiting_run = service.get_run(sent["run_id"])
+
+        assert after_first["status"] == "waiting_approval"
+        assert first_waiting_task is not None
+        assert first_waiting_task.status == TaskStatus.RUNNING
+        assert first_waiting_message is not None
+        assert first_waiting_message.status == MessageStatus.PROCESSING
+        assert first_waiting_run["status"] == "approval_required"
+        assert first_waiting_run["pending_approval"]["tool"] == "desktop.hotkey"
+        assert first_waiting_run["pending_approval"]["input_preview"] == {
+            "key": "return",
+            "modifiers": [],
+        }
+        assert calls == [
+            ("hotkey", "l", ["command"]),
+            ("type", "github.com"),
+        ]
+
+        after_second = await yachiyo.approve_task(sent["task_id"], None, request)
+        completed_task = state.get_task(sent["task_id"])
+        completed_message = session.get_assistant_message_for_task(sent["task_id"])
+        completed_run = service.get_run(sent["run_id"])
+        completed_events = [
+            event
+            for event in completed_run["timeline"]
+            if event.get("event") == "agent.desktop.intent_completed"
+        ]
+
+        assert after_second["status"] == "completed"
+        assert (
+            after_second["summary"]
+            == "已发送快捷键：Command+L。 已向前台输入文字（10 个字符）。 已发送快捷键：return。"
+        )
+        assert calls == [
+            ("hotkey", "l", ["command"]),
+            ("type", "github.com"),
+            ("hotkey", "return", []),
+        ]
+        assert completed_task is not None
+        assert completed_task.status == TaskStatus.COMPLETED
+        assert completed_task.result == after_second["summary"]
+        assert completed_message is not None
+        assert completed_message.status == MessageStatus.COMPLETED
+        assert completed_message.content == after_second["summary"]
+        assert completed_message.metadata["pending_approval"] == {}
+        assert completed_run["status"] == "completed"
+        assert completed_run["pending_approval"] == {}
+        assert completed_events[-1]["tools"] == [
+            "desktop.hotkey",
+            "desktop.safe_type_text",
+            "desktop.hotkey",
+        ]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

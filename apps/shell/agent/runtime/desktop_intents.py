@@ -232,7 +232,7 @@ def daily_desktop_intent_tool_requests(
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
     sequence = daily_desktop_intent_sequence_candidates(context)
-    if len(sequence) > 1 and all(str(request.get("tool") or "") in allowed for request in sequence):
+    if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
     for request in daily_desktop_intent_candidates(context):
         if str(request.get("tool") or "") in allowed:
@@ -260,8 +260,10 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
         if request is None:
             return []
         requests.append(request)
-    requests = _coalesce_app_foreground_sequence(requests)
     if len(requests) < 2:
+        return []
+    requests = _coalesce_app_foreground_sequence(requests)
+    if not requests:
         return []
     if not _is_foreground_desktop_sequence(requests):
         return []
@@ -488,9 +490,9 @@ def _is_foreground_desktop_sequence(requests: list[dict[str, Any]]) -> bool:
     tools = [str(request.get("tool") or "") for request in requests]
     if not tools or any(tool not in _FOREGROUND_SEQUENCE_TOOLS for tool in tools):
         return False
-    if tools[0] not in _APP_SEQUENCE_CONTEXT_TOOLS:
-        return False
-    return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
+    if tools[0] in _APP_SEQUENCE_CONTEXT_TOOLS:
+        return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools[1:])
+    return all(tool in _FOREGROUND_ACTION_TOOLS for tool in tools)
 
 
 def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
