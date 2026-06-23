@@ -243,6 +243,9 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
+    if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
+        return app_ui_elements
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
@@ -1937,6 +1940,7 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
             lowered,
         )
         or re.search(r"\b(?:what|which)\b.{0,24}\b(?:buttons|controls|ui elements)\b", lowered)
+        or re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered)
     ):
         return None
     role_filter = ""
@@ -1949,6 +1953,75 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     elif re.search(r"(?:复选框|checkbox)", text, flags=re.IGNORECASE):
         role_filter = "checkbox"
     return {"role_filter": role_filter, "limit": 80}
+
+
+def _app_scoped_ui_elements_tool_requests(text: str) -> list[dict[str, Any]]:
+    ui_payload = _desktop_ui_elements_request(text)
+    if ui_payload is None:
+        return []
+    app_name = _desktop_ui_elements_app_name(text)
+    if not app_name:
+        return []
+    return [
+        _request("app.focus", {"app_name": app_name}),
+        _request("desktop.ui_elements", ui_payload),
+    ]
+
+
+def _desktop_ui_elements_app_name(text: str) -> str:
+    patterns = (
+        r"\b(?:list|show|read|inspect)\s+(?:the\s+)?"
+        r"(?:ui\s+elements|buttons|text\s+fields|controls)\s+(?:in|on|for|of)\s+(?P<app>[^.!?]+)",
+        r"\b(?:what|which)\s+(?:buttons|controls|ui\s+elements|text\s+fields)\s+"
+        r"(?:are\s+)?(?:visible|shown|available|there)?\s*(?:in|on|for|of)\s+(?P<app>[^.!?]+)",
+        r"\bwhat\s+can\s+i\s+(?:click|press|use)\s+(?:in|on)\s+(?P<app>[^.!?]+)",
+        r"\b(?:list|show|read|inspect)\s+(?P<app>[^.!?]+?)\s+"
+        r"(?:ui\s+elements|buttons|text\s+fields|controls)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
+        r".{0,6}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
+        r".{0,6}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        if _looks_like_generic_ui_scope(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name and not _looks_like_generic_app_open_target(raw_app):
+            return app_name
+    return ""
+
+
+def _looks_like_generic_ui_scope(value: str) -> bool:
+    if _looks_like_generic_window_scope(value):
+        return True
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    return compact in {
+        "当前界面",
+        "当前窗口",
+        "当前屏幕",
+        "当前应用界面",
+        "前台界面",
+        "前台窗口",
+        "这个界面",
+        "这个窗口",
+        "thecurrent",
+        "thecurrentapp",
+        "currentapplication",
+        "currentwindow",
+        "currentinterface",
+        "thisapp",
+        "thiswindow",
+    }
 
 
 def _is_general_windows_request(text: str) -> bool:

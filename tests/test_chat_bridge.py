@@ -575,6 +575,74 @@ def test_chat_bridge_quick_message_executes_named_windows_list_without_model(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Slack buttons",
+            "data": {
+                "app_name": "Slack",
+                "title": "general",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "Send",
+                        "center": {"x": 640, "y": 720},
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "what buttons are visible in Slack",
+    )
+
+    assert result["ok"] is True
+    assert calls == [("focus", "Slack", None), ("ui", "button", 80)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == (
+        "已切换到 Slack。 当前 Slack 界面控件：Button Send（640, 720）。"
+    )
+    assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_app_status_without_model(
     tmp_path,
     monkeypatch,

@@ -2331,6 +2331,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.ui_elements",
         "input": {"role_filter": "button", "limit": 80},
     }
+    assert daily_desktop_intent_tool_requests("what buttons are visible in Slack", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("what can I click in Chrome", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+        },
+    ]
     assert daily_desktop_intent_tool_request("列出当前窗口控件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
