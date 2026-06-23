@@ -1602,6 +1602,15 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("不要关掉这个窗口", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要隐藏当前应用", allowed_tools) is None
     assert daily_desktop_intent_tool_request("别最小化当前窗口", allowed_tools) is None
+    long_design_request = (
+        '我看了一下当前桌面，class="plan-dropdown-item" 的显示有问题，'
+        "plan 的名字的显示区域被挤压到显示不出来文字，需要修改。\n\n"
+        "除功能以外，设计风格想要麻烦再出一版新的设计看一下。要求：\n"
+        "1. 仅对画面元素和 UI 进行调整，保持现有功能 100% 不变。\n"
+        "2. 风格修改为多巴胺风格。\n"
+        "3. 请不要覆盖原文件，生成一个新的 html 文件"
+    )
+    assert daily_desktop_intent_tool_request(long_design_request, allowed_tools) is None
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",

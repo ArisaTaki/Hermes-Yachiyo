@@ -216,6 +216,7 @@ class LegacyChatTaskStarter:
             return None
         if not direct_tool_request and not desktop_requests:
             return None
+        self._sync_chat_user_daily_desktop_metadata(task_id, desktop_requests)
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
         if not callable(start_main_chat_run) or not callable(execute_main_chat_model_loop):
@@ -303,6 +304,23 @@ class LegacyChatTaskStarter:
                 error=str(exc),
             )
             raise
+
+    def _sync_chat_user_daily_desktop_metadata(
+        self,
+        task_id: str,
+        desktop_requests: list[dict[str, Any]],
+    ) -> None:
+        chat_session = getattr(self._app_runtime, "chat_session", None)
+        update_metadata = getattr(chat_session, "update_message_metadata_for_task", None)
+        if not callable(update_metadata):
+            return
+        metadata = ChatAPI._daily_desktop_user_metadata(desktop_requests)
+        if not metadata:
+            return
+        try:
+            update_metadata(task_id, metadata, role="user")
+        except Exception:
+            return
 
     def _sync_app_task_running(self, task_id: str) -> None:
         self._sync_app_task_status(task_id, "running", progress_label="正在执行桌面操作")

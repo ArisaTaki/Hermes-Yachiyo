@@ -584,6 +584,28 @@ class ChatAPI:
         merged.update(dict(metadata or {}))
         return merged
 
+    @staticmethod
+    def _daily_desktop_user_metadata(
+        requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        tools = [
+            str(request.get("tool") or "").strip()
+            for request in requests
+            if str(request.get("tool") or "").strip()
+        ]
+        if not tools:
+            return {}
+        first_request = requests[0]
+        return {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": str(first_request.get("source") or "daily_desktop_intent"),
+            "daily_desktop_planning_reason": str(
+                first_request.get("planning_reason") or "clear_daily_desktop_intent"
+            ),
+            "daily_desktop_tool": tools[0],
+            "daily_desktop_tools": tools,
+        }
+
     def _idempotent_message_response(self, client_message_id: str) -> Dict[str, Any] | None:
         if not client_message_id:
             return None
@@ -1093,8 +1115,10 @@ class ChatAPI:
                 list(DAILY_DESKTOP_TOOL_NAMES),
                 metadata=metadata,
             )
+            main_chat_runnable_entry = str(runnable_id or "").strip() == MAIN_CHAT_AGENT_ID
             direct_daily_desktop_intent = (
-                not raw_attachments
+                not main_chat_runnable_entry
+                and not raw_attachments
                 and current_context.get("conversation_kind") != "group"
                 and bool(daily_desktop_requests)
             )
@@ -1132,6 +1156,11 @@ class ChatAPI:
             )
             user_metadata = self._group_followup_metadata_for_user_message(text, current_context)
             user_metadata = self._merge_user_metadata(user_metadata, metadata)
+            if direct_daily_desktop_intent:
+                user_metadata = self._merge_user_metadata(
+                    user_metadata,
+                    self._daily_desktop_user_metadata(daily_desktop_requests),
+                )
             task_description = self._with_group_context_for_main_model(task_description, current_context)
             task_description = self._with_group_followup_context(task_description, user_metadata)
             direct_group_dispatch_directives: list[GroupDispatchDirective] = []
@@ -3041,6 +3070,8 @@ class ChatAPI:
             for item in metadata.get("group_followup_for_agent_message_ids", [])
             if str(item or "").strip()
         ] if isinstance(metadata.get("group_followup_for_agent_message_ids"), list) else []
+        if not target_task_ids and not target_agent_message_ids:
+            return task_description
         target_lines: list[str] = []
         if target_task_ids:
             target_lines.append(f"关联主模型派发任务：{', '.join(target_task_ids)}")

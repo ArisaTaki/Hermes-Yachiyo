@@ -112,6 +112,11 @@ def _run_launcher_daily_desktop_quick_message(
         assert agent_task["open_in_studio_url"] == f"#/agents?run_id={run['run_id']}"
         assert user_metadata["source"] == "launcher"
         assert user_metadata["launcher_mode"] == "live2d"
+        assert user_metadata["daily_desktop_intent"] is True
+        assert user_metadata["daily_desktop_source"] == "daily_desktop_intent"
+        assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user_metadata["daily_desktop_tool"]
+        assert user_metadata["daily_desktop_tools"]
         assert assistant.content == agent_task["summary"]
         result["_events"] = events
         result["_task_timeline"] = task_timeline

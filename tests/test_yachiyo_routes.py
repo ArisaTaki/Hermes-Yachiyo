@@ -1744,6 +1744,10 @@ async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_mod
         assert user.task_id == started["task_id"]
         assert user_metadata["client_message_id"] == "route-main-daily-1"
         assert user_metadata["daily_desktop_intent"] is True
+        assert user_metadata["daily_desktop_source"] == "daily_desktop_intent"
+        assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user_metadata["daily_desktop_tool"] == "app.open"
+        assert user_metadata["daily_desktop_tools"] == ["app.open"]
         assert assistant.task_id == started["task_id"]
         assert assistant.content == "已打开 Microsoft Word。"
         assert assistant.status == MessageStatus.COMPLETED

@@ -195,6 +195,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user = runtime.chat_session.get_messages()[0]
 
         assert result["ok"] is True
         assert result["status"] == "completed"
@@ -208,6 +209,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert user.metadata["daily_desktop_intent"] is True
+        assert user.metadata["daily_desktop_source"] == "daily_desktop_intent"
+        assert user.metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert user.metadata["daily_desktop_tools"] == ["media.apple_music_open_and_play"]
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
@@ -11529,6 +11535,9 @@ def test_design_feedback_with_plain_screen_word_does_not_attach_desktop_snapshot
         assert task is not None
         assert task.attachments == []
         assert task.description == text.strip()
+        assert "agent_task" not in result
+        assert "run_id" not in result
+        assert "daily_desktop_intent" not in runtime.chat_session.get_messages()[0].metadata
     finally:
         store.close()
 

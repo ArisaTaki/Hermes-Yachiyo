@@ -829,6 +829,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _looks_like_explanation_request(text):
         return []
 
+    if _looks_like_project_or_design_request(text):
+        return []
+
     app_foreground_payload = _app_open_or_focus_foreground_action_request(text)
     if app_foreground_payload:
         candidates.append(
@@ -2835,6 +2838,26 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
         )
         or re.fullmatch(r"(?:play|start)\s+(?:a\s+)?(?:song|music|some\s+music)", lowered)
     )
+
+
+def _looks_like_project_or_design_request(text: str) -> bool:
+    value = str(text or "").strip()
+    if len(value) < 160 and "\n" not in value:
+        return False
+    lowered = value.lower()
+    has_project_terms = bool(
+        re.search(
+            r"(?:class=|css|html|ui|界面|设计|设计风格|功能|需求|要求|验收|生成一个新的|不要覆盖|保持现有功能)",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
+    has_spec_shape = bool(
+        re.search(r"(?:^|\n)\s*\d+[.、]", value)
+        or re.search(r"(?:要求|需求|验收)\s*[：:]", value)
+        or re.search(r"class\s*=", value, flags=re.IGNORECASE)
+    )
+    return has_project_terms and has_spec_shape
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:

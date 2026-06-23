@@ -215,6 +215,33 @@ class ChatSession:
                     logger.debug("消息 %s 关联任务 %s", message_id, task_id)
                     return True
         return False
+
+    def update_message_metadata_for_task(
+        self,
+        task_id: str,
+        metadata: dict | None,
+        *,
+        role: MessageRole | str | None = None,
+    ) -> bool:
+        """Merge metadata into the first message for a task, preserving existing fields."""
+        if not task_id or not metadata:
+            return False
+        safe_metadata = _redact_chat_metadata(metadata)
+        role_value = role.value if isinstance(role, MessageRole) else str(role or "")
+        with self._lock:
+            for msg in self.messages:
+                if msg.task_id != task_id:
+                    continue
+                if role_value and msg.role.value != role_value:
+                    continue
+                for key, value in safe_metadata.items():
+                    if value is None:
+                        msg.metadata.pop(key, None)
+                    else:
+                        msg.metadata[key] = value
+                self._persist_message(msg)
+                return True
+        return False
     
     def add_assistant_message(
         self,
