@@ -837,7 +837,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "能否帮我播放apple Music?",
+        "Can you play Apple Music?",
     )
 
     assert result["ok"] is True

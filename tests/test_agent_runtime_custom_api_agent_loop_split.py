@@ -1607,6 +1607,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("Can you play Apple Music?", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("please start playing Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("打开 Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

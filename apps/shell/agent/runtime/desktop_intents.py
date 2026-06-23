@@ -2452,6 +2452,8 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
         r"(?:play|start\s+playing)[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:play|start\s+playing)\s+(?P<app>[^.!?]+?)[.!?]*$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
