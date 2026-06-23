@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
@@ -352,14 +351,12 @@ class RuntimeCustomApiAgentLoop:
 
     def _direct_daily_desktop_result(
         self,
-        agent: dict[str, Any],
+        _agent: dict[str, Any],
         planned_tool: str,
         planned_input: dict[str, Any],
         timeline: list[dict[str, Any]],
         run_id: str = "",
     ) -> str:
-        if str(agent.get("agent_id") or "").strip() != MAIN_CHAT_AGENT_ID:
-            return ""
         if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
             return ""
         tool_event = self._latest_tool_call_event(timeline, planned_tool)

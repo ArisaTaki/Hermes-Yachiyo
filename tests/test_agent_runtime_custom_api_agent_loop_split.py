@@ -867,14 +867,8 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
         tool_call_executor=executor,
     )
 
-    def call_model(_base_url, _model, _api_key, messages, **_kwargs):
-        order.append("model")
-        assert broker.calls == [
-            ("media.apple_music_play", {"query": "超时空辉夜姬"}, False)
-        ]
-        assert "Tool result for media.apple_music_play" in messages[-1]["content"]
-        assert "Playing 超时空辉夜姬" in messages[-1]["content"]
-        return {"role": "assistant", "content": "已播放超时空辉夜姬。"}
+    def call_model(*_args, **_kwargs):
+        raise AssertionError("allowed custom desktop intent should not ask the model to restate permissions")
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {
@@ -910,7 +904,7 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     )
 
     result = loop.run(
-        {"name": "Yachiyo"},
+        {"agent_id": "agent-music", "name": "Music Agent"},
         "播放超时空辉夜姬",
         broker=broker,
         timeline=timeline,
@@ -919,23 +913,26 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
         budget=budget,
     )
 
-    assert str(result) == "已播放超时空辉夜姬。"
-    assert order == ["tool", "model"]
+    assert str(result) == "已在 Apple Music 播放：超时空辉夜姬。"
+    assert order == ["tool"]
+    assert broker.calls == [("media.apple_music_play", {"query": "超时空辉夜姬"}, False)]
     assert budget.tool_claims == [("media.apple_music_play", False)]
-    assert budget.claims == 1
+    assert budget.claims == 0
     assert [event["event"] for event in timeline] == [
         "agent.desktop.intent_planned",
         "agent.tool.call",
-        "agent.model.response",
+        "agent.desktop.intent_completed",
     ]
     assert timeline[1]["detail"] == "media.apple_music_play"
     assert timeline[1]["result"]["ok"] is True
+    assert timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
     assert [event["event_type"] for event in run_events] == [
         "agent.desktop.intent_planned",
         "tool.requested",
         "tool.started",
         "tool.completed",
         "agent.tool.call",
+        "agent.desktop.intent_completed",
     ]
     assert run_events[0]["payload"] == {
         "tool": "media.apple_music_play",
@@ -944,7 +941,7 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"query": "超时空辉夜姬"},
     }
-    assert run_events[-1]["payload"]["result"]["summary"] == "Playing 超时空辉夜姬"
+    assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
 def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -> None:

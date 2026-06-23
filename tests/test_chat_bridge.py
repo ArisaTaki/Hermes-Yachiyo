@@ -96,6 +96,40 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
         store.close()
 
 
+def test_chat_bridge_quick_message_waits_briefly_for_daily_desktop_snapshot(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakeDelayedDesktopIntentRuntimeService()
+    monkeypatch.setattr(chat_bridge_mod, "_QUICK_DESKTOP_SNAPSHOT_ATTEMPTS", 2)
+    monkeypatch.setattr(chat_bridge_mod, "_QUICK_DESKTOP_SNAPSHOT_DELAY_SECONDS", 0)
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-delayed-browser",
+            "task_id": "task-delayed-browser",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("打开 GitHub")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-delayed-browser"
+        assert result["agent_task"]["task_id"] == "task-delayed-browser"
+        assert result["agent_task"]["status"] == "running"
+        assert result["agent_task"]["current_step"] == "已回退执行 · 打开网页 · 系统浏览器"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_completed"
+        assert runtime.agent_runtime_service.calls == [
+            ("get_task_run_link", "task-delayed-browser"),
+            ("get_task_run_link", "task-delayed-browser"),
+            ("get_task_run_link", "task-delayed-browser"),
+        ]
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
@@ -132,7 +166,9 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
             "status": "planned",
             "tool": "browser.open_url",
         }
-        assert runtime.agent_runtime_service.calls == [("get_task_run_link", "task-pending-browser")]
+        assert runtime.agent_runtime_service.calls == [
+            ("get_task_run_link", "task-pending-browser")
+        ] * chat_bridge_mod._QUICK_DESKTOP_SNAPSHOT_ATTEMPTS
     finally:
         store.close()
 
@@ -299,6 +335,46 @@ class _FakeDesktopIntentRuntimeService:
 
     def get_run(self, run_id: str):
         assert run_id == "run-browser"
+        return {
+            "run_id": run_id,
+            "kind": "main_chat_run",
+            "user_goal": "打开 GitHub",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "browser.open_url",
+                    "payload": {
+                        "tool": "browser.open_url",
+                        "source": "daily_desktop_intent",
+                        "result": {
+                            "ok": True,
+                            "fallback_used": True,
+                            "fallback": "system_browser",
+                            "data": {"url": "https://github.com"},
+                        },
+                    },
+                }
+            ],
+        }
+
+
+class _FakeDelayedDesktopIntentRuntimeService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get_task_run_link(self, task_id: str):
+        self.calls.append(("get_task_run_link", task_id))
+        if len(self.calls) == 1:
+            raise KeyError(task_id)
+        return {
+            "task_id": task_id,
+            "run_id": "run-delayed-browser",
+            "session_id": "session-current",
+        }
+
+    def get_run(self, run_id: str):
+        assert run_id == "run-delayed-browser"
         return {
             "run_id": run_id,
             "kind": "main_chat_run",

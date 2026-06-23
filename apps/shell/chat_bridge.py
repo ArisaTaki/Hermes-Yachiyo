@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
@@ -36,6 +37,8 @@ logger = logging.getLogger(__name__)
 _SUMMARY_MAX_CONTENT_LEN = 80
 _SESSION_SUMMARY_MAX_CONTENT_LEN = 132
 _SESSION_SUMMARY_FRAGMENT_LEN = 58
+_QUICK_DESKTOP_SNAPSHOT_ATTEMPTS = 4
+_QUICK_DESKTOP_SNAPSHOT_DELAY_SECONDS = 0.05
 
 
 def _truncate(text: str, max_len: int = _SUMMARY_MAX_CONTENT_LEN) -> str:
@@ -230,11 +233,12 @@ def planned_agent_task_snapshot_for_quick_message(
     text: str,
     task_id: str,
     session_id: str,
+    candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     task_id = str(task_id or "").strip()
     if not task_id:
         return None
-    candidates = daily_desktop_intent_candidates(text)
+    candidates = candidates if candidates is not None else daily_desktop_intent_candidates(text)
     if not candidates:
         return None
     request = candidates[0]
@@ -331,17 +335,38 @@ class ChatBridge:
         task_id = str(result.get("task_id") or "").strip()
         if not task_id:
             return result
-        agent_task = agent_task_snapshot_for_task(self._runtime, task_id)
+        desktop_candidates = daily_desktop_intent_candidates(text)
+        agent_task = self._agent_task_snapshot_for_quick_message(
+            task_id,
+            has_desktop_intent=bool(desktop_candidates),
+        )
         if agent_task is None:
             planned_task = planned_agent_task_snapshot_for_quick_message(
                 text=text,
                 task_id=task_id,
                 session_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
+                candidates=desktop_candidates,
             )
             if planned_task is None:
                 return result
             return {**result, "agent_task": planned_task}
         return {**result, "agent_task": agent_task}
+
+    def _agent_task_snapshot_for_quick_message(
+        self,
+        task_id: str,
+        *,
+        has_desktop_intent: bool,
+    ) -> dict[str, Any] | None:
+        attempts = _QUICK_DESKTOP_SNAPSHOT_ATTEMPTS if has_desktop_intent else 1
+        for attempt in range(max(1, attempts)):
+            snapshot = agent_task_snapshot_for_task(self._runtime, task_id)
+            if snapshot is not None:
+                return snapshot
+            if not has_desktop_intent or attempt >= attempts - 1:
+                break
+            time.sleep(max(0.0, _QUICK_DESKTOP_SNAPSHOT_DELAY_SECONDS))
+        return None
 
     def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
         """获取最近 N 条消息的摘要。
