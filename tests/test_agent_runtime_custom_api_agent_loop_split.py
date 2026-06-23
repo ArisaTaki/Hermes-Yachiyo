@@ -304,15 +304,59 @@ def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools(
 
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
+        "app.open",
+        "app.focus",
         "media.apple_music_play",
         "screen.capture",
         "desktop.active_window",
+        "browser.open_url",
+        "browser.current_page",
     ]
 
+    assert daily_desktop_intent_tool_request("打开 https://example.com/docs", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://example.com/docs"},
+    }
+    assert daily_desktop_intent_tool_request("打开 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("当前网页是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("切换到 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+    }
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("播放 Music For a Sushi Restaurant", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "Music For a Sushi Restaurant"},
     }
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
@@ -325,8 +369,118 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("播放 Apple Music", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
+    assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
+
+
+def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    tool_runs: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "能否帮我播放 Apple Music?"}]
+
+    def run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        order.append("tool")
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": list(messages_arg),
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        messages_arg.append(
+            {
+                "role": "user",
+                "content": 'Tool result for app.open: {"ok": true, "data": {"app_name": "Music"}}',
+            }
+        )
+
+    def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
+        order.append("model")
+        assert "Tool result for app.open" in model_messages[-1]["content"]
+        return {"role": "assistant", "content": "已打开 Music。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "app.open",
+                    "media.apple_music_play",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-main-chat",
+    )
+
+    assert str(result) == "已打开 Music。"
+    assert order == ["tool", "model"]
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+        }
+    ]
+    assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
+    assert tool_runs[0]["kwargs"]["next_iteration"] == 0
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_planned",
+        "detail": "app.open",
+        "tool": "app.open",
+        "status": "planned",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
+        "input_preview": {"app_name": "Music"},
+    }
 
 
 def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_response() -> None:

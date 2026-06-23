@@ -86,8 +86,9 @@ class RuntimeCustomApiAgentLoop:
         self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
         start_iteration = self._normalize_tool_iteration(start_iteration)
-        if default_messages:
-            planned_tool_request = daily_desktop_intent_tool_request(context, allowed_tools)
+        if default_messages or start_iteration == 0:
+            planning_context = context if default_messages else self._latest_user_intent_text(messages)
+            planned_tool_request = daily_desktop_intent_tool_request(planning_context, allowed_tools)
             if planned_tool_request:
                 planned_tool = str(planned_tool_request.get("tool") or "")
                 planned_input = planned_tool_request.get("input") or {}
@@ -169,6 +170,17 @@ class RuntimeCustomApiAgentLoop:
             "custom_api Agent 工具循环超过上限；"
             f"{self._tool_loop_projection.loop_limit_detail(timeline)}"
         )
+
+    def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
+        for message in reversed(messages):
+            if str(message.get("role") or "") != "user":
+                continue
+            content = self._message_visible_content_text(message).strip()
+            if content.startswith("Tool result for "):
+                continue
+            if content:
+                return content
+        return ""
 
     def _initial_messages(self, context: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
         allowed_tool_text = ", ".join(allowed_tools) or "none"
