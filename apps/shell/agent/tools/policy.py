@@ -35,6 +35,7 @@ TOOL_FUNCTION_NAMES = {
     "app.open": "app_open",
     "app.focus": "app_focus",
     "desktop.reveal_path": "desktop_reveal_path",
+    "desktop.open_path": "desktop_open_path",
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
@@ -64,6 +65,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.open",
     "app.focus",
     "desktop.reveal_path",
+    "desktop.open_path",
     "media.apple_music_play",
     "media.apple_music_control",
     "system.volume",
@@ -236,6 +238,8 @@ class ToolDescriptor:
             raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
         if self.name == "desktop.reveal_path" and not str(payload.get("path") or "").strip():
             raise AgentRuntimeError("desktop.reveal_path 参数 path 必须是非空字符串")
+        if self.name == "desktop.open_path" and not str(payload.get("path") or "").strip():
+            raise AgentRuntimeError("desktop.open_path 参数 path 必须是非空字符串")
         if "timeout_seconds" in payload:
             value = payload.get("timeout_seconds")
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 120:
@@ -641,6 +645,20 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "path": {
                 "type": "string",
                 "description": "Absolute, relative, or ~/ local filesystem path to reveal in Finder.",
+            }
+        },
+        required=("path",),
+    ),
+    "desktop.open_path": ToolDescriptor(
+        name="desktop.open_path",
+        description=(
+            "Open a local folder or a safe document/media file with the system default app. "
+            "Reject executable, app bundle, script, or unknown file types instead of opening them."
+        ),
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Absolute, relative, or ~/ local filesystem path to open.",
             }
         },
         required=("path",),

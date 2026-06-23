@@ -30,6 +30,76 @@ _COMMON_FOLDER_TARGETS = {
     "用户文件夹": "",
 }
 
+_SAFE_OPEN_PATH_SUFFIXES = {
+    ".txt",
+    ".text",
+    ".md",
+    ".markdown",
+    ".log",
+    ".rtf",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".pages",
+    ".numbers",
+    ".key",
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".aiff",
+    ".flac",
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".avi",
+    ".mkv",
+    ".webm",
+}
+
+_UNSAFE_OPEN_PATH_SUFFIXES = {
+    ".app",
+    ".command",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".py",
+    ".rb",
+    ".pl",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".jar",
+    ".pkg",
+    ".dmg",
+    ".exe",
+    ".bin",
+    ".run",
+    ".workflow",
+    ".scpt",
+    ".applescript",
+}
+
 _PRIVACY_SECURITY_URLS = (
     "x-apple.systempreferences:com.apple.preference.security?Privacy",
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
@@ -584,6 +654,97 @@ def reveal_path(path: str) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def open_path(path: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.open_path")
+    clean_path = _clean_required(path, "path")
+    target = _expanded_local_path(clean_path)
+    if not target.exists():
+        return {
+            "ok": False,
+            "action": "desktop.open_path",
+            "summary": "desktop.open_path failed",
+            "error": f"Path not found: {clean_path}",
+            "error_code": "path_not_found",
+            "data": {
+                "path": clean_path,
+                "expanded_path": str(target),
+                "open_target": "system_open",
+                "exists": False,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    safety_error = _unsafe_open_path_reason(target)
+    if safety_error:
+        return {
+            "ok": False,
+            "action": "desktop.open_path",
+            "summary": "desktop.open_path blocked",
+            "error": safety_error,
+            "error_code": "unsafe_path_type",
+            "data": {
+                "path": clean_path,
+                "expanded_path": str(target),
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": target.is_dir(),
+                "suffix": target.suffix.lower(),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    try:
+        result = subprocess.run(
+            ["open", str(target)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("desktop.open_path", exc)
+    if result.returncode != 0:
+        payload = _failed("desktop.open_path", result)
+        payload["data"] = {
+            "path": clean_path,
+            "expanded_path": str(target),
+            "open_target": "system_open",
+            "exists": True,
+            "is_dir": target.is_dir(),
+            "suffix": target.suffix.lower(),
+        }
+        return payload
+    return {
+        "ok": True,
+        "action": "desktop.open_path",
+        "summary": f"Opened {target.name or str(target)}",
+        "data": {
+            "path": clean_path,
+            "expanded_path": str(target),
+            "open_target": "system_open",
+            "exists": True,
+            "is_dir": target.is_dir(),
+            "suffix": target.suffix.lower(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _unsafe_open_path_reason(target: Path) -> str:
+    suffix = target.suffix.lower()
+    if target.is_dir():
+        if suffix in _UNSAFE_OPEN_PATH_SUFFIXES:
+            return f"Refusing to open unsafe path type: {suffix}"
+        return ""
+    if suffix in _UNSAFE_OPEN_PATH_SUFFIXES:
+        return f"Refusing to open unsafe path type: {suffix}"
+    if suffix not in _SAFE_OPEN_PATH_SUFFIXES:
+        return f"Refusing to open unknown file type: {suffix or 'no extension'}"
+    return ""
 
 
 def _open_common_folder(label: str, folder_path: Path) -> dict[str, Any]:

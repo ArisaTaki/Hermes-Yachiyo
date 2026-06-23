@@ -404,6 +404,9 @@ class ToolBroker:
     def desktop_reveal_path(self, path: str) -> dict[str, Any]:
         return desktop.reveal_path(path)
 
+    def desktop_open_path(self, path: str) -> dict[str, Any]:
+        return desktop.open_path(path)
+
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 

@@ -355,6 +355,42 @@ def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypo
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    open_calls: list[str] = []
+
+    def fake_open_path(path: str) -> dict:
+        open_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": f"Opened {path}",
+            "data": {
+                "path": path,
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开下载文件夹",
+    )
+
+    assert open_calls == ["~/Downloads"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已打开文件夹：~/Downloads。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

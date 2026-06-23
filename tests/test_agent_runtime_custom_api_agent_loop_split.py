@@ -598,6 +598,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "browser.extract_text",
         "browser.screenshot",
         "desktop.reveal_path",
+        "desktop.open_path",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -797,7 +798,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.reveal_path",
+        "tool": "desktop.open_path",
         "input": {"path": "~/Downloads/report.pdf"},
     }
     assert daily_desktop_intent_tool_request("在访达中显示下载文件夹", allowed_tools) == {
@@ -810,24 +811,29 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads/测试文件夹"},
     }
-    assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
+    assert daily_desktop_intent_tool_request("show ~/Downloads/report.pdf in Finder", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads/report.pdf"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("打开下载", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.reveal_path",
+        "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("可以帮我打开下载文件夹吗", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.reveal_path",
+        "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("打开应用程序文件夹", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.reveal_path",
+        "tool": "desktop.open_path",
         "input": {"path": "/Applications"},
     }
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {

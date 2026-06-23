@@ -272,11 +272,12 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
         store.close()
 
 
-def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypatch):
+def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
     reveal_calls: list[str] = []
+    open_path_calls: list[str] = []
     app_open_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
@@ -306,6 +307,20 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
             },
         }
 
+    def fake_open_path(path: str) -> dict:
+        open_path_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": f"Opened {path}",
+            "data": {
+                "path": path,
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": True,
+            },
+        }
+
     def fake_app_open(app_name: str) -> dict:
         app_open_calls.append(app_name)
         return {
@@ -316,6 +331,7 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.reveal_path", fake_reveal_path)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     try:
         result = api.send_message("可以帮我打开下载文件夹吗")
@@ -325,12 +341,13 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
 
         assert result["ok"] is True
         assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已在 Finder 中显示：~/Downloads。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert result["agent_task"]["summary"] == "已打开文件夹：~/Downloads。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已在 Finder 中显示：~/Downloads。"
-        assert reveal_calls == ["~/Downloads"]
+        assert task.result == "已打开文件夹：~/Downloads。"
+        assert open_path_calls == ["~/Downloads"]
+        assert reveal_calls == []
         assert app_open_calls == []
         assert run["status"] == "completed"
     finally:

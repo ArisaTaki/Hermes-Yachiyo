@@ -25,6 +25,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.windows",
     "app.status",
     "desktop.reveal_path",
+    "desktop.open_path",
     "browser.open_url",
     "browser.current_page",
     "browser.extract_text",
@@ -42,6 +43,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.windows": "读取窗口列表",
     "app.status": "检查应用状态",
     "desktop.reveal_path": "在 Finder 中显示",
+    "desktop.open_path": "打开本地路径",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "media.apple_music_play": "播放 Apple Music",
@@ -458,6 +460,8 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "desktop.reveal_path":
                 path = _payload_text(result, planned_input, "path")
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
+            if tool_name == "desktop.open_path":
+                return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
             if tool_name == "browser.open_url":
                 url = _payload_text(result, planned_input, "url")
                 if result.get("fallback_used") and result.get("fallback") == "system_browser":
@@ -611,7 +615,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_control, system.volume, clipboard.write, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
@@ -624,7 +628,8 @@ class RuntimeCustomApiAgentLoop:
             "map single app running/open status questions to app.status; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "
-            "map 'show/reveal in Finder' requests to desktop.reveal_path. "
+            "map 'show/reveal in Finder' requests to desktop.reveal_path and safe local "
+            "file or folder open requests to desktop.open_path. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "
@@ -912,6 +917,16 @@ def _clipboard_write_summary(result: dict[str, Any], planned_input: dict[str, An
         text = str(planned_input.get("text") or "")
         length = len(text) if text else 0
     return f"已复制 {length} 个字符到剪贴板。" if length else "已写入剪贴板。"
+
+
+def _desktop_open_path_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    path = str(data.get("path") or planned_input.get("path") or "").strip()
+    if not path:
+        return ""
+    if data.get("is_dir") is True:
+        return f"已打开文件夹：{path}。"
+    return f"已打开文件：{path}。"
 
 
 def _sentence(value: str) -> str:

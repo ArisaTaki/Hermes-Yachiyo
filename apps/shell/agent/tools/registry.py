@@ -158,6 +158,10 @@ def _desktop_reveal_path(broker: Any, payload: dict[str, Any], _approved: bool) 
     return broker.desktop_reveal_path(str(payload.get("path") or ""))
 
 
+def _desktop_open_path(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.desktop_open_path(str(payload.get("path") or ""))
+
+
 def _media_apple_music_play(
     broker: Any,
     payload: dict[str, Any],
@@ -292,6 +296,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.open": _app_open,
     "app.focus": _app_focus,
     "desktop.reveal_path": _desktop_reveal_path,
+    "desktop.open_path": _desktop_open_path,
     "media.apple_music_play": _media_apple_music_play,
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,

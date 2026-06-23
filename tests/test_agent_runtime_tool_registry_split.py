@@ -274,6 +274,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_open",
         "app_focus",
         "desktop_reveal_path",
+        "desktop_open_path",
         "media_apple_music_play",
         "media_apple_music_control",
         "system_volume",
@@ -323,6 +324,16 @@ def test_desktop_reveal_path_schema_accepts_local_path() -> None:
 
     with pytest.raises(AgentRuntimeError, match="desktop.reveal_path 参数 path 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("desktop.reveal_path", {"path": ""})
+
+
+def test_desktop_open_path_schema_accepts_local_path() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.open_path",
+        {"path": "~/Downloads/report.pdf"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.open_path 参数 path 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.open_path", {"path": ""})
 
 
 def test_system_volume_schema_accepts_safe_volume_actions() -> None:
@@ -850,6 +861,58 @@ def test_desktop_reveal_path_reports_missing_path(monkeypatch, tmp_path) -> None
         "open_target": "finder_reveal",
         "exists": False,
     }
+
+
+def test_desktop_open_path_opens_safe_existing_file(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "report.pdf"
+    target.write_text("pdf", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path(str(target))
+    expanded = str(target.resolve(strict=False))
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.open_path"
+    assert result["summary"] == "Opened report.pdf"
+    assert result["data"] == {
+        "path": str(target),
+        "expanded_path": expanded,
+        "open_target": "system_open",
+        "exists": True,
+        "is_dir": False,
+        "suffix": ".pdf",
+    }
+    assert calls[0][0] == ["open", expanded]
+
+
+def test_desktop_open_path_blocks_unsafe_file_types(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "run.sh"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: calls.append((_args, _kwargs)),
+    )
+
+    result = desktop_mod.open_path(str(target))
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.open_path"
+    assert result["summary"] == "desktop.open_path blocked"
+    assert result["error_code"] == "unsafe_path_type"
+    assert ".sh" in result["error"]
+    assert result["data"]["suffix"] == ".sh"
+    assert calls == []
 
 
 def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:

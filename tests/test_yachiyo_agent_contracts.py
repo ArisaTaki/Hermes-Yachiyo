@@ -515,6 +515,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
+    assert desktop_tool_risk_level("desktop.open_path") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
@@ -522,6 +523,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("terminal.run") is None
     assert desktop_action_risk_level("read_screen") == "low"
     assert desktop_action_risk_level("diagnose_permissions") == "low"
+    assert desktop_action_risk_level("open_path") == "low"
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
@@ -534,7 +536,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:15] == [
+    assert list(catalog)[:16] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -544,6 +546,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "open_app",
         "focus_app",
         "reveal_path",
+        "open_path",
         "play_or_pause_media",
         "control_system_volume",
         "write_clipboard",
@@ -563,6 +566,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_app_status"].tools == ["app.status"]
     assert catalog["reveal_path"].risk_level == "low"
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
+    assert catalog["open_path"].risk_level == "low"
+    assert catalog["open_path"].tools == ["desktop.open_path"]
     assert catalog["play_or_pause_media"].tools == [
         "media.apple_music_play",
         "media.apple_music_control",

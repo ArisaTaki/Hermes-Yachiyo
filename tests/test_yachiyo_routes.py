@@ -1671,6 +1671,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["desktop.reveal_path"]["risk_level"] == "low"
     assert tools["desktop.reveal_path"]["input_schema"]["required"] == ["path"]
     assert any("Finder" in note for note in tools["desktop.reveal_path"]["fallback_notes"])
+    assert tools["desktop.open_path"]["capability_id"] == "desktop_execution"
+    assert tools["desktop.open_path"]["risk_level"] == "low"
+    assert tools["desktop.open_path"]["input_schema"]["required"] == ["path"]
+    assert any("unsafe" in note for note in tools["desktop.open_path"]["fallback_notes"])
     assert tools["desktop.permissions"]["capability_id"] == "desktop_execution"
     assert tools["desktop.permissions"]["risk_level"] == "low"
     assert tools["desktop.permissions"]["input_schema"]["properties"] == {}

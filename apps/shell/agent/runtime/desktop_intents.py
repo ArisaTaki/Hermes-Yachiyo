@@ -237,6 +237,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         if search_url:
             candidates.append(_request("browser.open_url", {"url": search_url}))
 
+    open_path = _desktop_open_path(text)
+    if open_path:
+        candidates.append(_request("desktop.open_path", {"path": open_path}))
+
     reveal_path = _desktop_reveal_path(text)
     if reveal_path:
         candidates.append(_request("desktop.reveal_path", {"path": reveal_path}))
@@ -768,6 +772,27 @@ def _looks_like_app_status_request(text: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APP_STATUS_PATTERNS)
 
 
+def _desktop_open_path(text: str) -> str:
+    if re.search(r"\bin\s+(?:the\s+)?finder\b", text, flags=re.IGNORECASE):
+        return ""
+    path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
+    patterns = (
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|开启)\s*(?P<path>{path_token})",
+        rf"\bopen\s+(?P<path>{path_token})\b",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|开启)\s*(?P<path>[^。！？!?，,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        path = _normalize_reveal_path(match.group("path"))
+        if path:
+            return path
+    return ""
+
+
 def _desktop_reveal_path(text: str) -> str:
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
@@ -796,6 +821,7 @@ def _desktop_reveal_path(text: str) -> str:
 
 def _normalize_reveal_path(value: str) -> str:
     target = _strip_polite_suffix(_strip_query(value))
+    target = re.sub(r"\s+in\s+(?:the\s+)?finder$", "", target, flags=re.IGNORECASE)
     target = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", target)
     if _looks_like_local_path(target):
         return target
