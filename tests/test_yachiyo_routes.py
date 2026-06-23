@@ -1160,6 +1160,135 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-open-click-ui.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-open-click-ui.db",
+        workspace_dir=tmp_path / "agent-runtime-open-click-ui",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-open-click-ui-approval")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app open click UI approval should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+        click_count: int = 1,
+    ) -> dict[str, Any]:
+        calls.append(("click_ui", target, role_filter, limit, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": "Clicked foreground UI element: 登录",
+            "data": {
+                "target": target,
+                "matched_label": "登录",
+                "role_filter": role_filter,
+                "x": 120,
+                "y": 240,
+                "click_count": click_count,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
+    try:
+        sent = ChatAPI(app_runtime).send_message("打开 Chrome 并点击登录按钮")
+        waiting_task = state.get_task(sent["task_id"])
+        waiting_message = session.get_assistant_message_for_task(sent["task_id"])
+        waiting_run = service.get_run(sent["run_id"])
+
+        assert sent["ok"] is True
+        assert sent["status"] == "waiting_approval"
+        assert waiting_task is not None
+        assert waiting_task.status == TaskStatus.RUNNING
+        assert waiting_message is not None
+        assert waiting_message.status == MessageStatus.PROCESSING
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "app.open_and_click_ui_element"
+        assert waiting_run["pending_approval"]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "target": "登录",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        }
+        assert calls == []
+
+        approved = await yachiyo.approve_task(sent["task_id"], None, request)
+        completed_task = state.get_task(sent["task_id"])
+        completed_message = session.get_assistant_message_for_task(sent["task_id"])
+        completed_run = service.get_run(sent["run_id"])
+        completed_events = [
+            event
+            for event in completed_run["timeline"]
+            if event.get("event") == "agent.desktop.intent_completed"
+        ]
+
+        assert approved["status"] == "completed"
+        assert approved["summary"] == "已打开 Google Chrome 并点击前台控件：登录（120, 240）。"
+        assert calls == [
+            ("open", "Google Chrome"),
+            ("focus", "Google Chrome"),
+            ("click_ui", "登录", "button", 80, 1),
+        ]
+        assert completed_task is not None
+        assert completed_task.status == TaskStatus.COMPLETED
+        assert completed_task.result == approved["summary"]
+        assert completed_message is not None
+        assert completed_message.status == MessageStatus.COMPLETED
+        assert completed_message.content == approved["summary"]
+        assert completed_message.metadata["pending_approval"] == {}
+        assert completed_run["status"] == "completed"
+        assert completed_run["pending_approval"] == {}
+        assert completed_events[-1]["summary"] == approved["summary"]
+        assert any(
+            event.get("tool") == "app.open_and_click_ui_element"
+            for event in completed_run["timeline"]
+        )
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6825,6 +6954,24 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
         "y",
     ]
     assert tools["app.focus_and_safe_click"]["input_schema"]["properties"]["y"]["type"] == "number"
+    assert tools["app.open_and_click_ui_element"]["capability_id"] == "foreground_input"
+    assert tools["app.open_and_click_ui_element"]["risk_level"] == "medium"
+    assert tools["app.open_and_click_ui_element"]["input_schema"]["required"] == [
+        "app_name",
+        "target",
+    ]
+    assert tools["app.open_and_click_ui_element"]["input_schema"]["properties"]["target"]["type"] == "string"
+    assert any(
+        "approval is required" in note
+        for note in tools["app.open_and_click_ui_element"]["fallback_notes"]
+    )
+    assert tools["app.focus_and_click_ui_element"]["capability_id"] == "foreground_input"
+    assert tools["app.focus_and_click_ui_element"]["risk_level"] == "medium"
+    assert tools["app.focus_and_click_ui_element"]["input_schema"]["required"] == [
+        "app_name",
+        "target",
+    ]
+    assert tools["app.focus_and_click_ui_element"]["input_schema"]["properties"]["click_count"]["maximum"] == 3
     assert tools["app.show"]["capability_id"] == "app_control"
     assert tools["app.show"]["risk_level"] == "low"
     assert tools["app.show"]["input_schema"]["required"] == ["app_name"]

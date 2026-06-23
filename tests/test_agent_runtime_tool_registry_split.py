@@ -285,6 +285,8 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_focus_and_safe_scroll",
         "app_open_and_safe_click",
         "app_focus_and_safe_click",
+        "app_open_and_click_ui_element",
+        "app_focus_and_click_ui_element",
         "app_show",
         "app_hide",
         "app_minimize",
@@ -351,20 +353,59 @@ def test_desktop_click_ui_element_schema_requires_target_and_valid_options() -> 
         "desktop.click_ui_element",
         {"target": "Send", "role_filter": "button", "limit": 20, "click_count": 2},
     )
+    ToolDescriptorRegistry.validate_payload(
+        "app.open_and_click_ui_element",
+        {
+            "app_name": "Google Chrome",
+            "target": "Send",
+            "role_filter": "button",
+            "limit": 20,
+            "click_count": 2,
+        },
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_click_ui_element",
+        {"app_name": "Slack", "target": "Send"},
+    )
 
     with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 target 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.click_ui_element", {"target": ""})
+    with pytest.raises(AgentRuntimeError, match="app.open_and_click_ui_element 参数 app_name 必须是"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_and_click_ui_element",
+            {"app_name": "", "target": "Send"},
+        )
+    with pytest.raises(AgentRuntimeError, match="app.focus_and_click_ui_element 参数 target 必须是"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_click_ui_element",
+            {"app_name": "Slack", "target": ""},
+        )
     with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 role_filter 必须是字符串"):
         ToolDescriptorRegistry.validate_payload(
             "desktop.click_ui_element",
             {"target": "Send", "role_filter": 123},
         )
+    with pytest.raises(AgentRuntimeError, match="app.open_and_click_ui_element 参数 role_filter 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_and_click_ui_element",
+            {"app_name": "Google Chrome", "target": "Send", "role_filter": 123},
+        )
     with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 limit 必须是 1-200"):
         ToolDescriptorRegistry.validate_payload("desktop.click_ui_element", {"target": "Send", "limit": 0})
+    with pytest.raises(AgentRuntimeError, match="app.focus_and_click_ui_element 参数 limit 必须是 1-200"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_click_ui_element",
+            {"app_name": "Slack", "target": "Send", "limit": 0},
+        )
     with pytest.raises(AgentRuntimeError, match="desktop.click_ui_element 参数 click_count 必须是 1-3"):
         ToolDescriptorRegistry.validate_payload(
             "desktop.click_ui_element",
             {"target": "Send", "click_count": 4},
+        )
+    with pytest.raises(AgentRuntimeError, match="app.open_and_click_ui_element 参数 click_count 必须是 1-3"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_and_click_ui_element",
+            {"app_name": "Google Chrome", "target": "Send", "click_count": 4},
         )
 
 
@@ -654,6 +695,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "desktop.safe_key",
                 "desktop.safe_scroll",
                 "app.quit",
+                "app.open_and_click_ui_element",
+                "app.focus_and_click_ui_element",
                 "desktop.close_window",
                 "desktop.click",
                 "desktop.click_ui_element",
@@ -675,6 +718,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "desktop.safe_key",
         "desktop.safe_scroll",
         "app.quit",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
         "desktop.close_window",
         "desktop.click",
         "desktop.click_ui_element",
@@ -684,6 +729,8 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
     ]
     assert policy["approval_required"] == {
         "app.quit": True,
+        "app.open_and_click_ui_element": True,
+        "app.focus_and_click_ui_element": True,
         "desktop.close_window": True,
         "desktop.click": True,
         "desktop.click_ui_element": True,
@@ -966,6 +1013,22 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "app_open_and_click_ui_element",
+        lambda app_name, target, *, role_filter="", limit=80, click_count=1: calls.append(
+            ("open_click_ui", app_name, target, role_filter, limit, click_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "app_focus_and_click_ui_element",
+        lambda app_name, target, *, role_filter="", limit=80, click_count=1: calls.append(
+            ("focus_click_ui", app_name, target, role_filter, limit, click_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "app_show",
         lambda app_name: calls.append(("show_named_app", app_name))
         or {"ok": True, "app_name": app_name},
@@ -1103,6 +1166,22 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "app.focus_and_safe_click",
         {"app_name": "Slack", "x": 320, "y": 180},
     ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.open_and_click_ui_element",
+        {
+            "app_name": "Google Chrome",
+            "target": "Sign in",
+            "role_filter": "button",
+            "limit": 20,
+            "click_count": 2,
+        },
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "app.focus_and_click_ui_element",
+        {"app_name": "Slack", "target": "Send"},
+    ) == {"ok": True}
     assert dispatch_tool_call(broker, "app.show", {"app_name": "Slack"}) == {
         "ok": True,
         "app_name": "Slack",
@@ -1169,6 +1248,8 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("focus_scroll", "Slack", "up", 3),
         ("open_click", "Google Chrome", 120, 240),
         ("focus_click", "Slack", 320, 180),
+        ("open_click_ui", "Google Chrome", "Sign in", "button", 20, 2),
+        ("focus_click_ui", "Slack", "Send", "", 80, 1),
         ("show_named_app", "Slack"),
         ("hide_named_app", "Slack"),
         ("minimize_named_app", "Slack"),
@@ -1378,6 +1459,73 @@ def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
         "explicit_user_coordinates": True,
     }
     assert list(result["fallback_result"]) == ["open", "focus", "safe_click"]
+
+
+def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, Any]] = []
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: calls.append(("open", app_name))
+        or {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "click_ui_element",
+        lambda target, *, role_filter="", limit=80, click_count=1: calls.append(
+            ("click_ui", target, role_filter, limit, click_count)
+        )
+        or {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "data": {
+                "target": target,
+                "matched_label": "Sign in",
+                "x": 120,
+                "y": 240,
+                "click_count": click_count,
+                "role_filter": role_filter,
+            },
+        },
+    )
+
+    result = broker.app_open_and_click_ui_element(
+        "Google Chrome",
+        "Sign in",
+        role_filter="button",
+        limit=20,
+        click_count=2,
+    )
+
+    assert calls == [
+        ("open", "Google Chrome"),
+        ("focus", "Google Chrome"),
+        ("click_ui", "Sign in", "button", 20, 2),
+    ]
+    assert result["ok"] is True
+    assert result["action"] == "app.open_and_click_ui_element"
+    assert result["data"] == {
+        "app_name": "Google Chrome",
+        "foreground_action": "click_ui_element",
+        "target": "Sign in",
+        "matched_label": "Sign in",
+        "x": 120,
+        "y": 240,
+        "click_count": 2,
+        "role_filter": "button",
+    }
+    assert list(result["fallback_result"]) == ["open", "focus", "click_ui_element"]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(

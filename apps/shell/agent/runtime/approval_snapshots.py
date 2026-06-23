@@ -148,6 +148,17 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
         if target:
             return f"将点击当前前台界面中匹配“{target}”的控件，按工具策略需要人工确认。"
         return "将点击当前前台界面中匹配名称的控件，按工具策略需要人工确认。"
+    if tool_name in {"app.open_and_click_ui_element", "app.focus_and_click_ui_element"}:
+        app_name = _preview_value(record, "app_name")
+        target = _preview_value(record, "target")
+        action = "打开" if tool_name.startswith("app.open") else "切到"
+        if app_name and target:
+            return f"将{action} {app_name} 并点击其中匹配“{target}”的控件，按工具策略需要人工确认。"
+        if app_name:
+            return f"将{action} {app_name} 并点击其中匹配名称的控件，按工具策略需要人工确认。"
+        if target:
+            return f"将点击应用中匹配“{target}”的控件，按工具策略需要人工确认。"
+        return "将点击应用中匹配名称的控件，按工具策略需要人工确认。"
     if tool_name == "desktop.type_into_ui_element":
         target = _preview_value(record, "target")
         text = _preview_value(record, "text")

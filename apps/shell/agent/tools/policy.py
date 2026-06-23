@@ -48,6 +48,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_scroll": "app_focus_and_safe_scroll",
     "app.open_and_safe_click": "app_open_and_safe_click",
     "app.focus_and_safe_click": "app_focus_and_safe_click",
+    "app.open_and_click_ui_element": "app_open_and_click_ui_element",
+    "app.focus_and_click_ui_element": "app_focus_and_click_ui_element",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -150,6 +152,8 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.quit",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
     "desktop.close_window",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
@@ -341,23 +345,33 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
-        if self.name in {"desktop.ui_elements", "desktop.click_ui_element", "desktop.type_into_ui_element"}:
+        if self.name in {
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+        }:
             if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
                 raise AgentRuntimeError(f"{self.name} 参数 role_filter 必须是字符串")
             if "limit" in payload:
                 value = payload.get("limit")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
                     raise AgentRuntimeError(f"{self.name} 参数 limit 必须是 1-200 的整数")
-            if self.name == "desktop.click_ui_element":
+            if self.name in {
+                "desktop.click_ui_element",
+                "app.open_and_click_ui_element",
+                "app.focus_and_click_ui_element",
+            }:
                 click_count = payload.get("click_count", 1)
                 if click_count not in (None, ""):
                     if isinstance(click_count, bool) or not isinstance(click_count, int):
                         raise AgentRuntimeError(
-                            "desktop.click_ui_element 参数 click_count 必须是 1-3 的整数"
+                            f"{self.name} 参数 click_count 必须是 1-3 的整数"
                         )
                     if click_count < 1 or click_count > 3:
                         raise AgentRuntimeError(
-                            "desktop.click_ui_element 参数 click_count 必须是 1-3 的整数"
+                            f"{self.name} 参数 click_count 必须是 1-3 的整数"
                         )
         if self.name in {
             "app.open",
@@ -367,6 +381,14 @@ class ToolDescriptor:
             "app.focus_and_safe_type_text",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
+            "app.open_and_safe_key",
+            "app.focus_and_safe_key",
+            "app.open_and_safe_scroll",
+            "app.focus_and_safe_scroll",
+            "app.open_and_safe_click",
+            "app.focus_and_safe_click",
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
             "app.show",
             "app.hide",
             "app.minimize",
@@ -1134,6 +1156,70 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "x", "y"),
+    ),
+    "app.open_and_click_ui_element": ToolDescriptor(
+        name="app.open_and_click_ui_element",
+        description=(
+            "Open and focus a local desktop application, then click a visible UI element "
+            "matched by Accessibility label/name/description. Requires approval because "
+            "the click coordinate is inferred from observed UI state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "target": {
+                "type": "string",
+                "description": "Visible UI element label/name/description to match, such as Send.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Optional click count. Defaults to 1.",
+            },
+        },
+        required=("app_name", "target"),
+    ),
+    "app.focus_and_click_ui_element": ToolDescriptor(
+        name="app.focus_and_click_ui_element",
+        description=(
+            "Focus a local desktop application, then click a visible UI element matched by "
+            "Accessibility label/name/description. Requires approval because the click "
+            "coordinate is inferred from observed UI state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "target": {
+                "type": "string",
+                "description": "Visible UI element label/name/description to match, such as Send.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Optional click count. Defaults to 1.",
+            },
+        },
+        required=("app_name", "target"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

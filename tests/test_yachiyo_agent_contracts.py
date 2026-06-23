@@ -428,6 +428,8 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "app.focus_and_safe_scroll",
         "app.open_and_safe_click",
         "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
@@ -572,6 +574,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("app.focus_and_safe_scroll") == "low"
     assert desktop_tool_risk_level("app.open_and_safe_click") == "low"
     assert desktop_tool_risk_level("app.focus_and_safe_click") == "low"
+    assert desktop_tool_risk_level("app.open_and_click_ui_element") == "medium"
+    assert desktop_tool_risk_level("app.focus_and_click_ui_element") == "medium"
     assert desktop_tool_risk_level("app.hide") == "low"
     assert desktop_tool_risk_level("app.minimize") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
@@ -700,7 +704,11 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_minimize_window"].risk_level == "low"
     assert catalog["foreground_minimize_window"].tools == ["desktop.minimize_window"]
     assert catalog["foreground_click_ui_element"].risk_level == "medium"
-    assert catalog["foreground_click_ui_element"].tools == ["desktop.click_ui_element"]
+    assert catalog["foreground_click_ui_element"].tools == [
+        "desktop.click_ui_element",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+    ]
     assert catalog["foreground_type_into_ui_element"].risk_level == "medium"
     assert catalog["foreground_type_into_ui_element"].tools == ["desktop.type_into_ui_element"]
     assert catalog["foreground_click"].risk_level == "medium"
@@ -812,6 +820,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     focus_safe_scroll = tools["app.focus_and_safe_scroll"]
     open_safe_click = tools["app.open_and_safe_click"]
     focus_safe_click = tools["app.focus_and_safe_click"]
+    open_click_ui_element = tools["app.open_and_click_ui_element"]
+    focus_click_ui_element = tools["app.focus_and_click_ui_element"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
@@ -889,6 +899,15 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert focus_safe_click.risk_level == "low"
     assert focus_safe_click.input_schema["required"] == ["app_name", "x", "y"]
     assert focus_safe_click.input_schema["properties"]["y"]["type"] == "number"
+    assert open_click_ui_element.capability_id == "foreground_input"
+    assert open_click_ui_element.risk_level == "medium"
+    assert open_click_ui_element.input_schema["required"] == ["app_name", "target"]
+    assert open_click_ui_element.input_schema["properties"]["target"]["type"] == "string"
+    assert any("approval is required" in note for note in open_click_ui_element.fallback_notes)
+    assert focus_click_ui_element.capability_id == "foreground_input"
+    assert focus_click_ui_element.risk_level == "medium"
+    assert focus_click_ui_element.input_schema["required"] == ["app_name", "target"]
+    assert focus_click_ui_element.input_schema["properties"]["click_count"]["maximum"] == 3
     assert named_hide_app.capability_id == "app_control"
     assert named_hide_app.risk_level == "low"
     assert named_hide_app.input_schema["required"] == ["app_name"]

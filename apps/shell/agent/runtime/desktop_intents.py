@@ -291,6 +291,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus_and_safe_key",
     "app.focus_and_safe_scroll",
     "app.focus_and_safe_click",
+    "app.focus_and_click_ui_element",
     "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
@@ -299,6 +300,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.open_and_safe_key",
     "app.open_and_safe_scroll",
     "app.open_and_safe_click",
+    "app.open_and_click_ui_element",
     "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
@@ -364,6 +366,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_scroll",
     "app.open_and_safe_click",
     "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
@@ -394,6 +398,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_scroll",
     "app.open_and_safe_click",
     "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
 }
 
 _FOREGROUND_ACTION_TOOLS = {
@@ -573,6 +579,19 @@ def _app_foreground_sequence_composite(
             return _request(
                 f"app.{mode}_and_safe_click",
                 {"app_name": app_name, "x": action_input.get("x"), "y": action_input.get("y")},
+            )
+    if action_tool == "desktop.click_ui_element":
+        target = str(action_input.get("target") or "").strip()
+        if target:
+            return _request(
+                f"app.{mode}_and_click_ui_element",
+                {
+                    "app_name": app_name,
+                    "target": target,
+                    "role_filter": action_input.get("role_filter", ""),
+                    "limit": action_input.get("limit", 80),
+                    "click_count": action_input.get("click_count", 1),
+                },
             )
     return None
 
@@ -1883,6 +1902,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_safe_click",
             "input": {"app_name": app_name, **safe_click},
+        }
+    click_ui_element = _desktop_click_ui_element(followup)
+    if click_ui_element:
+        return {
+            "tool": f"app.{mode}_and_click_ui_element",
+            "input": {"app_name": app_name, **click_ui_element},
         }
     safe_key = _desktop_safe_key(followup)
     if safe_key:

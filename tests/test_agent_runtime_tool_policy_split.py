@@ -137,6 +137,8 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
     assert policy["approval_required"] == {
         "app.quit": True,
+        "app.open_and_click_ui_element": True,
+        "app.focus_and_click_ui_element": True,
         "desktop.close_window": True,
         "desktop.hotkey": True,
         "desktop.type_text": True,

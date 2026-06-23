@@ -620,6 +620,63 @@ class ToolBroker:
             ),
         )
 
+    def app_open_and_click_ui_element(
+        self,
+        app_name: str,
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+        click_count: Any = 1,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_click_ui_element",
+            lambda: self._app_foreground_action(
+                "app.open_and_click_ui_element",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=(
+                    "click_ui_element",
+                    lambda: desktop.click_ui_element(
+                        target,
+                        role_filter=role_filter,
+                        limit=limit,
+                        click_count=click_count,
+                    ),
+                ),
+            ),
+        )
+
+    def app_focus_and_click_ui_element(
+        self,
+        app_name: str,
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+        click_count: Any = 1,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_click_ui_element",
+            lambda: self._app_foreground_action(
+                "app.focus_and_click_ui_element",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=(
+                    "click_ui_element",
+                    lambda: desktop.click_ui_element(
+                        target,
+                        role_filter=role_filter,
+                        limit=limit,
+                        click_count=click_count,
+                    ),
+                ),
+            ),
+        )
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 

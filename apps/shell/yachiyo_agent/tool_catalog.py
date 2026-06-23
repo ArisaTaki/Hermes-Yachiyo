@@ -356,6 +356,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus_and_safe_click": [
             "Focuses the app before single-clicking only coordinates explicitly provided by the user.",
         ],
+        "app.open_and_click_ui_element": [
+            "Opens and focuses the app before clicking an inferred coordinate from a visible UI control match; approval is required.",
+        ],
+        "app.focus_and_click_ui_element": [
+            "Focuses the app before clicking an inferred coordinate from a visible UI control match; approval is required.",
+        ],
         "app.show": [
             "Requires Automation and Accessibility permission to show, unhide, restore, and activate a local app.",
         ],

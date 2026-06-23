@@ -310,6 +310,34 @@ def _app_focus_and_safe_click(
     )
 
 
+def _app_open_and_click_ui_element(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_open_and_click_ui_element(
+        str(payload.get("app_name") or ""),
+        str(payload.get("target") or ""),
+        role_filter=str(payload.get("role_filter") or ""),
+        limit=payload.get("limit", 80),
+        click_count=payload.get("click_count", 1),
+    )
+
+
+def _app_focus_and_click_ui_element(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.app_focus_and_click_ui_element(
+        str(payload.get("app_name") or ""),
+        str(payload.get("target") or ""),
+        role_filter=str(payload.get("role_filter") or ""),
+        limit=payload.get("limit", 80),
+        click_count=payload.get("click_count", 1),
+    )
+
+
 def _app_show(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_show(str(payload.get("app_name") or ""))
 
@@ -583,6 +611,8 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.focus_and_safe_scroll": _app_focus_and_safe_scroll,
     "app.open_and_safe_click": _app_open_and_safe_click,
     "app.focus_and_safe_click": _app_focus_and_safe_click,
+    "app.open_and_click_ui_element": _app_open_and_click_ui_element,
+    "app.focus_and_click_ui_element": _app_focus_and_click_ui_element,
     "app.show": _app_show,
     "app.hide": _app_hide,
     "app.minimize": _app_minimize,
