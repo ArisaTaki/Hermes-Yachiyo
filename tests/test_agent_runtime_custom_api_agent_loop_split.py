@@ -643,6 +643,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.extract_text",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("读一下这个网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("截取当前网页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.screenshot",
@@ -683,7 +688,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Visual Studio Code"},
     }
+    assert daily_desktop_intent_tool_request("打开设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Settings"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Arc"},
+    }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("来点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("放首歌", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
@@ -743,6 +768,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "screen.capture",
         "input": {"reason": "user asked to capture the screen"},
     }
+    assert daily_desktop_intent_tool_request("帮我看看现在屏幕", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "screen.capture",
+        "input": {"reason": "user asked to capture the screen"},
+    }
     assert daily_desktop_intent_tool_request("当前窗口是什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.active_window",
@@ -789,6 +819,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", ["workspace.read"]) is None
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("放一下", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("播放一下", allowed_tools) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
 
 

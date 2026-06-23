@@ -137,6 +137,41 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
         store.close()
 
 
+def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoints(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-screen",
+            "task_id": "task-screen",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("帮我看看现在屏幕")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-screen"
+        assert result["agent_task"]["task_id"] == "task-screen"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 截取屏幕"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "screen.capture"
+        assert result["agent_task"]["recent_events"][0]["payload"] == {
+            "input_preview": {"reason": "user asked to capture the screen"},
+            "planning_reason": "clear_daily_desktop_intent",
+            "source": "daily_desktop_intent",
+            "status": "planned",
+            "tool": "screen.capture",
+        }
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_keeps_plain_chat_without_planned_agent_task(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)

@@ -26,6 +26,7 @@ _APP_ALIASES = {
     "systemsettings": "System Settings",
     "settings": "System Settings",
     "系统设置": "System Settings",
+    "设置": "System Settings",
     "notes": "Notes",
     "备忘录": "Notes",
     "calendar": "Calendar",
@@ -46,6 +47,18 @@ _APP_ALIASES = {
     "visualstudiocode": "Visual Studio Code",
     "code": "Visual Studio Code",
     "cursor": "Cursor",
+    "arc": "Arc",
+    "arc浏览器": "Arc",
+    "firefox": "Firefox",
+    "火狐": "Firefox",
+    "firefox浏览器": "Firefox",
+    "火狐浏览器": "Firefox",
+    "edge": "Microsoft Edge",
+    "edge浏览器": "Microsoft Edge",
+    "microsoftedge": "Microsoft Edge",
+    "brave": "Brave Browser",
+    "brave浏览器": "Brave Browser",
+    "spotify": "Spotify",
 }
 
 
@@ -320,7 +333,7 @@ def _is_browser_extract_text_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:读取|读一下|提取|抓取|获取).{0,10}"
-            r"(?:当前|现在|前台)?(?:网页|网站|页面|浏览器).{0,10}(?:正文|文字|文本|内容)",
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器).{0,10}(?:正文|文字|文本|内容)?",
             text,
         )
         or "extract text from the current page" in lowered
@@ -434,6 +447,8 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
 
 
 def _music_query(text: str) -> str:
+    if _looks_like_generic_music_play_request(text):
+        return ""
     patterns = (
         r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
         r"(?:帮我|请|麻烦)?(?:直接)?播放[一下\s]*(?P<query>[^。！？!?，,]+)",
@@ -472,7 +487,18 @@ def _strip_music_query_context(value: str) -> str:
 
 def _is_specific_music_query(query: str) -> bool:
     normalized = re.sub(r"[\s._-]+", "", query.lower())
-    return normalized not in {"音乐", "music", "song", "歌曲", "applemusic"}
+    return normalized not in {
+        "下",
+        "一下",
+        "音乐",
+        "music",
+        "song",
+        "songs",
+        "歌曲",
+        "首歌",
+        "一首歌",
+        "applemusic",
+    }
 
 
 def _music_control_action(text: str) -> str:
@@ -509,11 +535,27 @@ def _music_control_action(text: str) -> str:
         lowered,
     ):
         return "play"
+    if _looks_like_generic_music_play_request(text):
+        return "play"
     if re.fullmatch(r"(?:播放|放)(?:一下)?(?:音乐|music|apple\s*music)(?:应用|app|软件|程序)?", lowered):
         return "play"
     if re.fullmatch(r"(?:play|start)\s+(?:music|apple\s*music)(?:\s+app)?", lowered):
         return "play"
     return ""
+
+
+def _looks_like_generic_music_play_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"(?:(?:来点|来些)(?:音乐|歌|歌曲)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
+            r"(?:放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+            lowered,
+        )
+        or re.fullmatch(r"(?:play|start)\s+(?:a\s+)?(?:song|music|some\s+music)", lowered)
+    )
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
@@ -664,6 +706,7 @@ def _is_screen_capture_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(r"(?:截个?图|截图|截屏|屏幕截图|抓屏|拍屏)", text)
+        or re.search(r"(?:看一下|看看|看下|查看|读取).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
         or "take a screenshot" in lowered
         or "capture the screen" in lowered
         or "screen capture" in lowered
