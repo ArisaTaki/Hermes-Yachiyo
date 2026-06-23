@@ -6,7 +6,16 @@ from typing import Any, Callable
 
 from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
+from apps.shell.agent.tools.policy import (
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+)
 from packages.security import redact_api_error_text
+
+_DAILY_DESKTOP_APPROVAL_TOOLS = {
+    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+}
 
 
 class RuntimeToolApprovalResumeService:
@@ -130,9 +139,10 @@ class RuntimeToolApprovalResumeService:
         if not pending:
             raise self._error_type("Run 缺少待审批工具信息")
         model_profile_id = str(pending.get("model_profile_id") or "").strip()
-        if not model_profile_id:
+        profileless_daily_desktop = _is_daily_desktop_approval_resume(run, pending)
+        if not model_profile_id and not profileless_daily_desktop:
             model_profile_id = str(self._default_chat_profile_id() or "").strip()
-        if not model_profile_id:
+        if not model_profile_id and not profileless_daily_desktop:
             raise self._error_type("native_agent_not_ready:chat_model_profile_required")
         tool_policy = (
             pending.get("tool_policy")
@@ -167,3 +177,30 @@ class RuntimeToolApprovalResumeService:
             ),
             redact_error=redact_api_error_text,
         )
+
+
+def _is_daily_desktop_approval_resume(run: dict[str, Any], pending: dict[str, Any]) -> bool:
+    tool_name = _pending_tool_name(pending)
+    if tool_name not in _DAILY_DESKTOP_APPROVAL_TOOLS:
+        return False
+    for event in reversed(run.get("timeline") or []):
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event") or "").strip() != "agent.desktop.intent_approval_required":
+            continue
+        if str(event.get("source") or "").strip() != "daily_desktop_intent":
+            continue
+        event_tool = str(event.get("tool") or event.get("detail") or "").strip()
+        if event_tool == tool_name:
+            return True
+    return False
+
+
+def _pending_tool_name(pending: dict[str, Any]) -> str:
+    tool_name = str(pending.get("tool") or "").strip()
+    if tool_name:
+        return tool_name
+    tool_request = pending.get("tool_request")
+    if isinstance(tool_request, dict):
+        return str(tool_request.get("tool") or "").strip()
+    return ""

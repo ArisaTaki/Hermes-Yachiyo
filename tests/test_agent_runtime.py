@@ -4393,6 +4393,81 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         service.close()
 
 
+def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp_path, monkeypatch):
+    from apps.shell.yachiyo_agent import YachiyoAgentService
+    from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
+
+    service = make_service(tmp_path)
+    hotkey_calls: list[tuple[str, list[str] | None]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("approved desktop intent should not require model"),
+    )
+
+    def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
+        hotkey_calls.append((key, modifiers))
+        return {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "summary": "Sent hotkey",
+            "data": {
+                "key": key,
+                "modifiers": list(modifiers or []),
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-hotkey-no-profile",
+            session_id="session-main-hotkey-no-profile",
+            user_goal="按 Command+L",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "按 Command+L"}],
+        )
+
+        assert waiting["status"] == "approval_required"
+        assert waiting["pending_approval"]["tool"] == "desktop.hotkey"
+        assert waiting["pending_approval"]["input_preview"] == {
+            "key": "l",
+            "modifiers": ["command"],
+        }
+        assert hotkey_calls == []
+
+        resumed = service.approve_run_approval(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
+
+        assert resumed["status"] == "running"
+        assert resumed["pending_approval"] == {}
+        assert resumed["result"] == "已发送快捷键：Command+L。"
+        assert hotkey_calls == [("l", ["command"])]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert completed_event["payload"]["tool"] == "desktop.hotkey"
+        assert completed_event["payload"]["source"] == "daily_desktop_intent"
+        public_timeline = YachiyoAgentService(LegacyRuntimePort(service)).get_task_timeline(
+            "task-main-hotkey-no-profile"
+        )
+        assert public_timeline.run_id == run["run_id"]
+        assert public_timeline.task_id == "task-main-hotkey-no-profile"
+        assert public_timeline.tool_calls[-1].tool_name == "desktop.hotkey"
+        assert public_timeline.tool_calls[-1].status == "completed"
+        assert [event.event_type for event in public_timeline.events][-2:] == [
+            "agent.desktop.intent_completed",
+            "model.output.ready",
+        ]
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_specific_apple_music_song_before_model(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     play_calls: list[str] = []
