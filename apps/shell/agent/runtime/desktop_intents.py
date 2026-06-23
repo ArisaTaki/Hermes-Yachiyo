@@ -236,6 +236,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_quit_name:
         candidates.append(_request("app.quit", {"app_name": app_quit_name}))
 
+    if _is_minimize_current_window_request(text):
+        candidates.append(_request("desktop.minimize_window", {}))
+
     if _is_close_current_window_request(text):
         candidates.append(_request("desktop.close_window", {}))
 
@@ -1279,6 +1282,22 @@ def _is_close_current_window_request(text: str) -> bool:
         )
         or re.search(
             r"\b(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
+            lowered,
+        )
+    )
+
+
+def _is_minimize_current_window_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:最小化|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
             lowered,
         )
     )

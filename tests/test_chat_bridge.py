@@ -209,6 +209,50 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    minimize_calls = 0
+
+    def fake_minimize_window() -> dict:
+        nonlocal minimize_calls
+        minimize_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.minimize_window",
+            "summary": "Minimized the foreground window",
+            "data": {"key": "m", "modifiers": ["command"]},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_minimize_window",
+        fake_minimize_window,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "最小化当前窗口",
+    )
+
+    assert result["ok"] is True
+    assert minimize_calls == 1
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已最小化当前窗口。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

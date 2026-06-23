@@ -234,6 +234,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
     ),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": (
+        "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",
         "desktop.type_text",
@@ -1269,6 +1270,36 @@ def clipboard_write(text: str) -> dict[str, Any]:
     }
 
 
+def desktop_minimize_window() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.minimize_window")
+    result = _run_osascript(
+        """
+        on run argv
+            tell application "System Events" to keystroke "m" using {command down}
+            return "minimized_window"
+        end run
+        """,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.minimize_window",
+            {
+                **result,
+                "action": "desktop.minimize_window",
+                "summary": "desktop.minimize_window failed",
+            },
+        )
+    return {
+        "ok": True,
+        "action": "desktop.minimize_window",
+        "summary": "Minimized the foreground window",
+        "data": {"key": "m", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_close_window() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.close_window")
@@ -1900,6 +1931,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
@@ -1918,6 +1950,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
