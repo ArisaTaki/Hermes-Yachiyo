@@ -126,6 +126,65 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert timeline[-1] == {"event": "agent.model.response", "detail": "final answer"}
 
 
+def test_custom_api_agent_loop_injects_runtime_prompt_for_existing_messages() -> None:
+    budget = FakeBudget()
+    calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "帮我读取页面正文"}]
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local/",
+            "model": "test-model",
+            "api_key": "key",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["browser.extract_text"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Follow approval gates.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "final answer"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Agent"},
+        "ignored context",
+        broker=object(),
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-1",
+    )
+
+    assert str(result) == "final answer"
+    assert messages[0]["role"] == "system"
+    assert "Oha-Yachiyo Agent Runtime" in messages[0]["content"]
+    assert "Prefer native tool_calls" in messages[0]["content"]
+    assert "{\"action\":\"tool\"" in messages[0]["content"]
+    assert "browser.extract_text" in messages[0]["content"]
+    assert messages[1] == {"role": "user", "content": "帮我读取页面正文"}
+    assert calls[0][0] == messages[0]
+
+
 def test_custom_api_agent_loop_delegates_tool_requests_without_bypassing_runner() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
@@ -190,7 +249,9 @@ def test_custom_api_agent_loop_delegates_tool_requests_without_bypassing_runner(
     assert tool_runs[0]["tool_requests"] == [{"tool": "workspace.read", "input": {}, "protocol": "tool_calls"}]
     assert tool_runs[0]["allowed_tools"] == ["workspace.read"]
     assert tool_runs[0]["kwargs"]["next_iteration"] == 1
-    assert messages[1] == {"role": "assistant", "content": "need tool"}
+    assert messages[0]["role"] == "system"
+    assert messages[1] == {"role": "user", "content": "existing"}
+    assert messages[2] == {"role": "assistant", "content": "need tool"}
 
 
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:

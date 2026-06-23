@@ -82,6 +82,8 @@ class RuntimeCustomApiAgentLoop:
         default_messages = messages is None
         if messages is None:
             messages = self._initial_messages(context, allowed_tools)
+        else:
+            self._ensure_runtime_system_message(messages, allowed_tools)
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
@@ -182,7 +184,24 @@ class RuntimeCustomApiAgentLoop:
                 return content
         return ""
 
+    def _ensure_runtime_system_message(
+        self,
+        messages: list[dict[str, Any]],
+        allowed_tools: list[str],
+    ) -> None:
+        if messages and str(messages[0].get("role") or "") == "system":
+            content = str(messages[0].get("content") or "")
+            if "Oha-Yachiyo Agent Runtime" in content:
+                return
+        messages.insert(0, self._system_message(allowed_tools))
+
     def _initial_messages(self, context: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            self._system_message(allowed_tools),
+            {"role": "user", "content": context},
+        ]
+
+    def _system_message(self, allowed_tools: list[str]) -> dict[str, Any]:
         allowed_tool_text = ", ".join(allowed_tools) or "none"
         memory_tool_guidance = (
             "Use memory.add, memory.replace, and memory.remove only for stable user preferences, durable facts, "
@@ -240,7 +259,4 @@ class RuntimeCustomApiAgentLoop:
             "or switch tools instead of stopping or retrying the same invalid path. "
             f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
         )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": context},
-        ]
+        return {"role": "system", "content": system_prompt}
