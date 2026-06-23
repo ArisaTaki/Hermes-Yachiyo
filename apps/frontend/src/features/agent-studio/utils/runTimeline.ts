@@ -42,6 +42,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
   }
+  if (name === 'agent.desktop.intent_unavailable') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
+  }
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.started') return detail ? `工具执行中 · ${detail}` : '工具执行中';
   if (name === 'agent.tool.skipped' || name === 'tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
@@ -129,6 +133,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
   if (name === 'agent.desktop.intent_planned') return 'tool';
+  if (name === 'agent.desktop.intent_unavailable') return 'danger';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';
@@ -141,7 +146,10 @@ export function timelineEventCode(event: Record<string, unknown>): string {
 }
 
 function plannedDesktopToolLabel(event: Record<string, unknown>, detail: string): string {
-  const tool = String(event.tool || event.tool_name || detail || '').trim();
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const tool = String(event.tool || event.tool_name || payload.tool || payload.tool_name || detail || '').trim();
   return tool ? runtimeToolDisplayLabelOrName(tool) : '';
 }
 

@@ -35,6 +35,7 @@ const TOOL_EVENT_TYPES = new Set([
   'tool.failed',
   'tool.cancelled',
   'agent.desktop.intent_planned',
+  'agent.desktop.intent_unavailable',
   'skill.selected',
   'skill.dispatch.read',
   'memory.retrieved',
@@ -196,6 +197,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (eventType === 'tool.started') return 'running';
   if (eventType === 'tool.requested') return 'queued';
   if (eventType === 'agent.desktop.intent_planned') return 'planned';
+  if (eventType === 'agent.desktop.intent_unavailable') return 'unavailable';
   return 'running';
 }
 
@@ -215,6 +217,7 @@ function normalizeRuntimeToolStatus(status: string): string {
     'skipped',
     'expired',
     'blocked',
+    'unavailable',
   ];
   if (knownStatuses.includes(status)) {
     return status;
@@ -255,6 +258,7 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'skipped') return '已跳过';
   if (status === 'expired') return '已超时';
   if (status === 'blocked') return '被占用';
+  if (status === 'unavailable') return '不可用';
   return status || '工具';
 }
 

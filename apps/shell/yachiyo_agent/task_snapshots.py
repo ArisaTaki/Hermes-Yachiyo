@@ -23,6 +23,7 @@ from .links import studio_run_url
 
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
+_UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
 _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.active_window": "读取当前窗口",
@@ -194,11 +195,17 @@ def _desktop_intent_progress_text(
         return None
 
     for event in reversed(events):
-        if event.event_type != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+        if event.event_type not in {
+            _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
+            _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        }:
             continue
         tool_name = _event_tool_name(event)
         label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
-        return f"准备执行 · {label}" if label else "准备执行桌面动作"
+        if event.event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE:
+            return f"无法执行 · {label}" if label else "无法执行桌面动作"
+        if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+            return f"准备执行 · {label}" if label else "准备执行桌面动作"
     return None
 
 

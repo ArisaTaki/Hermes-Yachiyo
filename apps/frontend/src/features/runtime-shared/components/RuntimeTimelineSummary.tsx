@@ -10,6 +10,7 @@ export type RuntimeTimelineEventSnapshot = {
   detail?: string | null;
   actor?: string | null;
   status?: string | null;
+  payload?: Record<string, unknown> | null;
   created_at?: string | null;
 };
 
@@ -57,6 +58,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
   if (type === 'agent.desktop.intent_planned') {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
+  }
+  if (type === 'agent.desktop.intent_unavailable') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
   const typeLabel = runtimeTimelineEventTypeLabel(type || title);
   if (typeLabel) return typeLabel;
@@ -148,9 +153,14 @@ function runtimeTimelineEventTypeLabel(type: string): string {
 
 function runtimeTimelinePlannedDesktopToolLabel(event: RuntimeTimelineEventSnapshot): string {
   const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+    ? record.payload as Record<string, unknown>
+    : {};
   const tool = String(
     record.tool
       || record.tool_name
+      || payload.tool
+      || payload.tool_name
       || event.detail
       || '',
   ).trim();

@@ -106,6 +106,31 @@ def test_agent_task_snapshot_derives_progress_from_planned_desktop_intent() -> N
     assert task.progress_text == "准备执行 · 播放 Apple Music"
 
 
+def test_agent_task_snapshot_derives_progress_from_unavailable_desktop_intent() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-music",
+            "run_id": "run-music",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_unavailable",
+                    "detail": "media.apple_music_play",
+                    "payload": {
+                        "tool": "media.apple_music_play",
+                        "reason": "tool_not_allowed",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "无法执行 · 播放 Apple Music"
+    assert task.progress_text == "无法执行 · 播放 Apple Music"
+
+
 def test_agent_task_snapshot_preserves_explicit_progress_over_desktop_intent() -> None:
     task = agent_task_snapshot_from_payload(
         {
