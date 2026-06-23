@@ -1,8 +1,15 @@
 import type { ReactNode } from 'react';
 
 import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
-import type { GroupRunSnapshot, PublicRunEvent, RerunRunRequest, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type {
+  GroupRunSnapshot,
+  PublicRunEvent,
+  RerunRunRequest,
+  ToolCallSnapshot,
+  YachiyoRunTimelineSnapshot,
+} from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
+import type { RuntimeToolRecoveryAction } from '../../runtime-shared/toolRecoveryActions';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -42,6 +49,7 @@ export function RunDetailPanel({
   onRejectRunById,
   onRejectSelectedRun,
   onRequestCancelSelectedRun,
+  onRunToolRecoveryAction,
   onRerunSelectedRun,
   onRerunWorkflowScope,
   onRunAction,
@@ -101,6 +109,10 @@ export function RunDetailPanel({
   onRejectRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onRejectSelectedRun: () => Promise<unknown>;
   onRequestCancelSelectedRun: () => void;
+  onRunToolRecoveryAction?: (
+    toolCall: ToolCallSnapshot,
+    action: RuntimeToolRecoveryAction,
+  ) => Promise<unknown> | unknown;
   onRerunSelectedRun: () => Promise<unknown>;
   onRerunWorkflowScope: (request: RerunRunRequest) => Promise<unknown>;
   onRunAction: (action: () => Promise<unknown> | unknown, label: string) => void;
@@ -301,6 +313,8 @@ export function RunDetailPanel({
             formatRunDate={formatRunDate}
             onOpenArtifact={onOpenArtifact}
             onOpenRunDetail={onOpenRunDetail}
+            onRunToolRecoveryAction={onRunToolRecoveryAction}
+            recoveryActionDisabled={busy}
             runById={runById}
             runKindLabel={runKindLabel}
             runStatusLabel={runStatusLabel}
@@ -355,6 +369,8 @@ export function RunDetailPanel({
             <ToolCallInspector
               sourceLabel={toolCallSource}
               toolCalls={selectedRunToolCalls}
+              onRunRecoveryAction={onRunToolRecoveryAction}
+              recoveryActionDisabled={busy}
             />
           ) : null}
           {selectedPublicRunTimeline || selectedRunReplayEvents.length ? (

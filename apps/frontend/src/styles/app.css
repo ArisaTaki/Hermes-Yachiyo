@@ -18585,6 +18585,36 @@ button.activity-item {
   overflow-wrap: anywhere;
 }
 
+.runtime-tool-call-recovery-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.runtime-tool-call-recovery-actions button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid oklch(82% 0.135 76 / 0.3);
+  border-radius: 7px;
+  background: oklch(82% 0.135 76 / 0.085);
+  color: var(--hy-fg);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.runtime-tool-call-recovery-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.runtime-tool-call-recovery-actions button:not(:disabled):hover {
+  border-color: oklch(82% 0.135 76 / 0.48);
+  background: oklch(82% 0.135 76 / 0.13);
+}
+
 .runtime-tool-call-previews {
   display: grid;
   grid-column: 1 / -1;

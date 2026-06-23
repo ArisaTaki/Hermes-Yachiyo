@@ -5,6 +5,10 @@ import {
   runtimeToolDisplayLabelOrName,
   runtimeToolFamily,
 } from '../approval';
+import {
+  runtimeToolRecoveryActionsFromRecords,
+  type RuntimeToolRecoveryAction,
+} from '../toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../toolRecoveryHints';
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 
@@ -31,10 +35,17 @@ export type RuntimeToolCallCardSnapshot = {
 export function RuntimeToolCallCard({
   toolCall,
   className = 'runtime-tool-call',
+  onRunRecoveryAction,
+  recoveryActionDisabled = false,
   testId = 'runtime-tool-call-card',
 }: {
   toolCall: RuntimeToolCallCardSnapshot;
   className?: string;
+  onRunRecoveryAction?: (
+    toolCall: RuntimeToolCallCardSnapshot,
+    action: RuntimeToolRecoveryAction,
+  ) => unknown | Promise<unknown>;
+  recoveryActionDisabled?: boolean;
   testId?: string;
 }) {
   const inputPreview = approvalPreviewRecord(toolCall.input_preview);
@@ -46,6 +57,7 @@ export function RuntimeToolCallCard({
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);
   const recoveryHints = runtimeToolRecoveryHintsFromRecords([outputPreview, inputPreview]);
+  const recoveryActions = runtimeToolRecoveryActionsFromRecords([outputPreview, inputPreview]);
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div
@@ -88,6 +100,24 @@ export function RuntimeToolCallCard({
             <li key={hint}>{hint}</li>
           ))}
         </ul>
+      ) : null}
+      {recoveryActions.length ? (
+        <div className="runtime-tool-call-recovery-actions" data-testid={`${testId}-recovery-actions`}>
+          {recoveryActions.slice(0, 3).map((action) => (
+            <button
+              type="button"
+              data-permission-target={action.permission_target}
+              data-recovery-tool={action.tool}
+              data-testid={`${testId}-run-recovery-action`}
+              disabled={recoveryActionDisabled || !onRunRecoveryAction}
+              key={`${action.tool}:${action.prompt}:${action.permission_target}`}
+              onClick={() => void onRunRecoveryAction?.(toolCall, action)}
+              title={action.prompt}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
       ) : null}
       {inputPreviewContent || outputPreviewContent ? (
         <div className="runtime-tool-call-previews">

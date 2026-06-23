@@ -1,5 +1,9 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import {
+  runtimeToolRecoveryActionsFromRecords,
+  type RuntimeToolRecoveryAction,
+} from '../../runtime-shared/toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
@@ -262,14 +266,7 @@ type TaskPermissionRecovery = {
   tools: string[];
 };
 
-export type TaskPermissionRecoveryAction = {
-  input: Record<string, unknown>;
-  label: string;
-  permission_target: string;
-  prompt: string;
-  risk_level?: string;
-  tool: string;
-};
+export type TaskPermissionRecoveryAction = RuntimeToolRecoveryAction;
 
 const permissionTargetLabels: Record<string, string> = {
   accessibility: '辅助功能权限',
@@ -318,28 +315,7 @@ function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_e
   if ((event.sensitivity || 'public') === 'secret') return [];
   const payload = objectValue(event.payload);
   const result = objectValue(payload.result);
-  return [result, payload].filter(Boolean).flatMap((source) => recoveryActionsFromRecord(source));
-}
-
-function recoveryActionsFromRecord(source: Record<string, unknown>): TaskPermissionRecoveryAction[] {
-  const rawActions = Array.isArray(source.recovery_actions) ? source.recovery_actions : [];
-  return rawActions.flatMap((rawAction) => {
-    const action = objectValue(rawAction);
-    const tool = String(action.tool || '').trim();
-    const input = objectValue(action.input);
-    if (tool !== 'app.open') return [];
-    const appName = String(input.app_name || '').trim();
-    if (!appName) return [];
-    const label = String(action.label || appName || tool).trim();
-    return [{
-      input,
-      label,
-      permission_target: String(action.permission_target || '').trim(),
-      prompt: label || `打开 ${appName}`,
-      risk_level: String(action.risk_level || '').trim() || undefined,
-      tool,
-    }];
-  });
+  return runtimeToolRecoveryActionsFromRecords([result, payload].filter(Boolean));
 }
 
 function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {

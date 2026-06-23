@@ -1,9 +1,15 @@
 import type { RunGroupSpec, RunSpec } from '../types';
-import type { GroupRunSnapshot, PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type {
+  GroupRunSnapshot,
+  PublicRunEvent,
+  RunTimelineSnapshot,
+  ToolCallSnapshot,
+} from '../../yachiyo-studio/types';
 import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import type { RuntimeToolRecoveryAction } from '../../runtime-shared/toolRecoveryActions';
 import { ToolCallInspector } from './ToolCallInspector';
 import {
   approvalsFromRunEventReplay,
@@ -19,6 +25,11 @@ type GroupRunDetailPanelProps = {
   onLoadMoreGroupRunEvents: () => Promise<unknown> | unknown;
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   onOpenRunDetail: (runId: string) => void;
+  onRunToolRecoveryAction?: (
+    toolCall: ToolCallSnapshot,
+    action: RuntimeToolRecoveryAction,
+  ) => Promise<unknown> | unknown;
+  recoveryActionDisabled?: boolean;
   replayError: string;
   replayEvents: PublicRunEvent[];
   replayHasMore: boolean;
@@ -45,6 +56,8 @@ export function GroupRunDetailPanel({
   onLoadMoreGroupRunEvents,
   onOpenArtifact,
   onOpenRunDetail,
+  onRunToolRecoveryAction,
+  recoveryActionDisabled = false,
   replayError,
   replayEvents,
   replayHasMore,
@@ -221,6 +234,8 @@ export function GroupRunDetailPanel({
             sourceLabel="GroupRunSnapshot + RunEvent replay tool facts"
             testId="agent-run-detail-group-run-tool-call-inspector"
             toolCalls={groupRunToolCalls}
+            onRunRecoveryAction={onRunToolRecoveryAction}
+            recoveryActionDisabled={recoveryActionDisabled}
           />
         </section>
       ) : null}

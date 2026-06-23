@@ -1512,9 +1512,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'data-testid="yachiyo-agent-task-open-diagnostics"',
             "onRunRecoveryAction?.(task, action)",
             "export type TaskPermissionRecoveryAction",
+            "RuntimeToolRecoveryAction",
+            "runtimeToolRecoveryActionsFromRecords",
             "function executableRecoveryActionsFromEvents",
-            "function recoveryActionsFromRecord",
-            "if (tool !== 'app.open') return [];",
             "data-desktop-tools={permissionRecovery.tools.join(',')}",
             "data-permission-targets={permissionRecovery.targets.join(',')}",
             "href={permissionRecovery.href}",
@@ -2571,6 +2571,20 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "import { startYachiyoTask } from '../features/yachiyo-chat/api';",
+            "const runToolRecoveryAction = async (",
+            "source: 'agent_studio_tool_recovery'",
+            "source_tool_call_id: toolCall.tool_call_id || ''",
+            "source_tool_name: toolCall.tool_name || ''",
+            "statusMessage: `已创建恢复任务：${task.title || prompt}`",
+            "onRunToolRecoveryAction={(toolCall, action) => void runAction(",
+            "() => runToolRecoveryAction(toolCall, action)",
+            "`执行恢复动作：${action.label || action.prompt}`",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useAgentStudioActionRunner.ts",
         [
             "export type AgentStudioRunnableAction = () => Promise<unknown> | unknown;",
@@ -2924,6 +2938,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             ".agent-desktop-execution-notice>div",
             ".agent-desktop-execution-notice strong",
             ".agent-desktop-execution-notice span",
+            ".runtime-tool-call-recovery-actions",
+            ".runtime-tool-call-recovery-actions button",
+            ".runtime-tool-call-recovery-actions button:disabled",
         ],
     )
     _assert_contains(
@@ -3335,6 +3352,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "sourceLabel = '工具调用、审批关联和输入输出预览'",
             "<span>{sourceLabel}</span>",
             "RuntimeToolCallCard",
+            "onRunRecoveryAction",
+            "recoveryActionDisabled",
             "agent-run-detail-tool-calls",
             "testId={cardTestId}",
         ],
@@ -3387,7 +3406,9 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallCard.tsx",
         [
             "export function RuntimeToolCallCard",
+            "runtimeToolRecoveryActionsFromRecords",
             "runtimeToolRecoveryHintsFromRecords",
+            "onRunRecoveryAction",
             "data-tool-call-id={toolCall.tool_call_id}",
             "data-tool-family={runtimeToolFamily(toolCall.tool_name)}",
             "data-tool-status={toolCall.status}",
@@ -3408,12 +3429,28 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "runtime-tool-call-metadata",
             "runtime-tool-call-recovery-hints",
             "data-testid={`${testId}-recovery-hints`}",
+            "runtime-tool-call-recovery-actions",
+            "data-testid={`${testId}-recovery-actions`}",
+            "data-testid={`${testId}-run-recovery-action`}",
+            "onClick={() => void onRunRecoveryAction?.(toolCall, action)}",
             "runtime-tool-call-previews",
             "toolCallMetadataItems",
             "toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id",
             "label=\"展开输入预览\"",
             "label=\"展开输出预览\"",
             "formatToolPreview",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/toolRecoveryActions.ts",
+        [
+            "export type RuntimeToolRecoveryAction",
+            "export function runtimeToolRecoveryActionsFromRecords",
+            "export function runtimeToolRecoveryActionsFromRecord",
+            "Array.isArray(source.recovery_actions)",
+            "if (tool !== 'app.open') return [];",
+            "const appName = String(input.app_name || '').trim();",
+            "prompt: label || `打开 ${appName}`",
         ],
     )
     _assert_contains(
