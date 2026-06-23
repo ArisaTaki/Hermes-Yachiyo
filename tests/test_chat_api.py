@@ -2055,7 +2055,7 @@ def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch)
         fake_safe_type_text,
     )
     try:
-        result = api.send_message("输入 你好八千代")
+        result = api.send_message("帮我打 你好八千代")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]

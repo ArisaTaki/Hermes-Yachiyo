@@ -1511,6 +1511,28 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_type_text",
         "input": {"text": "你好八千代"},
     }
+    assert daily_desktop_intent_tool_request("帮我打 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("敲入 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("把 你好八千代 输入进去", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("在当前窗口写入 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("写入 你好八千代", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("别打 你好八千代", allowed_tools) is None
     assert daily_desktop_intent_tool_request("输入 你好八千代", ["desktop.type_text"]) == {
         "protocol": "json_fallback",
         "tool": "desktop.type_text",
