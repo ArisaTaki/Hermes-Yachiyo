@@ -699,6 +699,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("把 Chrome 切到前台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_window",
@@ -725,12 +730,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.quit",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("把 Slack 关掉", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.quit",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("close Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",
         "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("显示 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("把 Slack 显示出来", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
         "input": {"app_name": "Slack"},
@@ -760,6 +775,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.hide",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("把微信隐藏一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("hide Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.hide",
@@ -767,6 +787,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("隐藏 Slack", ["desktop.hide_app"]) is None
     assert daily_desktop_intent_tool_request("最小化 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.minimize",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("把 Slack 最小化一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.minimize",
         "input": {"app_name": "Slack"},
@@ -818,6 +843,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("打开浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("帮我开一下浏览器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Google Chrome"},
@@ -1243,12 +1273,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {"app_name": "Google Chrome"},
     }
+    assert daily_desktop_intent_tool_request("帮我看看 Slack 有哪些窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("看一下 Slack 的窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("show Slack windows", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
         "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("Chrome 开着吗", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.status",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("看看 Chrome 开了没", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.status",
         "input": {"app_name": "Google Chrome"},

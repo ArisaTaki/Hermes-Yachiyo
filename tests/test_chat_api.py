@@ -594,7 +594,7 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     try:
-        result = api.send_message("切到微信")
+        result = api.send_message("把 Chrome 切到前台")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -605,12 +605,12 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
 
         assert result["ok"] is True
         assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已切换到 WeChat。"
+        assert result["agent_task"]["summary"] == "已切换到 Google Chrome。"
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已切换到 WeChat。"
-        assert focus_calls == ["WeChat"]
+        assert task.result == "已切换到 Google Chrome。"
+        assert focus_calls == ["Google Chrome"]
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
