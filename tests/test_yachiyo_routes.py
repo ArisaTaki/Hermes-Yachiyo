@@ -2728,9 +2728,14 @@ async def test_yachiyo_task_route_executes_desktop_permission_diagnosis_without_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    ["为什么不能播放 Apple Music？", "怎么不能播放 Apple Music？"],
+)
 async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
 ) -> None:
     store = ChatStore(db_path=str(tmp_path / "chat-route-music-permission-diagnosis.db"))
     service = AgentRuntimeService(
@@ -2775,7 +2780,7 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
-                prompt="为什么不能播放 Apple Music？",
+                prompt=prompt,
                 conversation_id="chat-main-music-permission-diagnosis",
                 agent_id="builtin:yachiyo-main",
                 metadata={

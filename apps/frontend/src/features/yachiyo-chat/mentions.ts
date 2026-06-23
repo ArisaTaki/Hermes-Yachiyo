@@ -176,7 +176,9 @@ export function yachiyoPublicTaskPrompt(input: string, target: MentionOption): s
 
 export function yachiyoDailyDesktopTaskPrompt(input: string): string | null {
   const prompt = String(input || '').trim();
-  if (!prompt || DESKTOP_INTENT_HELP_RE.test(prompt)) return null;
+  if (!prompt) return null;
+  if (looksLikeDesktopPermissionDiagnosis(prompt)) return prompt;
+  if (DESKTOP_INTENT_HELP_RE.test(prompt)) return null;
   return looksLikeDailyDesktopIntent(prompt) ? prompt : null;
 }
 
@@ -213,6 +215,7 @@ function escapeRegExp(value: string): string {
 }
 
 const DESKTOP_INTENT_HELP_RE = /(?:怎么|如何|教程|步骤|只告诉我|不要真的|别真的|不要执行|别执行|不要操作|无需执行|不用执行)/i;
+const DESKTOP_PERMISSION_DIAGNOSIS_RE = /(?:(?:打开|检查|诊断|查看).{0,8}(?:权限|permission)|(?:为什么|为何|为啥|怎么(?:回事)?).{0,24}(?:不能|无法|没法|不会).{0,24}(?:控制|操作|执行|打开|启动|播放|点击|输入|截图|截屏|读取窗口)|desktop permissions?|check desktop permissions|why\s+can(?:not|'t)\s+(?:you|yachiyo|the agent).{0,40}(?:control|operate|open apps?|launch apps?|play music|click|type|capture the screen|read windows?))/i;
 const URL_RE = /(?:https?:\/\/|www\.|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|dev|app|ai|cn|jp|co|me|gg|tv|xyz|site|tech)\b)/i;
 const LOCAL_PATH_RE = /(?:~\/|\.{1,2}\/|\/(?:Users|Applications|Volumes|tmp|var|private)\b|(?:下载|桌面|应用程序)(?:文件夹)?)/i;
 const WEB_SITE_NAME_RE = new RegExp([
@@ -256,7 +259,7 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:打开|访问|浏览|前往|去|open|visit|go to|navigate to)/i.test(value) && WEB_SITE_NAME_RE.test(value)) return true;
   if (/(?:(?:搜索|搜一下|搜|查一下|查查|检索)\s*\S+|(?:search|google|look up)\s+\S+)/i.test(value)) return true;
   if (/(?:当前网页|读取当前网页|网页正文|截取当前网页|browser screenshot|current page|(?:读一下|读取|阅读|提取).{0,8}(?:这个|当前)?网页)/i.test(value)) return true;
-  if (/(?:(?:打开|检查|诊断|查看).{0,8}(?:权限|permission)|(?:为什么|为何).{0,8}(?:不能|无法).{0,8}(?:控制|操作|打开|点击|播放)|desktop permissions?|check desktop permissions)/i.test(value)) return true;
+  if (looksLikeDesktopPermissionDiagnosis(value)) return true;
   if (/(?:截图|截屏|截个图|屏幕截图|screenshot|capture screen)/i.test(value)) return true;
   if (/(?:当前窗口是什么|当前窗口|active window|frontmost window)/i.test(value)) return true;
   if (/(?:正在运行的应用|开了哪些应用|运行的应用|running apps|what apps are running)/i.test(value)) return true;
@@ -282,4 +285,8 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:(?:开着吗|在运行吗|打开了吗)|(?:is|check).*(?:running|open))/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
   if (/(?:(?:打开|启动|运行|切换到|切到|切回|回到|聚焦|激活|置前)\s*\S+|(?:focus|activate|switch to|bring up|launch|open)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
   return false;
+}
+
+function looksLikeDesktopPermissionDiagnosis(prompt: string): boolean {
+  return DESKTOP_PERMISSION_DIAGNOSIS_RE.test(prompt);
 }

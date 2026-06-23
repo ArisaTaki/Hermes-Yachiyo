@@ -916,6 +916,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.permissions",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("怎么不能播放 Apple Music？", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("check desktop permissions", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.permissions",
@@ -1299,6 +1304,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么截图？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("怎么播放 Apple Music？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
