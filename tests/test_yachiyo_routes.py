@@ -1366,6 +1366,105 @@ async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_wi
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_media_play_daily_desktop_intent_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-media-play.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-media-play.db",
+        workspace_dir=tmp_path / "agent-runtime-route-media-play",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-media-play")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    play_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("media play daily desktop public task should not call model")
+        ),
+    )
+
+    def fake_apple_music_play(query: str) -> dict[str, Any]:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="播放超时空辉夜姬",
+                conversation_id="chat-main-media-play",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-media-play-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-media-play", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert play_calls == ["超时空辉夜姬"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert started["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["query"] == "超时空辉夜姬"
+        assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_named_app_hide_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
