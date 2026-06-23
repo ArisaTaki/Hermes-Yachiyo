@@ -547,8 +547,12 @@ class RuntimeCustomApiAgentLoop:
                     return _browser_page_summary(result)
                 return result_summary or _browser_page_summary(result)
             if tool_name == "browser.extract_text":
+                if result.get("ok") is True:
+                    return _browser_text_summary(result)
                 return result_summary or _browser_text_summary(result)
             if tool_name == "browser.screenshot":
+                if result.get("ok") is True:
+                    return "已截取当前网页。"
                 return result_summary or "已截取当前网页。"
             if tool_name == "desktop.safe_shortcut":
                 return _safe_shortcut_summary(result, planned_input) or result_summary or "已执行快捷动作。"

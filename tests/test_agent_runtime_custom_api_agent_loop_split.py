@@ -1946,6 +1946,40 @@ def test_main_chat_desktop_intent_summarizes_browser_current_page() -> None:
     assert failed == "桌面操作未完成：Chrome CDP unavailable。"
 
 
+def test_main_chat_desktop_intent_summarizes_browser_extract_text_and_screenshot() -> None:
+    text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.extract_text",
+        {},
+        {
+            "ok": True,
+            "summary": "Extracted 30 characters from browser page",
+            "data": {"text": "Yachiyo desktop agent runtime"},
+        },
+    )
+    screenshot = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.screenshot",
+        {},
+        {
+            "ok": True,
+            "summary": "Captured current browser page",
+            "data": {"path": "browser/current-page.png"},
+        },
+    )
+    failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.extract_text",
+        {},
+        {
+            "ok": False,
+            "summary": "Chrome CDP unavailable",
+            "data": {},
+        },
+    )
+
+    assert text == "Yachiyo desktop agent runtime"
+    assert screenshot == "已截取当前网页。"
+    assert failed == "桌面操作未完成：Chrome CDP unavailable。"
+
+
 def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
     result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.running_apps",

@@ -2742,6 +2742,209 @@ async def test_yachiyo_task_route_executes_browser_current_page_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_browser_extract_text_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-browser-extract-text.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-browser-extract-text.db",
+        workspace_dir=tmp_path / "agent-runtime-route-browser-extract-text",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-browser-extract-text")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    extract_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser extract text public task should not call model")
+        ),
+    )
+
+    def fake_extract_text(selector: str = "") -> dict[str, Any]:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="读取当前网页正文",
+                conversation_id="chat-main-browser-extract-text",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-browser-extract-text-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-browser-extract-text", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert extract_calls == [""]
+        assert started["status"] == "completed"
+        assert started["summary"] == "Yachiyo desktop agent runtime"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["text"] == (
+            "Yachiyo desktop agent runtime"
+        )
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_browser_screenshot_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-browser-screenshot.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-browser-screenshot.db",
+        workspace_dir=tmp_path / "agent-runtime-route-browser-screenshot",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-browser-screenshot")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    screenshot_targets: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser screenshot public task should not call model")
+        ),
+    )
+
+    def fake_browser_screenshot(target_path: Path) -> dict[str, Any]:
+        screenshot_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "browser.screenshot",
+            "summary": "Captured current browser page",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "format": "png",
+                "size": 10,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_browser_screenshot)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="截取当前网页",
+                conversation_id="chat-main-browser-screenshot",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-browser-screenshot-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-browser-screenshot", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert screenshot_targets
+        assert screenshot_targets[0].endswith("browser/current-page.png")
+        assert started["status"] == "completed"
+        assert started["summary"] == "已截取当前网页。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "browser.screenshot"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["artifacts"][-1]["path"] == "browser/current-page.png"
+        assert timeline["tool_calls"][-1]["tool_name"] == "browser.screenshot"
+        assert timeline["artifacts"][-1]["path"] == "browser/current-page.png"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("prompt", "tool_name", "input_preview", "patched_tool"),
     [
