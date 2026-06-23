@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { taskPermissionRecoveryFromEvents, type TaskPermissionRecoveryAction } from './AgentTaskCard';
+import { taskPermissionRecoveryFromTaskFacts, type TaskPermissionRecoveryAction } from './AgentTaskCard';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -196,7 +196,10 @@ export function LauncherAgentTaskLight({
   const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
   const needsAction = Boolean(lightTask.needs_user_action || approval);
   const taskTitle = launcherAgentTaskTitle(currentTask);
-  const permissionRecovery = taskPermissionRecoveryFromEvents(currentTask.recent_events);
+  const permissionRecovery = taskPermissionRecoveryFromTaskFacts(
+    currentTask.recent_events,
+    currentTask.tool_calls,
+  );
   const detail = permissionRecovery
     ? `需要权限 · ${permissionRecovery.labels.join('、')}`
     : lightTask.detail || launcherAgentTaskDetail(currentTask);

@@ -54,7 +54,7 @@ export function AgentTaskCard({
   } = useYachiyoTaskEventReplay(task);
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
-  const permissionRecovery = taskPermissionRecoveryFromEvents(timelineEvents);
+  const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
 
   return (
     <section
@@ -302,11 +302,32 @@ const permissionTargetLabels: Record<string, string> = {
 };
 
 export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecovery | null {
-  const targets = uniqueStrings((events || []).flatMap((event) => permissionTargetsFromEvent(event)));
+  return taskPermissionRecoveryFromTaskFacts(events, []);
+}
+
+export function taskPermissionRecoveryFromTaskFacts(
+  events: AgentTaskSnapshot['recent_events'],
+  toolCalls: AgentTaskSnapshot['tool_calls'] = [],
+): TaskPermissionRecovery | null {
+  const safeEvents = events || [];
+  const safeToolCalls = toolCalls || [];
+  const targets = uniqueStrings([
+    ...safeEvents.flatMap((event) => permissionTargetsFromEvent(event)),
+    ...safeToolCalls.flatMap((toolCall) => permissionTargetsFromToolCall(toolCall)),
+  ]);
   if (!targets.length) return null;
-  const hints = uniqueStrings((events || []).flatMap((event) => recoveryHintsFromEvent(event)));
-  const tools = uniqueStrings((events || []).flatMap((event) => desktopToolsFromEvent(event)));
-  const actions = executableRecoveryActionsFromEvents(events || []);
+  const hints = uniqueStrings([
+    ...safeEvents.flatMap((event) => recoveryHintsFromEvent(event)),
+    ...safeToolCalls.flatMap((toolCall) => recoveryHintsFromToolCall(toolCall)),
+  ]);
+  const tools = uniqueStrings([
+    ...safeEvents.flatMap((event) => desktopToolsFromEvent(event)),
+    ...safeToolCalls.flatMap((toolCall) => desktopToolsFromToolCall(toolCall)),
+  ]);
+  const actions = dedupeRecoveryActions([
+    ...executableRecoveryActionsFromEvents(safeEvents),
+    ...executableRecoveryActionsFromToolCalls(safeToolCalls),
+  ]);
   const params = new URLSearchParams({
     command: 'native doctor',
     permission_targets: targets.join(','),
@@ -324,12 +345,11 @@ export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['rece
 }
 
 function executableRecoveryActionsFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecoveryAction[] {
-  const byKey = new Map<string, TaskPermissionRecoveryAction>();
-  (events || []).flatMap((event) => recoveryActionsFromEvent(event)).forEach((action) => {
-    const key = `${action.tool}:${JSON.stringify(action.input)}:${action.permission_target}`;
-    if (!byKey.has(key)) byKey.set(key, action);
-  });
-  return Array.from(byKey.values());
+  return dedupeRecoveryActions((events || []).flatMap((event) => recoveryActionsFromEvent(event)));
+}
+
+function executableRecoveryActionsFromToolCalls(toolCalls: AgentTaskSnapshot['tool_calls']): TaskPermissionRecoveryAction[] {
+  return dedupeRecoveryActions((toolCalls || []).flatMap((toolCall) => recoveryActionsFromToolCall(toolCall)));
 }
 
 function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): TaskPermissionRecoveryAction[] {
@@ -347,6 +367,18 @@ function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_e
   );
 }
 
+function recoveryActionsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): TaskPermissionRecoveryAction[] {
+  const outputPreview = objectValue(toolCall.output_preview);
+  return runtimeToolRecoveryActionsFromRecords(
+    [outputPreview],
+    {
+      retry_input: objectValue(toolCall.input_preview),
+      retry_source_tool_call_id: String(toolCall.tool_call_id || '').trim(),
+      retry_tool: String(toolCall.tool_name || '').trim(),
+    },
+  );
+}
+
 function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
   if ((event.sensitivity || 'public') === 'secret') return [];
   const payload = objectValue(event.payload);
@@ -360,12 +392,25 @@ function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent
   return permissionError || targets.length ? targets : [];
 }
 
+function permissionTargetsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
+  const outputPreview = objectValue(toolCall.output_preview);
+  const targets = [
+    ...stringList(outputPreview.permission_targets),
+    ...stringList(outputPreview.missing_permissions),
+  ];
+  return outputPreview.permission_error === true || targets.length ? targets : [];
+}
+
 function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
   if ((event.sensitivity || 'public') === 'secret') return [];
   const payload = objectValue(event.payload);
   const result = objectValue(payload.result);
   const sources = [result, payload].filter(Boolean);
   return runtimeToolRecoveryHintsFromRecords(sources);
+}
+
+function recoveryHintsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
+  return runtimeToolRecoveryHintsFromRecords([objectValue(toolCall.output_preview)]);
 }
 
 function desktopToolsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
@@ -381,6 +426,25 @@ function desktopToolsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_even
     payload.tool_name,
     detailTool,
   ].flatMap((value) => stringList(value));
+}
+
+function desktopToolsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
+  const outputPreview = objectValue(toolCall.output_preview);
+  return [
+    toolCall.tool_name,
+    outputPreview.action,
+    outputPreview.tool,
+    outputPreview.tool_name,
+  ].flatMap((value) => stringList(value));
+}
+
+function dedupeRecoveryActions(actions: TaskPermissionRecoveryAction[]): TaskPermissionRecoveryAction[] {
+  const byKey = new Map<string, TaskPermissionRecoveryAction>();
+  actions.forEach((action) => {
+    const key = `${action.tool}:${JSON.stringify(action.input)}:${action.permission_target}`;
+    if (!byKey.has(key)) byKey.set(key, action);
+  });
+  return Array.from(byKey.values());
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
