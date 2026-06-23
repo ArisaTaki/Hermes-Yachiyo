@@ -677,6 +677,63 @@ class ToolBroker:
             ),
         )
 
+    def app_open_and_type_into_ui_element(
+        self,
+        app_name: str,
+        target: str,
+        text: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.open_and_type_into_ui_element",
+            lambda: self._app_foreground_action(
+                "app.open_and_type_into_ui_element",
+                app_name,
+                setup_steps=(
+                    ("open", lambda: desktop.app_open(app_name)),
+                    ("focus", lambda: desktop.app_focus(app_name)),
+                ),
+                action_step=(
+                    "type_into_ui_element",
+                    lambda: desktop.type_into_ui_element(
+                        target,
+                        text,
+                        role_filter=role_filter,
+                        limit=limit,
+                    ),
+                ),
+            ),
+        )
+
+    def app_focus_and_type_into_ui_element(
+        self,
+        app_name: str,
+        target: str,
+        text: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "app.focus_and_type_into_ui_element",
+            lambda: self._app_foreground_action(
+                "app.focus_and_type_into_ui_element",
+                app_name,
+                setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
+                action_step=(
+                    "type_into_ui_element",
+                    lambda: desktop.type_into_ui_element(
+                        target,
+                        text,
+                        role_filter=role_filter,
+                        limit=limit,
+                    ),
+                ),
+            ),
+        )
+
     def app_show(self, app_name: str) -> dict[str, Any]:
         return desktop.app_show(app_name)
 

@@ -50,6 +50,8 @@ TOOL_FUNCTION_NAMES = {
     "app.focus_and_safe_click": "app_focus_and_safe_click",
     "app.open_and_click_ui_element": "app_open_and_click_ui_element",
     "app.focus_and_click_ui_element": "app_focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element": "app_open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element": "app_focus_and_type_into_ui_element",
     "app.show": "app_show",
     "app.hide": "app_hide",
     "app.minimize": "app_minimize",
@@ -154,6 +156,8 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.quit",
     "app.open_and_click_ui_element",
     "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
     "desktop.close_window",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
@@ -351,6 +355,8 @@ class ToolDescriptor:
             "desktop.type_into_ui_element",
             "app.open_and_click_ui_element",
             "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
         }:
             if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
                 raise AgentRuntimeError(f"{self.name} 参数 role_filter 必须是字符串")
@@ -389,6 +395,8 @@ class ToolDescriptor:
             "app.focus_and_safe_click",
             "app.open_and_click_ui_element",
             "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
             "app.show",
             "app.hide",
             "app.minimize",
@@ -452,6 +460,11 @@ class ToolDescriptor:
         if self.name in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"} and not str(
             payload.get("text") or ""
         ).strip():
+            raise AgentRuntimeError(f"{self.name} 参数 text 必须是非空字符串")
+        if self.name in {
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+        } and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError(f"{self.name} 参数 text 必须是非空字符串")
         if self.name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
             action = str(payload.get("action") or "").strip().lower()
@@ -1220,6 +1233,60 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "target"),
+    ),
+    "app.open_and_type_into_ui_element": ToolDescriptor(
+        name="app.open_and_type_into_ui_element",
+        description=(
+            "Open and focus a local desktop application, then focus a visible input control "
+            "matched by Accessibility label/name/description and type user-provided text. "
+            "Requires approval because the input coordinate is inferred from observed UI state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "target": {
+                "type": "string",
+                "description": "Visible input label/name/description to match, such as Search.",
+            },
+            "text": {"type": "string", "description": "User-provided text to type."},
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter, usually text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+        },
+        required=("app_name", "target", "text"),
+    ),
+    "app.focus_and_type_into_ui_element": ToolDescriptor(
+        name="app.focus_and_type_into_ui_element",
+        description=(
+            "Focus a local desktop application, then focus a visible input control matched by "
+            "Accessibility label/name/description and type user-provided text. Requires "
+            "approval because the input coordinate is inferred from observed UI state."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "target": {
+                "type": "string",
+                "description": "Visible input label/name/description to match, such as Search.",
+            },
+            "text": {"type": "string", "description": "User-provided text to type."},
+            "role_filter": {
+                "type": "string",
+                "description": "Optional role/name/description filter, usually text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of foreground UI elements to inspect. Defaults to 80.",
+            },
+        },
+        required=("app_name", "target", "text"),
     ),
     "app.show": ToolDescriptor(
         name="app.show",

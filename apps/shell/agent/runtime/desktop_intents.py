@@ -292,6 +292,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus_and_safe_scroll",
     "app.focus_and_safe_click",
     "app.focus_and_click_ui_element",
+    "app.focus_and_type_into_ui_element",
     "app.focus_and_safe_type_text",
     "app.hide",
     "app.minimize",
@@ -301,6 +302,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.open_and_safe_scroll",
     "app.open_and_safe_click",
     "app.open_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
     "app.open_and_safe_type_text",
     "app.quit",
     "app.show",
@@ -368,6 +370,8 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.focus_and_safe_click",
     "app.open_and_click_ui_element",
     "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
@@ -400,6 +404,8 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
     "app.focus_and_safe_click",
     "app.open_and_click_ui_element",
     "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
 }
 
 _FOREGROUND_ACTION_TOOLS = {
@@ -591,6 +597,20 @@ def _app_foreground_sequence_composite(
                     "role_filter": action_input.get("role_filter", ""),
                     "limit": action_input.get("limit", 80),
                     "click_count": action_input.get("click_count", 1),
+                },
+            )
+    if action_tool == "desktop.type_into_ui_element":
+        target = str(action_input.get("target") or "").strip()
+        text = str(action_input.get("text") or "").strip()
+        if target and text:
+            return _request(
+                f"app.{mode}_and_type_into_ui_element",
+                {
+                    "app_name": app_name,
+                    "target": target,
+                    "text": text,
+                    "role_filter": action_input.get("role_filter", ""),
+                    "limit": action_input.get("limit", 80),
                 },
             )
     return None
@@ -1908,6 +1928,12 @@ def _app_foreground_action_request_from_match(
         return {
             "tool": f"app.{mode}_and_click_ui_element",
             "input": {"app_name": app_name, **click_ui_element},
+        }
+    type_into_ui_element = _desktop_type_into_ui_element(followup)
+    if type_into_ui_element:
+        return {
+            "tool": f"app.{mode}_and_type_into_ui_element",
+            "input": {"app_name": app_name, **type_into_ui_element},
         }
     safe_key = _desktop_safe_key(followup)
     if safe_key:

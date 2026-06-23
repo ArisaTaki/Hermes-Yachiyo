@@ -599,6 +599,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.focus_and_safe_click",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -1024,6 +1026,28 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_type_text",
         "input": {"app_name": "Notes", "text": "hello yachiyo"},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并在地址栏输入 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_type_into_ui_element",
+        "input": {
+            "app_name": "Google Chrome",
+            "target": "地址",
+            "text": "github.com",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 并在消息框输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "消息",
+            "text": "hello",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
     assert daily_desktop_intent_tool_request("打开 Chrome 并新建标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
@@ -1334,6 +1358,19 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_type_text",
             "input": {"app_name": "Notes", "text": "再见"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome，然后在地址栏输入 github.com", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "地址",
+                "text": "github.com",
+                "role_filter": "text",
+                "limit": 80,
+            },
         }
     ]
     assert daily_desktop_intent_tool_request("退出 Slack", allowed_tools) == {
@@ -3780,6 +3817,21 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    app_open_type_into_ui_element = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_type_into_ui_element",
+        {"app_name": "Google Chrome", "target": "地址", "text": "github.com"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Google Chrome",
+                "foreground_action": "type_into_ui_element",
+                "target": "地址",
+                "matched_label": "Address",
+                "character_count": 10,
+            },
+        },
+    )
     app_open_safe_type_text_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.open_and_safe_type_text",
         {"app_name": "Notes", "text": "hello"},
@@ -3925,6 +3977,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_open_safe_scroll == "已打开 Google Chrome 并向下滚动前台界面（2 页）。"
     assert app_open_safe_click == "已打开 Google Chrome 并点击前台位置：120, 240。"
     assert app_open_click_ui_element == "已打开 Google Chrome 并点击前台控件：登录（120, 240）。"
+    assert app_open_type_into_ui_element == "已打开 Google Chrome 并在前台控件 Address 输入文字（10 个字符）。"
     assert app_open_safe_type_text_failed == (
         "已打开 Notes，但没能输入文字。 缺少权限：accessibility。"
         " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"

@@ -139,6 +139,8 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "app.quit": True,
         "app.open_and_click_ui_element": True,
         "app.focus_and_click_ui_element": True,
+        "app.open_and_type_into_ui_element": True,
+        "app.focus_and_type_into_ui_element": True,
         "desktop.close_window": True,
         "desktop.hotkey": True,
         "desktop.type_text": True,

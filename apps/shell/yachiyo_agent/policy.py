@@ -70,6 +70,8 @@ MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
         "app.quit",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
         "desktop.close_window",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
@@ -234,7 +236,11 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
     ),
-    "foreground_type_into_ui_element": ("desktop.type_into_ui_element",),
+    "foreground_type_into_ui_element": (
+        "desktop.type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    ),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_close_window": ("desktop.close_window",),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
@@ -365,6 +371,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.focus_and_safe_click",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -431,6 +439,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.focus_and_safe_click",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
         "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
@@ -783,6 +793,7 @@ def _tool_missing_permissions(
         "app.open_and_safe_scroll",
         "app.open_and_safe_click",
         "app.open_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
     }:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
         values.extend(
@@ -797,6 +808,7 @@ def _tool_missing_permissions(
         "app.focus_and_safe_scroll",
         "app.focus_and_safe_click",
         "app.focus_and_click_ui_element",
+        "app.focus_and_type_into_ui_element",
     }:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
         values.extend(
