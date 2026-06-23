@@ -2338,6 +2338,410 @@ async def test_yachiyo_task_route_executes_screen_capture_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_running_apps_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-running-apps.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-running-apps.db",
+        workspace_dir=tmp_path / "agent-runtime-route-running-apps",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-running-apps")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    running_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("running apps public task should not call model")
+        ),
+    )
+
+    def fake_running_apps() -> dict[str, Any]:
+        nonlocal running_calls
+        running_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.running_apps",
+            "summary": "Running apps: Finder, Google Chrome, Music",
+            "data": {
+                "apps": [
+                    {"name": "Finder", "pid": 101, "frontmost": False},
+                    {"name": "Google Chrome", "pid": 202, "frontmost": True},
+                    {"name": "Music", "pid": 303, "frontmost": False},
+                ],
+                "frontmost": "Google Chrome",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.running_apps", fake_running_apps)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="现在开了哪些应用",
+                conversation_id="chat-main-running-apps",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-running-apps-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-running-apps", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert running_calls == 1
+        assert started["status"] == "completed"
+        assert started["summary"] == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["frontmost"] == "Google Chrome"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_window_list_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-window-list.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-window-list.db",
+        workspace_dir=tmp_path / "agent-runtime-route-window-list",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-window-list")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    window_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("window list public task should not call model")
+        ),
+    )
+
+    def fake_windows(app_name: str = "") -> dict[str, Any]:
+        window_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "desktop.windows",
+            "summary": "Open windows: Google Chrome: ChatGPT",
+            "data": {
+                "app_name": app_name,
+                "windows": [
+                    {
+                        "app_name": "Google Chrome",
+                        "pid": 202,
+                        "index": 1,
+                        "frontmost": True,
+                        "title": "ChatGPT",
+                    }
+                ],
+                "count": 1,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="Chrome 有哪些窗口",
+                conversation_id="chat-main-window-list",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-window-list-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-window-list", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert window_calls == ["Google Chrome"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "当前窗口：Google Chrome: ChatGPT。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.windows"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Google Chrome"
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.windows"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["count"] == 1
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_app_status_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-app-status.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-app-status.db",
+        workspace_dir=tmp_path / "agent-runtime-route-app-status",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-app-status")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    status_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app status public task should not call model")
+        ),
+    )
+
+    def fake_app_status(app_name: str) -> dict[str, Any]:
+        status_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.status",
+            "summary": f"{app_name} is running",
+            "data": {"app_name": app_name, "running": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_status", fake_app_status)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="检查一下 Slack 是否在运行",
+                conversation_id="chat-main-app-status",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-app-status-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-app-status", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert status_calls == ["Slack"]
+        assert started["status"] == "completed"
+        assert started["summary"] == "Slack 当前正在运行。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "app.status"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
+        assert timeline["tool_calls"][-1]["tool_name"] == "app.status"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["running"] is True
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_browser_current_page_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-browser-current-page.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-browser-current-page.db",
+        workspace_dir=tmp_path / "agent-runtime-route-browser-current-page",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-browser-current-page")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    page_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser current page public task should not call model")
+        ),
+    )
+
+    def fake_current_page() -> dict[str, Any]:
+        nonlocal page_calls
+        page_calls += 1
+        return {
+            "ok": True,
+            "action": "browser.current_page",
+            "summary": "Current browser page: ChatGPT",
+            "data": {
+                "title": "ChatGPT",
+                "url": "https://chatgpt.com/",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.current_page", fake_current_page)
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="当前网页是什么",
+                conversation_id="chat-main-browser-current-page",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-browser-current-page-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-browser-current-page", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert page_calls == 1
+        assert started["status"] == "completed"
+        assert started["summary"] == "当前网页是 ChatGPT：https://chatgpt.com/。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "browser.current_page"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert timeline["tool_calls"][-1]["tool_name"] == "browser.current_page"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["title"] == "ChatGPT"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

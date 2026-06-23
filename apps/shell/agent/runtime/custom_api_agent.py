@@ -543,6 +543,8 @@ class RuntimeCustomApiAgentLoop:
                     return f"已用系统浏览器打开网页：{url}。" if url else (result_summary or "已用系统浏览器打开网页。")
                 return f"已打开网页：{url}。" if url else (result_summary or "已打开网页。")
             if tool_name == "browser.current_page":
+                if result.get("ok") is True:
+                    return _browser_page_summary(result)
                 return result_summary or _browser_page_summary(result)
             if tool_name == "browser.extract_text":
                 return result_summary or _browser_text_summary(result)

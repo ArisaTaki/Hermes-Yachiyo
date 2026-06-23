@@ -1922,6 +1922,30 @@ def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:
     assert result == "已在 Finder 中显示：~/Downloads/report.pdf。"
 
 
+def test_main_chat_desktop_intent_summarizes_browser_current_page() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.current_page",
+        {},
+        {
+            "ok": True,
+            "summary": "Current browser page: ChatGPT",
+            "data": {"title": "ChatGPT", "url": "https://chatgpt.com/"},
+        },
+    )
+    failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.current_page",
+        {},
+        {
+            "ok": False,
+            "summary": "Chrome CDP unavailable",
+            "data": {},
+        },
+    )
+
+    assert result == "当前网页是 ChatGPT：https://chatgpt.com/。"
+    assert failed == "桌面操作未完成：Chrome CDP unavailable。"
+
+
 def test_main_chat_desktop_intent_summarizes_running_apps() -> None:
     result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.running_apps",
