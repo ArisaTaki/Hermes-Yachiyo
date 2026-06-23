@@ -41,6 +41,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
     "desktop.hotkey": "desktop_hotkey",
@@ -73,6 +74,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "desktop.hide_app",
     "desktop.minimize_window",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
@@ -748,11 +750,11 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         },
         required=("text",),
     ),
-    "desktop.close_window": ToolDescriptor(
-        name="desktop.close_window",
+    "desktop.hide_app": ToolDescriptor(
+        name="desktop.hide_app",
         description=(
-            "Close the current foreground window using the standard system shortcut. "
-            "Requires approval because unsaved work in that window may be affected."
+            "Hide the current foreground app using the standard system shortcut. "
+            "Low-risk and reversible, but still recorded in the Run Timeline."
         ),
         properties={},
     ),
@@ -761,6 +763,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Minimize the current foreground window using the standard system shortcut. "
             "Low-risk and reversible, but still recorded in the Run Timeline."
+        ),
+        properties={},
+    ),
+    "desktop.close_window": ToolDescriptor(
+        name="desktop.close_window",
+        description=(
+            "Close the current foreground window using the standard system shortcut. "
+            "Requires approval because unsaved work in that window may be affected."
         ),
         properties={},
     ),

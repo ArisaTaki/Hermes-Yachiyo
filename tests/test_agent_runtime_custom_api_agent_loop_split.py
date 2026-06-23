@@ -600,6 +600,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "browser.screenshot",
         "desktop.reveal_path",
         "desktop.open_path",
+        "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",
@@ -717,6 +718,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("minimize current window", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.minimize_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("隐藏当前应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("hide current app", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
         "input": {},
     }
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
@@ -1166,6 +1177,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("退出 Slack", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("关闭当前窗口", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("最小化当前窗口", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("隐藏当前应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("检查桌面权限", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("搜索 open hanako", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
@@ -1814,6 +1826,11 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
         {},
         {"ok": True, "summary": "Minimized the foreground window"},
     )
+    hide_app = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.hide_app",
+        {},
+        {"ok": True, "summary": "Hid the foreground app"},
+    )
 
     assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
@@ -1821,6 +1838,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
     assert close_window == "已关闭当前窗口。"
     assert minimize_window == "已最小化当前窗口。"
+    assert hide_app == "已隐藏当前应用。"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 

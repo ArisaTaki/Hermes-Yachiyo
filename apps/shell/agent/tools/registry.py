@@ -218,6 +218,14 @@ def _desktop_minimize_window(
     return broker.desktop_minimize_window()
 
 
+def _desktop_hide_app(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_hide_app()
+
+
 def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     modifiers = payload.get("modifiers")
     return broker.desktop_hotkey(
@@ -322,6 +330,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,
     "clipboard.write": _clipboard_write,
+    "desktop.hide_app": _desktop_hide_app,
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,

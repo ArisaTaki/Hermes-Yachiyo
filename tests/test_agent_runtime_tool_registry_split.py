@@ -280,6 +280,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
         "desktop_hotkey",
@@ -375,6 +376,10 @@ def test_desktop_minimize_window_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.minimize_window", {})
 
 
+def test_desktop_hide_app_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.hide_app", {})
+
+
 def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
     compiler = RuntimePolicyCompiler()
 
@@ -383,6 +388,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         {
             "allowed_tools": [
                 "screen.capture",
+                "desktop.hide_app",
                 "desktop.minimize_window",
                 "app.quit",
                 "desktop.close_window",
@@ -395,6 +401,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
 
     assert policy["allowed_tools"] == [
         "screen.capture",
+        "desktop.hide_app",
         "desktop.minimize_window",
         "app.quit",
         "desktop.close_window",
@@ -499,6 +506,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_hide_app",
+        lambda: calls.append(("hide_app",)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_minimize_window",
         lambda: calls.append(("minimize_window",)) or {"ok": True},
     )
@@ -553,6 +565,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.click",
         {"x": 12, "y": 34, "click_count": 2},
     ) == {"ok": True}
+    assert dispatch_tool_call(broker, "desktop.hide_app", {}) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.minimize_window", {}) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.close_window", {}) == {"ok": True}
     assert dispatch_tool_call(
@@ -582,6 +595,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("music_control", "pause"),
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
+        ("hide_app",),
         ("minimize_window",),
         ("close_window",),
         ("reveal", "~/Downloads/report.pdf"),
@@ -1357,6 +1371,30 @@ def test_desktop_minimize_window_uses_standard_foreground_shortcut(monkeypatch) 
         "fallback_used": False,
     }
     assert "keystroke \"m\" using {command down}" in calls[0][0]
+    assert calls[0][1] is None
+
+
+def test_desktop_hide_app_uses_standard_foreground_shortcut(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "hidden_app", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.desktop_hide_app()
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.hide_app",
+        "summary": "Hid the foreground app",
+        "data": {"key": "h", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "keystroke \"h\" using {command down}" in calls[0][0]
     assert calls[0][1] is None
 
 

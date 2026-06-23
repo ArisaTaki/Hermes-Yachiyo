@@ -40,6 +40,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "desktop.hide_app",
         "desktop.minimize_window",
     }
 )
@@ -70,6 +71,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
         "play_or_pause_media",
         "control_system_volume",
         "write_clipboard",
+        "foreground_hide_app",
         "foreground_minimize_window",
     }
 )
@@ -119,6 +121,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "play_or_pause_media",
     "control_system_volume",
     "write_clipboard",
+    "foreground_hide_app",
     "foreground_minimize_window",
     "foreground_click",
     "foreground_close_window",
@@ -153,6 +156,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "play_or_pause_media": ("media.apple_music_play", "media.apple_music_control"),
     "control_system_volume": ("system.volume",),
     "write_clipboard": ("clipboard.write",),
+    "foreground_hide_app": ("desktop.hide_app",),
     "foreground_minimize_window": ("desktop.minimize_window",),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_close_window": ("desktop.close_window",),
@@ -176,6 +180,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "play_or_pause_media": "Play or pause media",
     "control_system_volume": "Control system volume",
     "write_clipboard": "Write clipboard",
+    "foreground_hide_app": "Hide foreground app",
     "foreground_minimize_window": "Minimize foreground window",
     "foreground_click": "Click foreground UI",
     "foreground_close_window": "Close foreground window",
@@ -206,6 +211,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "play_or_pause_media": "Control local media playback such as Apple Music.",
     "control_system_volume": "Read or adjust local system output volume.",
     "write_clipboard": "Write explicit user-provided text to the system clipboard.",
+    "foreground_hide_app": "Hide the current foreground app.",
     "foreground_minimize_window": "Minimize the current foreground window.",
     "foreground_click": "Click in the foreground application or browser page.",
     "foreground_close_window": "Close the current foreground window after approval.",
@@ -249,6 +255,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",
@@ -266,6 +273,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "app_control": ("app.status", "app.open", "app.focus", "app.quit"),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
     "foreground_input": (
+        "desktop.hide_app",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",

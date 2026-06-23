@@ -1669,6 +1669,13 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["app.quit"]["risk_level"] == "medium"
     assert tools["app.quit"]["input_schema"]["required"] == ["app_name"]
     assert any("approval" in note for note in tools["app.quit"]["fallback_notes"])
+    assert tools["desktop.hide_app"]["capability_id"] == "foreground_input"
+    assert tools["desktop.hide_app"]["risk_level"] == "low"
+    assert tools["desktop.hide_app"]["input_schema"]["properties"] == {}
+    assert any(
+        "hides the current foreground app" in note
+        for note in tools["desktop.hide_app"]["fallback_notes"]
+    )
     assert tools["desktop.minimize_window"]["capability_id"] == "foreground_input"
     assert tools["desktop.minimize_window"]["risk_level"] == "low"
     assert tools["desktop.minimize_window"]["input_schema"]["properties"] == {}

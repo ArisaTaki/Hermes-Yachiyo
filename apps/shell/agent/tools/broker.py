@@ -428,6 +428,12 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def desktop_hide_app(self) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.hide_app",
+            desktop.desktop_hide_app,
+        )
+
     def desktop_minimize_window(self) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.minimize_window",
