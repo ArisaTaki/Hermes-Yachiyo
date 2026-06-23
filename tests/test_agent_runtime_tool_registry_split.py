@@ -273,6 +273,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_status",
         "app_open",
         "app_focus",
+        "app_hide",
         "app_quit",
         "desktop_reveal_path",
         "desktop_open_path",
@@ -325,6 +326,13 @@ def test_app_quit_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.quit 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.quit", {"app_name": ""})
+
+
+def test_app_hide_schema_requires_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload("app.hide", {"app_name": "Slack"})
+
+    with pytest.raises(AgentRuntimeError, match="app.hide 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("app.hide", {"app_name": ""})
 
 
 def test_desktop_reveal_path_schema_accepts_local_path() -> None:
@@ -388,6 +396,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         {
             "allowed_tools": [
                 "screen.capture",
+                "app.hide",
                 "desktop.hide_app",
                 "desktop.minimize_window",
                 "app.quit",
@@ -401,6 +410,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
 
     assert policy["allowed_tools"] == [
         "screen.capture",
+        "app.hide",
         "desktop.hide_app",
         "desktop.minimize_window",
         "app.quit",
@@ -544,6 +554,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "app_status",
         lambda app_name: calls.append(("status", app_name)) or {"ok": True, "app_name": app_name},
     )
+    monkeypatch.setattr(
+        broker,
+        "app_hide",
+        lambda app_name: calls.append(("hide_named_app", app_name))
+        or {"ok": True, "app_name": app_name},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -566,6 +582,10 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         {"x": 12, "y": 34, "click_count": 2},
     ) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.hide_app", {}) == {"ok": True}
+    assert dispatch_tool_call(broker, "app.hide", {"app_name": "Slack"}) == {
+        "ok": True,
+        "app_name": "Slack",
+    }
     assert dispatch_tool_call(broker, "desktop.minimize_window", {}) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.close_window", {}) == {"ok": True}
     assert dispatch_tool_call(
@@ -596,6 +616,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("hotkey", "l", ["command"]),
         ("click", 12, 34, 2),
         ("hide_app",),
+        ("hide_named_app", "Slack"),
         ("minimize_window",),
         ("close_window",),
         ("reveal", "~/Downloads/report.pdf"),
@@ -1046,6 +1067,47 @@ def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None
     }
     assert result["fallback_used"] is False
     assert osascript_calls == [["Slack"], ["Slack"]]
+
+
+def test_app_hide_uses_system_events_process_visibility(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "hidden|Slack", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_hide("Slack")
+
+    assert result == {
+        "ok": True,
+        "action": "app.hide",
+        "summary": "Hid Slack",
+        "data": {"app_name": "Slack", "hide_status": "hidden"},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "set visible of application process appName to false" in calls[0][0]
+    assert calls[0][1] == ["Slack"]
+
+
+def test_app_hide_reports_not_running(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, args=None: {"ok": True, "stdout": "not_running|Slack", "stderr": ""},
+    )
+
+    result = desktop_mod.app_hide("Slack")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.hide"
+    assert result["summary"] == "Slack is not running"
+    assert result["error_code"] == "app_not_running"
+    assert result["data"] == {"app_name": "Slack", "hide_status": "not_running"}
 
 
 def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:

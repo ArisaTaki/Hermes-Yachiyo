@@ -236,6 +236,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_quit_name:
         candidates.append(_request("app.quit", {"app_name": app_quit_name}))
 
+    app_hide_name = _app_hide_name(text)
+    if app_hide_name:
+        candidates.append(_request("app.hide", {"app_name": app_hide_name}))
+
     if _is_hide_current_app_request(text):
         candidates.append(_request("desktop.hide_app", {}))
 
@@ -895,6 +899,34 @@ def _app_quit_name(text: str) -> str:
     return ""
 
 
+def _app_hide_name(text: str) -> str:
+    if (
+        _looks_like_search_request(text)
+        or _is_running_apps_request(text)
+        or _looks_like_app_status_request(text)
+    ):
+        return ""
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:隐藏|收起)\s*(?P<app>[^。！？!?，,]+)",
+        r"\bhide\s+(?P<app>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _looks_like_current_app_scope(raw_app):
+            continue
+        if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_generic_app_quit_target(raw_app):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
 def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
@@ -1025,6 +1057,34 @@ def _looks_like_generic_app_quit_target(value: str) -> bool:
     if re.search(r"\b(?:window|tab|page)\b", app.lower()):
         return True
     return _looks_like_generic_app_open_target(value)
+
+
+def _looks_like_current_app_scope(value: str) -> bool:
+    app = _strip_app_name(value)
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    return compact in {
+        "当前",
+        "现在",
+        "前台",
+        "这个",
+        "该",
+        "当前应用",
+        "前台应用",
+        "当前app",
+        "前台app",
+        "current",
+        "foreground",
+        "active",
+        "this",
+        "currentapp",
+        "foregroundapp",
+        "activeapp",
+        "thisapp",
+        "currentapplication",
+        "foregroundapplication",
+        "activeapplication",
+        "thisapplication",
+    }
 
 
 def _music_query(text: str) -> str:

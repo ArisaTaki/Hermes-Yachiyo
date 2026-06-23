@@ -583,6 +583,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",
         "app.focus",
+        "app.hide",
         "app.quit",
         "media.apple_music_play",
         "media.apple_music_control",
@@ -700,6 +701,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.quit",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("隐藏 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("隐藏微信", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("hide Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("隐藏 Slack", ["desktop.hide_app"]) is None
     assert daily_desktop_intent_tool_request("关闭当前窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
@@ -1816,6 +1833,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"app_name": "Slack", "running": True},
         },
     )
+    app_hide = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.hide",
+        {"app_name": "Slack"},
+        {
+            "ok": True,
+            "summary": "Hid Slack",
+            "data": {"app_name": "Slack"},
+        },
+    )
     close_window = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.close_window",
         {},
@@ -1836,6 +1862,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
     assert app_quit == "已退出 Slack。"
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
+    assert app_hide == "已隐藏 Slack。"
     assert close_window == "已关闭当前窗口。"
     assert minimize_window == "已最小化当前窗口。"
     assert hide_app == "已隐藏当前应用。"

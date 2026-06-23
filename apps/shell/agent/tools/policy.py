@@ -34,6 +34,7 @@ TOOL_FUNCTION_NAMES = {
     "app.status": "app_status",
     "app.open": "app_open",
     "app.focus": "app_focus",
+    "app.hide": "app_hide",
     "app.quit": "app_quit",
     "desktop.reveal_path": "desktop_reveal_path",
     "desktop.open_path": "desktop_open_path",
@@ -68,6 +69,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.status",
     "app.open",
     "app.focus",
+    "app.hide",
     "desktop.reveal_path",
     "desktop.open_path",
     "media.apple_music_play",
@@ -261,7 +263,7 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
-        if self.name in {"app.open", "app.focus", "app.quit", "app.status"} and not str(
+        if self.name in {"app.open", "app.focus", "app.hide", "app.quit", "app.status"} and not str(
             payload.get("app_name") or ""
         ).strip():
             raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
@@ -644,6 +646,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "app.focus": ToolDescriptor(
         name="app.focus",
         description="Bring a local desktop application to the foreground.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "app.hide": ToolDescriptor(
+        name="app.hide",
+        description="Hide a running local desktop application by display name without quitting it.",
         properties={"app_name": {"type": "string", "description": "Application name."}},
         required=("app_name",),
     ),

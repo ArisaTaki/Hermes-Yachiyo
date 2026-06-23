@@ -228,6 +228,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.status",
         "app.open",
         "app.focus",
+        "app.hide",
         "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
@@ -941,6 +942,58 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "action": "app.focus",
         "summary": f"Focused {clean_name}",
         "data": {"app_name": clean_name},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def app_hide(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.hide")
+    clean_name = _clean_required(app_name, "app_name")
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            tell application "System Events"
+                if exists application process appName then
+                    set visible of application process appName to false
+                    return "hidden|" & appName
+                end if
+            end tell
+            return "not_running|" & appName
+        end run
+        """,
+        [clean_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.hide",
+            {
+                **result,
+                "action": "app.hide",
+                "summary": "app.hide failed",
+                "data": {"app_name": clean_name},
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    status = stdout.split("|", 1)[0] if stdout else "unknown"
+    if status == "not_running":
+        return {
+            "ok": False,
+            "action": "app.hide",
+            "summary": f"{clean_name} is not running",
+            "error": "app_not_running",
+            "error_code": "app_not_running",
+            "data": {"app_name": clean_name, "hide_status": status},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    return {
+        "ok": True,
+        "action": "app.hide",
+        "summary": f"Hid {clean_name}",
+        "data": {"app_name": clean_name, "hide_status": status},
         "permission_error": False,
         "fallback_used": False,
     }
@@ -1959,6 +2012,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
+        "app.hide": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
@@ -1979,6 +2033,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
+        "app.hide": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],

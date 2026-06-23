@@ -311,6 +311,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.focus": [
             "Uses desktop automation and surfaces focus failures as tool results.",
         ],
+        "app.hide": [
+            "Requires Accessibility permission and hides a running app without quitting it.",
+        ],
         "app.quit": [
             "Requires approval because quitting an app can discard unsaved work; Automation failures are surfaced as tool results.",
         ],

@@ -297,6 +297,49 @@ def test_chat_bridge_quick_message_executes_hide_app_without_approval(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_named_app_hide_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    hide_calls: list[str] = []
+
+    def fake_app_hide(app_name: str) -> dict:
+        hide_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.hide",
+            "summary": f"Hid {app_name}",
+            "data": {"app_name": app_name, "hide_status": "hidden"},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_hide",
+        fake_app_hide,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "隐藏 Slack",
+    )
+
+    assert result["ok"] is True
+    assert hide_calls == ["Slack"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已隐藏 Slack。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.hide"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
