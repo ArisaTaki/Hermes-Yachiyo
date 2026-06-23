@@ -1,4 +1,5 @@
 import type { DesktopExecutionCapabilitySnapshot } from '../runtime-shared/types';
+import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 import type { ChatNotice, YachiyoReadinessSnapshot } from './types';
 
 const desktopCapabilityIds = [
@@ -42,20 +43,29 @@ export function chatDesktopPermissionNotice(
   'kind' | 'title' | 'detail' | 'action_label' | 'action_view' | 'action_params'
 > | null {
   const missing = missingDesktopPermissionIssues(readiness);
-  if (!missing.length) return null;
+  const toolReadiness = desktopToolReadinessSummary(readiness);
+  if (!missing.length && !toolReadiness.degraded.length && !toolReadiness.unavailable.length) return null;
   const labels = missing.map((issue) => issue.label);
   const hints = missing.map((issue) => issue.recovery_hint).filter(Boolean);
+  const details = [
+    labels.length ? `${labels.join('、')} 未就绪。` : '',
+    toolReadiness.degraded.length ? `降级可用：${formatDesktopToolList(toolReadiness.degraded)}。` : '',
+    toolReadiness.unavailable.length ? `暂不可用：${formatDesktopToolList(toolReadiness.unavailable)}。` : '',
+    hints.join(' ') || '打开「诊断」中的桌面权限检查，按提示授权后再试。',
+  ].filter(Boolean);
+  const actionParams: Record<string, string> = {
+    command: 'native doctor',
+    return_to: 'chat',
+  };
+  if (missing.length) actionParams.permission_targets = missing.map((issue) => issue.token).join(',');
+  if (toolReadiness.tools.length) actionParams.desktop_tools = toolReadiness.tools.join(',');
   return {
     kind: 'warn',
-    title: '桌面执行权限未就绪',
-    detail: `${labels.join('、')} 未就绪。${hints.join(' ') || '打开「诊断」中的桌面权限检查，按提示授权后再试。'}`,
+    title: missing.length ? '桌面执行权限未就绪' : '桌面执行能力需检查',
+    detail: details.join(''),
     action_label: '打开诊断',
     action_view: 'diagnostics',
-    action_params: {
-      command: 'native doctor',
-      permission_targets: missing.map((issue) => issue.token).join(','),
-      return_to: 'chat',
-    },
+    action_params: actionParams,
   };
 }
 
@@ -87,7 +97,40 @@ export function missingDesktopPermissionIssues(
   return Array.from(issues.values());
 }
 
+export function desktopToolReadinessSummary(
+  readiness: YachiyoReadinessSnapshot | null | undefined,
+): { degraded: string[]; unavailable: string[]; tools: string[] } {
+  const capabilities = readiness?.capabilities;
+  if (!capabilities || typeof capabilities !== 'object') return { degraded: [], unavailable: [], tools: [] };
+  const root = capabilitySnapshot(capabilities.desktop_execution);
+  const degraded = toolDisplayLabels(root?.degraded_tools || []);
+  const unavailable = toolDisplayLabels(root?.unavailable_tools || []);
+  return {
+    degraded,
+    unavailable,
+    tools: uniqueStrings([...(root?.degraded_tools || []), ...(root?.unavailable_tools || [])]),
+  };
+}
+
 function capabilitySnapshot(value: unknown): DesktopExecutionCapabilitySnapshot | null {
   if (!value || typeof value !== 'object') return null;
   return value as DesktopExecutionCapabilitySnapshot;
+}
+
+function toolDisplayLabels(values: string[]) {
+  return uniqueStrings(values.map((tool) => runtimeToolDisplayLabelOrName(tool)));
+}
+
+function formatDesktopToolList(values: string[]) {
+  if (values.length <= 4) return values.join('、');
+  return `${values.slice(0, 4).join('、')} 等 ${values.length} 项`;
+}
+
+function uniqueStrings(values: string[]) {
+  const result: string[] = [];
+  values.forEach((value) => {
+    const clean = String(value || '').trim();
+    if (clean && !result.includes(clean)) result.push(clean);
+  });
+  return result;
 }
