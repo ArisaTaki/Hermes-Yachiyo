@@ -764,6 +764,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "Google Chrome"},
     }
+    assert daily_desktop_intent_tool_request("Slack 切到前台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 到前台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("微信切过来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack 的 general 窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_window",
@@ -810,11 +825,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.show",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("Slack 显示出来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 显示一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("还原微信", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("别切到 Slack", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("不要显示 Slack", allowed_tools) is None
     assert daily_desktop_intent_tool_request("unhide Slack", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
@@ -1066,6 +1093,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads/report.pdf"},
     }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示 ~/Downloads/report.pdf", ["app.show"]) is None
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -1396,6 +1424,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"reason": "user asked to capture the screen"},
     }
     assert daily_desktop_intent_tool_request("当前窗口是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("现在用的是哪个 App", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.active_window",
         "input": {},
