@@ -4,11 +4,24 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
 )
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
+
+_DIRECT_DAILY_DESKTOP_TOOLS = {
+    "app.open",
+    "app.focus",
+    "media.apple_music_play",
+    "screen.capture",
+    "desktop.active_window",
+    "browser.open_url",
+    "browser.current_page",
+    "browser.extract_text",
+    "browser.screenshot",
+}
 
 
 class RuntimeCustomApiAgentLoop:
@@ -130,6 +143,15 @@ class RuntimeCustomApiAgentLoop:
                     run_id=run_id,
                     budget=budget,
                 )
+                direct_result = self._direct_daily_desktop_result(
+                    agent,
+                    planned_tool,
+                    planned_input,
+                    timeline,
+                    run_id=run_id,
+                )
+                if direct_result:
+                    return direct_result
             else:
                 candidates = daily_desktop_intent_candidates(planning_context)
                 if candidates:
@@ -236,6 +258,109 @@ class RuntimeCustomApiAgentLoop:
             }
         )
 
+    def _direct_daily_desktop_result(
+        self,
+        agent: dict[str, Any],
+        planned_tool: str,
+        planned_input: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> str:
+        if str(agent.get("agent_id") or "").strip() != MAIN_CHAT_AGENT_ID:
+            return ""
+        if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            return ""
+        tool_event = self._latest_tool_call_event(timeline, planned_tool)
+        if not tool_event:
+            return ""
+        result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+        if result.get("approval_required"):
+            return ""
+        summary = self._daily_desktop_summary(planned_tool, planned_input, result)
+        if not summary:
+            return ""
+        event_payload = {
+            "tool": planned_tool,
+            "source": "daily_desktop_intent",
+            "result": result,
+            "summary": summary,
+        }
+        timeline.append(
+            self._timeline(
+                "agent.desktop.intent_completed",
+                planned_tool,
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
+        return summary
+
+    @staticmethod
+    def _latest_tool_call_event(
+        timeline: list[dict[str, Any]],
+        planned_tool: str,
+    ) -> dict[str, Any] | None:
+        for event in reversed(timeline):
+            if event.get("event") != "agent.tool.call":
+                continue
+            if str(event.get("detail") or "") == planned_tool:
+                return event
+        return None
+
+    @staticmethod
+    def _daily_desktop_summary(
+        tool_name: str,
+        planned_input: dict[str, Any],
+        result: dict[str, Any],
+    ) -> str:
+        result_summary = str(result.get("summary") or "").strip()
+        if result.get("ok"):
+            if tool_name == "app.open":
+                app_name = _payload_text(result, planned_input, "app_name")
+                return f"已打开 {app_name}。" if app_name else (result_summary or "已打开应用。")
+            if tool_name == "app.focus":
+                app_name = _payload_text(result, planned_input, "app_name")
+                return f"已切换到 {app_name}。" if app_name else (result_summary or "已切换到应用。")
+            if tool_name == "media.apple_music_play":
+                data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                track = str(data.get("track") or "").strip()
+                artist = str(data.get("artist") or "").strip()
+                query = _payload_text(result, planned_input, "query")
+                if track:
+                    return f"已在 Apple Music 播放：{track}{f' - {artist}' if artist else ''}。"
+                return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
+            if tool_name == "screen.capture":
+                return result_summary or "已截取当前屏幕。"
+            if tool_name == "desktop.active_window":
+                return result_summary or _active_window_summary(result)
+            if tool_name == "browser.open_url":
+                url = _payload_text(result, planned_input, "url")
+                return f"已打开网页：{url}。" if url else (result_summary or "已打开网页。")
+            if tool_name == "browser.current_page":
+                return result_summary or _browser_page_summary(result)
+            if tool_name == "browser.extract_text":
+                return result_summary or _browser_text_summary(result)
+            if tool_name == "browser.screenshot":
+                return result_summary or "已截取当前网页。"
+            return result_summary or "已执行桌面操作。"
+
+        fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
+        if tool_name == "media.apple_music_play" and fallback.get("ok"):
+            query = _payload_text(result, planned_input, "query")
+            return (
+                f"没能直接播放 {query}，但已打开 Apple Music。"
+                if query
+                else "没能直接播放，但已打开 Apple Music。"
+            )
+        error = str(result.get("error") or result_summary or "工具返回失败").strip()
+        permission_targets = result.get("permission_targets")
+        if result.get("permission_error") or permission_targets:
+            targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
+            suffix = f" 缺少权限：{targets}。" if targets else ""
+            return f"桌面操作未完成：{error}。{suffix}".strip()
+        return f"桌面操作未完成：{error}。"
+
     def _latest_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
         for message in reversed(messages):
             if str(message.get("role") or "") != "user":
@@ -252,11 +377,17 @@ class RuntimeCustomApiAgentLoop:
         messages: list[dict[str, Any]],
         allowed_tools: list[str],
     ) -> None:
+        runtime_message = self._system_message(allowed_tools)
         if messages and str(messages[0].get("role") or "") == "system":
             content = str(messages[0].get("content") or "")
             if "Oha-Yachiyo Agent Runtime" in content:
                 return
-        messages.insert(0, self._system_message(allowed_tools))
+            messages[0] = {
+                **messages[0],
+                "content": f"{runtime_message['content']}\n\n{content}",
+            }
+            return
+        messages.insert(0, runtime_message)
 
     def _initial_messages(self, context: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [
@@ -323,3 +454,40 @@ class RuntimeCustomApiAgentLoop:
             f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
         )
         return {"role": "system", "content": system_prompt}
+
+
+def _payload_text(result: dict[str, Any], planned_input: dict[str, Any], key: str) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return str(data.get(key) or planned_input.get(key) or "").strip()
+
+
+def _active_window_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    app_name = str(data.get("app_name") or "").strip()
+    title = str(data.get("title") or "").strip()
+    if app_name and title:
+        return f"当前前台窗口是 {app_name}：{title}。"
+    if app_name:
+        return f"当前前台应用是 {app_name}。"
+    return "已读取当前前台窗口。"
+
+
+def _browser_page_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    title = str(data.get("title") or "").strip()
+    url = str(data.get("url") or "").strip()
+    if title and url:
+        return f"当前网页是 {title}：{url}。"
+    if url:
+        return f"当前网页是 {url}。"
+    return "已读取当前网页信息。"
+
+
+def _browser_text_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    text = str(data.get("text") or result.get("text") or "").strip()
+    if not text:
+        return "已读取当前网页文本。"
+    if len(text) > 1200:
+        text = f"{text[:1200]}..."
+    return text
