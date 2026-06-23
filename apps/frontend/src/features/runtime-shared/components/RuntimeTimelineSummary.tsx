@@ -67,6 +67,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
+  if (type === 'agent.desktop.permission_recovery') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
+  }
   if (type === 'agent.desktop.intent_unavailable') {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';

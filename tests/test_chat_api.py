@@ -586,6 +586,15 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
         assert task.status == TaskStatus.COMPLETED
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.permission_recovery" in event_types
+        recovery_event = next(
+            event
+            for event in service.list_run_events(run["run_id"])["events"]
+            if event["event_type"] == "agent.desktop.permission_recovery"
+        )
+        assert recovery_event["payload"]["permission_targets"] == ["screen_recording"]
+        assert recovery_event["payload"]["affected_tools"] == ["screen.capture"]
+        assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
     finally:

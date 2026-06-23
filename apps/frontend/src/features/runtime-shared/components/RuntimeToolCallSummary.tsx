@@ -37,6 +37,7 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.desktop.intent_planned',
   'agent.desktop.intent_approval_required',
   'agent.desktop.intent_completed',
+  'agent.desktop.permission_recovery',
   'agent.desktop.intent_unavailable',
   'skill.selected',
   'skill.dispatch.read',
@@ -236,6 +237,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (eventType === 'tool.requested') return 'queued';
   if (eventType === 'agent.desktop.intent_planned') return 'planned';
   if (eventType === 'agent.desktop.intent_approval_required') return 'waiting_approval';
+  if (eventType === 'agent.desktop.permission_recovery') return 'waiting_approval';
   if (eventType === 'agent.desktop.intent_completed') return 'completed';
   if (eventType === 'agent.desktop.intent_unavailable') return 'unavailable';
   return 'running';

@@ -422,6 +422,25 @@ class RuntimeCustomApiAgentLoop:
         )
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
+        recovery_payload = _desktop_permission_recovery_event_payload(
+            planned_tool,
+            planned_input,
+            result,
+        )
+        if recovery_payload:
+            timeline.append(
+                self._timeline(
+                    "agent.desktop.permission_recovery",
+                    planned_tool,
+                    **recovery_payload,
+                )
+            )
+            if run_id and self._append_run_event is not None:
+                self._append_run_event(
+                    run_id,
+                    "agent.desktop.permission_recovery",
+                    recovery_payload,
+                )
         return summary
 
     @staticmethod
@@ -816,11 +835,90 @@ def _desktop_permissions_summary(result: dict[str, Any]) -> str:
     )
 
 
+def _desktop_permission_recovery_event_payload(
+    tool_name: str,
+    planned_input: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    permission_targets = _ordered_text_list(
+        [
+            *_string_list(result.get("permission_targets")),
+            *_string_list(result.get("missing_permissions")),
+            *_string_list(data.get("permission_targets")),
+            *_string_list(data.get("missing_permissions")),
+        ]
+    )
+    recovery_hints = _ordered_text_list(
+        [
+            *_string_list(result.get("recovery_hints")),
+            *_string_list(data.get("recovery_hints")),
+            *_permission_target_hints(permission_targets),
+        ]
+    )
+    recovery_actions = _recovery_actions(result)
+    affected_tools = _ordered_text_list(
+        [
+            *_string_list(result.get("affected_tools")),
+            *_string_list(data.get("affected_tools")),
+            tool_name,
+        ]
+    )
+    has_recovery_signal = (
+        bool(permission_targets)
+        or bool(recovery_hints)
+        or bool(recovery_actions)
+        or bool(result.get("permission_error"))
+    )
+    if not has_recovery_signal:
+        return {}
+    return {
+        "tool": tool_name,
+        "source": "daily_desktop_intent",
+        "status": "permission_recovery_available",
+        "input_preview": planned_input,
+        "permission_targets": permission_targets,
+        "affected_tools": affected_tools,
+        "recovery_hints": recovery_hints,
+        "recovery_actions": recovery_actions,
+    }
+
+
 def _append_recovery_action_summary(text: str, result: dict[str, Any]) -> str:
     labels = _recovery_action_labels(result)
     if not labels:
         return text
     return f"{text}可直接打开：{'、'.join(labels[:4])}。"
+
+
+def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_actions = result.get("recovery_actions") or data.get("recovery_actions") or []
+    if not isinstance(raw_actions, list):
+        return []
+    actions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for raw_action in raw_actions:
+        if not isinstance(raw_action, dict):
+            continue
+        tool = str(raw_action.get("tool") or "").strip()
+        label = str(raw_action.get("label") or tool).strip()
+        permission_target = str(raw_action.get("permission_target") or "").strip()
+        action_input = raw_action.get("input") if isinstance(raw_action.get("input"), dict) else {}
+        key = (tool, repr(sorted(action_input.items())), permission_target)
+        if not tool or key in seen:
+            continue
+        seen.add(key)
+        actions.append(
+            {
+                "label": label or tool,
+                "tool": tool,
+                "input": dict(action_input),
+                "permission_target": permission_target,
+                "risk_level": str(raw_action.get("risk_level") or "low"),
+            }
+        )
+    return actions
 
 
 def _recovery_action_labels(result: dict[str, Any]) -> list[str]:
@@ -1059,3 +1157,12 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return []
+
+
+def _ordered_text_list(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result

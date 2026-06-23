@@ -50,6 +50,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
+  if (name === 'agent.desktop.permission_recovery') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
+  }
   if (name === 'agent.desktop.intent_unavailable') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
@@ -142,6 +146,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
   if (name === 'agent.desktop.intent_planned') return 'tool';
   if (name === 'agent.desktop.intent_approval_required') return 'approval';
+  if (name === 'agent.desktop.permission_recovery') return 'approval';
   if (name === 'agent.desktop.intent_completed') return 'ready';
   if (name === 'agent.desktop.intent_unavailable') return 'danger';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';

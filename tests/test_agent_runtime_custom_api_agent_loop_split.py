@@ -1687,6 +1687,89 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
     assert "Grant Automation permission" in result
 
 
+def test_main_chat_desktop_intent_permission_failure_records_recovery_event() -> None:
+    appended_events: list[dict[str, Any]] = []
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+    result_payload = {
+        "ok": False,
+        "error": "screen recording permission denied",
+        "permission_error": True,
+        "permission_targets": ["screen_recording"],
+        "recovery_hints": ["Grant Screen Recording permission."],
+        "recovery_actions": [
+            {
+                "label": "打开屏幕录制权限",
+                "tool": "app.open",
+                "input": {"app_name": "屏幕录制权限"},
+                "permission_target": "screen_recording",
+                "risk_level": "low",
+            }
+        ],
+    }
+    timeline = [
+        _timeline(
+            "agent.desktop.intent_planned",
+            "screen.capture",
+            tool="screen.capture",
+            input_preview={"reason": "user asked to capture the screen"},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "screen.capture",
+            tool="screen.capture",
+            result=result_payload,
+        ),
+    ]
+
+    summary = loop._direct_daily_desktop_result(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "screen.capture",
+        {"reason": "user asked to capture the screen"},
+        timeline,
+        run_id="run-screen-permission",
+    )
+
+    assert "桌面操作未完成：screen recording permission denied" in summary
+    assert [event["event"] for event in timeline[-2:]] == [
+        "agent.desktop.intent_completed",
+        "agent.desktop.permission_recovery",
+    ]
+    recovery = timeline[-1]
+    assert recovery["tool"] == "screen.capture"
+    assert recovery["permission_targets"] == ["screen_recording"]
+    assert recovery["affected_tools"] == ["screen.capture"]
+    assert recovery["recovery_hints"][0] == "Grant Screen Recording permission."
+    assert any("屏幕录制" in hint for hint in recovery["recovery_hints"])
+    assert recovery["recovery_actions"] == result_payload["recovery_actions"]
+    assert appended_events[-1]["event_type"] == "agent.desktop.permission_recovery"
+    assert appended_events[-1]["payload"]["recovery_actions"] == result_payload["recovery_actions"]
+
+
 def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
     pause = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "media.apple_music_control",

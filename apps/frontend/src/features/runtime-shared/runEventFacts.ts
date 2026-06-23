@@ -11,6 +11,7 @@ type ApprovalReplayWeakIndex = number | 'ambiguous';
 const DAILY_DESKTOP_INTENT_TOOL_EVENTS = new Set([
   'agent.desktop.intent_approval_required',
   'agent.desktop.intent_completed',
+  'agent.desktop.permission_recovery',
   'agent.desktop.intent_unavailable',
 ]);
 
@@ -641,6 +642,7 @@ function toolStatusFromRunEventPayload(
   outputPreview: Record<string, unknown>,
 ): string {
   if (eventType === 'agent.desktop.intent_approval_required') return 'waiting_approval';
+  if (eventType === 'agent.desktop.permission_recovery') return 'blocked';
   if (eventType === 'agent.desktop.intent_unavailable') return 'blocked';
   if (eventType === 'agent.desktop.intent_completed') {
     if (toolCallForegroundLockBusy(outputPreview) || outputPreview.foreground_lock_busy === true) return 'blocked';
@@ -667,6 +669,15 @@ function dailyDesktopIntentOutputPreview(
       'blocked_summary',
       'recovery_actions',
       'allowed_tools',
+    ]);
+  }
+  if (eventType === 'agent.desktop.permission_recovery') {
+    return pickPresentRecord(payload, [
+      'permission_targets',
+      'affected_tools',
+      'recovery_hints',
+      'recovery_actions',
+      'status',
     ]);
   }
   if (eventType === 'agent.desktop.intent_approval_required') {
