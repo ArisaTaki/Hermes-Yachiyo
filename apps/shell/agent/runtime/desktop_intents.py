@@ -3356,6 +3356,13 @@ def _looks_like_bare_safe_key_followup(value: str) -> bool:
 
 
 def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
+    postposed_open = _app_postposed_open_followup_match(text)
+    if postposed_open:
+        mode, _raw_app, app_name, followup = postposed_open
+        action = _desktop_safe_shortcut_action(followup)
+        if action:
+            return {"mode": mode, "app_name": app_name, "action": action}
+
     shortcut_pattern = (
         r"(?:复制(?:一下|下)?(?:选中(?:的)?(?:内容|文字))?|"
         r"粘贴(?:一下|下)?(?:(?:到|进|在)?(?:这(?:里)?|当前输入框|输入框|当前窗口|前台))?|"

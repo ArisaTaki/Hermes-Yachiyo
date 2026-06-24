@@ -647,6 +647,21 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.open",
         "input": {"app_name": "Activity Monitor"},
     }
+    assert daily_desktop_intent_tool_request("把Chrome打开然后新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("把Chrome打开然后刷新", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("把Chrome打开然后后退", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "browser_back"},
+    }
 
 
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
