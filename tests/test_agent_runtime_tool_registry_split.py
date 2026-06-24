@@ -637,6 +637,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
 
 def test_desktop_safe_key_schema_accepts_only_whitelisted_navigation_keys() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "shift_tab"})
     ToolDescriptorRegistry.validate_payload(
         "desktop.safe_key",
         {"action": "arrow_down", "repeat_count": 3},
@@ -3982,6 +3983,27 @@ def test_desktop_safe_key_accepts_directional_chinese_aliases(monkeypatch) -> No
     assert result["data"]["key_label"] == "Down Arrow"
     assert result["data"]["repeat_count"] == 2
     assert calls[0][0][-2:] == ["125", "2"]
+
+
+def test_desktop_safe_key_uses_shift_modifier_for_shift_tab(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="pressed\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_key("shift_tab")
+
+    assert result["ok"] is True
+    assert result["data"]["key_action"] == "shift_tab"
+    assert result["data"]["key_label"] == "Shift+Tab"
+    assert result["data"]["key_code"] == 48
+    assert result["data"]["repeat_count"] == 1
+    assert any("using {shift down}" in str(part) for part in calls[0][0])
+    assert calls[0][0][-2:] == ["48", "1"]
 
 
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:

@@ -5792,6 +5792,8 @@ def _desktop_safe_shortcut_action(text: str) -> str:
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:
     if _is_next_foreground_focus_request(text):
         return {"action": "tab", "repeat_count": 1}
+    if _is_previous_foreground_focus_request(text):
+        return {"action": "shift_tab", "repeat_count": 1}
     count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
     key = (
         r"(?P<{name}>esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"

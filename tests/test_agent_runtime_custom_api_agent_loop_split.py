@@ -4126,7 +4126,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_key",
         "input": {"action": "tab", "repeat_count": 1},
     }
-    assert daily_desktop_intent_tool_request("切到上一个输入框", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("切到上一个输入框", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_key",
+        "input": {"action": "shift_tab", "repeat_count": 1},
+    }
     assert daily_desktop_intent_tool_request("按三次下箭头", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_key",

@@ -115,6 +115,7 @@ SAFE_SHORTCUT_ACTIONS = (
 SAFE_KEY_ACTIONS = (
     "escape",
     "tab",
+    "shift_tab",
     "arrow_up",
     "arrow_down",
     "arrow_left",
@@ -1635,8 +1636,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.safe_key",
         description=(
             "Press a whitelisted foreground navigation key explicitly requested by the user, "
-            "such as Escape, Tab, arrow keys, Home, End, Page Up, or Page Down. This does "
-            "not accept committing keys like Return or destructive keys like Delete."
+            "such as Escape, Tab, Shift+Tab, arrow keys, Home, End, Page Up, or Page Down. "
+            "This does not accept committing keys like Return or destructive keys like Delete."
         ),
         properties={
             "action": {

@@ -3930,6 +3930,57 @@ def test_chat_bridge_quick_message_executes_next_input_focus_as_safe_tab_key(
     assert typed_texts == []
 
 
+def test_chat_bridge_quick_message_executes_previous_input_focus_as_safe_shift_tab_key(
+    tmp_path,
+    monkeypatch,
+):
+    pressed: list[tuple[str, int]] = []
+    typed_texts: list[str] = []
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        pressed.append((action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": "Pressed Shift+Tab",
+            "data": {
+                "key_action": action,
+                "key_label": "Shift+Tab",
+                "repeat_count": repeat_count,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        lambda text: typed_texts.append(text) or {"ok": True, "action": "desktop.safe_type_text"},
+    )
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "切到上一个输入框",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已按Shift+Tab。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "action": "shift_tab",
+            "repeat_count": 1,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert pressed == [("shift_tab", 1), ("shift_tab", 1)]
+    assert typed_texts == []
+
+
 def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
     tmp_path,
     monkeypatch,

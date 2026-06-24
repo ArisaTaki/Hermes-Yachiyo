@@ -123,6 +123,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
 _SAFE_KEYS: dict[str, tuple[int, str]] = {
     "escape": (53, "Escape"),
     "tab": (48, "Tab"),
+    "shift_tab": (48, "Shift+Tab"),
     "arrow_up": (126, "Up Arrow"),
     "arrow_down": (125, "Down Arrow"),
     "arrow_left": (123, "Left Arrow"),
@@ -2986,13 +2987,14 @@ def desktop_safe_key(action: str, *, repeat_count: Any = 1) -> dict[str, Any]:
     clean_action = _clean_safe_key_action(action)
     clean_repeat_count = _clean_key_repeat_count(repeat_count)
     key_code, label = _SAFE_KEYS[clean_action]
+    modifier_clause = " using {shift down}" if clean_action == "shift_tab" else ""
     result = _run_osascript(
-        """
+        f"""
         on run argv
             set keyCodeValue to item 1 of argv as integer
             set repeatCount to item 2 of argv as integer
             repeat repeatCount times
-                tell application "System Events" to key code keyCodeValue
+                tell application "System Events" to key code keyCodeValue{modifier_clause}
                 delay 0.05
             end repeat
             return "pressed"
@@ -3729,6 +3731,12 @@ def _clean_safe_key_action(action: str) -> str:
         "tab_key": "tab",
         "制表": "tab",
         "制表键": "tab",
+        "shift_tab": "shift_tab",
+        "shifttab": "shift_tab",
+        "shift+tab": "shift_tab",
+        "shift_tab_key": "shift_tab",
+        "上一个输入框": "shift_tab",
+        "上一输入框": "shift_tab",
         "up": "arrow_up",
         "down": "arrow_down",
         "left": "arrow_left",

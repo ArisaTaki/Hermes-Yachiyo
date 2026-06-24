@@ -1253,7 +1253,7 @@ class RuntimeCustomApiAgentLoop:
             "map app open/focus followed by explicit single-click coordinates to app.open_and_safe_click or app.focus_and_safe_click; "
             "map app open/focus followed by explicit foreground UI control/button clicks by visible label to app.open_and_click_ui_element or app.focus_and_click_ui_element; "
             "map app open/focus followed by explicit foreground input field typing by visible label to app.open_and_type_into_ui_element or app.focus_and_type_into_ui_element; "
-            "map explicit foreground navigation keys such as Escape, Tab, arrow keys, Home, End, Page Up, and Page Down to desktop.safe_key; "
+            "map explicit foreground navigation keys such as Escape, Tab, Shift+Tab, arrow keys, Home, End, Page Up, and Page Down to desktop.safe_key; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "
             "map explicit current foreground scroll/page up/page down requests to desktop.safe_scroll; "
@@ -2023,6 +2023,7 @@ def _safe_key_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> 
     label = {
         "escape": "Escape",
         "tab": "Tab",
+        "shift_tab": "Shift+Tab",
         "arrow_up": "上箭头",
         "arrow_down": "下箭头",
         "arrow_left": "左箭头",

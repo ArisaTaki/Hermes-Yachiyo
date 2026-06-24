@@ -63,6 +63,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "app.focus_and_safe_type_text" in config["instructions"]
     assert "app.open_and_safe_shortcut" in config["instructions"]
     assert "app.focus_and_safe_shortcut" in config["instructions"]
+    assert "Shift+Tab" in config["instructions"]
     assert "desktop.reveal_path" in config["instructions"]
     assert "browser.open_url" in config["instructions"]
     assert "browser.open_url_and_extract_text" in config["instructions"]

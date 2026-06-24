@@ -928,12 +928,14 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert open_safe_key.risk_level == "low"
     assert open_safe_key.input_schema["required"] == ["app_name", "action"]
     assert "tab" in open_safe_key.input_schema["properties"]["action"]["enum"]
+    assert "shift_tab" in open_safe_key.input_schema["properties"]["action"]["enum"]
     assert "return" not in open_safe_key.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted foreground navigation keys" in note for note in open_safe_key.fallback_notes)
     assert focus_safe_key.capability_id == "foreground_input"
     assert focus_safe_key.risk_level == "low"
     assert focus_safe_key.input_schema["required"] == ["app_name", "action"]
     assert "arrow_down" in focus_safe_key.input_schema["properties"]["action"]["enum"]
+    assert "shift_tab" in focus_safe_key.input_schema["properties"]["action"]["enum"]
     assert open_hotkey.capability_id == "foreground_input"
     assert open_hotkey.risk_level == "medium"
     assert open_hotkey.input_schema["required"] == ["app_name", "key"]
@@ -999,6 +1001,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_key.risk_level == "low"
     assert safe_key.input_schema["required"] == ["action"]
     assert "tab" in safe_key.input_schema["properties"]["action"]["enum"]
+    assert "shift_tab" in safe_key.input_schema["properties"]["action"]["enum"]
     assert "return" not in safe_key.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted foreground navigation keys" in note for note in safe_key.fallback_notes)
     assert safe_type_text.capability_id == "foreground_input"
