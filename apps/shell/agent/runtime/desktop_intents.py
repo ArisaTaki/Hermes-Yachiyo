@@ -1748,7 +1748,7 @@ def _browser_open_url_and_extract_text_request(text: str) -> dict[str, str] | No
 def _browser_open_url_and_screenshot_request(text: str) -> dict[str, str] | None:
     if not _is_browser_open_followup_screenshot_request(text):
         return None
-    url = _browser_open_target_url(text)
+    url = _browser_open_target_url(text) or _explicit_browser_url_in_text(text)
     if not url:
         return None
     return {
@@ -1784,11 +1784,19 @@ def _is_browser_open_followup_extract_text_request(text: str) -> bool:
 
 
 def _is_browser_open_followup_screenshot_request(text: str) -> bool:
-    if not _browser_open_target_url(text):
+    explicit_url = _explicit_browser_url_in_text(text)
+    if not (_browser_open_target_url(text) or explicit_url):
         return False
     lowered = text.lower()
     return bool(
         _is_browser_screenshot_request(text)
+        or (
+            explicit_url
+            and (
+                re.search(r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图|截取)", text)
+                or re.search(r"\b(?:screenshot|capture)\b", lowered)
+            )
+        )
         or re.search(
             r"(?:打开|访问|浏览|前往|去).{0,80}"
             r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图|截取)",
@@ -1800,6 +1808,21 @@ def _is_browser_open_followup_screenshot_request(text: str) -> bool:
             lowered,
         )
     )
+
+
+def _explicit_browser_url_in_text(text: str) -> str:
+    url_token = (
+        r"(?:https?://[^\s。！？!?，,]+|www\.[^\s。！？!?，,]+|"
+        r"localhost(?::\d+)?(?:/[^\s。！？!?，,]*)?|"
+        r"[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(?:/[^\s。！？!?，,]*)?)"
+    )
+    for match in re.finditer(rf"(?P<url>{url_token})", text, flags=re.IGNORECASE):
+        if _url_match_inside_local_path(text, match.start("url")):
+            continue
+        url = _normalize_url(match.group("url"))
+        if url:
+            return url
+    return ""
 
 
 def _browser_target_url(value: str) -> str:

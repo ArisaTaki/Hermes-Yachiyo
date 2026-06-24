@@ -3436,36 +3436,42 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_screenshot)
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "打开 Chrome 访问 github.com 并截图",
-        launcher_mode="bubble",
+    cases = (
+        ("打开 Chrome 访问 github.com 并截图", "bubble"),
+        ("打开网页并截图 github.com", "live2d"),
     )
+    for text, launcher_mode in cases:
+        calls.clear()
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
 
-    assert calls[0] == ("open", "https://github.com")
-    assert calls[1][0] == "screenshot"
-    assert calls[1][1].endswith("browser/current-page.png")
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开网页并截取当前网页。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_screenshot"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
-        "url": "https://github.com",
-        "reason": "user asked to capture the browser page after opening a URL",
-    }
-    assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
-    completed_event = next(
-        event
-        for event in result["_task_timeline"]["events"]
-        if event["event_type"] == "agent.desktop.intent_completed"
-    )
-    assert completed_event["detail"] == "browser.open_url_and_screenshot"
-    assert run["status"] == "completed"
-    assert "artifact.created" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert calls[0] == ("open", "https://github.com")
+        assert calls[1][0] == "screenshot"
+        assert calls[1][1].endswith("browser/current-page.png")
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已打开网页并截取当前网页。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_screenshot"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "url": "https://github.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        }
+        assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
+        completed_event = next(
+            event
+            for event in result["_task_timeline"]["events"]
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+        assert completed_event["detail"] == "browser.open_url_and_screenshot"
+        assert run["status"] == "completed"
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoints(

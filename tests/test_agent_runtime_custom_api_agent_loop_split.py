@@ -889,6 +889,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "reason": "user asked to capture the browser page after opening a URL",
         },
     }
+    assert daily_desktop_intent_tool_request("打开网页并截图 example.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://example.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
+    assert daily_desktop_intent_tool_request("screenshot https://example.com after opening it", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://example.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
     assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", ["browser.open_url"]) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
