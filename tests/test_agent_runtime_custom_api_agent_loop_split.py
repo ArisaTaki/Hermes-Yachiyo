@@ -1805,6 +1805,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"url": "https://www.baidu.com/s?wd=OpenAI"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("百度搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.baidu.com/s?wd=OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开百度搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.baidu.com/s?wd=OpenAI"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开 Excel 然后新建表格", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
@@ -4103,6 +4117,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "pause"},
     }
     assert daily_desktop_intent_tool_request("继续放歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("继续当前音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},

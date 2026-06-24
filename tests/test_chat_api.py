@@ -450,6 +450,33 @@ def test_send_message_executes_direct_music_control_task(tmp_path, monkeypatch):
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("继续当前音乐")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_user = [
+            message for message in runtime.chat_session.get_messages() if message.role == "user"
+        ][-1]
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_user.metadata["daily_desktop_tool"] == "media.apple_music_control"
+        assert control_calls == ["next", "play"]
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
@@ -2713,6 +2740,8 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("查 OpenAI 最新消息", "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"),
             ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
             ("百度 open hanako", "https://www.baidu.com/s?wd=open+hanako"),
+            ("百度搜索 OpenAI", "https://www.baidu.com/s?wd=OpenAI"),
+            ("打开百度搜索 OpenAI", "https://www.baidu.com/s?wd=OpenAI"),
             ("打开新标签并搜索 OpenAI", "https://www.google.com/search?q=OpenAI"),
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),

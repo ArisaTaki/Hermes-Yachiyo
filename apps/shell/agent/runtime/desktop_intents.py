@@ -2021,6 +2021,8 @@ def _browser_search_url(text: str) -> str:
     if _looks_like_click_command(text) or _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
         return ""
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开)?\s*"
+        r"(?P<engine>百度|baidu)\s*(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -6293,8 +6295,8 @@ def _music_control_action(text: str) -> str:
         return "pause"
     if re.search(
         r"(?:继续播放|恢复播放|接着播放|开始播放|"
-        r"(?:继续|接着|恢复|开始)(?:播放|播|放)?\s*(?:音乐|歌曲|歌|apple\s*music|music))"
-        r"(?:\s*(?:音乐|歌曲|歌|apple\s*music|music))?",
+        r"(?:继续|接着|恢复|开始)(?:播放|播|放)?\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))"
+        r"(?:\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))?",
         lowered,
     ) or re.search(
         r"\b(?:resume|continue|start)(?:\s+playing)?\s+"
