@@ -4202,6 +4202,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("我想听歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("听一首歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("播点东西", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("play something", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("I want to listen to music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("帮我播放点音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
@@ -4231,6 +4256,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "周杰伦"},
+    }
+    assert daily_desktop_intent_tool_request("我想听超时空辉夜姬吧", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("播放超时空辉夜姬 Apple Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
     }
     assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",

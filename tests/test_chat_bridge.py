@@ -1943,6 +1943,11 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         ("放音乐听听", "live2d"),
         ("听点音乐", "bubble"),
         ("想听音乐", "live2d"),
+        ("我想听歌", "bubble"),
+        ("听一首歌", "live2d"),
+        ("播点东西", "bubble"),
+        ("play something", "live2d"),
+        ("I want to listen to music", "bubble"),
         ("用 Apple Music 听点音乐", "bubble"),
         ("播放苹果音乐", "live2d"),
     ]
@@ -1968,7 +1973,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_and_play_calls == 11
+    assert open_and_play_calls == 16
 
 
 def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(
@@ -2100,6 +2105,35 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
+
+    direct_prompts = (
+        ("我想听超时空辉夜姬吧", "bubble", "超时空辉夜姬"),
+        ("播放超时空辉夜姬 Apple Music", "live2d", "超时空辉夜姬"),
+    )
+    for prompt, launcher_mode, query in direct_prompts:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert play_calls[-1] == query
+        assert agent_task["summary"] == f"已在 Apple Music 播放：{query} - Yachiyo。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"query": query}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert play_calls == ["超时空辉夜姬", "超时空辉夜姬", "超时空辉夜姬"]
 
 
 def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoints(
