@@ -3505,6 +3505,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Music"},
     }
+    assert daily_desktop_intent_tool_request("打开苹果音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+    }
     assert daily_desktop_intent_tool_request("启动播放器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -3544,6 +3549,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
         "input": {},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 播放音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 随便放点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 播放周杰伦", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "周杰伦"},
     }
     assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",
