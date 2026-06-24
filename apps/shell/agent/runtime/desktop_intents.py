@@ -5958,6 +5958,12 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
         ),
         (
+            zh_prefix
+            + r"(?:翻到|翻至|滚到|滚至|滑到|滑至|转到|转至|跳到|跳至|到)\s*"
+            + r"(?P<direction_target>下一页|上一页)"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
             r"^(?:please\s+)?(?:scroll|page)\s+"
             r"(?P<direction_en>down|up)"
             + rf"(?:\s+{page_count.format(name='count_en')}\s*(?:pages?|times?)?)?"
@@ -5983,6 +5989,7 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
         direction = (
             groups.get("direction")
             or groups.get("direction_phrase")
+            or groups.get("direction_target")
             or groups.get("direction_en")
             or groups.get("direction_en_target")
             or groups.get("direction_en_prefix")

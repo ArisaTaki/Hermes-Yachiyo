@@ -3879,6 +3879,51 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
     assert pressed == [("arrow_down", 3), ("arrow_down", 3)]
 
 
+def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    scrolled: list[tuple[str, int]] = []
+
+    def fake_safe_scroll(direction: str, *, pages: int = 1) -> dict:
+        scrolled.append((direction, pages))
+        return {
+            "ok": True,
+            "action": "desktop.safe_scroll",
+            "summary": "Scrolled foreground desktop down 1 page",
+            "data": {
+                "direction": direction,
+                "pages": pages,
+                "explicit_user_scroll": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "翻到下一页",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已向下滚动前台界面（1 页）。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "direction": "down",
+            "pages": 1,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert scrolled == [("down", 1), ("down", 1)]
+
+
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     tmp_path,
     monkeypatch,

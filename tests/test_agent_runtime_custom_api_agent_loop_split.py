@@ -4096,6 +4096,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_scroll",
         "input": {"direction": "up", "pages": 2},
     }
+    assert daily_desktop_intent_tool_request("翻到下一页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 1},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 翻到下一页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_scroll",
+        "input": {"app_name": "Google Chrome", "direction": "down", "pages": 1},
+    }
     assert daily_desktop_intent_tool_request("scroll down 3 pages", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_scroll",
