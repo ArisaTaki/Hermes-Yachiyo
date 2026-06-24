@@ -3512,6 +3512,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开 Finder 看看下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开访达看看下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 看看桌面文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Desktop"},
+    }
     assert daily_desktop_intent_tool_request("打开 Finder 下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",

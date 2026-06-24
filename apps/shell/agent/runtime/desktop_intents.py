@@ -3657,7 +3657,8 @@ def _strip_finder_path_prefix(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)|"
         r"(?:open|launch|start)\s+(?:the\s+)?(?:finder|file\s+manager|file\s+browser))\s*"
-        r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))?\s*",
+        r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))?\s*"
+        r"(?:(?:看看|看一下|看下|查看|检查|打开|开启|进入)\s*)?",
         "",
         text,
         flags=re.IGNORECASE,

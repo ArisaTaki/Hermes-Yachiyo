@@ -3560,6 +3560,27 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    cases = (
+        ("打开 Finder 看看下载文件夹", "bubble"),
+        ("打开访达看看下载文件夹", "live2d"),
+    )
+    for prompt, launcher_mode in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert open_calls[-1] == "~/Downloads"
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已打开文件夹：~/Downloads。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "~/Downloads"}
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_latest_download_open_path_for_launcher_entrypoints(
     tmp_path,
