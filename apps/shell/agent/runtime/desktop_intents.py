@@ -1013,6 +1013,9 @@ def _normalize_submit_foreground_phrase(text: str) -> str:
 
 
 def _submit_foreground_action_for_phrase(phrase: str) -> str:
+    return_key_action = _submit_foreground_action_from_return_key_phrase(phrase)
+    if return_key_action:
+        return return_key_action
     if phrase in {
         "发送",
         "发出",
@@ -1080,6 +1083,27 @@ def _submit_foreground_action_for_phrase(phrase: str) -> str:
         "confirmcurrentdialog",
         "confirmthecurrentdialog",
     }:
+        return "confirm"
+    return ""
+
+
+def _submit_foreground_action_from_return_key_phrase(phrase: str) -> str:
+    return_key = r"(?:按|按下|敲|敲下)?(?:一下|下)?(?:回车|enter|return)(?:键)?"
+    english_prefix = r"(?:press|hit)(?:enter|return)to"
+    if re.fullmatch(rf"(?:{return_key})(?:发送|发出)", phrase) or re.fullmatch(
+        rf"{english_prefix}(?:send|post)",
+        phrase,
+    ):
+        return "send"
+    if re.fullmatch(rf"(?:{return_key})(?:提交)", phrase) or re.fullmatch(
+        rf"{english_prefix}submit",
+        phrase,
+    ):
+        return "submit"
+    if re.fullmatch(rf"(?:{return_key})(?:确认|确定)", phrase) or re.fullmatch(
+        rf"{english_prefix}(?:confirm|ok)",
+        phrase,
+    ):
         return "confirm"
     return ""
 

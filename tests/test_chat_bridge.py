@@ -4556,6 +4556,7 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             ),
             ("send current message", "desktop.submit_foreground", {"action": "send"}),
             ("发送当前内容", "desktop.submit_foreground", {"action": "send"}),
+            ("按回车提交", "desktop.submit_foreground", {"action": "submit"}),
         ]
         for text, tool_name, input_preview in cases:
             result = bridge.send_quick_message(

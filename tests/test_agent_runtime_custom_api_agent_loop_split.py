@@ -3704,6 +3704,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "send"},
     }
+    assert daily_desktop_intent_tool_request("按回车发送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("press return to send", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
     assert daily_desktop_intent_tool_request("发送 hello", allowed_tools) is None
     assert daily_desktop_intent_tool_request("send current message", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3720,12 +3730,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "submit"},
     }
+    assert daily_desktop_intent_tool_request("按回车提交", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
+    assert daily_desktop_intent_tool_request("press enter to submit", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
     assert daily_desktop_intent_tool_request("submit current form", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
         "input": {"action": "submit"},
     }
     assert daily_desktop_intent_tool_request("确认当前内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "confirm"},
+    }
+    assert daily_desktop_intent_tool_request("按回车确认", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "confirm"},
+    }
+    assert daily_desktop_intent_tool_request("press enter to confirm", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
         "input": {"action": "confirm"},
