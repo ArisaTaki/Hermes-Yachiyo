@@ -522,6 +522,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/features/yachiyo-chat/api.ts",
         [
             "export type LegacyChatMessageResult",
+            "agent_task?: AgentTaskSnapshot | null;",
             "export async function sendLegacyChatMessage",
             "return apiPost('/ui/chat/messages', request);",
             "export async function retryLegacyChatMessage",
@@ -615,6 +616,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/features/yachiyo-chat/hooks/useLegacyChatRunnableResult.ts",
         [
             "export function useLegacyChatRunnableResult",
+            "legacyChatAgentTask(result)",
+            "rememberYachiyoTasks([agentTask])",
+            "expectPendingAssistantReply(taskId)",
+            "yachiyoTaskRunId(agentTask)",
+            "setStatus(chatRunnableRunningStatusText('八千代'));",
             "legacyChatRunnableResult(result)",
             "if (!runnableResult.runnableCommand) return false;",
             "setStatus(chatRunnableRunningStatusText(runnableLabel));",

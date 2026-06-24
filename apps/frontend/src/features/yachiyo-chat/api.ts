@@ -13,6 +13,7 @@ import type {
 } from './types';
 
 export type LegacyChatMessageResult = {
+  agent_task?: AgentTaskSnapshot | null;
   ok?: boolean;
   error?: string;
   task_id?: string;

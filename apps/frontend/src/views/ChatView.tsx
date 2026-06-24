@@ -403,6 +403,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     clearPendingReplyTask: () => {
       pendingReplyTaskIdRef.current = '';
     },
+    expectPendingAssistantReply,
     loadSessions,
     onRunning: () => {
       stickToBottomRef.current = true;
@@ -413,6 +414,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     pollAgentRunInBackground,
     refreshMessages,
     refreshYachiyoTaskById,
+    rememberYachiyoTasks,
     setStatus,
   });
   const { startPublicYachiyoTask } = useYachiyoTaskSubmit({
