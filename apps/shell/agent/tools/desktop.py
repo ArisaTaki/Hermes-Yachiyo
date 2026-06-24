@@ -163,6 +163,10 @@ _WIFI_SETTINGS_URLS = (
     "x-apple.systempreferences:com.apple.preference.network?Wi-Fi",
     *_NETWORK_SETTINGS_URLS,
 )
+_DISPLAY_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Displays-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.displays",
+)
 
 _SYSTEM_SETTINGS_TARGETS = {
     "privacysecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
@@ -185,6 +189,10 @@ _SYSTEM_SETTINGS_TARGETS = {
     "wifi": ("Wi-Fi", _WIFI_SETTINGS_URLS),
     "无线网络": ("Wi-Fi", _WIFI_SETTINGS_URLS),
     "无线局域网": ("Wi-Fi", _WIFI_SETTINGS_URLS),
+    "display": ("Displays", _DISPLAY_SETTINGS_URLS),
+    "displays": ("Displays", _DISPLAY_SETTINGS_URLS),
+    "显示器": ("Displays", _DISPLAY_SETTINGS_URLS),
+    "显示": ("Displays", _DISPLAY_SETTINGS_URLS),
     "accessibility": (
         "Accessibility Permission",
         ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),

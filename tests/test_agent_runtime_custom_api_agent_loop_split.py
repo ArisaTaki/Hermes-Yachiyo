@@ -3538,10 +3538,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "System Settings"},
     }
+    assert daily_desktop_intent_tool_request("打开蓝牙", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "蓝牙"},
+    }
     assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.settings_open",
         "input": {"target": "蓝牙"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Wi-Fi", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "Wi-Fi"},
     }
     assert daily_desktop_intent_tool_request("打开 Wi-Fi 设置", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3563,10 +3573,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.settings_open",
         "input": {"target": "网络"},
     }
+    assert daily_desktop_intent_tool_request("打开网络", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "网络"},
+    }
     assert daily_desktop_intent_tool_request("打开显示器设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "tool": "system.settings_open",
+        "input": {"target": "显示器"},
+    }
+    assert daily_desktop_intent_tool_request("打开显示设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "显示器"},
+    }
+    assert daily_desktop_intent_tool_request("打开隐私", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
+    }
+    assert daily_desktop_intent_tool_request("打开定位权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "定位服务"},
     }
     assert daily_desktop_intent_tool_request("打开文件管理器", allowed_tools) == {
         "protocol": "json_fallback",

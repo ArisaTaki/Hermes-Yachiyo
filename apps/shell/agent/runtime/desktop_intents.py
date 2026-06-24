@@ -344,6 +344,9 @@ def daily_desktop_intent_tool_requests(
     """Return structured desktop tool requests for clear daily Chat intents."""
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
+    system_settings_target = _direct_system_settings_tool_target(context)
+    if system_settings_target and "system.settings_open" in allowed:
+        return [_request("system.settings_open", {"target": system_settings_target})]
     sequence = _prefer_system_settings_open_sequence(
         daily_desktop_intent_sequence_candidates(context),
         allowed,
@@ -1604,7 +1607,7 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
 
-    system_settings_target = _system_settings_tool_target(text)
+    system_settings_target = _direct_system_settings_tool_target(text)
     if system_settings_target:
         candidates.append(_request("system.settings_open", {"target": system_settings_target}))
 
@@ -6147,6 +6150,45 @@ def _system_settings_tool_target(text: str) -> str:
     return _permission_settings_open_name(text) or _system_settings_open_name(text)
 
 
+def _direct_system_settings_tool_target(text: str) -> str:
+    cleaned = _clean_text(text)
+    if (
+        not cleaned
+        or _looks_like_negative_request(cleaned)
+        or _is_desktop_permissions_request(cleaned)
+        or _looks_like_explanation_request(cleaned)
+        or _looks_like_project_or_design_request(cleaned)
+    ):
+        return ""
+    if re.search(r"(?:看看|看下|查看|检查|有哪些|有什么|选项|按钮|控件|界面)", cleaned):
+        return ""
+    return _system_settings_tool_target(cleaned) or _bare_system_settings_open_name(cleaned)
+
+
+def _bare_system_settings_open_name(text: str) -> str:
+    lowered = text.lower()
+    open_prefix = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|拉起|显示|前往|进入|去|open|launch|show|go\s+to)\s*"
+    )
+    suffix = (
+        r"\s*(?:设置|权限|settings?|permissions?|pane|page|面板|页面)?"
+        r"\s*(?:一下|下)?(?:吧|吗|嘛|呢)?[?？。！!]*$"
+    )
+    target_patterns = (
+        (r"(?:wi-?fi|无线网络|无线局域网)", "Wi-Fi"),
+        (r"(?:蓝牙|\bbluetooth\b)", "蓝牙"),
+        (r"(?:网络|\bnetwork\b)", "网络"),
+        (r"(?:显示器|显示设置|\bdisplays?\b|\bdisplay\s+settings?\b)", "显示器"),
+        (r"(?:隐私与安全性|隐私和安全性|隐私.*安全|隐私|\bprivacy\b|\bsecurity\b)", "隐私与安全性"),
+        (r"(?:定位服务|定位|位置服务|\blocation\s+services?\b|\blocation\b)", "定位服务"),
+    )
+    for pattern, target in target_patterns:
+        if re.search(open_prefix + pattern + suffix, lowered, flags=re.IGNORECASE):
+            return target
+    return ""
+
+
 def _system_settings_target_name(text: str) -> str:
     lowered = text.lower()
     if re.search(r"(?:蓝牙|\bbluetooth\b)", lowered):
@@ -6171,6 +6213,8 @@ def _system_settings_target_name(text: str) -> str:
         return "麦克风"
     if re.search(r"(?:摄像头|相机|\bcamera\b)", lowered):
         return "摄像头"
+    if re.search(r"(?:定位服务|定位权限|位置服务|\blocation\s+services?\b|\blocation\b)", lowered):
+        return "定位服务"
     if re.search(
         r"(?:隐私与安全性|隐私和安全性|隐私.*安全|系统隐私设置|隐私设置|安全隐私设置|"
         r"桌面权限|桌面执行权限|本地工具权限|\bprivacy\b|\bsecurity\b|"
@@ -6178,7 +6222,9 @@ def _system_settings_target_name(text: str) -> str:
         lowered,
     ):
         return "隐私与安全性"
-    if re.search(r"(?:声音|音量|显示器|显示设置|\bsound\b|\bvolume\b|\bdisplay\b)", lowered):
+    if re.search(r"(?:显示器|显示设置|\bdisplays?\b|\bdisplay\s+settings?\b)", lowered):
+        return "显示器"
+    if re.search(r"(?:声音|音量|\bsound\b|\bvolume\b)", lowered):
         return ""
     if re.search(
         r"(?:系统设置|系统偏好|系统偏好设置|设置|偏好|system\s+settings?|system\s+preferences?|settings?|preferences?)",
@@ -6194,7 +6240,7 @@ def _permission_settings_open_name(text: str) -> str:
         r"(?:打开|启动|开启|拉起|显示|前往|进入|去|修复|修一下|修下|处理|解决).{0,20}"
         r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面|"
         r"屏幕录制|辅助功能|自动化|输入监控|完全磁盘访问|文件和文件夹|摄像头|相机|麦克风|"
-        r"隐私与安全性|隐私.*安全)",
+        r"定位服务|定位权限|位置服务|隐私与安全性|隐私.*安全)",
         text,
     ):
         return _permission_settings_target_name(text) or "隐私与安全性"
@@ -6208,7 +6254,8 @@ def _permission_settings_open_name(text: str) -> str:
     if english_target and re.search(
         r"\b(?:open|launch|show|go\s+to|fix|repair|resolve)\b.{0,24}"
         r"(?:privacy|security|accessibility|automation|screen\s+recording|screen\s+capture|"
-        r"full\s+disk\s+access|input\s+monitoring|camera|microphone|files?\s+and\s+folders?)"
+        r"full\s+disk\s+access|input\s+monitoring|camera|microphone|files?\s+and\s+folders?|"
+        r"location\s+services?|location)"
         r".{0,24}(?:settings|permissions?|pane|page)?\b",
         lowered,
     ):
@@ -6234,6 +6281,8 @@ def _permission_settings_target_name(text: str) -> str:
         return "麦克风"
     if re.search(r"(?:摄像头|相机|\bcamera\b)", lowered):
         return "摄像头"
+    if re.search(r"(?:定位服务|定位权限|位置服务|\blocation\s+services?\b|\blocation\b)", lowered):
+        return "定位服务"
     if re.search(
         r"(?:隐私与安全性|隐私和安全性|隐私.*安全|系统隐私设置|隐私设置|安全隐私设置|"
         r"桌面权限|桌面执行权限|本地工具权限|\bprivacy\b|\bsecurity\b|"

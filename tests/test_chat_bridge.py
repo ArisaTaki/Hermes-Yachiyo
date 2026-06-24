@@ -416,33 +416,36 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
     tmp_path,
     monkeypatch,
 ):
-    open_calls: list[str] = []
+    settings_calls: list[str] = []
 
-    def fake_app_open(app_name: str) -> dict:
-        open_calls.append(app_name)
+    def fake_system_settings_open(target: str) -> dict:
+        settings_calls.append(target)
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened System Settings: {app_name}",
+            "action": "system.settings_open",
+            "summary": f"Opened System Settings: {target}",
             "data": {
-                "app_name": app_name,
+                "target": target,
                 "open_target": "system_settings",
-                "settings_label": "Bluetooth",
+                "settings_label": target,
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_settings_open",
+        fake_system_settings_open,
+    )
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开蓝牙设置",
+        "打开蓝牙",
     )
 
     assert result["ok"] is True
-    assert open_calls == ["蓝牙"]
-    assert agent_task["summary"] == "已打开蓝牙。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "蓝牙"}
+    assert settings_calls == ["蓝牙"]
+    assert agent_task["summary"] == "已打开系统设置：蓝牙。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "system.settings_open"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"target": "蓝牙"}
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
@@ -451,20 +454,24 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
     assert "model.requested" not in event_types
 
     cases = (
-        ("打开 Wi-Fi 设置", "bubble", "Wi-Fi", "已打开 Wi-Fi。"),
-        ("打开系统设置里的辅助功能", "bubble", "辅助功能权限", "已打开辅助功能权限。"),
-        ("打开系统设置里的辅助功能", "live2d", "辅助功能权限", "已打开辅助功能权限。"),
-        ("打开隐私设置", "bubble", "隐私与安全性", "已打开隐私与安全性。"),
-        ("open desktop permissions", "live2d", "隐私与安全性", "已打开隐私与安全性。"),
-        ("打开输入监控权限", "bubble", "输入监控", "已打开输入监控。"),
-        ("打开完全磁盘访问权限", "live2d", "完全磁盘访问", "已打开完全磁盘访问。"),
-        ("打开摄像头权限", "bubble", "摄像头", "已打开摄像头。"),
-        ("修复自动化权限", "bubble", "自动化权限", "已打开自动化权限。"),
-        ("修一下屏幕录制权限", "live2d", "屏幕录制权限", "已打开屏幕录制权限。"),
-        ("fix full disk access permissions", "bubble", "完全磁盘访问", "已打开完全磁盘访问。"),
-        ("fix input monitoring permissions", "live2d", "输入监控", "已打开输入监控。"),
+        ("打开 Wi-Fi", "bubble", "Wi-Fi", "已打开系统设置：Wi-Fi。"),
+        ("打开无线网络", "live2d", "Wi-Fi", "已打开系统设置：Wi-Fi。"),
+        ("打开网络", "bubble", "网络", "已打开系统设置：网络。"),
+        ("打开显示设置", "live2d", "显示器", "已打开系统设置：显示器。"),
+        ("打开定位权限", "bubble", "定位服务", "已打开系统设置：定位服务。"),
+        ("打开系统设置里的辅助功能", "bubble", "辅助功能权限", "已打开系统设置：辅助功能权限。"),
+        ("打开系统设置里的辅助功能", "live2d", "辅助功能权限", "已打开系统设置：辅助功能权限。"),
+        ("打开隐私", "bubble", "隐私与安全性", "已打开系统设置：隐私与安全性。"),
+        ("open desktop permissions", "live2d", "隐私与安全性", "已打开系统设置：隐私与安全性。"),
+        ("打开输入监控权限", "bubble", "输入监控", "已打开系统设置：输入监控。"),
+        ("打开完全磁盘访问权限", "live2d", "完全磁盘访问", "已打开系统设置：完全磁盘访问。"),
+        ("打开摄像头权限", "bubble", "摄像头", "已打开系统设置：摄像头。"),
+        ("修复自动化权限", "bubble", "自动化权限", "已打开系统设置：自动化权限。"),
+        ("修一下屏幕录制权限", "live2d", "屏幕录制权限", "已打开系统设置：屏幕录制权限。"),
+        ("fix full disk access permissions", "bubble", "完全磁盘访问", "已打开系统设置：完全磁盘访问。"),
+        ("fix input monitoring permissions", "live2d", "输入监控", "已打开系统设置：输入监控。"),
     )
-    for prompt, launcher_mode, app_name, summary in cases:
+    for prompt, launcher_mode, target, summary in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
@@ -474,17 +481,21 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
 
         assert result["ok"] is True
         assert agent_task["summary"] == summary
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+        assert agent_task["tool_calls"][-1]["tool_name"] == "system.settings_open"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"target": target}
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_calls == [
+    assert settings_calls == [
         "蓝牙",
         "Wi-Fi",
+        "Wi-Fi",
+        "网络",
+        "显示器",
+        "定位服务",
         "辅助功能权限",
         "辅助功能权限",
         "隐私与安全性",
@@ -1379,13 +1390,17 @@ def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_with
 ):
     calls: list[tuple[str, object, object]] = []
 
-    def fake_app_open(app_name: str) -> dict:
-        calls.append(("open", app_name, None))
+    def fake_system_settings_open(target: str) -> dict:
+        calls.append(("settings", target, None))
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name, "launch_verified": True},
+            "action": "system.settings_open",
+            "summary": f"Opened System Settings: {target}",
+            "data": {
+                "target": target,
+                "open_target": "system_settings",
+                "settings_label": "System Settings",
+            },
         }
 
     def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
@@ -1407,7 +1422,10 @@ def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_with
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_settings_open",
+        fake_system_settings_open,
+    )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     for launcher_mode in ("bubble", "live2d"):
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1422,11 +1440,11 @@ def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_with
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == (
-            "已打开 System Settings。 当前 System Settings 界面控件："
+            "已打开系统设置。 当前 System Settings 界面控件："
             "Button General（120, 88）。"
         )
         assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
-            "app.open",
+            "system.settings_open",
             "desktop.ui_elements",
         ]
         assert agent_task["tool_calls"][-1]["input_preview"] == {
@@ -1443,9 +1461,9 @@ def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_with
         assert "model.requested" not in event_types
 
     assert calls == [
-        ("open", "System Settings", None),
+        ("settings", "系统设置", None),
         ("ui", "", 80),
-        ("open", "System Settings", None),
+        ("settings", "系统设置", None),
         ("ui", "", 80),
     ]
 

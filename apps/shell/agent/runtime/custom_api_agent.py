@@ -2121,7 +2121,7 @@ def _system_settings_open_summary(result: dict[str, Any], planned_input: dict[st
     label = str(data.get("settings_label") or "").strip()
     target = str(data.get("target") or planned_input.get("target") or "").strip()
     if target and target not in {"System Settings", "系统设置", "设置"}:
-        return f"已打开系统设置：{_display_target_name(target)}。"
+        return f"已打开系统设置：{target}。"
     if label and label != "System Settings":
         return f"已打开系统设置：{label}。"
     return "已打开系统设置。"
