@@ -1155,10 +1155,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 刷新页面", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 后退", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "browser_back"},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack 并粘贴", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Slack", "action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("Slack 粘贴", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("Notes 新建笔记", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
     }
     assert daily_desktop_intent_tool_request("focus Chrome and then new tab", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1988,6 +2018,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.permissions",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("需要什么权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("你需要哪些权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.permissions",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("为什么不能控制桌面？", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.permissions",
@@ -2719,6 +2759,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "find"},
     }
     assert daily_desktop_intent_tool_request("页面里查找", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "find"},
+    }
+    assert daily_desktop_intent_tool_request("open find", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "find"},
+    }
+    assert daily_desktop_intent_tool_request("find on page", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "find"},

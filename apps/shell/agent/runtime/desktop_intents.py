@@ -249,6 +249,9 @@ def daily_desktop_intent_tool_requests(
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
+    app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
+    if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
+        return [app_shortcut]
     app_ui_action = _app_scoped_ui_action_tool_request(context)
     if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
         return [app_ui_action]
@@ -552,6 +555,9 @@ def _strip_sequence_clause_prefix(text: str) -> str:
 
 
 def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
+    app_shortcut = _app_scoped_safe_shortcut_tool_request(text)
+    if app_shortcut and str(app_shortcut.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
+        return app_shortcut
     app_ui_action = _app_scoped_ui_action_tool_request(text)
     if app_ui_action and str(app_ui_action.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
         return app_ui_action
@@ -1120,6 +1126,12 @@ def _is_desktop_permissions_request(text: str) -> bool:
         r"(?:权限诊断|桌面权限|桌面执行权限|本地工具权限|自动化权限状态|辅助功能权限状态|"
         r"屏幕录制权限状态)",
         text,
+    ):
+        return True
+    if re.search(
+        r"(?:你|八千代|yachiyo)?\s*(?:需要|缺少|要)\s*(?:什么|哪些|哪个|啥).{0,12}权限",
+        text,
+        flags=re.IGNORECASE,
     ):
         return True
     if re.search(
@@ -2026,6 +2038,60 @@ def _app_scoped_ui_action_tool_request(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _app_scoped_safe_shortcut_tool_request(text: str) -> dict[str, Any] | None:
+    shortcut = _app_scoped_safe_shortcut_request(text)
+    if not shortcut:
+        return None
+    mode = str(shortcut.pop("mode"))
+    return _request(f"app.{mode}_and_safe_shortcut", shortcut)
+
+
+def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
+    shortcut_pattern = (
+        r"(?:复制(?:一下)?(?:选中(?:的)?内容)?|粘贴(?:到这(?:里)?)?|全选|撤销|重做|"
+        r"刷新(?:一下|下)?(?:页面|当前页|当前网页|网页)?|返回上一页|回到上一页|"
+        r"网页后退|浏览器后退|后退一页|后退|前进一页|网页前进|浏览器前进|前进|"
+        r"查找|打开查找(?:框)?|打开搜索框|页面(?:内|里)?查找|当前页查找|"
+        r"新建标签页|新标签页|打开新标签页|新建窗口|新窗口|打开新窗口|"
+        r"新建笔记|新笔记|新建备忘录|新备忘录|"
+        r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
+        r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+note|"
+        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note)"
+    )
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+?)\s*"
+            rf"(?:(?:并|然后|后|之后|再)\s*)?(?P<action>{shortcut_pattern})$",
+        ),
+        (
+            "open",
+            rf"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+"
+            rf"(?:and\s+)?(?P<action>{shortcut_pattern})$",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<app>[^。！？!?，,\s]+?)\s*(?:的|里|中|内|上)?\s*"
+            rf"(?P<action>{shortcut_pattern})$",
+        ),
+        (
+            "focus",
+            rf"^(?P<app>[^.!?]+?)\s+(?P<action>{shortcut_pattern})$",
+        ),
+    )
+    for mode, pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _normalize_app_scoped_ui_action_app(match.group("app"))
+        action = _desktop_safe_shortcut_action(match.group("action"))
+        if app_name and action:
+            return {"mode": mode, "app_name": app_name, "action": action}
+    return None
+
+
 def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
@@ -2220,6 +2286,20 @@ def _normalize_app_scoped_ui_action_app(value: str) -> str:
         "tab",
         "esc",
         "escape",
+        "页面",
+        "网页",
+        "当前页",
+        "当前页面",
+        "当前网页",
+        "浏览器",
+        "browser",
+        "page",
+        "currentpage",
+        "go",
+        "make",
+        "makea",
+        "create",
+        "createa",
     }:
         return ""
     if re.fullmatch(r"\d+(?:\.\d+)?", raw_app):
@@ -3382,6 +3462,10 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "当前页查找": ("f", ("command",)),
         "find": ("f", ("command",)),
         "findinpage": ("f", ("command",)),
+        "findonpage": ("f", ("command",)),
+        "pagefind": ("f", ("command",)),
+        "openfind": ("f", ("command",)),
+        "openfindbox": ("f", ("command",)),
         "新建标签页": ("t", ("command",)),
         "新标签页": ("t", ("command",)),
         "打开新标签页": ("t", ("command",)),
@@ -3465,6 +3549,10 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "当前页查找": "find",
         "find": "find",
         "findinpage": "find",
+        "findonpage": "find",
+        "pagefind": "find",
+        "openfind": "find",
+        "openfindbox": "find",
         "新建标签页": "new_tab",
         "新标签页": "new_tab",
         "打开新标签页": "new_tab",

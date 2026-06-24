@@ -1781,7 +1781,7 @@ def test_chat_bridge_quick_message_executes_permission_diagnosis_for_launcher_en
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "检查桌面权限",
+        "需要什么权限",
     )
 
     assert permission_calls == [True]
@@ -1828,6 +1828,51 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_app_scoped_safe_shortcut_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: new tab",
+            "data": {"shortcut_action": action, "key": "t", "modifiers": ["command"]},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "Chrome 新建标签页",
+    )
+
+    assert calls == [("focus", "Google Chrome"), ("shortcut", "new_tab")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已切到 Google Chrome 并新建标签页。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "app_name": "Google Chrome",
+        "action": "new_tab",
+    }
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
     assert "model.request.started" not in event_types
 
 
