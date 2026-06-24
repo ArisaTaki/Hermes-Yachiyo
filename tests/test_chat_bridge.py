@@ -3717,6 +3717,98 @@ def test_chat_bridge_quick_message_surfaces_app_open_recovery(
     assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
 
 
+def test_chat_bridge_quick_message_surfaces_app_foreground_action_recovery(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        calls.append(("key", action))
+        return {
+            "ok": False,
+            "action": "desktop.safe_key",
+            "summary": "desktop.safe_key failed",
+            "error": "Not authorized to send events to System Events.",
+            "permission_error": True,
+            "permission_targets": ["accessibility"],
+            "recovery_actions": [
+                {
+                    "label": "打开辅助功能权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "辅助功能权限"},
+                    "permission_target": "accessibility",
+                    "risk_level": "low",
+                }
+            ],
+            "data": {
+                "key_action": action,
+                "key_label": "Tab",
+                "repeat_count": repeat_count,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Chrome，然后按 Tab",
+    )
+    timeline = result["_task_timeline"]
+    recovery_event = next(
+        event
+        for event in timeline["events"]
+        if event["event_type"] == "agent.desktop.permission_recovery"
+    )
+    tool_call = agent_task["tool_calls"][-1]
+
+    assert calls == [("open", "Google Chrome"), ("focus", "Google Chrome"), ("key", "tab")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"].startswith(
+        "已打开 Google Chrome，但没能按Tab。 缺少权限：accessibility。"
+    )
+    assert "可直接打开：打开辅助功能权限。" in agent_task["summary"]
+    assert tool_call["tool_name"] == "app.open_and_safe_key"
+    assert tool_call["status"] == "failed"
+    assert tool_call["output_preview"]["permission_targets"] == ["accessibility"]
+    assert tool_call["output_preview"]["recovery_actions"] == [
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "recovery_retry_input": {
+                "app_name": "Google Chrome",
+                "action": "tab",
+                "repeat_count": 1,
+            },
+            "recovery_retry_prompt": "打开Google Chrome并按Tab",
+            "recovery_retry_tool": "app.open_and_safe_key",
+            "retry_input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+            "retry_prompt": "打开Google Chrome并按Tab",
+            "retry_tool": "app.open_and_safe_key",
+            "risk_level": "low",
+        }
+    ]
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.permission_recovery" in event_types
+    assert "model.request.started" not in event_types
+    assert recovery_event["payload"]["permission_targets"] == ["accessibility"]
+    assert recovery_event["payload"]["affected_tools"] == ["app.open_and_safe_key"]
+    assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
+
+
 def test_chat_bridge_quick_message_executes_structured_recovery_action_without_model(
     tmp_path,
     monkeypatch,

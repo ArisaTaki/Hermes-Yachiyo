@@ -5486,6 +5486,30 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    app_open_safe_key_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_key",
+        {"app_name": "Google Chrome", "action": "tab"},
+        {
+            "ok": False,
+            "action": "app.open_and_safe_key",
+            "permission_error": True,
+            "permission_targets": ["accessibility"],
+            "recovery_actions": [
+                {
+                    "label": "打开辅助功能权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "辅助功能权限"},
+                    "permission_target": "accessibility",
+                    "risk_level": "low",
+                }
+            ],
+            "fallback_result": {
+                "open": {"ok": True, "action": "app.open"},
+                "focus": {"ok": True, "action": "app.focus"},
+                "safe_key": {"ok": False, "action": "desktop.safe_key"},
+            },
+        },
+    )
     safe_click = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.safe_click",
         {"x": 120, "y": 240},
@@ -5641,6 +5665,11 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_open_safe_type_text_failed == (
         "已打开 Notes，但没能输入文字。 缺少权限：accessibility。"
         " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"
+    )
+    assert app_open_safe_key_failed == (
+        "已打开 Google Chrome，但没能按Tab。 缺少权限：accessibility。"
+        " 你可以这样处理：在 macOS 系统设置 > 隐私与安全性 > 辅助功能 中允许 Oha-Yachiyo 或当前运行环境。"
+        "可直接打开：打开辅助功能权限。"
     )
     assert safe_click == "已点击前台位置：120, 240。"
     assert safe_scroll == "已向下滚动前台界面（2 页）。"

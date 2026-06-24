@@ -80,6 +80,25 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.click",
 }
 
+_APP_FOREGROUND_ACTION_TOOLS = {
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
+}
+
 _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.permissions": "检查桌面权限",
@@ -1001,26 +1020,14 @@ class RuntimeCustomApiAgentLoop:
                     f"{partial_summary}{suffix}{diagnostics}".strip(),
                     result,
                 )
-        if tool_name in {
-            "app.open_and_safe_type_text",
-            "app.focus_and_safe_type_text",
-            "app.open_and_safe_shortcut",
-            "app.focus_and_safe_shortcut",
-        }:
-            setup_key = "focus"
-            setup = fallback.get(setup_key) if isinstance(fallback.get(setup_key), dict) else {}
-            if setup.get("ok"):
-                app_name = _payload_text(result, planned_input, "app_name")
-                action = "打开" if tool_name.startswith("app.open") else "切到"
-                target = _display_target_name(app_name)
-                failed_action = "输入文字" if tool_name.endswith("safe_type_text") else "执行快捷动作"
-                targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
-                diagnostics = _permission_diagnostics(result)
-                suffix = f" 缺少权限：{targets}。" if targets else ""
-                return _append_recovery_action_summary(
-                    f"已{action}{target}，但没能{failed_action}。{suffix}{diagnostics}".strip(),
-                    result,
-                )
+        if tool_name in _APP_FOREGROUND_ACTION_TOOLS:
+            foreground_summary = _app_foreground_action_failed_summary(
+                tool_name,
+                planned_input,
+                result,
+            )
+            if foreground_summary:
+                return foreground_summary
         if result.get("permission_error") or permission_targets:
             targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
             diagnostics = _permission_diagnostics(result)
@@ -1362,6 +1369,78 @@ def _type_into_ui_element_summary(result: dict[str, Any], planned_input: dict[st
     return ""
 
 
+def _app_foreground_action_failed_summary(
+    tool_name: str,
+    planned_input: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
+    setup = fallback.get("focus") if isinstance(fallback.get("focus"), dict) else {}
+    if not setup.get("ok"):
+        return ""
+    app_name = _payload_text(result, planned_input, "app_name")
+    action = "打开" if tool_name.startswith("app.open") else "切到"
+    target = _display_target_name(app_name)
+    failed_action = _app_foreground_action_phrase(tool_name, result, planned_input)
+    targets = ", ".join(str(item) for item in result.get("permission_targets") or [] if str(item))
+    diagnostics = _permission_diagnostics(result)
+    suffix = f" 缺少权限：{targets}。" if targets else ""
+    return _append_recovery_action_summary(
+        f"已{action}{target}，但没能{failed_action}。{suffix}{diagnostics}".strip(),
+        result,
+    )
+
+
+def _app_foreground_action_phrase(
+    tool_name: str,
+    result: dict[str, Any],
+    planned_input: dict[str, Any],
+) -> str:
+    if tool_name.endswith("safe_type_text"):
+        return "输入文字"
+    if tool_name.endswith("safe_shortcut"):
+        return _action_phrase_from_done_summary(
+            _safe_shortcut_summary(result, planned_input),
+            "执行快捷动作",
+        )
+    if tool_name.endswith("safe_key"):
+        return _action_phrase_from_done_summary(
+            _safe_key_summary(result, planned_input),
+            "按前台导航键",
+        )
+    if tool_name.endswith("safe_scroll"):
+        return _action_phrase_from_done_summary(
+            _safe_scroll_summary(result, planned_input),
+            "滚动前台界面",
+        )
+    if tool_name.endswith("safe_click"):
+        point = _click_text(result, planned_input)
+        return f"点击前台位置：{point}" if point else "点击前台位置"
+    if tool_name.endswith("click_ui_element"):
+        return _action_phrase_from_done_summary(
+            _click_ui_element_summary(result, planned_input),
+            "点击前台控件",
+        )
+    if tool_name.endswith("type_into_ui_element"):
+        return _action_phrase_from_done_summary(
+            _type_into_ui_element_summary(result, planned_input),
+            "填写前台控件",
+        )
+    if tool_name.endswith("hotkey"):
+        hotkey = _hotkey_text(result, planned_input)
+        return f"发送快捷键：{hotkey}" if hotkey else "发送快捷键"
+    return "执行前台动作"
+
+
+def _action_phrase_from_done_summary(summary: str, fallback: str) -> str:
+    text = str(summary or "").strip()
+    if not text:
+        return fallback
+    if text.startswith("已"):
+        text = text[1:]
+    return text.removesuffix("。") or fallback
+
+
 def _active_window_summary(result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     app_name = str(data.get("app_name") or "").strip()
@@ -1622,6 +1701,13 @@ def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -
     if tool_name == "app.focus":
         app_name = str(planned_input.get("app_name") or "").strip()
         return f"切到{app_name}" if app_name else ""
+    if tool_name in _APP_FOREGROUND_ACTION_TOOLS:
+        app_name = str(planned_input.get("app_name") or "").strip()
+        if not app_name:
+            return ""
+        action = "打开" if tool_name.startswith("app.open") else "切到"
+        phrase = _app_foreground_action_phrase(tool_name, {}, planned_input)
+        return f"{action}{app_name}并{phrase}" if phrase else f"{action}{app_name}"
     return ""
 
 
