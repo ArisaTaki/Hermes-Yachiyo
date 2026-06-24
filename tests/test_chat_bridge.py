@@ -327,6 +327,44 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    open_calls: list[str] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened System Settings: {app_name}",
+            "data": {
+                "app_name": app_name,
+                "open_target": "system_settings",
+                "settings_label": "Bluetooth",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开蓝牙设置",
+    )
+
+    assert result["ok"] is True
+    assert open_calls == ["蓝牙设置"]
+    assert agent_task["summary"] == "已打开蓝牙设置。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "蓝牙设置"}
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
     tmp_path,
     monkeypatch,

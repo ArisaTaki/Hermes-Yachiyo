@@ -2214,6 +2214,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "System Settings"},
     }
+    assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "蓝牙设置"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Wi-Fi 设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Wi-Fi 设置"},
+    }
+    assert daily_desktop_intent_tool_request("打开系统设置蓝牙", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "系统设置蓝牙"},
+    }
     assert daily_desktop_intent_tool_request("打开文件管理器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

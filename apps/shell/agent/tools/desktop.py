@@ -135,6 +135,19 @@ _PRIVACY_SECURITY_URLS = (
     "x-apple.systempreferences:com.apple.preference.security?Privacy",
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
 )
+_BLUETOOTH_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.BluetoothSettings",
+    "x-apple.systempreferences:com.apple.preferences.Bluetooth",
+)
+_NETWORK_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Network-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.network",
+)
+_WIFI_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.wifi-settings-extension",
+    "x-apple.systempreferences:com.apple.preference.network?Wi-Fi",
+    *_NETWORK_SETTINGS_URLS,
+)
 
 _SYSTEM_SETTINGS_TARGETS = {
     "privacysecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
@@ -150,6 +163,13 @@ _SYSTEM_SETTINGS_TARGETS = {
     "桌面执行权限": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
     "本地工具权限": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
     "权限诊断": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "bluetooth": ("Bluetooth", _BLUETOOTH_SETTINGS_URLS),
+    "蓝牙": ("Bluetooth", _BLUETOOTH_SETTINGS_URLS),
+    "network": ("Network", _NETWORK_SETTINGS_URLS),
+    "网络": ("Network", _NETWORK_SETTINGS_URLS),
+    "wifi": ("Wi-Fi", _WIFI_SETTINGS_URLS),
+    "无线网络": ("Wi-Fi", _WIFI_SETTINGS_URLS),
+    "无线局域网": ("Wi-Fi", _WIFI_SETTINGS_URLS),
     "accessibility": (
         "Accessibility Permission",
         ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),

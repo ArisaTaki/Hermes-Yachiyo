@@ -2096,6 +2096,26 @@ def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> Non
         "x-apple.systempreferences:com.apple.preference.security?Privacy",
     ]
 
+    result = desktop_mod.app_open("蓝牙设置")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened System Settings: Bluetooth"
+    assert result["data"]["settings_label"] == "Bluetooth"
+    assert calls[2][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.BluetoothSettings",
+    ]
+
+    result = desktop_mod.app_open("Wi-Fi 设置")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened System Settings: Wi-Fi"
+    assert result["data"]["settings_label"] == "Wi-Fi"
+    assert calls[3][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.wifi-settings-extension",
+    ]
+
 
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
     calls = []
