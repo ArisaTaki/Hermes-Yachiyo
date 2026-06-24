@@ -1409,6 +1409,118 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         store.close()
 
 
+def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-app-open-ui-click.db",
+        workspace_dir=tmp_path / "runtime-app-open-ui-click",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    click_calls: list[tuple[str, str, int, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher app open UI click should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+        click_count: int = 1,
+    ) -> dict:
+        click_calls.append((target, role_filter, limit, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": f"Clicked {target}",
+            "data": {"target": target, "role_filter": role_filter},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.click_ui_element",
+        fake_click_ui_element,
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开 Slack 然后点击搜索",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert open_calls == []
+        assert click_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == (
+            "app.open_and_click_ui_element"
+        )
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "app.open_and_click_ui_element"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert open_calls == ["Slack"]
+        assert click_calls == [("搜索", "", 80, 1)]
+        assert approved.status == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
