@@ -852,10 +852,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://example.com/docs"},
     }
+    assert daily_desktop_intent_tool_request("打开网页并读一下 example.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://example.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开网页并总结 https://example.com/docs", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://example.com/docs"},
+        "presentation": "summary",
+    }
     assert daily_desktop_intent_tool_request("open github.com and read the page", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("summarize https://example.com after opening it", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://example.com"},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("打开 GitHub 并截个图", allowed_tools) == {
         "protocol": "json_fallback",

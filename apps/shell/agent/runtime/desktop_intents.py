@@ -1739,7 +1739,7 @@ def _browser_open_target_url(text: str) -> str:
 def _browser_open_url_and_extract_text_request(text: str) -> dict[str, str] | None:
     if not _is_browser_open_followup_extract_text_request(text):
         return None
-    url = _browser_open_target_url(text)
+    url = _browser_open_target_url(text) or _explicit_browser_url_in_text(text)
     if not url:
         return None
     return {"url": url}
@@ -1758,11 +1758,19 @@ def _browser_open_url_and_screenshot_request(text: str) -> dict[str, str] | None
 
 
 def _is_browser_open_followup_extract_text_request(text: str) -> bool:
-    if not _browser_open_target_url(text):
+    explicit_url = _explicit_browser_url_in_text(text)
+    if not (_browser_open_target_url(text) or explicit_url):
         return False
     lowered = text.lower()
     return bool(
         _is_browser_extract_text_request(text)
+        or (
+            explicit_url
+            and (
+                re.search(r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下|总结|摘要|概括)", text)
+                or re.search(r"\b(?:read|extract|get|summari[sz]e)\b", lowered)
+            )
+        )
         or re.search(
             r"(?:并且|并|然后|之后|后|再)\s*"
             r"(?:读取|读一下|读下|读一读|提取|抓取|获取|总结|摘要|概括)"

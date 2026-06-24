@@ -3361,8 +3361,10 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         ("打开 GitHub 看看内容", "bubble", "GitHub page text for Yachiyo", ""),
         ("打开 github.com 读一下内容", "live2d", "GitHub page text for Yachiyo", ""),
         ("浏览器打开 GitHub 然后读一下", "bubble", "GitHub page text for Yachiyo", ""),
+        ("打开网页并读一下 github.com", "live2d", "GitHub page text for Yachiyo", ""),
         ("打开 GitHub 并概括内容", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
         ("open github.com and summarize", "live2d", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
+        ("summarize github.com after opening it", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
     ]
     for prompt, launcher_mode, expected_summary, expected_presentation in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -3390,6 +3392,10 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         assert "model.request.started" not in event_types
 
     assert calls == [
+        ("open", "https://github.com"),
+        ("extract", ""),
+        ("open", "https://github.com"),
+        ("extract", ""),
         ("open", "https://github.com"),
         ("extract", ""),
         ("open", "https://github.com"),
