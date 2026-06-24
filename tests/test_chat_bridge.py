@@ -6230,6 +6230,115 @@ def test_chat_bridge_quick_message_executes_structured_recovery_action_without_m
         store.close()
 
 
+def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-recovery-retry.db",
+        workspace_dir=tmp_path / "runtime-recovery-retry",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher recovery retry should not call model")
+        ),
+    )
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "恢复后重试原操作",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "desktop_permission_retry": True,
+                "recovery_action_kind": "retry_original",
+                "recovery_tool": "media.apple_music_play",
+                "recovery_input": {"query": "超时空辉夜姬"},
+                "recovery_permission_target": "music_app",
+                "recovery_retry_tool": "media.apple_music_play",
+                "recovery_retry_input": {"query": "超时空辉夜姬"},
+                "recovery_retry_prompt": "播放超时空辉夜姬",
+                "source_task_id": "task-source-music",
+            },
+        )
+        agent_task = result["agent_task"]
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        retry_context_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.recovery_retry_context"
+        )
+        messages = store.load_messages("session-current", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        user_metadata = json.loads(user.metadata_json)
+
+        assert result["ok"] is True
+        assert play_calls == ["超时空辉夜姬"]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"query": "超时空辉夜姬"}
+        assert planned_event["payload"]["source"] == "daily_desktop_metadata"
+        assert planned_event["payload"]["planning_reason"] == "structured_recovery_metadata"
+        assert planned_event["payload"]["tool"] == "media.apple_music_play"
+        assert retry_context_event["payload"]["retry_tool"] == "media.apple_music_play"
+        assert retry_context_event["payload"]["retry_input"] == {"query": "超时空辉夜姬"}
+        assert retry_context_event["payload"]["retry_prompt"] == "播放超时空辉夜姬"
+        assert retry_context_event["payload"]["source_task_id"] == "task-source-music"
+        assert user_metadata["desktop_permission_retry"] is True
+        assert user_metadata["recovery_action_kind"] == "retry_original"
+        assert user_metadata["recovery_retry_tool"] == "media.apple_music_play"
+        assert "agent.desktop.recovery_retry_context" in event_types
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task(
     tmp_path,
     monkeypatch,

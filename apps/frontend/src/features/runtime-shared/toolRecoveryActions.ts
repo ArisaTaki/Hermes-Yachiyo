@@ -101,21 +101,30 @@ export function runtimeToolRecoveryActionsFromRecord(
     const action = objectValue(rawAction);
     const tool = String(action.tool || '').trim();
     const input = objectValue(action.input);
-    if (tool !== 'app.open') return [];
-    const appName = String(input.app_name || '').trim();
-    if (!appName) return [];
-    const label = String(action.label || appName || tool).trim();
+    const fallbackLabel = runtimeToolRecoveryExecutableLabel(tool, input);
+    if (!fallbackLabel) return [];
+    const label = String(action.label || fallbackLabel || tool).trim();
     const actionRetryContext = runtimeToolRecoveryRetryContext(action, retryContext);
     return [{
       input,
       label,
       permission_target: String(action.permission_target || '').trim(),
-      prompt: String(action.prompt || label || `打开${appName}`).trim(),
+      prompt: String(action.prompt || label || fallbackLabel || tool).trim(),
       risk_level: String(action.risk_level || '').trim() || undefined,
       ...actionRetryContext,
       tool,
     }];
   });
+}
+
+function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, unknown>): string {
+  const appName = String(input.app_name || '').trim();
+  const target = String(input.target || '').trim();
+  const path = String(input.path || '').trim();
+  if (tool === 'app.open' && appName) return `打开${appName}`;
+  if (tool === 'system.settings_open' && target) return `打开${target}`;
+  if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  return '';
 }
 
 function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unknown>): string {

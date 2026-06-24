@@ -27,6 +27,8 @@ _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
 _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
 _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_required"
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
+_PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
+_RECOVERY_RETRY_CONTEXT_EVENT_TYPE = "agent.desktop.recovery_retry_context"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
 _DESKTOP_TOOL_PROGRESS_LABELS = {
     "screen.capture": "截取屏幕",
@@ -337,9 +339,19 @@ def _has_desktop_recovery_user_action(
     for event in events:
         if (event.sensitivity or "public") == "secret":
             continue
+        if event.event_type == _RECOVERY_RETRY_CONTEXT_EVENT_TYPE:
+            continue
         payload = event.payload if isinstance(event.payload, Mapping) else {}
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
-        if _has_recovery_signal(payload) or _has_recovery_signal(result):
+        if (
+            event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE
+            and _has_recovery_signal(payload)
+        ):
+            return True
+        if (
+            event.event_type in {_COMPLETED_DESKTOP_INTENT_EVENT_TYPE, _TOOL_CALL_EVENT_TYPE}
+            and _has_recovery_signal(result)
+        ):
             return True
     for tool_call in tool_calls:
         output_preview = getattr(tool_call, "output_preview", {})

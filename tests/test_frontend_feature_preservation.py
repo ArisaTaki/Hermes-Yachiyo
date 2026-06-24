@@ -3574,8 +3574,11 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "export function runtimeToolRecoveryActionsFromRecords",
             "export function runtimeToolRecoveryActionsFromRecord",
             "Array.isArray(source.recovery_actions)",
-            "if (tool !== 'app.open') return [];",
-            "const appName = String(input.app_name || '').trim();",
+            "runtimeToolRecoveryExecutableLabel(tool, input)",
+            "function runtimeToolRecoveryExecutableLabel",
+            "if (tool === 'app.open' && appName) return `打开${appName}`;",
+            "if (tool === 'system.settings_open' && target) return `打开${target}`;",
+            "if (tool === 'desktop.open_path' && path) return `打开 ${path}`;",
             "return `打开${appName}`;",
             "return `打开${appName}并输入文字`;",
             "return `切到${appName}并输入文字`;",
@@ -3588,7 +3591,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "recovery_retry_tool: action.retry_tool",
             "runtimeToolRecoveryRetryContext(action, retryContext)",
             "action.tool === 'app.open' ? 'low' : ''",
-            "prompt: String(action.prompt || label || `打开${appName}`).trim()",
+            "prompt: String(action.prompt || label || fallbackLabel || tool).trim()",
         ],
     )
     _assert_contains(
