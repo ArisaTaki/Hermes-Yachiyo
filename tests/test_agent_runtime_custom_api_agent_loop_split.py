@@ -4988,6 +4988,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "OpenAI"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在当前页面搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "OpenAI"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开查找", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("刷新一下页面", allowed_tools) == {
         "protocol": "json_fallback",
@@ -5317,6 +5329,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_scroll",
         "input": {"direction": "down", "pages": 1},
     }
+    assert daily_desktop_intent_tool_request("滚动到底部", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 10},
+    }
+    assert daily_desktop_intent_tool_request("回到顶部", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "up", "pages": 10},
+    }
     assert daily_desktop_intent_tool_request("打开 Chrome 翻到下一页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_scroll",
@@ -5331,6 +5353,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_scroll",
         "input": {"direction": "down", "pages": 1},
+    }
+    assert daily_desktop_intent_tool_request("scroll to bottom", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "down", "pages": 10},
     }
     assert daily_desktop_intent_tool_request("按 Tab", allowed_tools) == {
         "protocol": "json_fallback",

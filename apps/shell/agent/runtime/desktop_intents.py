@@ -1255,6 +1255,11 @@ def _desktop_find_query(text: str) -> str:
 def _desktop_foreground_find_query(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在\s*)?(?:(?:当前|前台|这个|该)\s*)?"
+        r"(?:页面|网页|页内|页面内|窗口|应用|app)(?:里|中|内|上)?\s*"
+        r"(?:查找|搜索(?!框)|搜一下|找一下|打开查找(?:框)?(?:并输入|输入)?)\s*"
+        r"(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在(?:当前|前台)?(?:页面|网页|窗口|应用|app)?(?:里|中|内|上)?\s*)?"
         r"(?:(?:页面|网页|页内|页面内)\s*)?"
         r"(?:查找|找一下|打开查找(?:框)?(?:并输入|输入)?|\bfind\b(?:\s+in\s+page)?)\s*"
@@ -7085,6 +7090,12 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
     patterns = (
         (
             zh_prefix
+            + r"(?:(?:滚动|滚|滑动|滑|翻页|翻|拉|跳|跳转|回)(?:到|至)|到)\s*"
+            + r"(?P<direction_extent>页面底部|页面顶部|底部|底端|最底下|最下面|顶部|顶端|最上面|最上方)"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            zh_prefix
             + r"(?P<direction>向下|往下|朝下|下|向上|往上|朝上|上)"
             + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)"
             + rf"(?:\s*{page_count.format(name='count')}\s*(?:页|屏|次))?"
@@ -7119,6 +7130,10 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             rf"^(?:please\s+)?{page_count.format(name='count_en_prefix')}\s+"
             r"(?:pages?\s+)?(?:scroll|page)\s+(?P<direction_en_prefix>down|up)\s*$"
         ),
+        (
+            r"^(?:please\s+)?(?:scroll|page)\s+(?:to\s+)?(?:the\s+)?"
+            r"(?P<direction_extent_en>bottom|top)\s*$"
+        ),
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -7126,20 +7141,26 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             continue
         groups = match.groupdict()
         direction = (
-            groups.get("direction")
+            groups.get("direction_extent")
+            or groups.get("direction")
             or groups.get("direction_phrase")
             or groups.get("direction_target")
             or groups.get("direction_en")
             or groups.get("direction_en_target")
             or groups.get("direction_en_prefix")
+            or groups.get("direction_extent_en")
             or ""
         )
-        pages = _scroll_page_count(
-            groups.get("count")
-            or groups.get("count_phrase")
-            or groups.get("count_en")
-            or groups.get("count_en_target")
-            or groups.get("count_en_prefix")
+        pages = (
+            10
+            if groups.get("direction_extent") or groups.get("direction_extent_en")
+            else _scroll_page_count(
+                groups.get("count")
+                or groups.get("count_phrase")
+                or groups.get("count_en")
+                or groups.get("count_en_target")
+                or groups.get("count_en_prefix")
+            )
         )
         if direction and pages:
             return {
@@ -7157,7 +7178,23 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
 
 def _scroll_direction_is_up(value: str) -> bool:
     direction = str(value or "").strip().lower()
-    return direction in {"向上", "往上", "朝上", "上", "上滑", "上滚", "上翻", "上一页", "up"}
+    return direction in {
+        "向上",
+        "往上",
+        "朝上",
+        "上",
+        "上滑",
+        "上滚",
+        "上翻",
+        "上一页",
+        "页面顶部",
+        "顶部",
+        "顶端",
+        "最上面",
+        "最上方",
+        "up",
+        "top",
+    }
 
 
 def _scroll_page_count(value: str | None) -> int:
