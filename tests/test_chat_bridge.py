@@ -327,6 +327,47 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
+    tmp_path,
+    monkeypatch,
+):
+    focus_calls: list[str] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "能不能切到 Slack",
+    )
+
+    assert result["ok"] is True
+    assert focus_calls == ["Slack"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已切换到 Slack。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Slack"}
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
     tmp_path,
     monkeypatch,

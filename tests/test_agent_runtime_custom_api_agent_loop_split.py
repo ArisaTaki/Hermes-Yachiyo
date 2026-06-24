@@ -1048,6 +1048,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("能不能切到 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
+    }
     assert daily_desktop_intent_tool_request("切到微信", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus",
@@ -1115,6 +1120,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Notes", "action": "new_note"},
     }
     assert daily_desktop_intent_tool_request("打开 Chrome 并在地址栏输入 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 地址栏输入 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("在 Chrome 输入 github.com 再回车", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
@@ -1274,11 +1289,44 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "click_count": 1,
         },
     }
+    assert daily_desktop_intent_tool_request("点击 Slack 发送按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "发送",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
     assert daily_desktop_intent_tool_request("在 Slack 消息框输入 hello", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_type_into_ui_element",
         "input": {
             "app_name": "Slack",
+            "target": "消息",
+            "text": "hello",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request("Chrome 搜索框输入 yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Google Chrome",
+            "target": "搜索",
+            "text": "yachiyo",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request("微信消息框输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "WeChat",
             "target": "消息",
             "text": "hello",
             "role_filter": "text",
@@ -1579,12 +1627,48 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"key": "return", "modifiers": []},
         },
     ]
+    assert daily_desktop_intent_tool_requests("Chrome 搜索框输入 yachiyo 并搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "搜索",
+                "text": "yachiyo",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("切到 Slack 并在消息框输入 hello 并发送", allowed_tools) == [
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_type_into_ui_element",
             "input": {
                 "app_name": "Slack",
+                "target": "消息",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信消息框输入 hello 并发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
                 "target": "消息",
                 "text": "hello",
                 "role_filter": "text",
