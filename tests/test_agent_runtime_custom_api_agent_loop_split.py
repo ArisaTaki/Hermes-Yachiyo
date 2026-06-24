@@ -948,6 +948,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.click",
         "input": {"selector": "text=Submit", "click_count": 1},
     }
+    assert daily_desktop_intent_tool_requests("打开 Chrome 点击登录按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("切到 Chrome 点击登录按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 点网页上的登录按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
     assert daily_desktop_intent_tool_request("点击当前网页 120 240", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.click",
@@ -990,6 +1026,55 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "text": "yachiyo",
         },
     }
+    assert daily_desktop_intent_tool_requests(
+        "打开 Chrome 网页搜索框输入 yachiyo 然后搜索",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.type_text",
+            "input": {
+                "selector": (
+                    'input[type="search"], input[name="q"], textarea[name="q"], '
+                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                    'input[aria-label*="search" i], input[placeholder*="search" i]'
+                ),
+                "text": "yachiyo",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "切到 Safari 在网页搜索框输入 weather",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Safari"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.type_text",
+            "input": {
+                "selector": (
+                    'input[type="search"], input[name="q"], textarea[name="q"], '
+                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                    'input[aria-label*="search" i], input[placeholder*="search" i]'
+                ),
+                "text": "weather",
+            },
+        },
+    ]
     assert daily_desktop_intent_tool_request("在网页坐标 120 240 输入 hello", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.type_text",
@@ -1423,17 +1508,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_click",
         "input": {"app_name": "Slack", "x": 320, "y": 180},
     }
-    assert daily_desktop_intent_tool_request("打开 Chrome 并点击登录按钮", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "app.open_and_click_ui_element",
-        "input": {
-            "app_name": "Google Chrome",
-            "target": "登录",
-            "role_filter": "button",
-            "limit": 80,
-            "click_count": 1,
+    assert daily_desktop_intent_tool_requests("打开 Chrome 并点击登录按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
         },
-    }
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
     assert daily_desktop_intent_tool_request("切到 Slack 并点击 Send 按钮", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_click_ui_element",
@@ -1633,14 +1719,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome，然后点击登录按钮", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
-            "input": {
-                "app_name": "Google Chrome",
-                "target": "登录",
-                "role_filter": "button",
-                "limit": 80,
-                "click_count": 1,
-            },
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
         }
     ]
     assert daily_desktop_intent_tool_requests("打开 Slack 然后点击搜索", allowed_tools) == [
@@ -1994,13 +2079,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome 并在搜索框输入 yachiyo 并搜索", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "find"},
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "yachiyo"},
+            "tool": "browser.type_text",
+            "input": {
+                "selector": (
+                    'input[type="search"], input[name="q"], textarea[name="q"], '
+                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                    'input[aria-label*="search" i], input[placeholder*="search" i]'
+                ),
+                "text": "yachiyo",
+            },
         },
         {
             "protocol": "json_fallback",

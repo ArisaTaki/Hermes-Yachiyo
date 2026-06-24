@@ -280,6 +280,11 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
+    if app_browser_action_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
+    ):
+        return app_browser_action_sequence
     foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
     if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
         return foreground_click_search_type_sequence
@@ -1717,7 +1722,7 @@ def _browser_click_request(text: str) -> dict[str, Any] | None:
         }
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:点击|点一下|点按|单击)\s*"
+        r"(?:点击|点一下|点按|单击|点)\s*"
         r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
         r"(?P<label>[^。！？!?，,]+?)\s*(?:按钮|链接|元素)?$",
         r"\b(?:click|press)\s+(?:the\s+)?(?P<label>[^.!?]+?)"
@@ -2962,6 +2967,46 @@ def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, An
     )
 
 
+def _app_open_or_focus_browser_action_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    if app_name not in _BROWSER_APP_NAMES:
+        return []
+    app_request = _request(f"app.{mode}", {"app_name": app_name})
+    browser_followup = _browser_context_followup(followup)
+
+    click_payload = _browser_click_request(browser_followup)
+    if click_payload:
+        return [app_request, _request("browser.click", click_payload)]
+
+    type_payload = _browser_type_text_request(browser_followup)
+    if type_payload:
+        requests = [app_request, _request("browser.type_text", type_payload)]
+        selector = str(type_payload.get("selector") or "")
+        if _browser_type_text_should_submit(browser_followup, selector):
+            requests.append(_request("desktop.search_submit", {}))
+        return requests
+
+    return []
+
+
+def _browser_context_followup(value: str) -> str:
+    followup = _strip_query(value)
+    if _has_browser_page_context(followup):
+        return followup
+    return f"网页{followup}"
+
+
+def _browser_type_text_should_submit(source_text: str, selector: str) -> bool:
+    if not _typed_text_has_return_followup(source_text, "搜索"):
+        return False
+    return bool(
+        re.search(r"(?:search|输入|搜索|query|name=\"q\")", selector, flags=re.IGNORECASE)
+    )
+
+
 def _app_scoped_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
     request = _app_scoped_ui_action_tool_request(text)
     if not isinstance(request, dict):
@@ -3259,6 +3304,8 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_hotkey(followup)
         or _desktop_safe_type_text(followup)
         or _desktop_find_query(followup)
+        or _browser_click_request(_browser_context_followup(followup)) is not None
+        or _browser_type_text_request(_browser_context_followup(followup)) is not None
         or _desktop_ui_elements_request(followup) is not None
         or _desktop_windows_request(followup) is not None
         or _is_active_window_request(followup)
