@@ -393,6 +393,12 @@ def daily_desktop_intent_tool_requests(
     app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
     if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
         return [app_shortcut]
+    app_safe_key = _app_prefix_safe_key_tool_request(context)
+    if app_safe_key and str(app_safe_key.get("tool") or "") in allowed:
+        return [app_safe_key]
+    app_open_or_focus_safe_key = _app_open_or_focus_safe_key_tool_request(context)
+    if app_open_or_focus_safe_key and str(app_open_or_focus_safe_key.get("tool") or "") in allowed:
+        return [app_open_or_focus_safe_key]
     app_ui_action = _app_scoped_ui_action_tool_request(context)
     if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
         return [app_ui_action]
@@ -719,6 +725,15 @@ def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
     app_shortcut = _app_scoped_safe_shortcut_tool_request(text)
     if app_shortcut and str(app_shortcut.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
         return app_shortcut
+    app_safe_key = _app_prefix_safe_key_tool_request(text)
+    if app_safe_key and str(app_safe_key.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
+        return app_safe_key
+    app_open_or_focus_safe_key = _app_open_or_focus_safe_key_tool_request(text)
+    if (
+        app_open_or_focus_safe_key
+        and str(app_open_or_focus_safe_key.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS
+    ):
+        return app_open_or_focus_safe_key
     app_ui_action = _app_scoped_ui_action_tool_request(text)
     if app_ui_action and str(app_ui_action.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
         return app_ui_action
@@ -1172,6 +1187,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_prefix_safe_scroll = _app_prefix_safe_scroll_tool_request(text)
     if app_prefix_safe_scroll:
         candidates.append(app_prefix_safe_scroll)
+
+    app_prefix_safe_key = _app_prefix_safe_key_tool_request(text)
+    if app_prefix_safe_key:
+        candidates.append(app_prefix_safe_key)
 
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
@@ -2607,6 +2626,63 @@ def _app_prefix_safe_scroll_tool_request(text: str) -> dict[str, Any] | None:
     return _request(
         "app.focus_and_safe_scroll",
         {"app_name": app_name, **safe_scroll},
+    )
+
+
+def _app_prefix_safe_key_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    safe_key = _app_followup_safe_key(followup)
+    if not safe_key:
+        return None
+    return _request(
+        "app.focus_and_safe_key",
+        {"app_name": app_name, **safe_key},
+    )
+
+
+def _app_open_or_focus_safe_key_tool_request(text: str) -> dict[str, Any] | None:
+    payload = _app_open_or_focus_foreground_action_request(text)
+    if not payload:
+        return None
+    tool = str(payload.get("tool") or "").strip()
+    if tool not in {"app.open_and_safe_key", "app.focus_and_safe_key"}:
+        return None
+    raw_input = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+    return _request(tool, dict(raw_input))
+
+
+def _app_followup_safe_key(value: str) -> dict[str, Any] | None:
+    safe_key = _desktop_safe_key(value)
+    if safe_key:
+        return safe_key
+    text = _strip_query(value)
+    if not _looks_like_bare_safe_key_followup(text):
+        return None
+    return _desktop_safe_key(f"按{text}")
+
+
+def _looks_like_bare_safe_key_followup(value: str) -> bool:
+    count = r"(?:\d+|[一二两三四五六七八九十])\s*(?:次|下)\s*"
+    key = (
+        r"(?:esc|escape|tab|home|end|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|"
+        r"arrow\s+up|arrow\s+down|arrow\s+left|arrow\s+right|"
+        r"制表键|制表|向上箭头|往上箭头|朝上箭头|向下箭头|往下箭头|朝下箭头|"
+        r"向左箭头|往左箭头|朝左箭头|向右箭头|往右箭头|朝右箭头|"
+        r"上箭头|下箭头|左箭头|右箭头|向上键|向下键|向左键|向右键|"
+        r"上一页键|下一页键|home\s*键|end\s*键)"
+    )
+    return bool(
+        re.fullmatch(
+            rf"(?:{count})?{key}(?:\s*(?:键|一下|下))?",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -4191,6 +4267,12 @@ def _app_foreground_action_request(
             "tool": f"app.{mode}_and_safe_scroll",
             "input": {"app_name": app_name, **safe_scroll},
         }
+    safe_key = _app_followup_safe_key(followup)
+    if safe_key:
+        return {
+            "tool": f"app.{mode}_and_safe_key",
+            "input": {"app_name": app_name, **safe_key},
+        }
     safe_click = _desktop_safe_click(followup)
     if safe_click:
         return {
@@ -4208,12 +4290,6 @@ def _app_foreground_action_request(
         return {
             "tool": f"app.{mode}_and_type_into_ui_element",
             "input": {"app_name": app_name, **type_into_ui_element},
-        }
-    safe_key = _desktop_safe_key(followup)
-    if safe_key:
-        return {
-            "tool": f"app.{mode}_and_safe_key",
-            "input": {"app_name": app_name, **safe_key},
         }
     hotkey = _desktop_hotkey(followup)
     if hotkey:

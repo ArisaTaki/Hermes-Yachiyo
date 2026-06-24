@@ -1733,10 +1733,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_key",
         "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
     }
+    assert daily_desktop_intent_tool_request("Chrome 按 Tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_key",
+        "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 切到下一个输入框", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_key",
+        "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 下箭头", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_key",
+        "input": {"app_name": "Google Chrome", "action": "arrow_down", "repeat_count": 1},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack 并按三次下箭头", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_key",
         "input": {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
+    }
+    assert daily_desktop_intent_tool_request("切到 Chrome 按三次下箭头", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_key",
+        "input": {"app_name": "Google Chrome", "action": "arrow_down", "repeat_count": 3},
     }
     assert daily_desktop_intent_tool_request("打开 Chrome 并向下滚动两页", allowed_tools) == {
         "protocol": "json_fallback",

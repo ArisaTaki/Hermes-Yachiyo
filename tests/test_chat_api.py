@@ -3828,6 +3828,85 @@ def test_send_message_executes_next_input_focus_as_safe_tab_key(tmp_path, monkey
         store.close()
 
 
+def test_send_message_executes_app_prefix_safe_tab_key_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str] | tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app scoped safe key task should not call model")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        calls.append(("key", action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": "Pressed Tab",
+            "data": {
+                "key_action": action,
+                "key_label": "Tab",
+                "repeat_count": repeat_count,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    try:
+        result = api.send_message("Chrome 按 Tab")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Google Chrome"), ("key", "tab", 1)]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已切到 Google Chrome 并按Tab。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_key"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "action": "tab",
+            "repeat_count": 1,
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已切到 Google Chrome 并按Tab。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已切到 Google Chrome 并按Tab。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_previous_input_focus_as_safe_shift_tab_key(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
