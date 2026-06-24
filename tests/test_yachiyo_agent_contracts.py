@@ -536,6 +536,8 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
         "app.focus_window",
         "app.show",
         "app.quit",
+        "reminders.create",
+        "calendar.create_event",
     ]
     assert media_control["available"] is False
     assert media_control["degraded_tools"] == [
@@ -605,6 +607,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.open_path") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
+    assert desktop_tool_risk_level("reminders.create") == "low"
+    assert desktop_tool_risk_level("calendar.create_event") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
     assert desktop_tool_risk_level("browser.open_url_and_extract_text") == "low"
     assert desktop_tool_risk_level("browser.open_url_and_screenshot") == "low"
@@ -846,6 +850,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     focus_type_into_ui_element = tools["app.focus_and_type_into_ui_element"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
+    reminder = tools["reminders.create"]
+    calendar_event = tools["calendar.create_event"]
     hide_app = tools["desktop.hide_app"]
     safe_shortcut = tools["desktop.safe_shortcut"]
     safe_key = tools["desktop.safe_key"]
@@ -884,6 +890,14 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any(
         "matching app window" in note for note in named_focus_window.fallback_notes
     )
+    assert reminder.capability_id == "app_control"
+    assert reminder.risk_level == "low"
+    assert reminder.input_schema["required"] == ["title"]
+    assert any("Reminders" in note for note in reminder.fallback_notes)
+    assert calendar_event.capability_id == "app_control"
+    assert calendar_event.risk_level == "low"
+    assert calendar_event.input_schema["required"] == ["title", "start_at"]
+    assert any("Calendar" in note for note in calendar_event.fallback_notes)
     assert open_safe_type_text.capability_id == "foreground_input"
     assert open_safe_type_text.risk_level == "low"
     assert open_safe_type_text.input_schema["required"] == ["app_name", "text"]

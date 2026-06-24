@@ -438,6 +438,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.hide",
         "app.minimize",
         "app.quit",
+        "reminders.create",
+        "calendar.create_event",
     ),
     "media_control": (
         "media.apple_music_play",

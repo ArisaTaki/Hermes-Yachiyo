@@ -3572,6 +3572,34 @@ def test_desktop_calendar_create_event_defaults_to_one_hour(monkeypatch) -> None
     ]
 
 
+def test_native_schedule_permission_failures_return_automation_targets(monkeypatch) -> None:
+    def fake_run_osascript(_script, _args=None):
+        return {
+            "ok": False,
+            "action": "osascript",
+            "summary": "osascript failed",
+            "permission_error": True,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_run_osascript)
+
+    reminder = desktop_mod.reminders_create("开会", due_at="2026-06-25T15:00")
+    calendar_event = desktop_mod.calendar_create_event("开会", start_at="2026-06-25T15:00")
+
+    assert reminder["ok"] is False
+    assert reminder["action"] == "reminders.create"
+    assert reminder["missing_permissions"] == ["automation"]
+    assert reminder["permission_targets"] == ["automation"]
+    assert reminder["recovery_actions"][0]["permission_target"] == "automation"
+    assert calendar_event["ok"] is False
+    assert calendar_event["action"] == "calendar.create_event"
+    assert calendar_event["missing_permissions"] == ["automation"]
+    assert calendar_event["permission_targets"] == ["automation"]
+    assert calendar_event["recovery_actions"][0]["permission_target"] == "automation"
+
+
 def test_desktop_safe_key_uses_whitelisted_system_events_key_code(monkeypatch) -> None:
     calls = []
 
