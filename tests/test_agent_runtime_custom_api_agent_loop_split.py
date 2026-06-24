@@ -3638,6 +3638,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {},
         },
     ]
+    assert daily_desktop_intent_tool_requests("选中的是什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("我选中了什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("选中内容复制给我", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("read selected text", allowed_tools) == [
         {
             "protocol": "json_fallback",

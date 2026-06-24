@@ -2395,6 +2395,20 @@ def _selected_text_read_request(text: str) -> bool:
             clean,
         )
         or re.search(
+            r"(?:我|当前|现在)?(?:选中|选取|高亮|选择)(?:了|的)?"
+            r"(?:内容|文字|文本|这段|这部分|选区)?\s*(?:是什么|是啥|有啥|有什么)",
+            clean,
+        )
+        or re.search(
+            r"(?:我|当前|现在)?(?:选中|选取|高亮|选择)(?:了|的)?\s*(?:什么|啥)",
+            clean,
+        )
+        or re.search(
+            r"(?:选中|选取|高亮|选择).{0,12}(?:内容|文字|文本|这段|这部分|选区)?"
+            r".{0,8}(?:复制|拷贝)(?:给|给我|给我看|出来)",
+            clean,
+        )
+        or re.search(
             r"\b(?:read|show|display|check|tell\s+me)\s+(?:the\s+)?"
             r"(?:selected|highlighted)\s+(?:text|content|selection)\b",
             lowered,

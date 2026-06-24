@@ -3090,6 +3090,34 @@ def test_chat_bridge_quick_message_copies_and_reads_selected_text_without_model(
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "我选中了什么",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "clipboard.read",
+        ]
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("shortcut", "copy"),
+        ("read", 2000),
+        ("shortcut", "copy"),
+        ("read", 2000),
+        ("shortcut", "copy"),
+        ("read", 2000),
+    ]
+
 
 def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     tmp_path,

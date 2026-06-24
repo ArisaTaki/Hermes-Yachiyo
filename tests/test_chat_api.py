@@ -2749,6 +2749,35 @@ def test_send_message_copies_and_reads_selected_text_without_model(tmp_path, mon
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("选中的是什么")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+        assert [tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "clipboard.read",
+        ]
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已复制选中内容。 剪贴板内容：selected text。"
+        assert second_assistant is not None
+        assert second_assistant.content == "已复制选中内容。 剪贴板内容：selected text。"
+        assert calls == [("shortcut", "copy"), ("read", 2000), ("shortcut", "copy"), ("read", 2000)]
+        assert second_run["status"] == "completed"
+        assert second_event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
