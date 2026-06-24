@@ -5628,7 +5628,7 @@ def _is_specific_music_query(query: str) -> bool:
 
 def _music_control_action(text: str) -> str:
     lowered = text.lower()
-    if re.search(r"(?:下一首|下一曲|下首|切下一首|跳下一首|下一首歌)", text) or re.search(
+    if re.search(r"(?:下一首|下一曲|下首|切下一首|跳下一首|下一首歌|切歌|换一首|换首歌|换歌)", text) or re.search(
         r"\b(?:next|skip)\s+(?:song|track)\b",
         lowered,
     ):
@@ -5694,6 +5694,8 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
     lowered = text.lower()
     if _music_app_generic_play_open_name(text) == "Music":
         return True
+    if _looks_like_generic_music_play_request(text):
+        return True
     return bool(
         re.search(
             r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
@@ -5724,11 +5726,17 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:随便|随机)?"
             r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
             r"(?:来点|来些)(?:音乐|歌|歌曲)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
-            r"(?:放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+            r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+            lowered,
+        )
+        or re.search(
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"(?:随便|随机)?(?:来|放|播放|播)(?:一首|首)"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             lowered,
         )

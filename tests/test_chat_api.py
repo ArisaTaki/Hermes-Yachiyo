@@ -221,6 +221,32 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("给我来点音乐")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_events = service.list_run_events(second_run["run_id"])["events"]
+        second_event_types = [event["event_type"] for event in second_events]
+        second_user = [
+            message for message in runtime.chat_session.get_messages() if message.role == MessageRole.USER
+        ][-1]
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert open_and_play_calls == 2
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
@@ -299,6 +325,73 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert user.metadata["daily_desktop_intent"] is True
         assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert open_and_play_calls == 1
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_direct_music_control_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    control_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct music control task should not call model")
+        ),
+    )
+
+    def fake_apple_music_control(action: str) -> dict:
+        control_calls.append(action)
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {action} executed",
+            "data": {
+                "control": action,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_control",
+        fake_apple_music_control,
+    )
+    try:
+        result = api.send_message("切歌")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        user = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert user.metadata["daily_desktop_tool"] == "media.apple_music_control"
+        assert control_calls == ["next"]
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
