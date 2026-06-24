@@ -3383,6 +3383,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "麦克风"},
     }
+    assert daily_desktop_intent_tool_request("打开输入监控权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "输入监控"},
+    }
+    assert daily_desktop_intent_tool_request("打开完全磁盘访问权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "完全磁盘访问"},
+    }
+    assert daily_desktop_intent_tool_request("打开摄像头权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "摄像头"},
+    }
     assert daily_desktop_intent_tool_request("打开桌面权限设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

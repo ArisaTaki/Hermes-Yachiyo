@@ -454,6 +454,9 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
         ("打开 Wi-Fi 设置", "bubble", "Wi-Fi", "已打开 Wi-Fi。"),
         ("打开系统设置里的辅助功能", "bubble", "辅助功能权限", "已打开辅助功能权限。"),
         ("打开系统设置里的辅助功能", "live2d", "辅助功能权限", "已打开辅助功能权限。"),
+        ("打开输入监控权限", "bubble", "输入监控", "已打开输入监控。"),
+        ("打开完全磁盘访问权限", "live2d", "完全磁盘访问", "已打开完全磁盘访问。"),
+        ("打开摄像头权限", "bubble", "摄像头", "已打开摄像头。"),
     )
     for prompt, launcher_mode, app_name, summary in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -473,7 +476,15 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_calls == ["蓝牙", "Wi-Fi", "辅助功能权限", "辅助功能权限"]
+    assert open_calls == [
+        "蓝牙",
+        "Wi-Fi",
+        "辅助功能权限",
+        "辅助功能权限",
+        "输入监控",
+        "完全磁盘访问",
+        "摄像头",
+    ]
 
 
 def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(

@@ -411,6 +411,51 @@ _PERMISSION_RECOVERY_ACTIONS = {
             "risk_level": "low",
         },
     ),
+    "input_monitoring": (
+        {
+            "label": "打开输入监控权限",
+            "tool": "app.open",
+            "input": {"app_name": "输入监控"},
+            "permission_target": "input_monitoring",
+            "risk_level": "low",
+        },
+    ),
+    "full_disk_access": (
+        {
+            "label": "打开完全磁盘访问权限",
+            "tool": "app.open",
+            "input": {"app_name": "完全磁盘访问"},
+            "permission_target": "full_disk_access",
+            "risk_level": "low",
+        },
+    ),
+    "files_and_folders": (
+        {
+            "label": "打开文件和文件夹权限",
+            "tool": "app.open",
+            "input": {"app_name": "文件和文件夹"},
+            "permission_target": "files_and_folders",
+            "risk_level": "low",
+        },
+    ),
+    "microphone": (
+        {
+            "label": "打开麦克风权限",
+            "tool": "app.open",
+            "input": {"app_name": "麦克风"},
+            "permission_target": "microphone",
+            "risk_level": "low",
+        },
+    ),
+    "camera": (
+        {
+            "label": "打开摄像头权限",
+            "tool": "app.open",
+            "input": {"app_name": "摄像头"},
+            "permission_target": "camera",
+            "risk_level": "low",
+        },
+    ),
     "music_app": (
         {
             "label": "打开 Apple Music",
@@ -4334,6 +4379,26 @@ def _permission_recovery_hints_for_targets(targets: list[str]) -> list[str]:
         "screen_capture_probe_failed": (
             "Open Screen Recording permission in macOS System Settings and confirm "
             "Oha-Yachiyo or the current runtime is allowed."
+        ),
+        "input_monitoring": (
+            "Grant Input Monitoring permission to Oha-Yachiyo or the current runtime "
+            "in macOS System Settings > Privacy & Security > Input Monitoring."
+        ),
+        "full_disk_access": (
+            "Grant Full Disk Access to Oha-Yachiyo or the current runtime in macOS "
+            "System Settings > Privacy & Security > Full Disk Access."
+        ),
+        "files_and_folders": (
+            "Grant Files and Folders permission to Oha-Yachiyo or the current runtime "
+            "in macOS System Settings > Privacy & Security > Files and Folders."
+        ),
+        "microphone": (
+            "Grant Microphone permission to Oha-Yachiyo or the current runtime in "
+            "macOS System Settings > Privacy & Security > Microphone."
+        ),
+        "camera": (
+            "Grant Camera permission to Oha-Yachiyo or the current runtime in macOS "
+            "System Settings > Privacy & Security > Camera."
         ),
         "chrome_cdp": (
             "Open or configure Google Chrome with a reachable Chrome DevTools/CDP endpoint "

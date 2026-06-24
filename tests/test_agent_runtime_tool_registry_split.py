@@ -3008,6 +3008,68 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
     assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
 
 
+def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {
+            "desktop_execution": ["input_monitoring", "full_disk_access", "files_and_folders"],
+            "media_control": ["microphone", "camera"],
+        },
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["permission_error"] is True
+    assert result["permission_targets"] == [
+        "input_monitoring",
+        "full_disk_access",
+        "files_and_folders",
+        "microphone",
+        "camera",
+    ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开输入监控权限",
+            "tool": "app.open",
+            "input": {"app_name": "输入监控"},
+            "permission_target": "input_monitoring",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开完全磁盘访问权限",
+            "tool": "app.open",
+            "input": {"app_name": "完全磁盘访问"},
+            "permission_target": "full_disk_access",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开文件和文件夹权限",
+            "tool": "app.open",
+            "input": {"app_name": "文件和文件夹"},
+            "permission_target": "files_and_folders",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开麦克风权限",
+            "tool": "app.open",
+            "input": {"app_name": "麦克风"},
+            "permission_target": "microphone",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开摄像头权限",
+            "tool": "app.open",
+            "input": {"app_name": "摄像头"},
+            "permission_target": "camera",
+            "risk_level": "low",
+        },
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
+    assert any("Input Monitoring permission" in hint for hint in result["recovery_hints"])
+    assert any("Full Disk Access" in hint for hint in result["recovery_hints"])
+    assert any("Microphone permission" in hint for hint in result["recovery_hints"])
+
+
 def test_desktop_permission_preflight_reports_cached_missing_targets(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.desktop_permissions.cached_desktop_permission_missing_by_capability",
