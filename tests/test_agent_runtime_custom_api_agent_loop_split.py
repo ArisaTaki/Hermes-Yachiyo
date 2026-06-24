@@ -1788,6 +1788,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_click",
         "input": {"app_name": "Slack", "x": 320, "y": 180},
     }
+    assert daily_desktop_intent_tool_request("Chrome 点击 120, 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_click",
+        "input": {"app_name": "Google Chrome", "x": 120, "y": 240},
+    }
+    assert daily_desktop_intent_tool_request("Google Chrome 单击 120 240", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_click",
+        "input": {"app_name": "Google Chrome", "x": 120, "y": 240},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_type_text",
+        "input": {"app_name": "Google Chrome", "text": "hello"},
+    }
+    assert daily_desktop_intent_tool_request("Notes 输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_type_text",
+        "input": {"app_name": "Notes", "text": "hello"},
+    }
     assert daily_desktop_intent_tool_requests("打开 Chrome 并点击登录按钮", allowed_tools) == [
         {
             "protocol": "json_fallback",

@@ -399,6 +399,12 @@ def daily_desktop_intent_tool_requests(
     app_open_or_focus_safe_key = _app_open_or_focus_safe_key_tool_request(context)
     if app_open_or_focus_safe_key and str(app_open_or_focus_safe_key.get("tool") or "") in allowed:
         return [app_open_or_focus_safe_key]
+    app_safe_click = _app_prefix_safe_click_tool_request(context)
+    if app_safe_click and str(app_safe_click.get("tool") or "") in allowed:
+        return [app_safe_click]
+    app_safe_type_text = _app_prefix_safe_type_text_tool_request(context)
+    if app_safe_type_text and str(app_safe_type_text.get("tool") or "") in allowed:
+        return [app_safe_type_text]
     app_ui_action = _app_scoped_ui_action_tool_request(context)
     if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
         return [app_ui_action]
@@ -734,6 +740,12 @@ def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
         and str(app_open_or_focus_safe_key.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS
     ):
         return app_open_or_focus_safe_key
+    app_safe_click = _app_prefix_safe_click_tool_request(text)
+    if app_safe_click and str(app_safe_click.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
+        return app_safe_click
+    app_safe_type_text = _app_prefix_safe_type_text_tool_request(text)
+    if app_safe_type_text and str(app_safe_type_text.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
+        return app_safe_type_text
     app_ui_action = _app_scoped_ui_action_tool_request(text)
     if app_ui_action and str(app_ui_action.get("tool") or "") in _FOREGROUND_SEQUENCE_TOOLS:
         return app_ui_action
@@ -1191,6 +1203,14 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_prefix_safe_key = _app_prefix_safe_key_tool_request(text)
     if app_prefix_safe_key:
         candidates.append(app_prefix_safe_key)
+
+    app_prefix_safe_click = _app_prefix_safe_click_tool_request(text)
+    if app_prefix_safe_click:
+        candidates.append(app_prefix_safe_click)
+
+    app_prefix_safe_type_text = _app_prefix_safe_type_text_tool_request(text)
+    if app_prefix_safe_type_text:
+        candidates.append(app_prefix_safe_type_text)
 
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
@@ -2654,6 +2674,38 @@ def _app_open_or_focus_safe_key_tool_request(text: str) -> dict[str, Any] | None
         return None
     raw_input = payload.get("input") if isinstance(payload.get("input"), dict) else {}
     return _request(tool, dict(raw_input))
+
+
+def _app_prefix_safe_click_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    safe_click = _desktop_safe_click(followup)
+    if not safe_click:
+        return None
+    return _request(
+        "app.focus_and_safe_click",
+        {"app_name": app_name, **safe_click},
+    )
+
+
+def _app_prefix_safe_type_text_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    typed_text = _app_followup_safe_type_text(followup)
+    if not typed_text:
+        return None
+    return _request(
+        "app.focus_and_safe_type_text",
+        {"app_name": app_name, "text": typed_text},
+    )
 
 
 def _app_followup_safe_key(value: str) -> dict[str, Any] | None:

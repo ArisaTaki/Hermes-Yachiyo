@@ -4256,6 +4256,124 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_scroll_without_model
     ]
 
 
+def test_chat_bridge_quick_message_executes_app_prefix_safe_click_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str] | tuple[str, int, int]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_click(x: int, y: int) -> dict:
+        calls.append(("click", x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": x,
+                "y": y,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "Chrome 点击 120, 240",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切到 Google Chrome 并点击前台位置：120, 240。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_click"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "x": 120,
+            "y": 240,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("focus", "Google Chrome"),
+        ("click", 120, 240),
+        ("focus", "Google Chrome"),
+        ("click", 120, 240),
+    ]
+
+
+def test_chat_bridge_quick_message_executes_app_prefix_safe_type_text_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "Chrome 输入 hello",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切到 Google Chrome 并输入文字（5 个字符）。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_type_text"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "text": "hello",
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("focus", "Google Chrome"),
+        ("type", "hello"),
+        ("focus", "Google Chrome"),
+        ("type", "hello"),
+    ]
+
+
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     tmp_path,
     monkeypatch,

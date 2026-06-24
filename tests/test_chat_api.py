@@ -4126,6 +4126,160 @@ def test_send_message_executes_app_prefix_safe_scroll_without_model(tmp_path, mo
         store.close()
 
 
+def test_send_message_executes_app_prefix_safe_click_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str] | tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app scoped safe click task should not call model")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_click(x: int, y: int) -> dict:
+        calls.append(("click", x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": "Clicked explicit foreground coordinate at (120, 240)",
+            "data": {
+                "x": x,
+                "y": y,
+                "click_count": 1,
+                "explicit_user_coordinates": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    try:
+        result = api.send_message("Chrome 点击 120, 240")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Google Chrome"), ("click", 120, 240)]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已切到 Google Chrome 并点击前台位置：120, 240。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_click"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "x": 120,
+            "y": 240,
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已切到 Google Chrome 并点击前台位置：120, 240。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已切到 Google Chrome 并点击前台位置：120, 240。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_app_prefix_safe_type_text_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app scoped safe type text task should not call model")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    try:
+        result = api.send_message("Chrome 输入 hello")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Google Chrome"), ("type", "hello")]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已切到 Google Chrome 并输入文字（5 个字符）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_type_text"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "text": "hello",
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已切到 Google Chrome 并输入文字（5 个字符）。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已切到 Google Chrome 并输入文字（5 个字符）。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_safe_click_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
