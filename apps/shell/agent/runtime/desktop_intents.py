@@ -4263,6 +4263,15 @@ def _communication_compose_request(text: str) -> tuple[str, str, str, str, bool]
             "focus",
             r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+",
         ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过|到)\s*",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:in|on|with|using)\s+",
+        ),
     )
     for candidate_mode, pattern in prefix_patterns:
         match = re.search(pattern, stripped, flags=re.IGNORECASE)
@@ -4290,6 +4299,12 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
     if not followup:
         return None
     patterns = (
+        r"^(?P<verb>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
+        r"(?:给|向|to)\s*(?P<recipient>.+?)\s*"
+        r"(?:说|内容是|内容为|:|：)\s*(?P<message>.+)$",
+        r"^(?:给|向|to)\s*(?P<recipient>.+?)\s*"
+        r"(?P<verb>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
+        r"(?:(?:说|内容是|内容为|:|：)\s*)?(?P<message>.+)$",
         r"^(?:给|向)\s*(?P<recipient>.+?)\s*"
         r"(?P<verb>发送|发出|发|send)\s*(?P<message>.+)$",
         r"^(?:搜索|搜一下|搜|查找|查一下|检索|find|search)\s*"

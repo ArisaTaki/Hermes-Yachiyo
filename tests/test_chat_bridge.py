@@ -2331,6 +2331,113 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
         assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_approval(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-comm-approval.db",
+        workspace_dir=tmp_path / "runtime-comm-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher communication compose should not call model")
+        ),
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("submit_foreground should wait for approval")
+        ),
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "在微信给张三发你好",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        agent_task = result["agent_task"]
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+    finally:
+        service.close()
+        store.close()
+
+    assert result["ok"] is True
+    assert calls == [
+        ("focus", "WeChat"),
+        ("shortcut", "find"),
+        ("type", "张三"),
+        ("search_submit", ""),
+        ("type", "你好"),
+    ]
+    assert agent_task["status"] == "waiting_approval"
+    assert agent_task["needs_user_action"] is True
+    assert agent_task["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+    assert run["status"] == "approval_required"
+    assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
+    assert run["pending_approval"]["input_preview"] == {"action": "send"}
+    assert "agent.desktop.intent_approval_required" in event_types
+    assert "agent.desktop.intent_completed" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_foreground_search_type_submit_without_model(
     tmp_path,
     monkeypatch,
