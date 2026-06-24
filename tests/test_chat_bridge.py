@@ -1359,14 +1359,24 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
             "data": {"character_count": len(text), "explicit_user_text": True},
         }
 
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "",
+            "data": {"key": "return", "modifiers": []},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开 Slack 点击搜索框输入 yachiyo",
+        "打开 Slack 点击搜索框输入 yachiyo 并搜索",
     )
 
     assert result["ok"] is True
@@ -1375,14 +1385,18 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
         ("focus", "Slack"),
         ("shortcut", "find"),
         ("type", "yachiyo"),
+        ("search_submit", ""),
     ]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开 Slack 并打开查找。 已向前台输入文字（7 个字符）。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+    assert agent_task["summary"] == (
+        "已打开 Slack 并打开查找。 已向前台输入文字（7 个字符）。 已提交前台搜索。"
+    )
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-3:]] == [
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.search_submit",
     ]
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}

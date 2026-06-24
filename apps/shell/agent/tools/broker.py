@@ -837,6 +837,12 @@ class ToolBroker:
             lambda: desktop.desktop_safe_type_text(text),
         )
 
+    def desktop_search_submit(self) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.search_submit",
+            desktop.desktop_search_submit,
+        )
+
     def desktop_hide_app(self) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hide_app",

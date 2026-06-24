@@ -382,6 +382,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.search_submit",
     "desktop.submit_foreground",
     "desktop.type_text",
     "desktop.ui_elements",
@@ -433,6 +434,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.type_into_ui_element",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.search_submit",
     "desktop.click",
     "desktop.close_window",
     "desktop.hotkey",
@@ -475,6 +477,7 @@ _FOREGROUND_ACTION_TOOLS = {
     "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.search_submit",
     "desktop.type_text",
 }
 
@@ -741,6 +744,8 @@ def _typed_input_followup_requests(
     if input_request is None:
         return False, []
     if _is_input_return_followup(text, input_request):
+        if _typed_input_request_targets_search(input_request):
+            return True, [_request("desktop.search_submit", {})]
         return True, [_request("desktop.hotkey", {"key": "return", "modifiers": []})]
     submit_action = _external_submit_followup_action(text)
     if submit_action:
@@ -762,6 +767,18 @@ def _latest_sequence_typed_input_request(
         if tool not in {"app.open", "app.focus"}:
             break
     return None
+
+
+def _typed_input_request_targets_search(input_request: dict[str, Any]) -> bool:
+    payload = input_request.get("input") if isinstance(input_request.get("input"), dict) else {}
+    target = str(payload.get("target") or "").strip()
+    return bool(
+        re.search(
+            r"(?:搜索|查找|检索|search|find|query)",
+            target,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _is_input_return_followup(text: str, input_request: dict[str, Any]) -> bool:
@@ -2681,7 +2698,7 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
             _request("desktop.safe_type_text", {"text": typed_text}),
         ]
         if submit_return:
-            requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+            requests.append(_request("desktop.search_submit", {}))
         return requests
     requests = [
         _request(

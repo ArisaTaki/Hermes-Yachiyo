@@ -297,6 +297,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.close_window",
         "desktop.safe_shortcut",
         "desktop.safe_key",
+        "desktop.search_submit",
         "desktop.submit_foreground",
         "desktop.safe_type_text",
         "desktop.safe_click",
@@ -2480,6 +2481,16 @@ def desktop_submit_foreground(action: str = "submit") -> dict[str, Any]:
     return payload
 
 
+def desktop_search_submit() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.search_submit")
+    payload = _send_desktop_keystroke("desktop.search_submit", "return", [])
+    if not payload.get("ok"):
+        return payload
+    payload["summary"] = "Submitted foreground search query"
+    return payload
+
+
 def desktop_safe_shortcut(action: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.safe_shortcut")
@@ -3353,6 +3364,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
+        "desktop.search_submit": ["accessibility"],
         "desktop.submit_foreground": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
@@ -3401,6 +3413,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
+        "desktop.search_submit": ["accessibility"],
         "desktop.submit_foreground": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],

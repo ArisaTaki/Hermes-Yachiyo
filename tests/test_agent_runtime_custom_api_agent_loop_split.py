@@ -666,6 +666,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.safe_scroll",
+        "desktop.search_submit",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.hotkey",
@@ -1014,8 +1015,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并确认", allowed_tools) == [
@@ -1026,8 +1027,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("type yachiyo into search field then enter", allowed_tools) == [
@@ -1038,8 +1039,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_request("在搜索框输入 yachiyo", ["desktop.type_text"]) is None
@@ -1787,8 +1788,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
@@ -1805,8 +1806,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开微信点搜索输入文件传输助手并回车", allowed_tools) == [
@@ -1822,8 +1823,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开 Slack 点击搜索框输入 yachiyo", allowed_tools) == [
@@ -1852,8 +1853,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "desktop.search_submit",
+            "input": {},
         },
     ]
     assert daily_desktop_intent_tool_requests("切到 Slack 并在消息框输入 hello 并发送", allowed_tools) == [

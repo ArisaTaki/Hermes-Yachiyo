@@ -508,6 +508,14 @@ def _desktop_submit_foreground(
     return broker.desktop_submit_foreground(str(payload.get("action") or "submit"))
 
 
+def _desktop_search_submit(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_search_submit()
+
+
 def _desktop_type_text(
     broker: Any,
     payload: dict[str, Any],
@@ -696,6 +704,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.submit_foreground": _desktop_submit_foreground,
+    "desktop.search_submit": _desktop_search_submit,
     "desktop.safe_key": _desktop_safe_key,
     "desktop.safe_type_text": _desktop_safe_type_text,
     "desktop.safe_click": _desktop_safe_click,

@@ -47,6 +47,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.safe_type_text",
     "desktop.safe_click",
     "desktop.safe_scroll",
+    "desktop.search_submit",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "screen.capture",
@@ -118,6 +119,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.safe_type_text": "输入前台文字",
     "desktop.safe_click": "点击前台界面",
     "desktop.safe_scroll": "滚动前台界面",
+    "desktop.search_submit": "提交搜索",
     "desktop.click_ui_element": "点击前台控件",
     "desktop.type_into_ui_element": "填写前台控件",
     "desktop.hide_app": "隐藏当前应用",
@@ -925,6 +927,8 @@ class RuntimeCustomApiAgentLoop:
                 return f"已点击前台位置：{click}。" if click else (result_summary or "已点击前台界面。")
             if tool_name == "desktop.safe_scroll":
                 return _safe_scroll_summary(result, planned_input) or result_summary or "已滚动前台界面。"
+            if tool_name == "desktop.search_submit":
+                return "已提交前台搜索。" if result.get("ok") is True else (result_summary or "没能提交前台搜索。")
             if tool_name == "desktop.click_ui_element":
                 return _click_ui_element_summary(result, planned_input) or result_summary or "已点击前台控件。"
             if tool_name == "desktop.type_into_ui_element":

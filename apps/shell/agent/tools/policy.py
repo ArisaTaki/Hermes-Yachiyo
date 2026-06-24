@@ -70,6 +70,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.safe_type_text": "desktop_safe_type_text",
     "desktop.safe_click": "desktop_safe_click",
     "desktop.safe_scroll": "desktop_safe_scroll",
+    "desktop.search_submit": "desktop_search_submit",
     "desktop.hide_app": "desktop_hide_app",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
@@ -154,6 +155,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.safe_type_text",
     "desktop.safe_click",
     "desktop.safe_scroll",
+    "desktop.search_submit",
     "desktop.hide_app",
     "desktop.minimize_window",
 )
@@ -1634,6 +1636,16 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("direction",),
+    ),
+    "desktop.search_submit": ToolDescriptor(
+        name="desktop.search_submit",
+        description=(
+            "Press Return only to submit an explicit search/find query that the user just "
+            "asked to type into a foreground search field. This is separate from "
+            "desktop.submit_foreground, which remains approval-gated for sending messages "
+            "or submitting forms."
+        ),
+        properties={},
     ),
     "desktop.click": ToolDescriptor(
         name="desktop.click",
