@@ -536,6 +536,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
         "app.focus_window",
         "app.show",
         "app.quit",
+        "notes.create",
         "reminders.create",
         "calendar.create_event",
     ]
@@ -607,6 +608,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.open_path") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
+    assert desktop_tool_risk_level("notes.create") == "low"
     assert desktop_tool_risk_level("reminders.create") == "low"
     assert desktop_tool_risk_level("calendar.create_event") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
@@ -617,6 +619,9 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("read_screen") == "low"
     assert desktop_action_risk_level("diagnose_permissions") == "low"
     assert desktop_action_risk_level("open_path") == "low"
+    assert desktop_action_risk_level("create_note") == "low"
+    assert desktop_action_risk_level("create_reminder") == "low"
+    assert desktop_action_risk_level("create_calendar_event") == "low"
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
     assert desktop_action_risk_level("show_app") == "low"
@@ -645,7 +650,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:24] == [
+    assert list(catalog)[:27] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -665,6 +670,9 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "play_or_pause_media",
         "control_system_volume",
         "write_clipboard",
+        "create_note",
+        "create_reminder",
+        "create_calendar_event",
         "foreground_safe_shortcut",
         "foreground_safe_key",
         "foreground_safe_type_text",
@@ -704,6 +712,9 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     ]
     assert catalog["control_system_volume"].tools == ["system.volume"]
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
+    assert catalog["create_note"].tools == ["notes.create"]
+    assert catalog["create_reminder"].tools == ["reminders.create"]
+    assert catalog["create_calendar_event"].tools == ["calendar.create_event"]
     assert catalog["foreground_safe_shortcut"].risk_level == "low"
     assert catalog["foreground_safe_shortcut"].tools == ["desktop.safe_shortcut"]
     assert catalog["foreground_safe_key"].risk_level == "low"
@@ -850,6 +861,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     focus_type_into_ui_element = tools["app.focus_and_type_into_ui_element"]
     named_hide_app = tools["app.hide"]
     named_minimize_app = tools["app.minimize"]
+    note_tool = tools["notes.create"]
     reminder = tools["reminders.create"]
     calendar_event = tools["calendar.create_event"]
     hide_app = tools["desktop.hide_app"]
@@ -890,6 +902,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any(
         "matching app window" in note for note in named_focus_window.fallback_notes
     )
+    assert note_tool.capability_id == "app_control"
+    assert note_tool.risk_level == "low"
+    assert note_tool.input_schema["required"] == ["body"]
+    assert any("Notes" in note for note in note_tool.fallback_notes)
     assert reminder.capability_id == "app_control"
     assert reminder.risk_level == "low"
     assert reminder.input_schema["required"] == ["title"]

@@ -288,6 +288,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "clipboard.write": [
             "Writes explicit user-provided text to the system clipboard and records only character count.",
         ],
+        "notes.create": [
+            "Creates a macOS Notes note from explicit user-provided content through local automation.",
+        ],
         "reminders.create": [
             "Creates a macOS Reminders item through local automation and reports permission failures as tool results.",
         ],

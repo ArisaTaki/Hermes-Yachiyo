@@ -460,6 +460,18 @@ def _clipboard_write(
     return broker.clipboard_write(str(payload.get("text") or ""))
 
 
+def _notes_create(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.notes_create(
+        str(payload.get("body") or ""),
+        title=str(payload.get("title") or ""),
+        folder_name=str(payload.get("folder_name") or ""),
+    )
+
+
 def _reminders_create(
     broker: Any,
     payload: dict[str, Any],
@@ -723,6 +735,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,
     "clipboard.write": _clipboard_write,
+    "notes.create": _notes_create,
     "reminders.create": _reminders_create,
     "calendar.create_event": _calendar_create_event,
     "desktop.safe_shortcut": _desktop_safe_shortcut,

@@ -481,51 +481,18 @@ def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_mo
     tmp_path,
     monkeypatch,
 ):
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str, str]] = []
 
-    def fake_app_open(app_name: str) -> dict:
-        calls.append(("open", app_name))
+    def fake_notes_create(body: str, *, title: str = "", folder_name: str = "") -> dict:
+        calls.append(("note", body, title, folder_name))
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name, "launch_verified": True},
+            "action": "notes.create",
+            "summary": "Created note: hello",
+            "data": {"title": "hello", "body_length": len(body), "folder_name": folder_name},
         }
 
-    def fake_app_focus(app_name: str) -> dict:
-        calls.append(("focus", app_name))
-        return {
-            "ok": True,
-            "action": "app.focus",
-            "summary": f"Focused {app_name}",
-            "data": {"app_name": app_name},
-        }
-
-    def fake_safe_shortcut(action: str) -> dict:
-        calls.append(("shortcut", action))
-        return {
-            "ok": True,
-            "action": "desktop.safe_shortcut",
-            "summary": "Executed safe shortcut: new note",
-            "data": {
-                "shortcut_action": action,
-                "shortcut_label": "new note",
-            },
-        }
-
-    def fake_safe_type_text(text: str) -> dict:
-        calls.append(("type", text))
-        return {
-            "ok": True,
-            "action": "desktop.safe_type_text",
-            "summary": "Typed user-provided text into the foreground app",
-            "data": {"character_count": len(text), "explicit_user_text": True},
-        }
-
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.notes_create", fake_notes_create)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -533,22 +500,15 @@ def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_mo
     )
 
     assert result["ok"] is True
-    assert calls == [
-        ("open", "Notes"),
-        ("focus", "Notes"),
-        ("shortcut", "new_note"),
-        ("type", "hello"),
-    ]
+    assert calls == [("note", "hello", "", "")]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开 Notes 并新建笔记。 已向前台输入文字（5 个字符）。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
+    assert agent_task["summary"] == "已创建备忘录：hello（5 个字符）。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-1:]] == [
+        "notes.create",
     ]
-    assert result["_task_timeline"]["tool_calls"][-2]["tool_name"] == "app.open_and_safe_shortcut"
-    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "notes.create"
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
     assert "agent.desktop.intent_planned" in event_types

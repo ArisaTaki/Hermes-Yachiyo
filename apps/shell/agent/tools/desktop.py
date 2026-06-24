@@ -291,6 +291,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
+        "notes.create",
         "reminders.create",
         "calendar.create_event",
     ),
@@ -2177,6 +2178,56 @@ def clipboard_write(text: str) -> dict[str, Any]:
     }
 
 
+def notes_create(body: str, *, title: str = "", folder_name: str = "") -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("notes.create")
+    clean_body = _clean_required(body, "body")
+    clean_title = str(title or "").strip() or _note_title_from_body(clean_body)
+    clean_folder_name = str(folder_name or "").strip()
+    result = _run_osascript(
+        """
+        on run argv
+            set noteTitle to item 1 of argv
+            set noteBody to item 2 of argv
+            set folderName to item 3 of argv
+            tell application "Notes"
+                set targetAccount to default account
+                if folderName is "" then
+                    set targetFolder to first folder of targetAccount
+                else
+                    set targetFolder to folder folderName of targetAccount
+                end if
+                set newNote to make new note at targetFolder with properties {name:noteTitle, body:noteBody}
+                try
+                    return id of newNote
+                on error
+                    return "created"
+                end try
+            end tell
+        end run
+        """,
+        [clean_title, clean_body, clean_folder_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "notes.create",
+            {**result, "action": "notes.create", "summary": "notes.create failed"},
+        )
+    return {
+        "ok": True,
+        "action": "notes.create",
+        "summary": f"Created note: {clean_title}",
+        "data": {
+            "title": clean_title,
+            "body_length": len(clean_body),
+            "folder_name": clean_folder_name,
+            "note_id": str(result.get("stdout") or "").strip(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def reminders_create(title: str, *, due_at: Any = None, list_name: str = "") -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("reminders.create")
@@ -2851,6 +2902,13 @@ def _clean_required(value: str, field: str) -> str:
     if not clean:
         raise ValueError(f"{field} is required")
     return clean
+
+
+def _note_title_from_body(value: str) -> str:
+    first_line = next((line.strip() for line in str(value or "").splitlines() if line.strip()), "")
+    if not first_line:
+        return "New Note"
+    return first_line[:80]
 
 
 def _parse_required_local_datetime(value: Any, field: str) -> datetime:
@@ -3568,6 +3626,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "notes.create": ["automation"],
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],
         "desktop.hide_app": ["accessibility"],
@@ -3619,6 +3678,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "notes.create": ["automation"],
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],
         "desktop.hide_app": ["accessibility"],

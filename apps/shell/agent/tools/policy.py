@@ -65,6 +65,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "notes.create": "notes_create",
     "reminders.create": "reminders_create",
     "calendar.create_event": "calendar_create_event",
     "desktop.safe_shortcut": "desktop_safe_shortcut",
@@ -153,6 +154,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "notes.create",
     "reminders.create",
     "calendar.create_event",
     "desktop.safe_shortcut",
@@ -464,6 +466,8 @@ class ToolDescriptor:
                 _validate_percentage_number(step, "system.volume 参数 step")
         if self.name == "clipboard.write" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("clipboard.write 参数 text 必须是非空字符串")
+        if self.name == "notes.create" and not str(payload.get("body") or "").strip():
+            raise AgentRuntimeError("notes.create 参数 body 必须是非空字符串")
         if self.name == "reminders.create":
             if not str(payload.get("title") or "").strip():
                 raise AgentRuntimeError("reminders.create 参数 title 必须是非空字符串")
@@ -1513,6 +1517,28 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("text",),
+    ),
+    "notes.create": ToolDescriptor(
+        name="notes.create",
+        description=(
+            "Create a macOS Notes note from explicit user-provided content. "
+            "Use this for clear create/new note requests with body text."
+        ),
+        properties={
+            "body": {
+                "type": "string",
+                "description": "Note body text explicitly requested by the user.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Optional note title. Empty derives a title from the first body line.",
+            },
+            "folder_name": {
+                "type": "string",
+                "description": "Optional Notes folder name. Empty uses the first folder in the default account.",
+            },
+        },
+        required=("body",),
     ),
     "reminders.create": ToolDescriptor(
         name="reminders.create",

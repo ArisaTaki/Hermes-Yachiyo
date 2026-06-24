@@ -642,6 +642,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "notes.create",
         "reminders.create",
         "calendar.create_event",
         "screen.capture",
@@ -1424,16 +1425,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开备忘录新建笔记输入 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Notes", "action": "new_note"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "hello"},
+            "tool": "notes.create",
+            "input": {"body": "hello"},
         },
     ]
     assert daily_desktop_intent_tool_requests("新建一个备忘录写 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "新建一个备忘录写 hello",
+        ["app.open_and_safe_shortcut", "desktop.safe_type_text"],
+    ) == [
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
@@ -1491,37 +1497,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("新建一条笔记记下 明天十点开会", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Notes", "action": "new_note"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "明天十点开会"},
+            "tool": "notes.create",
+            "input": {"body": "明天十点开会"},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开备忘录新建一个笔记写 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Notes", "action": "new_note"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "hello"},
+            "tool": "notes.create",
+            "input": {"body": "hello"},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开备忘录写 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Notes", "action": "new_note"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "hello"},
+            "tool": "notes.create",
+            "input": {"body": "hello"},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开 Word 新建文档输入 hello", allowed_tools) == [
@@ -4857,7 +4848,16 @@ def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_tex
     assert "047e43ac" not in result
 
 
-def test_main_chat_desktop_intent_summarizes_native_schedule_creation() -> None:
+def test_main_chat_desktop_intent_summarizes_native_content_creation() -> None:
+    note = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "notes.create",
+        {"body": "hello"},
+        {
+            "ok": True,
+            "summary": "Created note",
+            "data": {"title": "hello", "body_length": 5},
+        },
+    )
     reminder = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "reminders.create",
         {"title": "开会", "due_at": "2026-06-25T15:00"},
@@ -4877,6 +4877,7 @@ def test_main_chat_desktop_intent_summarizes_native_schedule_creation() -> None:
         },
     )
 
+    assert note == "已创建备忘录：hello（5 个字符）。"
     assert reminder == "已创建提醒事项：开会（2026-06-25T15:00）。"
     assert calendar_event == "已创建日历事件：开会（2026-06-25T15:00 - 2026-06-25T16:00）。"
 

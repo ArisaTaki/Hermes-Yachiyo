@@ -302,6 +302,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "notes_create",
         "reminders_create",
         "calendar_create_event",
         "desktop_safe_shortcut",
@@ -732,6 +733,17 @@ def test_clipboard_write_schema_requires_text() -> None:
         ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": ""})
 
 
+def test_notes_create_schema_requires_body() -> None:
+    ToolDescriptorRegistry.validate_payload("notes.create", {"body": "hello"})
+    ToolDescriptorRegistry.validate_payload(
+        "notes.create",
+        {"body": "hello", "title": "Greeting", "folder_name": "Notes"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="notes.create 参数 body 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("notes.create", {"body": ""})
+
+
 def test_native_schedule_creation_schemas_validate_titles_and_times() -> None:
     ToolDescriptorRegistry.validate_payload("reminders.create", {"title": "开会"})
     ToolDescriptorRegistry.validate_payload(
@@ -951,6 +963,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         broker,
         "media_apple_music_open_and_play",
         lambda: calls.append(("music_open_and_play",)) or {"ok": True, "action": "open_and_play"},
+    )
+    monkeypatch.setattr(
+        broker,
+        "notes_create",
+        lambda body, *, title="", folder_name="": calls.append(("note", body, title, folder_name))
+        or {"ok": True, "body": body},
     )
     monkeypatch.setattr(
         broker,
@@ -1213,6 +1231,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "action": "open_and_play"}
     assert dispatch_tool_call(
         broker,
+        "notes.create",
+        {"body": "hello", "title": "Greeting", "folder_name": "Notes"},
+    ) == {"ok": True, "body": "hello"}
+    assert dispatch_tool_call(
+        broker,
         "desktop.safe_shortcut",
         {"action": "copy"},
     ) == {"ok": True}
@@ -1408,6 +1431,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("music", "超时空辉夜姬"),
         ("music_control", "pause"),
         ("music_open_and_play",),
+        ("note", "hello", "Greeting", "Notes"),
         ("safe_shortcut", "copy"),
         ("safe_key", "arrow_down", 3),
         ("safe_type_text", "hello"),
@@ -3508,6 +3532,30 @@ def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
     assert calls[0][0][-1] == "n"
 
 
+def test_desktop_notes_create_uses_macos_notes_automation(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_osascript(script, args=None):
+        calls.append((script, args or []))
+        return {"ok": True, "stdout": "note-id", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_run_osascript)
+
+    result = desktop_mod.notes_create("hello world")
+
+    assert result["ok"] is True
+    assert result["action"] == "notes.create"
+    assert result["data"] == {
+        "title": "hello world",
+        "body_length": 11,
+        "folder_name": "",
+        "note_id": "note-id",
+    }
+    assert "tell application \"Notes\"" in calls[0][0]
+    assert calls[0][1] == ["hello world", "hello world", ""]
+
+
 def test_desktop_reminders_create_uses_macos_reminders_automation(monkeypatch) -> None:
     calls = []
 
@@ -3572,7 +3620,7 @@ def test_desktop_calendar_create_event_defaults_to_one_hour(monkeypatch) -> None
     ]
 
 
-def test_native_schedule_permission_failures_return_automation_targets(monkeypatch) -> None:
+def test_native_note_and_schedule_permission_failures_return_automation_targets(monkeypatch) -> None:
     def fake_run_osascript(_script, _args=None):
         return {
             "ok": False,
@@ -3585,9 +3633,15 @@ def test_native_schedule_permission_failures_return_automation_targets(monkeypat
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod, "_run_osascript", fake_run_osascript)
 
+    note = desktop_mod.notes_create("hello")
     reminder = desktop_mod.reminders_create("开会", due_at="2026-06-25T15:00")
     calendar_event = desktop_mod.calendar_create_event("开会", start_at="2026-06-25T15:00")
 
+    assert note["ok"] is False
+    assert note["action"] == "notes.create"
+    assert note["missing_permissions"] == ["automation"]
+    assert note["permission_targets"] == ["automation"]
+    assert note["recovery_actions"][0]["permission_target"] == "automation"
     assert reminder["ok"] is False
     assert reminder["action"] == "reminders.create"
     assert reminder["missing_permissions"] == ["automation"]

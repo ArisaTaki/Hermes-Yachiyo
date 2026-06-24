@@ -58,6 +58,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "desktop.running_apps" in config["instructions"]
     assert "desktop.windows" in config["instructions"]
     assert "app.status" in config["instructions"]
+    assert "notes.create" in config["instructions"]
     assert "app.open_and_safe_type_text" in config["instructions"]
     assert "app.focus_and_safe_type_text" in config["instructions"]
     assert "app.open_and_safe_shortcut" in config["instructions"]

@@ -819,6 +819,15 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def notes_create(
+        self,
+        body: str,
+        *,
+        title: str = "",
+        folder_name: str = "",
+    ) -> dict[str, Any]:
+        return desktop.notes_create(body, title=title, folder_name=folder_name)
+
     def reminders_create(
         self,
         title: str,

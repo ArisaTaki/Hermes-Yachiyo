@@ -318,6 +318,9 @@ def daily_desktop_intent_tool_requests(
     schedule_create_request = _schedule_create_tool_request(context)
     if schedule_create_request and str(schedule_create_request.get("tool") or "") in allowed:
         return [schedule_create_request]
+    notes_create_request = _notes_create_tool_request(context)
+    if notes_create_request and str(notes_create_request.get("tool") or "") in allowed:
+        return [notes_create_request]
     notes_create_type_sequence = _notes_create_and_type_tool_requests(context)
     if notes_create_type_sequence and all(
         str(request.get("tool") or "") in allowed for request in notes_create_type_sequence
@@ -488,6 +491,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "browser.type_text",
     "calendar.create_event",
     "clipboard.write",
+    "notes.create",
     "desktop.active_window",
     "desktop.click",
     "desktop.click_ui_element",
@@ -513,6 +517,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "media.apple_music_control",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
+    "notes.create",
     "reminders.create",
     "screen.capture",
     "system.volume",
@@ -1134,6 +1139,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     schedule_create = _schedule_create_tool_request(text)
     if schedule_create:
         candidates.append(schedule_create)
+
+    notes_create = _notes_create_tool_request(text)
+    if notes_create:
+        candidates.append(notes_create)
 
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
@@ -3363,6 +3372,13 @@ def _notes_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:
     ]
 
 
+def _notes_create_tool_request(text: str) -> dict[str, Any] | None:
+    body = _notes_create_and_type_text(text)
+    if not body:
+        return None
+    return _request("notes.create", {"body": body})
+
+
 def _schedule_create_tool_request(text: str) -> dict[str, Any] | None:
     reminder_payload = _reminder_create_payload(text)
     if reminder_payload:
@@ -3620,6 +3636,7 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?:新建|创建|开|打开)\s*(?:一个|一条|一篇|新的?)?\s*"
         r"(?:备忘录|笔记|note)\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*(?:备忘录|笔记|note)?\s*)?"
         r"(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)\s*"
         r"(?P<text>[^。！？!?]+)$",
         r"^(?:please\s+)?(?:create|make|open)\s+(?:a\s+)?(?:new\s+)?note\s+"
