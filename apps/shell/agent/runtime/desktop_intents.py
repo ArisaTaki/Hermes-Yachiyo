@@ -2672,6 +2672,17 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
     if not parsed:
         return []
     click_payload, typed_text, submit_return = parsed
+    if _is_search_ui_input_click(click_payload):
+        requests = [
+            _request(
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": "find"},
+            ),
+            _request("desktop.safe_type_text", {"text": typed_text}),
+        ]
+        if submit_return:
+            requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+        return requests
     requests = [
         _request(
             f"app.{mode}_and_click_ui_element",
@@ -2987,6 +2998,19 @@ def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] 
             _typed_text_has_return_followup(raw_text, raw_label),
         )
     return None
+
+
+def _is_search_ui_input_click(payload: dict[str, Any]) -> bool:
+    target = str(payload.get("target") or "").strip()
+    role_filter = str(payload.get("role_filter") or "").strip()
+    click_count = payload.get("click_count", 1)
+    if click_count != 1:
+        return False
+    if not re.search(r"(?:搜索|查找|检索|search|find|query)", target, flags=re.IGNORECASE):
+        return False
+    return not role_filter or bool(
+        re.search(r"(?:text|field|input|search|输入|文本|搜索)", role_filter, flags=re.IGNORECASE)
+    )
 
 
 def _typed_text_has_return_followup(raw_text: str, target: str) -> bool:

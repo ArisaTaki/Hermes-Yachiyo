@@ -1317,6 +1317,83 @@ def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_ent
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_app_search_field_type_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Slack 点击搜索框输入 yachiyo",
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("open", "Slack"),
+        ("focus", "Slack"),
+        ("shortcut", "find"),
+        ("type", "yachiyo"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 Slack 并打开查找。 已向前台输入文字（7 个字符）。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
@@ -1687,7 +1764,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         store.close()
 
 
-def test_chat_bridge_quick_message_continues_after_app_open_ui_click_approval(
+def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_approval(
     tmp_path,
     monkeypatch,
 ):
@@ -1774,7 +1851,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_ui_click_approval(
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "打开 Slack 点搜索输入 yachiyo",
+            "打开 Slack 点频道输入 yachiyo",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "live2d",
@@ -1798,7 +1875,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_ui_click_approval(
         )
         assert waiting_task["pending_approvals"][0]["input_preview"] == {
             "app_name": "Slack",
-            "target": "搜索",
+            "target": "频道",
             "role_filter": "",
             "limit": 80,
             "click_count": 1,
@@ -1815,7 +1892,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_ui_click_approval(
 
         assert open_calls == ["Slack"]
         assert focus_calls == ["Slack"]
-        assert click_calls == [("搜索", "", 80, 1)]
+        assert click_calls == [("频道", "", 80, 1)]
         assert typed_text == ["yachiyo"]
         assert approved.status == "completed"
         assert run["status"] == "completed"

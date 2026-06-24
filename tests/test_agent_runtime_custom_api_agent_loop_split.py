@@ -1812,14 +1812,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开微信点搜索输入文件传输助手并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
-            "input": {
-                "app_name": "WeChat",
-                "target": "搜索",
-                "role_filter": "",
-                "limit": 80,
-                "click_count": 1,
-            },
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
         },
         {
             "protocol": "json_fallback",
@@ -1835,14 +1829,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Slack 点击搜索框输入 yachiyo", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
-            "input": {
-                "app_name": "Slack",
-                "target": "搜索",
-                "role_filter": "text",
-                "limit": 80,
-                "click_count": 1,
-            },
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
         },
         {
             "protocol": "json_fallback",
