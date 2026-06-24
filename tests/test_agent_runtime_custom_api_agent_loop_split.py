@@ -3403,6 +3403,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "隐私与安全性"},
     }
+    assert daily_desktop_intent_tool_request("打开隐私设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "隐私与安全性"},
+    }
+    assert daily_desktop_intent_tool_request("打开系统隐私设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "隐私与安全性"},
+    }
+    assert daily_desktop_intent_tool_request("open desktop permissions", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "隐私与安全性"},
+    }
     assert daily_desktop_intent_tool_request("打开需要的权限设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

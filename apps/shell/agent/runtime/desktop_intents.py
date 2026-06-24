@@ -5662,7 +5662,12 @@ def _system_settings_target_name(text: str) -> str:
         return "麦克风"
     if re.search(r"(?:摄像头|相机|\bcamera\b)", lowered):
         return "摄像头"
-    if re.search(r"(?:隐私与安全性|隐私和安全性|隐私.*安全|\bprivacy\b|\bsecurity\b)", lowered):
+    if re.search(
+        r"(?:隐私与安全性|隐私和安全性|隐私.*安全|系统隐私设置|隐私设置|安全隐私设置|"
+        r"桌面权限|桌面执行权限|本地工具权限|\bprivacy\b|\bsecurity\b|"
+        r"\bdesktop\s+permissions?\b|\blocal\s+tool\s+permissions?\b)",
+        lowered,
+    ):
         return "隐私与安全性"
     return ""
 
@@ -5701,7 +5706,12 @@ def _permission_settings_target_name(text: str) -> str:
         return "屏幕录制权限"
     if re.search(r"(?:自动化|\bautomation\b|\bapple\s*events?\b)", lowered):
         return "自动化权限"
-    if re.search(r"(?:隐私与安全性|隐私和安全性|隐私.*安全|\bprivacy\b|\bsecurity\b)", lowered):
+    if re.search(
+        r"(?:隐私与安全性|隐私和安全性|隐私.*安全|系统隐私设置|隐私设置|安全隐私设置|"
+        r"桌面权限|桌面执行权限|本地工具权限|\bprivacy\b|\bsecurity\b|"
+        r"\bdesktop\s+permissions?\b|\blocal\s+tool\s+permissions?\b)",
+        lowered,
+    ):
         return "隐私与安全性"
     return ""
 
