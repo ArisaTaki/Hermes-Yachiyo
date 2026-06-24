@@ -3924,11 +3924,14 @@ def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
 
 
 def _app_preposed_observe_tool_requests(text: str) -> list[dict[str, Any]]:
+    stripped_text = _strip_query(text)
+    if _looks_like_app_status_request(stripped_text):
+        return []
     match = re.search(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<action>看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
         r"(?P<target>[^。！？!?，,]+)$",
-        _strip_query(text),
+        stripped_text,
         flags=re.IGNORECASE,
     )
     if not match:
@@ -3991,7 +3994,11 @@ def _app_observe_tool_requests(
     if _is_active_window_request(followup):
         return [app_request, _request("desktop.active_window", {})]
 
-    if _is_screen_capture_request(followup) or _is_visual_inspection_followup(followup):
+    if (
+        _is_screen_capture_request(followup)
+        or _is_visual_inspection_followup(followup)
+        or _is_app_visual_inspection_followup(followup)
+    ):
         return [
             app_request,
             _request("screen.capture", {"reason": "user asked to capture the screen"}),
@@ -4796,6 +4803,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _is_browser_current_page_request(followup)
         or _is_screen_capture_request(followup)
         or _is_visual_inspection_followup(followup)
+        or _is_app_visual_inspection_followup(followup)
         or _safe_shortcut_then_type(followup) is not None
         or bool(_safe_shortcut_action_sequence(followup))
     )
@@ -4848,6 +4856,20 @@ def _is_bare_visual_inspection_request(value: str) -> bool:
         re.fullmatch(
             r"(?:看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)",
             text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_app_visual_inspection_followup(value: str) -> bool:
+    followup = _strip_query(value)
+    if not followup:
+        return False
+    return bool(
+        re.match(
+            r"^(?:看看|看一下|看下|看一眼|查看|检查|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+            r"[^。！？!?]{0,40}$",
+            followup,
             flags=re.IGNORECASE,
         )
     )

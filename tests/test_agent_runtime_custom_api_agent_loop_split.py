@@ -3235,16 +3235,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Activity Monitor"},
     }
-    assert daily_desktop_intent_tool_request("打开活动监视器看看 CPU", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Activity Monitor"},
-    }
-    assert daily_desktop_intent_tool_request("打开日历看看今天安排", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Calendar"},
-    }
+    assert daily_desktop_intent_tool_requests("打开活动监视器看看 CPU", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Activity Monitor"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开日历看看今天安排", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Calendar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信看看有没有新消息", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开设置的隐私与安全性", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

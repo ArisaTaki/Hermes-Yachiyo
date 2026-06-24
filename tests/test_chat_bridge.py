@@ -3831,6 +3831,36 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    cases = (
+        ("打开微信看看有没有新消息", "bubble", "WeChat"),
+        ("打开活动监视器看看 CPU", "live2d", "Activity Monitor"),
+    )
+    for prompt, launcher_mode, app_name in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert calls[-2] == ("open", app_name)
+        assert calls[-1][0] == "capture"
+        assert calls[-1][1].endswith("screenshots/current-screen.png")
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == f"已打开 {app_name}。 已截取当前屏幕。"
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "app.open",
+            "screen.capture",
+        ]
+        assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_app_prefix_screen_capture_without_model(
     tmp_path,
@@ -6054,6 +6084,43 @@ def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints
             "source": "daily_desktop_intent",
             "status": "planned",
             "tool": "app.focus",
+        }
+    finally:
+        store.close()
+
+
+def test_chat_bridge_quick_message_plans_app_open_visual_followup_for_lightweight_entrypoints(
+    tmp_path,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-app-open-observe",
+            "task_id": "task-app-open-observe",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("打开微信看看有没有新消息")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-app-open-observe"
+        assert result["agent_task"]["task_id"] == "task-app-open-observe"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 打开应用"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "app.open"
+        assert result["agent_task"]["recent_events"][0]["payload"] == {
+            "input_preview": {"app_name": "WeChat"},
+            "planning_reason": "clear_daily_desktop_intent",
+            "source": "daily_desktop_intent",
+            "status": "planned",
+            "tool": "app.open",
         }
     finally:
         store.close()
