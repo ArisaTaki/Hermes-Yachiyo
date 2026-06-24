@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shlex
 from collections.abc import Mapping
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -314,6 +315,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    schedule_create_request = _schedule_create_tool_request(context)
+    if schedule_create_request and str(schedule_create_request.get("tool") or "") in allowed:
+        return [schedule_create_request]
     notes_create_type_sequence = _notes_create_and_type_tool_requests(context)
     if notes_create_type_sequence and all(
         str(request.get("tool") or "") in allowed for request in notes_create_type_sequence
@@ -482,6 +486,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "browser.open_url_and_screenshot",
     "browser.screenshot",
     "browser.type_text",
+    "calendar.create_event",
     "clipboard.write",
     "desktop.active_window",
     "desktop.click",
@@ -508,6 +513,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "media.apple_music_control",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
+    "reminders.create",
     "screen.capture",
     "system.volume",
 }
@@ -1124,6 +1130,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     clipboard_text = _clipboard_write_text(text)
     if clipboard_text:
         candidates.append(_request("clipboard.write", {"text": clipboard_text}))
+
+    schedule_create = _schedule_create_tool_request(text)
+    if schedule_create:
+        candidates.append(schedule_create)
 
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
@@ -3351,6 +3361,204 @@ def _notes_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:
         ),
         _request("desktop.safe_type_text", {"text": typed_text}),
     ]
+
+
+def _schedule_create_tool_request(text: str) -> dict[str, Any] | None:
+    reminder_payload = _reminder_create_payload(text)
+    if reminder_payload:
+        return _request("reminders.create", reminder_payload)
+    calendar_payload = _calendar_event_create_payload(text)
+    if calendar_payload:
+        return _request("calendar.create_event", calendar_payload)
+    return None
+
+
+def _reminder_create_payload(value: str) -> dict[str, Any] | None:
+    body = _reminder_create_body(value)
+    if not body:
+        return None
+    scheduled = _extract_schedule_datetime_and_title(body)
+    if scheduled:
+        due, title = scheduled
+        if title:
+            return {"title": title, "due_at": _local_datetime_text(due)}
+    title = _reminders_create_and_type_text(value)
+    if title:
+        return {"title": title}
+    clean_body = _strip_schedule_title(body)
+    if clean_body and not _looks_like_reminder_title_with_due_time(clean_body):
+        return {"title": clean_body}
+    return None
+
+
+def _calendar_event_create_payload(value: str) -> dict[str, Any] | None:
+    body = _calendar_event_create_body(value)
+    if not body:
+        return None
+    scheduled = _extract_schedule_datetime_and_title(body)
+    if not scheduled:
+        return None
+    start, title = scheduled
+    if not title:
+        return None
+    end = start + timedelta(hours=1)
+    return {
+        "title": title,
+        "start_at": _local_datetime_text(start),
+        "end_at": _local_datetime_text(end),
+    }
+
+
+def _reminder_create_body(value: str) -> str:
+    text = str(value or "").strip()
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:提醒事项|提醒|reminder)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:提醒事项|reminders?)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:新建|创建|添加|新增|加)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:提醒事项|提醒)?\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:please\s+)?remind me\s+(?P<body>[^.!?]+)$",
+        r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+        r"(?:called|named|for|to)?\s*(?P<body>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _strip_query(match.group("body"))
+    return ""
+
+
+def _calendar_event_create_body(value: str) -> str:
+    text = str(value or "").strip()
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日历事件|日程|日历日程|calendar event)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)?\s*(?:日历|calendar)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日程|事件|event)?\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?calendar event\s+"
+        r"(?:called|named|for)?\s*(?P<body>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _strip_query(match.group("body"))
+    return ""
+
+
+_SCHEDULE_TIME_PATTERNS = (
+    re.compile(
+        r"(?P<full>"
+        r"(?:(?:今天|今日|今晚|明天|明日|明晚|后天)\s*)?"
+        r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
+        r"(?P<hour>\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*点"
+        r"(?:(?P<half>半)|(?P<minute>\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*分?)?"
+        r")"
+    ),
+    re.compile(
+        r"(?P<full>"
+        r"(?:(?:今天|今日|今晚|明天|明日|明晚|后天)\s*)?"
+        r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
+        r"(?P<hour>\d{1,2})\s*[:：]\s*(?P<minute>\d{1,2})"
+        r")"
+    ),
+)
+
+
+def _extract_schedule_datetime_and_title(value: str) -> tuple[datetime, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for pattern in _SCHEDULE_TIME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        scheduled = _datetime_from_schedule_match(match)
+        if scheduled is None:
+            continue
+        title = _strip_schedule_title(f"{text[: match.start()]} {text[match.end() :]}")
+        if title:
+            return scheduled, title
+    return None
+
+
+def _datetime_from_schedule_match(match: re.Match[str]) -> datetime | None:
+    full = str(match.group("full") or "")
+    hour = _parse_schedule_number(match.group("hour"))
+    if hour is None or hour < 0 or hour > 23:
+        return None
+    minute = 30 if match.groupdict().get("half") else _parse_schedule_number(match.groupdict().get("minute") or "0")
+    if minute is None or minute < 0 or minute > 59:
+        return None
+    if any(marker in full for marker in ("下午", "晚上", "今晚", "明晚")) and hour < 12:
+        hour += 12
+    if "中午" in full and hour < 11:
+        hour += 12
+    if any(marker in full for marker in ("上午", "早上", "凌晨")) and hour == 12:
+        hour = 0
+    day_offset = 0
+    if "后天" in full:
+        day_offset = 2
+    elif any(marker in full for marker in ("明天", "明日", "明晚")):
+        day_offset = 1
+    target_date = date.today() + timedelta(days=day_offset)
+    return datetime.combine(target_date, time(hour=hour, minute=minute))
+
+
+_CHINESE_DIGITS = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _parse_schedule_number(value: str | None) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    if text in _CHINESE_DIGITS:
+        return _CHINESE_DIGITS[text]
+    if text == "十":
+        return 10
+    if text.startswith("十"):
+        tail = text[1:]
+        return 10 + _CHINESE_DIGITS.get(tail, 0)
+    if "十" in text:
+        head, _, tail = text.partition("十")
+        head_value = _CHINESE_DIGITS.get(head)
+        if head_value is None:
+            return None
+        return head_value * 10 + (_CHINESE_DIGITS.get(tail, 0) if tail else 0)
+    return None
+
+
+def _strip_schedule_title(value: str) -> str:
+    title = _strip_typed_text(str(value or ""))
+    title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我)\s*", "", title)
+    title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
+    return _strip_typed_text(title)
+
+
+def _local_datetime_text(value: datetime) -> str:
+    return value.isoformat(timespec="minutes")
 
 
 def _reminders_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:

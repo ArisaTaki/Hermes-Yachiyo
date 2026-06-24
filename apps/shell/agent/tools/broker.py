@@ -819,6 +819,30 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def reminders_create(
+        self,
+        title: str,
+        *,
+        due_at: Any = None,
+        list_name: str = "",
+    ) -> dict[str, Any]:
+        return desktop.reminders_create(title, due_at=due_at, list_name=list_name)
+
+    def calendar_create_event(
+        self,
+        title: str,
+        *,
+        start_at: Any,
+        end_at: Any = None,
+        calendar_name: str = "",
+    ) -> dict[str, Any]:
+        return desktop.calendar_create_event(
+            title,
+            start_at=start_at,
+            end_at=end_at,
+            calendar_name=calendar_name,
+        )
+
     def desktop_safe_shortcut(self, action: str) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.safe_shortcut",

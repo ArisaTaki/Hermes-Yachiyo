@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -2174,6 +2175,153 @@ def clipboard_write(text: str) -> dict[str, Any]:
     }
 
 
+def reminders_create(title: str, *, due_at: Any = None, list_name: str = "") -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("reminders.create")
+    clean_title = _clean_required(title, "title")
+    due = _parse_optional_local_datetime(due_at, "due_at")
+    clean_list_name = str(list_name or "").strip()
+    args = [clean_title, clean_list_name, *_datetime_argv(due)]
+    result = _run_osascript(
+        """
+        on run argv
+            set reminderTitle to item 1 of argv
+            set listName to item 2 of argv
+            set hasDueDate to item 3 of argv
+            tell application "Reminders"
+                if listName is "" then
+                    set targetList to default list
+                else
+                    set targetList to list listName
+                end if
+                set newReminder to make new reminder at end of reminders of targetList with properties {name:reminderTitle}
+                if hasDueDate is "true" then
+                    set dueDate to current date
+                    set year of dueDate to (item 4 of argv as integer)
+                    set month of dueDate to (item 5 of argv as integer)
+                    set day of dueDate to (item 6 of argv as integer)
+                    set hours of dueDate to (item 7 of argv as integer)
+                    set minutes of dueDate to (item 8 of argv as integer)
+                    set seconds of dueDate to 0
+                    set due date of newReminder to dueDate
+                end if
+                try
+                    return id of newReminder
+                on error
+                    return "created"
+                end try
+            end tell
+        end run
+        """,
+        args,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "reminders.create",
+            {**result, "action": "reminders.create", "summary": "reminders.create failed"},
+        )
+    return {
+        "ok": True,
+        "action": "reminders.create",
+        "summary": (
+            f"Created reminder: {clean_title}"
+            if due is None
+            else f"Created reminder: {clean_title} at {_format_local_datetime(due)}"
+        ),
+        "data": {
+            "title": clean_title,
+            "due_at": _format_local_datetime(due) if due is not None else "",
+            "list_name": clean_list_name,
+            "reminder_id": str(result.get("stdout") or "").strip(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def calendar_create_event(
+    title: str,
+    *,
+    start_at: Any,
+    end_at: Any = None,
+    calendar_name: str = "",
+) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("calendar.create_event")
+    clean_title = _clean_required(title, "title")
+    start = _parse_required_local_datetime(start_at, "start_at")
+    end = _parse_optional_local_datetime(end_at, "end_at")
+    if end is None:
+        end = start + timedelta(hours=1)
+    if end <= start:
+        raise ValueError("end_at must be after start_at")
+    clean_calendar_name = str(calendar_name or "").strip()
+    args = [
+        clean_title,
+        clean_calendar_name,
+        *_datetime_argv(start),
+        *_datetime_argv(end),
+    ]
+    result = _run_osascript(
+        """
+        on run argv
+            set eventTitle to item 1 of argv
+            set calendarName to item 2 of argv
+            set startDate to current date
+            set year of startDate to (item 4 of argv as integer)
+            set month of startDate to (item 5 of argv as integer)
+            set day of startDate to (item 6 of argv as integer)
+            set hours of startDate to (item 7 of argv as integer)
+            set minutes of startDate to (item 8 of argv as integer)
+            set seconds of startDate to 0
+            set endDate to current date
+            set year of endDate to (item 10 of argv as integer)
+            set month of endDate to (item 11 of argv as integer)
+            set day of endDate to (item 12 of argv as integer)
+            set hours of endDate to (item 13 of argv as integer)
+            set minutes of endDate to (item 14 of argv as integer)
+            set seconds of endDate to 0
+            tell application "Calendar"
+                if calendarName is "" then
+                    set targetCalendar to first calendar
+                else
+                    set targetCalendar to calendar calendarName
+                end if
+                set newEvent to make new event at end of events of targetCalendar with properties {summary:eventTitle, start date:startDate, end date:endDate}
+                try
+                    return uid of newEvent
+                on error
+                    return "created"
+                end try
+            end tell
+        end run
+        """,
+        args,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "calendar.create_event",
+            {**result, "action": "calendar.create_event", "summary": "calendar.create_event failed"},
+        )
+    return {
+        "ok": True,
+        "action": "calendar.create_event",
+        "summary": (
+            f"Created calendar event: {clean_title} from {_format_local_datetime(start)} "
+            f"to {_format_local_datetime(end)}"
+        ),
+        "data": {
+            "title": clean_title,
+            "start_at": _format_local_datetime(start),
+            "end_at": _format_local_datetime(end),
+            "calendar_name": clean_calendar_name,
+            "event_id": str(result.get("stdout") or "").strip(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_hide_app() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.hide_app")
@@ -2701,6 +2849,44 @@ def _clean_required(value: str, field: str) -> str:
     if not clean:
         raise ValueError(f"{field} is required")
     return clean
+
+
+def _parse_required_local_datetime(value: Any, field: str) -> datetime:
+    if value in (None, ""):
+        raise ValueError(f"{field} is required")
+    return _parse_local_datetime(value, field)
+
+
+def _parse_optional_local_datetime(value: Any, field: str) -> datetime | None:
+    if value in (None, ""):
+        return None
+    return _parse_local_datetime(value, field)
+
+
+def _parse_local_datetime(value: Any, field: str) -> datetime:
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO local datetime") from exc
+    return parsed.replace(tzinfo=None, second=0, microsecond=0)
+
+
+def _datetime_argv(value: datetime | None) -> list[str]:
+    if value is None:
+        return ["false", "0", "1", "1", "0", "0"]
+    return [
+        "true",
+        str(value.year),
+        str(value.month),
+        str(value.day),
+        str(value.hour),
+        str(value.minute),
+    ]
+
+
+def _format_local_datetime(value: datetime) -> str:
+    return value.isoformat(timespec="minutes")
 
 
 def _int_value(value: Any) -> int:

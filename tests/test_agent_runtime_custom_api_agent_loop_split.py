@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from apps.shell import agent_runtime
@@ -641,6 +642,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "reminders.create",
+        "calendar.create_event",
         "screen.capture",
         "desktop.permissions",
         "desktop.active_window",
@@ -675,6 +678,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.click",
         "terminal.run",
     ]
+    today_1500 = f"{date.today().isoformat()}T15:00"
+    tomorrow = date.today() + timedelta(days=1)
+    tomorrow_1500 = f"{tomorrow.isoformat()}T15:00"
+    tomorrow_1600 = f"{tomorrow.isoformat()}T16:00"
 
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1441,25 +1448,44 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("新建一个提醒事项 买牛奶", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Reminders", "action": "new_reminder"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "买牛奶"},
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶"},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开提醒事项添加买牛奶", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Reminders", "action": "new_reminder"},
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶"},
         },
+    ]
+    assert daily_desktop_intent_tool_requests("提醒我明天下午三点开会", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "买牛奶"},
+            "tool": "reminders.create",
+            "input": {"title": "开会", "due_at": tomorrow_1500},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("创建日历事件 明天下午三点开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开日历新建日程 明天下午三点开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
         },
     ]
     assert daily_desktop_intent_tool_requests("新建一条笔记记下 明天十点开会", allowed_tools) == [
@@ -3753,9 +3779,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None
     assert daily_desktop_intent_tool_request("别把 GitHub 打开", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("提醒我下午三点开会", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("新建一个提醒事项 明天下午三点开会", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("创建日历事件 明天下午三点开会", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("提醒我下午三点开会", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "reminders.create",
+        "input": {"title": "开会", "due_at": today_1500},
+    }
+    assert daily_desktop_intent_tool_request("新建一个提醒事项 明天下午三点开会", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "reminders.create",
+        "input": {"title": "开会", "due_at": tomorrow_1500},
+    }
+    assert daily_desktop_intent_tool_request("创建日历事件 明天下午三点开会", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "calendar.create_event",
+        "input": {"title": "开会", "start_at": tomorrow_1500, "end_at": tomorrow_1600},
+    }
     assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
         "protocol": "json_fallback",
@@ -4817,6 +4855,30 @@ def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_tex
 
     assert result == "已复制 8 个字符到剪贴板。"
     assert "047e43ac" not in result
+
+
+def test_main_chat_desktop_intent_summarizes_native_schedule_creation() -> None:
+    reminder = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "reminders.create",
+        {"title": "开会", "due_at": "2026-06-25T15:00"},
+        {
+            "ok": True,
+            "summary": "Created reminder",
+            "data": {"title": "开会", "due_at": "2026-06-25T15:00"},
+        },
+    )
+    calendar_event = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "calendar.create_event",
+        {"title": "开会", "start_at": "2026-06-25T15:00", "end_at": "2026-06-25T16:00"},
+        {
+            "ok": True,
+            "summary": "Created calendar event",
+            "data": {"title": "开会", "start_at": "2026-06-25T15:00", "end_at": "2026-06-25T16:00"},
+        },
+    )
+
+    assert reminder == "已创建提醒事项：开会（2026-06-25T15:00）。"
+    assert calendar_event == "已创建日历事件：开会（2026-06-25T15:00 - 2026-06-25T16:00）。"
 
 
 def test_main_chat_desktop_intent_summarizes_finder_reveal() -> None:

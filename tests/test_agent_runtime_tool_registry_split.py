@@ -302,6 +302,8 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "reminders_create",
+        "calendar_create_event",
         "desktop_safe_shortcut",
         "desktop_safe_key",
         "desktop_safe_type_text",
@@ -622,6 +624,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_document"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_reminder"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
 
@@ -727,6 +730,40 @@ def test_clipboard_write_schema_requires_text() -> None:
 
     with pytest.raises(AgentRuntimeError, match="clipboard.write 参数 text 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": ""})
+
+
+def test_native_schedule_creation_schemas_validate_titles_and_times() -> None:
+    ToolDescriptorRegistry.validate_payload("reminders.create", {"title": "开会"})
+    ToolDescriptorRegistry.validate_payload(
+        "reminders.create",
+        {"title": "开会", "due_at": "2026-06-25T15:00"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "calendar.create_event",
+        {"title": "开会", "start_at": "2026-06-25T15:00"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "calendar.create_event",
+        {
+            "title": "开会",
+            "start_at": "2026-06-25T15:00",
+            "end_at": "2026-06-25T16:00",
+        },
+    )
+
+    with pytest.raises(AgentRuntimeError, match="reminders.create 参数 title 必须是"):
+        ToolDescriptorRegistry.validate_payload("reminders.create", {"title": ""})
+    with pytest.raises(AgentRuntimeError, match="reminders.create 参数 due_at 必须是"):
+        ToolDescriptorRegistry.validate_payload("reminders.create", {"title": "开会", "due_at": "tomorrow"})
+    with pytest.raises(AgentRuntimeError, match="reminders.create 参数 due_at 必须是"):
+        ToolDescriptorRegistry.validate_payload("reminders.create", {"title": "开会", "due_at": "2026-06-25"})
+    with pytest.raises(AgentRuntimeError, match="calendar.create_event 参数 start_at 必须是"):
+        ToolDescriptorRegistry.validate_payload("calendar.create_event", {"title": "开会"})
+    with pytest.raises(AgentRuntimeError, match="calendar.create_event 参数 end_at 必须是"):
+        ToolDescriptorRegistry.validate_payload(
+            "calendar.create_event",
+            {"title": "开会", "start_at": "2026-06-25T15:00", "end_at": "tomorrow"},
+        )
 
 
 def test_desktop_close_window_schema_accepts_empty_payload() -> None:
@@ -3469,6 +3506,70 @@ def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
     assert result["data"]["shortcut_action"] == "new_document"
     assert result["data"]["shortcut_label"] == "new document"
     assert calls[0][0][-1] == "n"
+
+
+def test_desktop_reminders_create_uses_macos_reminders_automation(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_osascript(script, args=None):
+        calls.append((script, args or []))
+        return {"ok": True, "stdout": "reminder-id", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_run_osascript)
+
+    result = desktop_mod.reminders_create("开会", due_at="2026-06-25T15:00")
+
+    assert result["ok"] is True
+    assert result["action"] == "reminders.create"
+    assert result["data"] == {
+        "title": "开会",
+        "due_at": "2026-06-25T15:00",
+        "list_name": "",
+        "reminder_id": "reminder-id",
+    }
+    assert "tell application \"Reminders\"" in calls[0][0]
+    assert calls[0][1] == ["开会", "", "true", "2026", "6", "25", "15", "0"]
+
+
+def test_desktop_calendar_create_event_defaults_to_one_hour(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_osascript(script, args=None):
+        calls.append((script, args or []))
+        return {"ok": True, "stdout": "event-id", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_run_osascript)
+
+    result = desktop_mod.calendar_create_event("开会", start_at="2026-06-25T15:00")
+
+    assert result["ok"] is True
+    assert result["action"] == "calendar.create_event"
+    assert result["data"] == {
+        "title": "开会",
+        "start_at": "2026-06-25T15:00",
+        "end_at": "2026-06-25T16:00",
+        "calendar_name": "",
+        "event_id": "event-id",
+    }
+    assert "tell application \"Calendar\"" in calls[0][0]
+    assert calls[0][1] == [
+        "开会",
+        "",
+        "true",
+        "2026",
+        "6",
+        "25",
+        "15",
+        "0",
+        "true",
+        "2026",
+        "6",
+        "25",
+        "16",
+        "0",
+    ]
 
 
 def test_desktop_safe_key_uses_whitelisted_system_events_key_code(monkeypatch) -> None:

@@ -65,6 +65,8 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "reminders.create": "reminders_create",
+    "calendar.create_event": "calendar_create_event",
     "desktop.safe_shortcut": "desktop_safe_shortcut",
     "desktop.safe_key": "desktop_safe_key",
     "desktop.safe_type_text": "desktop_safe_type_text",
@@ -151,6 +153,8 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "reminders.create",
+    "calendar.create_event",
     "desktop.safe_shortcut",
     "desktop.safe_key",
     "desktop.safe_type_text",
@@ -223,6 +227,15 @@ def _validate_percentage_number(value: Any, label: str) -> None:
         raise AgentRuntimeError(f"{label} 必须是 0-100 的数字") from exc
     if number < 0 or number > 100:
         raise AgentRuntimeError(f"{label} 必须是 0-100 的数字")
+
+
+def _looks_like_iso_datetime(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?",
+            str(value or "").strip(),
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -451,6 +464,23 @@ class ToolDescriptor:
                 _validate_percentage_number(step, "system.volume 参数 step")
         if self.name == "clipboard.write" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("clipboard.write 参数 text 必须是非空字符串")
+        if self.name == "reminders.create":
+            if not str(payload.get("title") or "").strip():
+                raise AgentRuntimeError("reminders.create 参数 title 必须是非空字符串")
+            due_at = str(payload.get("due_at") or "").strip()
+            if due_at and not _looks_like_iso_datetime(due_at):
+                raise AgentRuntimeError("reminders.create 参数 due_at 必须是 ISO 本地时间")
+        if self.name == "calendar.create_event":
+            if not str(payload.get("title") or "").strip():
+                raise AgentRuntimeError("calendar.create_event 参数 title 必须是非空字符串")
+            start_at = str(payload.get("start_at") or "").strip()
+            end_at = str(payload.get("end_at") or "").strip()
+            if not start_at:
+                raise AgentRuntimeError("calendar.create_event 参数 start_at 必须是非空字符串")
+            if not _looks_like_iso_datetime(start_at):
+                raise AgentRuntimeError("calendar.create_event 参数 start_at 必须是 ISO 本地时间")
+            if end_at and not _looks_like_iso_datetime(end_at):
+                raise AgentRuntimeError("calendar.create_event 参数 end_at 必须是 ISO 本地时间")
         if self.name == "desktop.safe_shortcut":
             action = str(payload.get("action") or "").strip().lower()
             if action not in SAFE_SHORTCUT_ACTIONS:
@@ -1483,6 +1513,54 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("text",),
+    ),
+    "reminders.create": ToolDescriptor(
+        name="reminders.create",
+        description=(
+            "Create a macOS Reminders item from an explicit user request. "
+            "Use due_at only when the requested local date/time is deterministic."
+        ),
+        properties={
+            "title": {
+                "type": "string",
+                "description": "Reminder title explicitly requested by the user.",
+            },
+            "due_at": {
+                "type": "string",
+                "description": "Optional local ISO datetime, for example 2026-06-25T15:00.",
+            },
+            "list_name": {
+                "type": "string",
+                "description": "Optional Reminders list name. Empty uses the default list.",
+            },
+        },
+        required=("title",),
+    ),
+    "calendar.create_event": ToolDescriptor(
+        name="calendar.create_event",
+        description=(
+            "Create a macOS Calendar event from an explicit user request. "
+            "Use only when the title and start time are deterministic; end_at defaults to one hour later."
+        ),
+        properties={
+            "title": {
+                "type": "string",
+                "description": "Calendar event title explicitly requested by the user.",
+            },
+            "start_at": {
+                "type": "string",
+                "description": "Local ISO start datetime, for example 2026-06-25T15:00.",
+            },
+            "end_at": {
+                "type": "string",
+                "description": "Optional local ISO end datetime. Defaults to one hour after start_at.",
+            },
+            "calendar_name": {
+                "type": "string",
+                "description": "Optional Calendar name. Empty uses the first available calendar.",
+            },
+        },
+        required=("title", "start_at"),
     ),
     "desktop.hide_app": ToolDescriptor(
         name="desktop.hide_app",

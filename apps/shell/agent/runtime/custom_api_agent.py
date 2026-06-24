@@ -42,6 +42,8 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "reminders.create",
+    "calendar.create_event",
     "desktop.safe_shortcut",
     "desktop.safe_key",
     "desktop.safe_type_text",
@@ -115,6 +117,8 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
+    "reminders.create": "创建提醒事项",
+    "calendar.create_event": "创建日历事件",
     "desktop.safe_shortcut": "执行快捷动作",
     "desktop.safe_key": "按前台导航键",
     "desktop.safe_type_text": "输入前台文字",
@@ -857,6 +861,10 @@ class RuntimeCustomApiAgentLoop:
                 return _system_volume_summary(result, planned_input) or result_summary or "已处理系统音量。"
             if tool_name == "clipboard.write":
                 return _clipboard_write_summary(result, planned_input) or result_summary or "已写入剪贴板。"
+            if tool_name == "reminders.create":
+                return _reminders_create_summary(result, planned_input) or result_summary or "已创建提醒事项。"
+            if tool_name == "calendar.create_event":
+                return _calendar_create_event_summary(result, planned_input) or result_summary or "已创建日历事件。"
             if tool_name == "screen.capture":
                 return result_summary or "已截取当前屏幕。"
             if tool_name == "desktop.permissions":
@@ -1197,13 +1205,13 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
             "commands to system.volume; map explicit 'copy/write to clipboard' requests to "
-            "clipboard.write without reading clipboard contents; map screen capture requests to "
+            "clipboard.write without reading clipboard contents; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
@@ -1978,6 +1986,30 @@ def _clipboard_write_summary(result: dict[str, Any], planned_input: dict[str, An
         text = str(planned_input.get("text") or "")
         length = len(text) if text else 0
     return f"已复制 {length} 个字符到剪贴板。" if length else "已写入剪贴板。"
+
+
+def _reminders_create_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    title = str(data.get("title") or planned_input.get("title") or "").strip()
+    due_at = str(data.get("due_at") or planned_input.get("due_at") or "").strip()
+    if not title:
+        return ""
+    return f"已创建提醒事项：{title}{f'（{due_at}）' if due_at else ''}。"
+
+
+def _calendar_create_event_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    title = str(data.get("title") or planned_input.get("title") or "").strip()
+    start_at = str(data.get("start_at") or planned_input.get("start_at") or "").strip()
+    end_at = str(data.get("end_at") or planned_input.get("end_at") or "").strip()
+    if not title:
+        return ""
+    time_text = ""
+    if start_at and end_at:
+        time_text = f"（{start_at} - {end_at}）"
+    elif start_at:
+        time_text = f"（{start_at}）"
+    return f"已创建日历事件：{title}{time_text}。"
 
 
 def _desktop_open_path_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
