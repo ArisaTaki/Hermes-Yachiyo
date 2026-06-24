@@ -531,6 +531,10 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Google Chrome", "action": "new_tab"},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.open_and_safe_shortcut",
+        {"app_name": "Google Chrome", "action": "close_tab"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.focus_and_safe_shortcut",
         {"app_name": "Slack", "action": "paste"},
     )
@@ -575,7 +579,7 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
     with pytest.raises(AgentRuntimeError, match="app.focus_and_safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
-            {"app_name": "Slack", "action": "close_tab"},
+            {"app_name": "Slack", "action": "delete_tab"},
         )
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_key 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -624,6 +628,9 @@ def test_app_hide_schema_requires_app_name() -> None:
 def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "copy"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "next_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "previous_tab"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_document"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
@@ -634,7 +641,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "reopen_closed_tab"})
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
-        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "delete_tab"})
 
 
 def test_desktop_safe_key_schema_accepts_only_whitelisted_navigation_keys() -> None:
@@ -3833,6 +3840,32 @@ def test_desktop_safe_shortcut_reopen_closed_tab_uses_command_shift_t(monkeypatc
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert "keystroke keyName using {command down, shift down}" in calls[0][0][2]
     assert calls[0][0][-1] == "t"
+
+
+def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    close_tab = desktop_mod.desktop_safe_shortcut("close_tab")
+    next_tab = desktop_mod.desktop_safe_shortcut("next_tab")
+    previous_tab = desktop_mod.desktop_safe_shortcut("previous_tab")
+
+    assert close_tab["summary"] == "Executed safe shortcut: close tab"
+    assert close_tab["data"]["key"] == "w"
+    assert close_tab["data"]["modifiers"] == ["command"]
+    assert next_tab["summary"] == "Executed safe shortcut: next tab"
+    assert next_tab["data"]["key"] == "]"
+    assert next_tab["data"]["modifiers"] == ["command", "shift"]
+    assert previous_tab["summary"] == "Executed safe shortcut: previous tab"
+    assert previous_tab["data"]["key"] == "["
+    assert previous_tab["data"]["modifiers"] == ["command", "shift"]
+    assert len(calls) == 3
 
 
 def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:

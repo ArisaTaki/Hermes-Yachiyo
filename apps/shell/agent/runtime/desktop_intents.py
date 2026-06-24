@@ -370,6 +370,18 @@ def daily_desktop_intent_tool_requests(
     app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
     if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
         return app_search_type_sequence
+    shortcut_type_sequence = _app_open_or_focus_shortcut_type_tool_requests(context)
+    if shortcut_type_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_type_sequence):
+        return shortcut_type_sequence
+    shortcut_sequence = _app_open_or_focus_safe_shortcut_sequence_tool_requests(context)
+    if shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_sequence):
+        return shortcut_sequence
+    foreground_shortcut_sequence = _foreground_safe_shortcut_sequence_tool_requests(context)
+    if foreground_shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_shortcut_sequence):
+        return foreground_shortcut_sequence
+    app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
+    if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
+        return [app_shortcut]
     app_preposed_observe_sequence = _app_preposed_observe_tool_requests(context)
     if app_preposed_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_preposed_observe_sequence):
         return app_preposed_observe_sequence
@@ -382,15 +394,6 @@ def daily_desktop_intent_tool_requests(
     app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
-    shortcut_type_sequence = _app_open_or_focus_shortcut_type_tool_requests(context)
-    if shortcut_type_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_type_sequence):
-        return shortcut_type_sequence
-    shortcut_sequence = _app_open_or_focus_safe_shortcut_sequence_tool_requests(context)
-    if shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_sequence):
-        return shortcut_sequence
-    foreground_shortcut_sequence = _foreground_safe_shortcut_sequence_tool_requests(context)
-    if foreground_shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_shortcut_sequence):
-        return foreground_shortcut_sequence
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
     if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
         return click_type_sequence
@@ -406,9 +409,6 @@ def daily_desktop_intent_tool_requests(
     app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
     if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
         return app_find_sequence
-    app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
-    if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
-        return [app_shortcut]
     app_safe_key = _app_prefix_safe_key_tool_request(context)
     if app_safe_key and str(app_safe_key.get("tool") or "") in allowed:
         return [app_safe_key]
@@ -2932,8 +2932,13 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
         r"新建日程|新建一个日程|新建一条日程|新建日历事件|新建一个日历事件|新日程|"
         r"新建事件|新建一个事件|新事件|"
+        r"关闭(?:当前|这个|浏览器)?标签页|关掉(?:当前|这个|浏览器)?标签页|"
+        r"切(?:换)?到(?:下一个|下个|下一|上一个|上个|上一)标签页|"
+        r"(?:下一个|下个|下一|上一个|上个|上一)标签页|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|reopen\s+(?:the\s+)?(?:last\s+)?closed\s+tab|"
-        r"restore\s+(?:the\s+)?(?:last\s+)?closed\s+tab|go\s+back|back|"
+        r"restore\s+(?:the\s+)?(?:last\s+)?closed\s+tab|close\s+(?:the\s+)?(?:current\s+)?tab|"
+        r"(?:switch\s+to\s+)?next\s+tab|(?:switch\s+to\s+)?previous\s+tab|"
+        r"go\s+back|back|"
         r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
         r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
         r"new\s+note|new\s+event|new\s+calendar\s+event|"
@@ -2956,7 +2961,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         (
             "open",
             rf"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+"
-            rf"(?:and\s+)?(?P<action>{shortcut_pattern})$",
+            rf"(?:(?:and\s+then|then|and)\s+)?(?P<action>{shortcut_pattern})$",
         ),
         (
             "focus",
@@ -2967,7 +2972,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         (
             "focus",
             rf"^(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+?)\s+"
-            rf"(?:and\s+)?(?P<action>{shortcut_pattern})$",
+            rf"(?:(?:and\s+then|then|and)\s+)?(?P<action>{shortcut_pattern})$",
         ),
         (
             "focus",
@@ -2986,6 +2991,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             continue
         raw_app = match.group("app")
         if re.search(r"(?:剪贴板|粘贴板|clipboard)", raw_app, flags=re.IGNORECASE):
+            continue
+        if re.sub(r"[\s._-]+", "", str(raw_app or "").strip().lower()) in {"switchto", "switch"}:
             continue
         if mode == "focus" and re.match(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|运行|拉起|开启|开)",
@@ -6271,6 +6278,20 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "reopentheclosedtab": ("t", ("command", "shift")),
         "reopenlastclosedtab": ("t", ("command", "shift")),
         "restoreclosedtab": ("t", ("command", "shift")),
+        "下一个标签页": ("]", ("command", "shift")),
+        "下个标签页": ("]", ("command", "shift")),
+        "下一标签页": ("]", ("command", "shift")),
+        "切到下一个标签页": ("]", ("command", "shift")),
+        "切换到下一个标签页": ("]", ("command", "shift")),
+        "nexttab": ("]", ("command", "shift")),
+        "switchtonexttab": ("]", ("command", "shift")),
+        "上一个标签页": ("[", ("command", "shift")),
+        "上个标签页": ("[", ("command", "shift")),
+        "上一标签页": ("[", ("command", "shift")),
+        "切到上一个标签页": ("[", ("command", "shift")),
+        "切换到上一个标签页": ("[", ("command", "shift")),
+        "previoustab": ("[", ("command", "shift")),
+        "switchtoprevioustab": ("[", ("command", "shift")),
         "查找": ("f", ("command",)),
         "打开查找": ("f", ("command",)),
         "打开查找框": ("f", ("command",)),
@@ -6291,6 +6312,10 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "newtab": ("t", ("command",)),
         "关闭标签页": ("w", ("command",)),
         "关闭当前标签页": ("w", ("command",)),
+        "关闭浏览器标签页": ("w", ("command",)),
+        "关闭这个标签页": ("w", ("command",)),
+        "closecurrenttab": ("w", ("command",)),
+        "closethecurrenttab": ("w", ("command",)),
         "closetab": ("w", ("command",)),
         "回车": ("return", ()),
         "确认": ("return", ()),
@@ -6392,6 +6417,31 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "reopentheclosedtab": "reopen_closed_tab",
         "reopenlastclosedtab": "reopen_closed_tab",
         "restoreclosedtab": "reopen_closed_tab",
+        "关闭标签页": "close_tab",
+        "关闭当前标签页": "close_tab",
+        "关闭浏览器标签页": "close_tab",
+        "关闭这个标签页": "close_tab",
+        "关掉标签页": "close_tab",
+        "关掉当前标签页": "close_tab",
+        "关掉浏览器标签页": "close_tab",
+        "关掉这个标签页": "close_tab",
+        "closetab": "close_tab",
+        "closecurrenttab": "close_tab",
+        "closethecurrenttab": "close_tab",
+        "下一个标签页": "next_tab",
+        "下个标签页": "next_tab",
+        "下一标签页": "next_tab",
+        "切到下一个标签页": "next_tab",
+        "切换到下一个标签页": "next_tab",
+        "nexttab": "next_tab",
+        "switchtonexttab": "next_tab",
+        "上一个标签页": "previous_tab",
+        "上个标签页": "previous_tab",
+        "上一标签页": "previous_tab",
+        "切到上一个标签页": "previous_tab",
+        "切换到上一个标签页": "previous_tab",
+        "previoustab": "previous_tab",
+        "switchtoprevioustab": "previous_tab",
         "返回上一页": "browser_back",
         "回到上一页": "browser_back",
         "网页后退": "browser_back",

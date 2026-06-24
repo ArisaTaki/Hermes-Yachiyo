@@ -4461,6 +4461,36 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("关闭当前标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "close_tab"},
+    }
+    assert daily_desktop_intent_tool_request("close current tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "close_tab"},
+    }
+    assert daily_desktop_intent_tool_request("切到下一个标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "next_tab"},
+    }
+    assert daily_desktop_intent_tool_request("switch to next tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "next_tab"},
+    }
+    assert daily_desktop_intent_tool_request("切到上一个标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "previous_tab"},
+    }
+    assert daily_desktop_intent_tool_request("previous tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "previous_tab"},
+    }
     assert daily_desktop_intent_tool_request("打开新窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -4542,6 +4572,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 关闭当前标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "close_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 切到下一个标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "next_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 切到上一个标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "previous_tab"},
     }
     assert daily_desktop_intent_tool_request("返回上一页", allowed_tools) == {
         "protocol": "json_fallback",
@@ -6300,6 +6345,33 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    safe_close_tab = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_shortcut",
+        {"action": "close_tab"},
+        {
+            "ok": True,
+            "summary": "Executed safe shortcut: close tab",
+            "data": {"shortcut_action": "close_tab", "key": "w", "modifiers": ["command"]},
+        },
+    )
+    safe_next_tab = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_shortcut",
+        {"action": "next_tab"},
+        {
+            "ok": True,
+            "summary": "Executed safe shortcut: next tab",
+            "data": {"shortcut_action": "next_tab", "key": "]", "modifiers": ["command", "shift"]},
+        },
+    )
+    safe_previous_tab = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_shortcut",
+        {"action": "previous_tab"},
+        {
+            "ok": True,
+            "summary": "Executed safe shortcut: previous tab",
+            "data": {"shortcut_action": "previous_tab", "key": "[", "modifiers": ["command", "shift"]},
+        },
+    )
     safe_key = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.safe_key",
         {"action": "arrow_down", "repeat_count": 3},
@@ -6651,6 +6723,9 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert safe_shortcut == "已复制选中内容。"
     assert safe_reopen_closed_tab == "已重新打开关闭的标签页。"
+    assert safe_close_tab == "已关闭标签页。"
+    assert safe_next_tab == "已切到下一个标签页。"
+    assert safe_previous_tab == "已切到上一个标签页。"
     assert safe_key == "已按下箭头（3 次）。"
     assert safe_type_text == "已向前台输入文字（5 个字符）。"
     assert app_open_safe_type_text == "已打开 Notes 并输入文字（5 个字符）。"

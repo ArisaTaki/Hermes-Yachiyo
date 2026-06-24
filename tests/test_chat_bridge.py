@@ -4351,6 +4351,9 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("复制选中文字", "bubble", "copy", "已复制选中内容。"),
         ("浏览器刷新", "live2d", "refresh", "已刷新。"),
         ("把剪贴板内容粘贴到当前输入框", "bubble", "paste", "已粘贴。"),
+        ("关闭当前标签页", "bubble", "close_tab", "已关闭标签页。"),
+        ("切到下一个标签页", "live2d", "next_tab", "已切到下一个标签页。"),
+        ("切到上一个标签页", "bubble", "previous_tab", "已切到上一个标签页。"),
         (
             "重新打开关闭的标签页",
             "live2d",
@@ -4400,28 +4403,35 @@ def test_chat_bridge_quick_message_executes_app_scoped_safe_shortcut_without_app
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "Chrome 新建标签页",
+    cases = (
+        ("Chrome 新建标签页", "new_tab", "已切到 Google Chrome 并新建标签页。"),
+        ("Chrome 关闭当前标签页", "close_tab", "已切到 Google Chrome 并关闭标签页。"),
+        ("Chrome 切到下一个标签页", "next_tab", "已切到 Google Chrome 并切到下一个标签页。"),
+        ("Chrome 切到上一个标签页", "previous_tab", "已切到 Google Chrome 并切到上一个标签页。"),
     )
+    for text, action, summary in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+        )
 
-    assert calls == [("focus", "Google Chrome"), ("shortcut", "new_tab")]
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已切到 Google Chrome 并新建标签页。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
-        "app_name": "Google Chrome",
-        "action": "new_tab",
-    }
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
+        assert calls[-2:] == [("focus", "Google Chrome"), ("shortcut", action)]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == summary
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "action": action,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_app_scoped_browser_back_without_fake_app_name(
