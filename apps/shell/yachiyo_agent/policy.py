@@ -54,6 +54,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_open_and_play",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -239,6 +240,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_open_and_play",
     ),
     "control_system_volume": ("system.volume",),
     "control_system_brightness": ("system.brightness",),
@@ -338,7 +340,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "minimize_app": "Minimize windows for a running local desktop application without quitting it.",
     "quit_app": "Quit a local desktop application after approval.",
     "open_path": "Open a safe local file or folder with the system default app.",
-    "play_or_pause_media": "Control local media playback such as Apple Music.",
+    "play_or_pause_media": "Control local media playback such as Apple Music or a named music app.",
     "control_system_volume": "Read or adjust local system output volume.",
     "control_system_brightness": "Adjust local display brightness up or down.",
     "write_clipboard": "Write explicit user-provided text to the system clipboard.",
@@ -421,6 +423,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_open_and_play",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -473,6 +476,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_open_and_play",
     ),
     "foreground_input": (
         "app.open_and_safe_type_text",
@@ -548,6 +552,7 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "media.apple_music_play": ("automation",),
     "media.apple_music_open_and_play": ("automation",),
     "media.apple_music_control": ("automation",),
+    "media.music_app_open_and_play": ("accessibility",),
     "system.brightness": ("accessibility",),
 }
 
@@ -874,6 +879,13 @@ def _tool_missing_permissions(
         )
     elif tool in {"app.hide", "app.minimize"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+    elif tool == "media.music_app_open_and_play":
+        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+        values.extend(
+            value
+            for value in _missing_permissions(missing_by_capability, "app_control")
+            if value == "open_command"
+        )
     else:
         values.extend(capability_missing)
     if tool in {"browser.screenshot", "browser.open_url_and_screenshot"}:
@@ -891,6 +903,19 @@ def _tool_missing_permissions(
             if value == "open_command"
         )
     return _ordered_unique(values)
+
+
+def desktop_tool_missing_permissions(
+    tool: str,
+    *,
+    capability_id: str,
+    missing_permissions: Mapping[str, Iterable[str]],
+) -> list[str]:
+    return _tool_missing_permissions(
+        tool,
+        capability_id=capability_id,
+        missing_by_capability=missing_permissions,
+    )
 
 
 def _tool_degrades_with_permissions(

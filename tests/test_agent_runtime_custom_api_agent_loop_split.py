@@ -640,6 +640,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_play",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_open_and_play",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -3932,23 +3933,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("播放网易云音乐", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
+        "tool": "media.music_app_open_and_play",
         "input": {"app_name": "网易云音乐"},
     }
     assert daily_desktop_intent_tool_request("播放 QQ 音乐", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
+        "tool": "media.music_app_open_and_play",
         "input": {"app_name": "QQ音乐"},
     }
+    assert daily_desktop_intent_tool_request("播放 Spotify", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("播放 Spotify", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
+        "tool": "media.music_app_open_and_play",
         "input": {"app_name": "Spotify"},
     }
-    assert daily_desktop_intent_tool_request("播放 Spotify", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
+        "tool": "media.music_app_open_and_play",
         "input": {"app_name": "Spotify"},
     }
     assert daily_desktop_intent_tool_request("打开 Spotify 播放周杰伦", allowed_tools) == {
@@ -3964,9 +3965,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 Spotify 播放周杰伦", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_control"]) is None
+    assert daily_desktop_intent_tool_request("打开 Spotify 播放周杰伦", ["media.music_app_open_and_play"]) is None
     assert daily_desktop_intent_tool_request("打开网易云音乐并播放", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
+        "tool": "media.music_app_open_and_play",
         "input": {"app_name": "网易云音乐"},
     }
     assert daily_desktop_intent_tool_request("打开网易云音乐播放周杰伦", allowed_tools) == {

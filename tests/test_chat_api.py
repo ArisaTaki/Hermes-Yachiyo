@@ -2273,11 +2273,11 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
         store.close()
 
 
-def test_send_message_opens_named_music_app_without_model(tmp_path, monkeypatch):
+def test_send_message_opens_named_music_app_and_attempts_playback_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
-    open_calls: list[str] = []
+    open_and_play_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -2292,19 +2292,30 @@ def test_send_message_opens_named_music_app_without_model(tmp_path, monkeypatch)
         ),
     )
 
-    def fake_app_open(app_name: str) -> dict:
-        open_calls.append(app_name)
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        open_and_play_calls.append(app_name)
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and attempted playback with media key",
             "data": {
                 "app_name": app_name,
-                "launch_verified": True,
+                "open_ok": True,
+                "focus_ok": True,
+                "playback_ok": True,
+                "control": "play",
+                "player_state": "unknown",
+                "playback_state_unverified": True,
             },
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
     try:
         result = api.send_message("打开网易云音乐并播放")
         task = runtime.state.get_task(result["task_id"])
@@ -2318,15 +2329,18 @@ def test_send_message_opens_named_music_app_without_model(tmp_path, monkeypatch)
 
         assert result["ok"] is True
         assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已打开网易云音乐。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert result["agent_task"]["summary"] == "已打开网易云音乐，并用媒体键尝试开始播放。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已打开网易云音乐。"
+        assert task.result == "已打开网易云音乐，并用媒体键尝试开始播放。"
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已打开网易云音乐。"
-        assert open_calls == ["网易云音乐"]
+        assert assistant.content == "已打开网易云音乐，并用媒体键尝试开始播放。"
+        user_metadata = runtime.chat_session.get_messages()[0].metadata
+        assert user_metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
+        assert user_metadata["daily_desktop_tools"] == ["media.music_app_open_and_play"]
+        assert open_and_play_calls == ["网易云音乐"]
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

@@ -929,6 +929,16 @@ def test_apple_music_control_schema_accepts_safe_playback_actions() -> None:
         )
 
 
+def test_music_app_open_and_play_schema_requires_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "media.music_app_open_and_play",
+        {"app_name": "Spotify"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="media.music_app_open_and_play 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("media.music_app_open_and_play", {})
+
+
 def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
     ToolDescriptorRegistry.validate_payload(
         "browser.open_url_and_extract_text",
@@ -4524,6 +4534,89 @@ def test_apple_music_open_and_play_reports_media_key_fallback(monkeypatch) -> No
     assert result["recovery_actions"][0]["permission_target"] == "automation"
     assert result["fallback_used"] is True
     assert result["fallback"] == "system_media_key"
+
+
+def test_music_app_open_and_play_opens_app_then_uses_media_key(monkeypatch) -> None:
+    calls = []
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_osascript(_script, args=None):
+        calls.append(("osascript", args))
+        return {"ok": True, "stdout": "pressed|toggle", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "app_open", fake_app_open)
+    monkeypatch.setattr(desktop_mod, "app_focus", fake_app_focus)
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.music_app_open_and_play("Spotify")
+
+    assert result == {
+        "ok": True,
+        "action": "media.music_app_open_and_play",
+        "summary": "Opened Spotify and attempted playback with media key",
+        "data": {
+            "app_name": "Spotify",
+            "open_ok": True,
+            "open_summary": "Opened Spotify",
+            "focus_ok": True,
+            "focus_summary": "Focused Spotify",
+            "playback_ok": True,
+            "control": "play",
+            "player_state": "unknown",
+            "playback_state_unverified": True,
+            "media_key": "Play/Pause",
+            "fallback_control": "toggle",
+        },
+        "permission_error": False,
+        "fallback_used": True,
+        "fallback": "system_media_key",
+        "fallback_result": {
+            "open": {
+                "ok": True,
+                "action": "app.open",
+                "summary": "Opened Spotify",
+                "data": {"app_name": "Spotify"},
+            },
+            "focus": {
+                "ok": True,
+                "action": "app.focus",
+                "summary": "Focused Spotify",
+                "data": {"app_name": "Spotify"},
+            },
+            "media_key": {
+                "ok": True,
+                "action": "media.music_app_open_and_play",
+                "summary": "Pressed Play/Pause media key",
+                "data": {
+                    "requested_control": "play",
+                    "media_control": "toggle",
+                    "media_key": "Play/Pause",
+                    "key_code": 100,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            },
+        },
+    }
+    assert calls == [("open", "Spotify"), ("focus", "Spotify"), ("osascript", ["100", "toggle"])]
 
 
 def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:

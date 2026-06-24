@@ -7273,6 +7273,14 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["media.apple_music_control"]["risk_level"] == "low"
     assert tools["media.apple_music_control"]["input_schema"]["required"] == ["action"]
     assert tools["media.apple_music_control"]["missing_permissions"] == ["music_app"]
+    assert tools["media.music_app_open_and_play"]["capability_id"] == "media_control"
+    assert tools["media.music_app_open_and_play"]["risk_level"] == "low"
+    assert tools["media.music_app_open_and_play"]["input_schema"]["required"] == ["app_name"]
+    assert tools["media.music_app_open_and_play"]["missing_permissions"] == []
+    assert any(
+        "media play key" in note
+        for note in tools["media.music_app_open_and_play"]["fallback_notes"]
+    )
     assert tools["system.volume"]["capability_id"] == "desktop_execution"
     assert tools["system.volume"]["risk_level"] == "low"
     assert tools["system.volume"]["input_schema"]["required"] == ["action"]

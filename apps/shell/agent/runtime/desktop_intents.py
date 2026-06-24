@@ -755,6 +755,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.ui_elements",
     "desktop.windows",
     "media.apple_music_control",
+    "media.music_app_open_and_play",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
     "notes.create",
@@ -1578,6 +1579,12 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_status_name = _app_status_name(text)
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
+
+    music_app_open_and_play = _music_app_open_and_play_app_name(text)
+    if music_app_open_and_play:
+        candidates.append(
+            _request("media.music_app_open_and_play", {"app_name": music_app_open_and_play})
+        )
 
     if _is_apple_music_open_and_play_request(text):
         candidates.append(_request("media.apple_music_open_and_play", {}))
@@ -6162,6 +6169,13 @@ def _media_app_open_name(text: str) -> str:
     return ""
 
 
+def _music_app_open_and_play_app_name(text: str) -> str:
+    app_name = _music_app_generic_play_open_name(text)
+    if app_name and app_name != "Music":
+        return app_name
+    return ""
+
+
 def _non_apple_music_named_play_app_name(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -6205,6 +6219,9 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:play|start\s+playing)[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:play|start\s+playing)\s+(?P<app>[^.!?]+?)[.!?]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:播放|播|放)(?:一下)?\s*(?P<app>[^。！？!?，,]+?)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)

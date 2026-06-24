@@ -63,6 +63,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
+    "media.music_app_open_and_play": "media_music_app_open_and_play",
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
     "clipboard.write": "clipboard_write",
@@ -160,6 +161,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_play",
     "media.apple_music_open_and_play",
     "media.apple_music_control",
+    "media.music_app_open_and_play",
     "system.volume",
     "system.brightness",
     "clipboard.write",
@@ -1499,6 +1501,21 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("action",),
+    ),
+    "media.music_app_open_and_play": ToolDescriptor(
+        name="media.music_app_open_and_play",
+        description=(
+            "Open a common local music app such as Spotify, QQ Music, or NetEase Cloud Music "
+            "and press the system play media key for explicit generic playback commands. "
+            "This does not search for a specific track."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Local music application name to open and try to play.",
+            }
+        },
+        required=("app_name",),
     ),
     "system.volume": ToolDescriptor(
         name="system.volume",

@@ -314,6 +314,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "media.apple_music_control",
     ),
     "foreground_input": (
+        "media.music_app_open_and_play",
         "app.open_and_safe_type_text",
         "app.focus_and_safe_type_text",
         "app.open_and_safe_shortcut",
@@ -2500,6 +2501,60 @@ def _apple_music_media_key_fallback(action: str) -> dict[str, Any]:
     }
 
 
+def _system_media_key_press(action_name: str, control: str) -> dict[str, Any]:
+    media_key = _APPLE_MUSIC_MEDIA_KEY_FALLBACKS.get(control)
+    if not media_key:
+        return {
+            "ok": False,
+            "action": action_name,
+            "summary": f"No safe media key mapping for control {control}",
+            "error": "unsupported_media_key",
+            "data": {"requested_control": control},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    key_code, key_label, media_control = media_key
+    result = _run_osascript(
+        """
+        on run argv
+            set keyCodeValue to item 1 of argv as integer
+            set mediaControl to item 2 of argv
+            tell application "System Events" to key code keyCodeValue
+            return "pressed|" & mediaControl
+        end run
+        """,
+        [str(key_code), media_control],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            action_name,
+            {
+                **result,
+                "action": action_name,
+                "summary": f"{action_name} media key failed",
+                "data": {
+                    "requested_control": control,
+                    "media_control": media_control,
+                    "media_key": key_label,
+                    "key_code": key_code,
+                },
+            },
+        )
+    return {
+        "ok": True,
+        "action": action_name,
+        "summary": f"Pressed {key_label} media key",
+        "data": {
+            "requested_control": control,
+            "media_control": media_control,
+            "media_key": key_label,
+            "key_code": key_code,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def apple_music_open_and_play() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("media.apple_music_open_and_play")
@@ -2564,6 +2619,89 @@ def apple_music_open_and_play() -> dict[str, Any]:
         },
     }
     return _with_permission_metadata("media.apple_music_open_and_play", payload)
+
+
+def music_app_open_and_play(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.music_app_open_and_play")
+    clean_name = _clean_required(app_name, "app_name")
+    if clean_name == "Music":
+        return apple_music_open_and_play()
+
+    open_result = app_open(clean_name)
+    focus_result: dict[str, Any] = {}
+    media_key_result: dict[str, Any] = {}
+    if open_result.get("ok"):
+        focus_result = app_focus(clean_name)
+        media_key_result = _system_media_key_press(
+            "media.music_app_open_and_play",
+            "play",
+        )
+    open_ok = bool(open_result.get("ok"))
+    key_ok = bool(media_key_result.get("ok"))
+    data = {
+        "app_name": clean_name,
+        "open_ok": open_ok,
+        "open_summary": str(open_result.get("summary") or ""),
+        "focus_ok": bool(focus_result.get("ok")),
+        "focus_summary": str(focus_result.get("summary") or ""),
+        "playback_ok": key_ok,
+        "control": "play",
+        "player_state": "unknown",
+        "playback_state_unverified": True,
+    }
+    media_key_data = (
+        media_key_result.get("data") if isinstance(media_key_result.get("data"), dict) else {}
+    )
+    if media_key_data.get("media_key"):
+        data["media_key"] = media_key_data.get("media_key") or ""
+    if media_key_data.get("media_control"):
+        data["fallback_control"] = media_key_data.get("media_control") or ""
+
+    if open_ok and key_ok:
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {clean_name} and attempted playback with media key",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
+            "fallback_result": {
+                "open": open_result,
+                "focus": focus_result,
+                "media_key": media_key_result,
+            },
+        }
+
+    payload = {
+        "ok": False,
+        "action": "media.music_app_open_and_play",
+        "summary": (
+            f"Opened {clean_name} but could not start playback"
+            if open_ok
+            else f"Could not open {clean_name} or start playback"
+        ),
+        "error": str(
+            media_key_result.get("error")
+            or focus_result.get("error")
+            or open_result.get("error")
+            or "music app playback failed"
+        ),
+        "data": data,
+        "permission_error": bool(
+            media_key_result.get("permission_error")
+            or focus_result.get("permission_error")
+            or open_result.get("permission_error")
+        ),
+        "fallback_used": open_ok,
+        "fallback_result": {
+            "open": open_result,
+            "focus": focus_result,
+            "media_key": media_key_result,
+        },
+    }
+    return _with_permission_metadata("media.music_app_open_and_play", payload)
 
 
 def _open_apple_music_search(query: str) -> dict[str, Any]:
@@ -4336,6 +4474,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "media.music_app_open_and_play": ["accessibility", "open_command"],
         "system.brightness": ["accessibility"],
         "notes.create": ["automation"],
         "reminders.create": ["automation"],

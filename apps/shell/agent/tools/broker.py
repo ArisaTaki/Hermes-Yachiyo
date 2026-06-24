@@ -807,6 +807,9 @@ class ToolBroker:
     def media_apple_music_control(self, action: str) -> dict[str, Any]:
         return desktop.apple_music_control(action)
 
+    def media_music_app_open_and_play(self, app_name: str) -> dict[str, Any]:
+        return desktop.music_app_open_and_play(app_name)
+
     def system_volume(
         self,
         action: str,

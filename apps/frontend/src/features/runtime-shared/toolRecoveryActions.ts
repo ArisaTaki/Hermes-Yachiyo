@@ -152,6 +152,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.reveal_path' && path) return `在 Finder 中显示 ${path}`;
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
+  if (tool === 'media.music_app_open_and_play' && appName) return `打开${appName}并播放`;
   if (tool === 'system.volume') return systemVolumeRetryPrompt(action, input);
   if (tool === 'system.brightness') return systemBrightnessRetryPrompt(action);
   if (tool === 'clipboard.write' && typeof input.text === 'string') return `复制${input.text}到剪贴板`;

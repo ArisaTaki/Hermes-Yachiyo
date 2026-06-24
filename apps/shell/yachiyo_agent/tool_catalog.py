@@ -25,6 +25,7 @@ from .contracts import (
 from .policy import (
     DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES,
     DESKTOP_CAPABILITY_TOOLS,
+    desktop_tool_missing_permissions,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
 )
@@ -260,15 +261,11 @@ def _missing_permissions_for_tool(
 ) -> list[str]:
     if not _is_desktop_or_browser_tool(tool_name):
         return []
-    values: list[str] = []
-    for key in ("desktop_execution", capability_id or ""):
-        if not key:
-            continue
-        capability_payload = capabilities.get(key)
-        if isinstance(capability_payload, Mapping):
-            values.extend(_string_list(capability_payload.get("missing_permissions")))
-        values.extend(_string_list(missing_permissions.get(key)))
-    return _unique(values)
+    return desktop_tool_missing_permissions(
+        tool_name,
+        capability_id=capability_id or "",
+        missing_permissions=missing_permissions,
+    )
 
 
 def _fallback_notes_for_tool(tool_name: str) -> list[str]:
@@ -281,6 +278,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         ],
         "media.apple_music_control": [
             "Apple Music playback controls fall back to opening Music when direct control is unavailable.",
+        ],
+        "media.music_app_open_and_play": [
+            "Opens the named music app, then sends a system media play key; track selection is not verified.",
         ],
         "system.volume": [
             "Uses the local system volume interface and records only volume state metadata.",
