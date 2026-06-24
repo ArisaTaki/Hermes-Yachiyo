@@ -3829,6 +3829,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "/Applications"},
     }
+    for prompt in ("打开文件夹", "打开一个文件夹", "open folder", "open a folder"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Finder"},
+        }
+    for prompt in ("打开项目文件夹", "打开工作区", "open project folder", "open workspace"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) is None
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

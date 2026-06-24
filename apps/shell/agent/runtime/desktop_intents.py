@@ -5634,6 +5634,9 @@ def _app_open_name(text: str) -> str:
             continue
         if _looks_like_composite_action_target(raw_app):
             continue
+        finder_app_name = _generic_finder_open_app_name(raw_app)
+        if finder_app_name:
+            return finder_app_name
         browser_app_name = _generic_browser_open_app_name(raw_app)
         if browser_app_name:
             return browser_app_name
@@ -5897,6 +5900,25 @@ def _generic_browser_open_app_name(value: str) -> str:
     return ""
 
 
+def _generic_finder_open_app_name(value: str) -> str:
+    app = _strip_app_name(value)
+    if not app:
+        return ""
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    if compact in {
+        "文件夹",
+        "一个文件夹",
+        "文件浏览器",
+        "文件管理器",
+        "folder",
+        "afolder",
+        "filebrowser",
+        "filemanager",
+    }:
+        return "Finder"
+    return ""
+
+
 def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
     app = _strip_app_foreground_followup(app)
@@ -5993,6 +6015,19 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         "麻烦",
         "本地",
         "local",
+        "项目",
+        "项目文件夹",
+        "项目目录",
+        "工作区",
+        "当前项目",
+        "当前仓库",
+        "仓库目录",
+        "project",
+        "projectfolder",
+        "workspace",
+        "currentproject",
+        "currentrepo",
+        "repofolder",
     }:
         return True
     lowered = app.lower()
