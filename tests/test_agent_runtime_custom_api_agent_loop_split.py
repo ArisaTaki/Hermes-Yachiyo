@@ -882,6 +882,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.extract_text",
         "input": {},
     }
+    assert daily_desktop_intent_tool_requests("打开 Chrome 读取当前页", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 当前页是什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        },
+    ]
     assert daily_desktop_intent_tool_request("截取当前网页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.screenshot",
@@ -902,6 +926,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.screenshot",
         "input": {"reason": "user asked to capture the browser page"},
     }
+    assert daily_desktop_intent_tool_requests("切到 Chrome 截图当前页", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.screenshot",
+            "input": {"reason": "user asked to capture the browser page"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("点击当前网页上的登录按钮", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.click",
@@ -2872,6 +2908,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"text": "047e43ac"},
     }
     assert daily_desktop_intent_tool_request("写入剪贴板：hello world", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
+    assert daily_desktop_intent_tool_request("写入剪贴板 hello world", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
+    assert daily_desktop_intent_tool_request("把这段话复制到剪贴板：hello world", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello world"},
+    }
+    assert daily_desktop_intent_tool_request("复制以下内容：hello world", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "clipboard.write",
         "input": {"text": "hello world"},

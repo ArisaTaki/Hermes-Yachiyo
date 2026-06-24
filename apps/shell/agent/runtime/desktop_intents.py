@@ -1904,13 +1904,13 @@ def _is_browser_current_page_request(text: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|浏览器|标签页).{0,8}"
+            r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|页|浏览器|标签页).{0,8}"
             r"(?:是什么|是啥|哪个|地址|标题|url)?",
             text,
         )
         or re.search(
             r"(?:看一下|看看|看下|查看).{0,8}"
-            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页)",
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)",
             text,
         )
         or "current page" in lowered
@@ -1933,11 +1933,11 @@ def _is_browser_extract_text_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:读取|读一下|提取|抓取|获取).{0,10}"
-            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页).{0,10}(?:正文|文字|文本|内容)?",
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页).{0,10}(?:正文|文字|文本|内容)?",
             text,
         )
         or re.search(
-            r"(?:把|将)?\s*(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页)"
+            r"(?:把|将)?\s*(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)"
             r".{0,8}(?:读取|读一下|读下|读一读|提取|抓取|获取)"
             r"(?:正文|文字|文本|内容)?",
             text,
@@ -1955,12 +1955,12 @@ def _is_browser_screenshot_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"(?:当前|现在|前台)?(?:网页|网站|页面|浏览器).{0,8}"
+            r"(?:当前|现在|前台)?(?:网页|网站|页面|页|浏览器).{0,8}"
             r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图)",
             text,
         )
         or re.search(
-            r"(?:截取|截图|截屏|截一下|截个图|截|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|浏览器)",
+            r"(?:截取|截图|截屏|截一下|截个图|截|抓屏).{0,8}(?:当前|现在|前台)?(?:网页|网站|页面|页|浏览器)",
             text,
         )
         or "browser screenshot" in lowered
@@ -2031,6 +2031,12 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
 
 def _clipboard_write_text(text: str) -> str:
     patterns = (
+        r"(?:把|将)?\s*(?:这段话|这段文字|这段文本|以下内容|下面内容|内容)?\s*"
+        r"(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
+        r"(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*(?P<text>.+)$",
+        r"(?:复制|拷贝)(?:一下|下)?\s*(?:以下|下面)?(?:内容|这段话|这段文字|这段文本)?\s*[:：]\s*"
+        r"(?P<text>.+)$",
+        r"(?:写入|放入|放进|保存到)\s*(?:系统)?(?:剪贴板|粘贴板)\s+(?P<text>.+)$",
         r"(?:把|将)\s*(?P<text>.+?)\s*(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)",
         r"(?:复制|拷贝|写入)(?:一下|下)?\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
@@ -2875,6 +2881,17 @@ def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     mode, _raw_app, app_name, followup = shorthand_match
     app_request = _request(f"app.{mode}", {"app_name": app_name})
 
+    if app_name in _BROWSER_APP_NAMES:
+        if _is_browser_extract_text_request(followup):
+            return [app_request, _request("browser.extract_text", {})]
+        if _is_browser_screenshot_request(followup):
+            return [
+                app_request,
+                _request("browser.screenshot", {"reason": "user asked to capture the browser page"}),
+            ]
+        if _is_browser_current_page_request(followup):
+            return [app_request, _request("browser.current_page", {})]
+
     ui_payload = _desktop_ui_elements_request(followup)
     if ui_payload is not None:
         return [app_request, _request("desktop.ui_elements", ui_payload)]
@@ -3245,6 +3262,9 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_ui_elements_request(followup) is not None
         or _desktop_windows_request(followup) is not None
         or _is_active_window_request(followup)
+        or _is_browser_extract_text_request(followup)
+        or _is_browser_screenshot_request(followup)
+        or _is_browser_current_page_request(followup)
         or _is_screen_capture_request(followup)
         or _is_visual_inspection_followup(followup)
         or bool(_safe_shortcut_action_sequence(followup))

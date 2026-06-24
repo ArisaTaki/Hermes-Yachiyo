@@ -2466,7 +2466,7 @@ def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypo
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "copy hello world to clipboard",
+        "复制以下内容：hello world",
     )
 
     assert clipboard_calls == ["hello world"]
@@ -2746,6 +2746,60 @@ def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_en
     assert run["pending_approval"] == {}
     assert "agent.desktop.intent_planned" in event_types
     assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_opens_browser_then_extracts_current_page_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_extract_text(selector: str = "") -> dict:
+        calls.append(("extract", selector))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Chrome 读取当前页",
+    )
+
+    assert calls == [("open", "Google Chrome"), ("extract", "")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 Google Chrome。 Yachiyo desktop agent runtime。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open",
+        "browser.extract_text",
+    ]
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert event_types.count("agent.desktop.intent_planned") == 2
     assert "agent.desktop.intent_completed" in event_types
     assert "agent.desktop.intent_approval_required" not in event_types
     assert "model.request.started" not in event_types
