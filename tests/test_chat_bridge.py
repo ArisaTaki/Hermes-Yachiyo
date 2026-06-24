@@ -3556,34 +3556,51 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
 
     def fake_system_volume(action: str, *, level=None, step=None) -> dict:
         volume_calls.append((action, level, step))
+        if action == "down":
+            old_level = 50
+            new_level = 40
+            summary = "System volume decreased from 50% to 40%"
+        else:
+            old_level = 40
+            new_level = 50
+            summary = "System volume increased from 40% to 50%"
         return {
             "ok": True,
             "action": "system.volume",
-            "summary": "System volume increased from 40% to 50%",
+            "summary": summary,
             "data": {
                 "requested_action": action,
-                "old_level": 40,
+                "old_level": old_level,
                 "old_muted": False,
-                "level": 50,
+                "level": new_level,
                 "muted": False,
                 "changed": True,
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "调大音量",
+    cases = (
+        ("调大音量", "bubble", "up", "已把系统音量从 40% 调高到 50%。"),
+        ("turn it up", "live2d", "up", "已把系统音量从 40% 调高到 50%。"),
+        ("make it quieter", "bubble", "down", "已把系统音量从 50% 调低到 40%。"),
     )
+    for prompt, launcher_mode, action, summary in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert volume_calls == [("up", None, None)]
-    assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "已把系统音量从 40% 调高到 50%。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "system.volume"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == summary
+        assert agent_task["tool_calls"][-1]["tool_name"] == "system.volume"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"action": action}
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert volume_calls == [("up", None, None), ("up", None, None), ("down", None, None)]
 
 
 def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypoints(

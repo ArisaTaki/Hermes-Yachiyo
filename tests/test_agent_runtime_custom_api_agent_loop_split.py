@@ -4130,7 +4130,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "up"},
     }
+    assert daily_desktop_intent_tool_request("turn it up", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
+    assert daily_desktop_intent_tool_request("make it louder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
     assert daily_desktop_intent_tool_request("声音小一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("turn it down", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("make it quieter", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
         "input": {"action": "down"},

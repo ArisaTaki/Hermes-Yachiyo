@@ -2462,7 +2462,8 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         text,
     ) or re.search(
         r"\b(?:turn|raise|increase)\s+(?:up\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
-        r"\bvolume\s+up\b",
+        r"\bvolume\s+up\b|"
+        r"\b(?:louder|make\s+it\s+louder|turn\s+it\s+up|turn\s+(?:the\s+)?sound\s+up)\b",
         lowered,
     ):
         return {"action": "up"}
@@ -2472,7 +2473,8 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         text,
     ) or re.search(
         r"\b(?:turn|lower|decrease)\s+(?:down\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
-        r"\bvolume\s+down\b",
+        r"\bvolume\s+down\b|"
+        r"\b(?:quieter|make\s+it\s+quieter|turn\s+it\s+down|turn\s+(?:the\s+)?sound\s+down)\b",
         lowered,
     ):
         return {"action": "down"}
