@@ -873,6 +873,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
         "presentation": "summary",
     }
+    assert daily_desktop_intent_tool_request("summarize current webpage", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+        "presentation": "summary",
+    }
     assert daily_desktop_intent_tool_request("读当前网页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
@@ -891,6 +897,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("screenshot this page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
+    }
+    assert daily_desktop_intent_tool_request("screenshot current webpage", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.screenshot",
         "input": {"reason": "user asked to capture the browser page"},
@@ -1090,6 +1101,33 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {
             "url": "https://www.google.com/search?q=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
+        },
+    }
+    assert daily_desktop_intent_tool_request("搜索 oha yachiyo 并读一下结果", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://www.google.com/search?q=oha+yachiyo"},
+    }
+    assert daily_desktop_intent_tool_request("search oha yachiyo and summarize results", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://www.google.com/search?q=oha+yachiyo"},
+        "presentation": "summary",
+    }
+    assert daily_desktop_intent_tool_request("用浏览器搜索 oha yachiyo 并截图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://www.google.com/search?q=oha+yachiyo",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
+    assert daily_desktop_intent_tool_request("google oha yachiyo and screenshot results", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://www.google.com/search?q=oha+yachiyo",
+            "reason": "user asked to capture the browser page after opening a URL",
         },
     }
     assert daily_desktop_intent_tool_requests("打开浏览器搜索天气然后点第一个结果", allowed_tools) == [

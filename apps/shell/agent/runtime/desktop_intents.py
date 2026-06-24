@@ -2019,6 +2019,7 @@ def _browser_open_target_url(text: str) -> str:
         _browser_composite_open_url(text)
         or _browser_address_bar_url(text)
         or _browser_open_url(text)
+        or _browser_search_url(text)
         or _browser_named_site_url(text)
     )
 
@@ -2098,8 +2099,19 @@ def _is_browser_open_followup_screenshot_request(text: str) -> bool:
             text,
         )
         or re.search(
+            r"(?:并且|并|然后|之后|后|再)\s*"
+            r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图|截取)"
+            r"(?:一下|下|搜索结果|结果|网页|页面|网站)?",
+            text,
+        )
+        or re.search(
             r"\b(?:open|visit|browse|go to)\b.{0,80}"
             r"(?:take\s+a\s+screenshot|screenshot|capture)",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:and|then)\s+(?:take\s+a\s+screenshot|screenshot|capture)"
+            r"(?:\s+(?:the\s+)?(?:search\s+)?(?:results?|page|webpage|website|site))?\b",
             lowered,
         )
     )
@@ -2272,17 +2284,42 @@ def _looks_like_search_request(text: str) -> bool:
 
 
 def _browser_search_url(text: str) -> str:
-    if _looks_like_click_command(text) or _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
+    app_followup = _app_open_or_focus_known_app_followup_match(text)
+    if app_followup:
+        if app_followup[2] not in _BROWSER_APP_NAMES:
+            return ""
+        if _desktop_safe_shortcut_action(app_followup[3]):
+            return ""
+        if _looks_like_known_app_followup(app_followup[3]) and not _looks_like_search_request(app_followup[3]):
+            return ""
+    app_prefix = _known_app_prefix_split(text)
+    if app_prefix:
+        if app_prefix[1] not in _BROWSER_APP_NAMES:
+            return ""
+        if _desktop_safe_shortcut_action(app_prefix[2]):
+            return ""
+        if _looks_like_known_app_followup(app_prefix[2]) and not _looks_like_search_request(app_prefix[2]):
+            return ""
+    if _app_direct_search_type_tool_requests(text) or _app_scoped_search_type_tool_requests(text):
+        return ""
+    if (
+        _looks_like_click_command(text)
+        or _desktop_click_ui_element(text)
+        or _desktop_type_into_ui_element(text)
+        or _browser_type_text_request(text) is not None
+    ):
         return ""
     patterns = (
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开)?\s*"
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开)?\s*"
         r"(?P<engine>百度|baidu)\s*(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:打开|启动|运行|拉起|开启|用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:[，,；;。]?\s*(?:并且|并|然后|之后|后|再)?\s*)?"
         r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*(?P<query>[^。！？!?]+)",
-        r"\b(?:search|google|look up)\b\s+(?:for\s+)?(?P<query>[^.!?]+)",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|google|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -2580,6 +2617,23 @@ def _strip_search_query(value: str) -> str:
     query = re.sub(r"^(?:一下|这个|那个)\s*", "", query)
     query = re.sub(r"^下(?:\s+|$)", "", query)
     query = re.sub(
+        r"\s*(?:并且|并|然后|之后|后|再|接着)\s*"
+        r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下|"
+        r"总结|摘要|概括|截图|截屏|屏幕截图|抓屏|截一下|截个图)"
+        r"(?:一下|下|搜索结果|结果|网页|页面|网站|正文|文字|文本|内容)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"\s+(?:and\s+then|then|and)\s+"
+        r"(?:read|extract|get|summari[sz]e|take\s+a\s+screenshot|screenshot|capture)"
+        r"(?:\s+(?:the\s+)?(?:search\s+)?(?:results?|page|webpage|website|site|text|content))?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
         r"\s*(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)(?:里|中|上|内)?$",
         "",
         query,
@@ -2671,8 +2725,12 @@ def _is_browser_extract_text_request(text: str) -> bool:
         or "read the page" in lowered
         or "summarize current page" in lowered
         or "summarize the current page" in lowered
+        or "summarize current webpage" in lowered
+        or "summarize the current webpage" in lowered
         or "summarise current page" in lowered
         or "summarise the current page" in lowered
+        or "summarise current webpage" in lowered
+        or "summarise the current webpage" in lowered
         or "summarize this page" in lowered
         or "summarise this page" in lowered
         or "what is this page about" in lowered
@@ -2705,6 +2763,8 @@ def _is_browser_screenshot_request(text: str) -> bool:
         or "browser screenshot" in lowered
         or "page screenshot" in lowered
         or "screenshot the current page" in lowered
+        or "screenshot current webpage" in lowered
+        or "screenshot the current webpage" in lowered
         or "screenshot this page" in lowered
         or "screenshot the page" in lowered
         or re.search(r"\btake\s+(?:a\s+)?screenshot\s+of\s+(?:this|the|current)\s+page\b", lowered)

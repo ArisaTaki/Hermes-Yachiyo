@@ -631,6 +631,29 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "summarize current webpage",
+        launcher_mode="live2d",
+    )
+
+    assert extract_calls == ["", ""]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "网页内容摘要：\n- Yachiyo desktop agent runtime"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
 
 def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_model(
     tmp_path,
@@ -3672,16 +3695,48 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     cases = [
-        ("打开 GitHub 并读一下页面", "live2d", "GitHub page text for Yachiyo", ""),
-        ("打开 GitHub 看看内容", "bubble", "GitHub page text for Yachiyo", ""),
-        ("打开 github.com 读一下内容", "live2d", "GitHub page text for Yachiyo", ""),
-        ("浏览器打开 GitHub 然后读一下", "bubble", "GitHub page text for Yachiyo", ""),
-        ("打开网页并读一下 github.com", "live2d", "GitHub page text for Yachiyo", ""),
-        ("打开 GitHub 并概括内容", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
-        ("open github.com and summarize", "live2d", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
-        ("summarize github.com after opening it", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
+        ("打开 GitHub 并读一下页面", "live2d", "https://github.com", "GitHub page text for Yachiyo", ""),
+        ("打开 GitHub 看看内容", "bubble", "https://github.com", "GitHub page text for Yachiyo", ""),
+        ("打开 github.com 读一下内容", "live2d", "https://github.com", "GitHub page text for Yachiyo", ""),
+        ("浏览器打开 GitHub 然后读一下", "bubble", "https://github.com", "GitHub page text for Yachiyo", ""),
+        ("打开网页并读一下 github.com", "live2d", "https://github.com", "GitHub page text for Yachiyo", ""),
+        (
+            "打开 GitHub 并概括内容",
+            "bubble",
+            "https://github.com",
+            "网页内容摘要：\n- GitHub page text for Yachiyo",
+            "summary",
+        ),
+        (
+            "open github.com and summarize",
+            "live2d",
+            "https://github.com",
+            "网页内容摘要：\n- GitHub page text for Yachiyo",
+            "summary",
+        ),
+        (
+            "summarize github.com after opening it",
+            "bubble",
+            "https://github.com",
+            "网页内容摘要：\n- GitHub page text for Yachiyo",
+            "summary",
+        ),
+        (
+            "搜索 oha yachiyo 并读一下结果",
+            "bubble",
+            "https://www.google.com/search?q=oha+yachiyo",
+            "GitHub page text for Yachiyo",
+            "",
+        ),
+        (
+            "search oha yachiyo and summarize results",
+            "live2d",
+            "https://www.google.com/search?q=oha+yachiyo",
+            "网页内容摘要：\n- GitHub page text for Yachiyo",
+            "summary",
+        ),
     ]
-    for prompt, launcher_mode, expected_summary, expected_presentation in cases:
+    for prompt, launcher_mode, expected_url, expected_summary, expected_presentation in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
@@ -3692,7 +3747,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         assert agent_task["status"] == "completed"
         assert agent_task["summary"] == expected_summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
-        assert agent_task["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
+        assert agent_task["tool_calls"][-1]["input_preview"]["url"] == expected_url
         completed_event = next(
             event
             for event in result["_task_timeline"]["events"]
@@ -3722,6 +3777,10 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         ("open", "https://github.com"),
         ("extract", ""),
         ("open", "https://github.com"),
+        ("extract", ""),
+        ("open", "https://www.google.com/search?q=oha+yachiyo"),
+        ("extract", ""),
+        ("open", "https://www.google.com/search?q=oha+yachiyo"),
         ("extract", ""),
     ]
 
@@ -3758,10 +3817,20 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_screenshot)
     cases = (
-        ("打开 Chrome 访问 github.com 并截图", "bubble"),
-        ("打开网页并截图 github.com", "live2d"),
+        ("打开 Chrome 访问 github.com 并截图", "bubble", "https://github.com"),
+        ("打开网页并截图 github.com", "live2d", "https://github.com"),
+        (
+            "用浏览器搜索 oha yachiyo 并截图",
+            "bubble",
+            "https://www.google.com/search?q=oha+yachiyo",
+        ),
+        (
+            "google oha yachiyo and screenshot results",
+            "live2d",
+            "https://www.google.com/search?q=oha+yachiyo",
+        ),
     )
-    for text, launcher_mode in cases:
+    for text, launcher_mode, expected_url in cases:
         calls.clear()
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
@@ -3770,7 +3839,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
             launcher_mode=launcher_mode,
         )
 
-        assert calls[0] == ("open", "https://github.com")
+        assert calls[0] == ("open", expected_url)
         assert calls[1][0] == "screenshot"
         assert calls[1][1].endswith("browser/current-page.png")
         assert agent_task["status"] == "completed"
@@ -3779,7 +3848,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
         assert agent_task["summary"] == "已打开网页并截取当前网页。"
         assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_screenshot"
         assert agent_task["tool_calls"][-1]["input_preview"] == {
-            "url": "https://github.com",
+            "url": expected_url,
             "reason": "user asked to capture the browser page after opening a URL",
         }
         assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
@@ -4724,29 +4793,35 @@ def test_chat_bridge_quick_message_executes_browser_screenshot_for_launcher_entr
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_browser_screenshot)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "screenshot this page",
-    )
+    for prompt, launcher_mode in (
+        ("screenshot this page", "bubble"),
+        ("screenshot current webpage", "live2d"),
+    ):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert screenshot_targets
-    assert screenshot_targets[0].endswith("browser/current-page.png")
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已截取当前网页。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.screenshot"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "artifact.created" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
+        assert screenshot_targets[-1].endswith("browser/current-page.png")
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已截取当前网页。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.screenshot"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+
+    assert len(screenshot_targets) == 2
     assert "model.requested" not in event_types
 
 
