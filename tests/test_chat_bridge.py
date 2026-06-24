@@ -3313,6 +3313,26 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    local_url_cases = (
+        ("打开 127.0.0.1:5173", "bubble", "http://127.0.0.1:5173"),
+        ("open 192.168.1.10:8000/status", "live2d", "http://192.168.1.10:8000/status"),
+    )
+    for prompt, launcher_mode, url in local_url_cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == f"已打开网页：{url}。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"url": url}
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
     for launcher_mode in ("bubble", "live2d"):
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
@@ -3331,6 +3351,8 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
 
     assert opened_urls == [
         "https://github.com",
+        "http://127.0.0.1:5173",
+        "http://192.168.1.10:8000/status",
         "https://www.baidu.com/s?wd=open+hanako",
         "https://www.baidu.com/s?wd=open+hanako",
     ]

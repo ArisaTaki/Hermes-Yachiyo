@@ -1601,6 +1601,7 @@ def _browser_open_url(text: str) -> str:
     url_token = (
         r"(?:https?://[^\s。！？!?，,]+|www\.[^\s。！？!?，,]+|"
         r"localhost(?::\d+)?(?:/[^\s。！？!?，,]*)?|"
+        r"(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/[^\s。！？!?，,]*)?|"
         r"[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(?:/[^\s。！？!?，,]*)?)"
     )
     patterns = (
@@ -1849,6 +1850,7 @@ def _explicit_browser_url_in_text(text: str) -> str:
     url_token = (
         r"(?:https?://[^\s。！？!?，,]+|www\.[^\s。！？!?，,]+|"
         r"localhost(?::\d+)?(?:/[^\s。！？!?，,]*)?|"
+        r"(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/[^\s。！？!?，,]*)?|"
         r"[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(?:/[^\s。！？!?，,]*)?)"
     )
     for match in re.finditer(rf"(?P<url>{url_token})", text, flags=re.IGNORECASE):
@@ -1893,6 +1895,12 @@ def _normalize_url(value: str) -> str:
         return f"https://{candidate}"
     if lowered.startswith("localhost"):
         return f"http://{candidate}"
+    if re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/[^\s]*)?", candidate):
+        host = candidate.split("/", 1)[0].split(":", 1)[0]
+        octets = [int(part) for part in host.split(".")]
+        if all(0 <= part <= 255 for part in octets):
+            return f"http://{candidate}"
+        return ""
     domain_pattern = (
         r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+"
