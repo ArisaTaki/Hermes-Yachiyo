@@ -251,6 +251,13 @@ _COMMON_REVEAL_PATHS = {
     "文稿": "~/Documents",
     "文稿文件夹": "~/Documents",
     "文稿目录": "~/Documents",
+    "pictures": "~/Pictures",
+    "picturesfolder": "~/Pictures",
+    "picturesdirectory": "~/Pictures",
+    "图片文件夹": "~/Pictures",
+    "图片目录": "~/Pictures",
+    "照片文件夹": "~/Pictures",
+    "照片目录": "~/Pictures",
     "home": "~",
     "homefolder": "~",
     "主目录": "~",
@@ -3748,6 +3755,10 @@ def _normalize_reveal_path(value: str) -> str:
     target = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", target)
     if _looks_like_local_path(target):
         return target
+    compact = re.sub(r"[\s._-]+", "", target.lower())
+    common_path = _COMMON_REVEAL_PATHS.get(compact)
+    if common_path:
+        return common_path
     target = re.sub(r"\s*(?:文件夹|目录|路径|folder|directory|path)$", "", target, flags=re.IGNORECASE)
     target = _strip_polite_suffix(_strip_query(target))
     if not target:

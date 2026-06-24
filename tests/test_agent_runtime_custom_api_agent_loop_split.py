@@ -3499,6 +3499,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开图片文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Pictures"},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 打开照片目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Pictures"},
+    }
     assert daily_desktop_intent_tool_request("open Finder and show Downloads folder", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
