@@ -379,6 +379,119 @@ def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_completio
     assert snapshots[0].completed_at == "2026-06-22T00:00:02Z"
 
 
+def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_sequence_steps() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-intent-completed",
+                run_id="run-daily-sequence",
+                sequence=5,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.ui_elements",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "tools": ["app.open", "desktop.ui_elements"],
+                    "source": "daily_desktop_intent",
+                    "input_preview": {"role_filter": "button", "limit": 80},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {"count": 2},
+                    },
+                    "steps": [
+                        {
+                            "tool": "app.open",
+                            "input_preview": {"app_name": "WeChat"},
+                            "result": {
+                                "ok": True,
+                                "action": "app.open",
+                                "summary": "已打开 WeChat。",
+                            },
+                            "summary": "已打开 WeChat。",
+                        },
+                        {
+                            "tool": "desktop.ui_elements",
+                            "input_preview": {"role_filter": "button", "limit": 80},
+                            "result": {
+                                "ok": True,
+                                "action": "desktop.ui_elements",
+                                "data": {"count": 2},
+                            },
+                            "summary": "当前 WeChat 界面控件：2 个。",
+                        },
+                    ],
+                    "summary": "已打开 WeChat。 当前 WeChat 界面控件：2 个。",
+                },
+                created_at="2026-06-22T00:00:05Z",
+            ),
+        ]
+    )
+
+    assert [snapshot.tool_name for snapshot in snapshots] == [
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert [snapshot.status for snapshot in snapshots] == ["completed", "completed"]
+    assert snapshots[0].input_preview == {"app_name": "WeChat"}
+    assert snapshots[0].output_preview["action"] == "app.open"
+    assert snapshots[1].input_preview == {"role_filter": "button", "limit": 80}
+    assert snapshots[1].output_preview["data"]["count"] == 2
+    assert snapshots[1].completed_at == "2026-06-22T00:00:05Z"
+
+
+def test_tool_call_snapshots_from_events_merges_redacted_daily_desktop_step_inputs() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-tool-call",
+                run_id="run-daily-sequence",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="desktop.ui_elements",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "input_preview": {"role_filter": "button", "limit": 80},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {"count": 2},
+                    },
+                },
+                created_at="2026-06-22T00:00:04Z",
+            ),
+            PublicRunEvent(
+                event_id="evt-intent-completed",
+                run_id="run-daily-sequence",
+                sequence=2,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.ui_elements",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "tools": ["desktop.ui_elements"],
+                    "source": "daily_desktop_intent",
+                    "steps": [
+                        {
+                            "tool": "desktop.ui_elements",
+                            "input_preview": {"role_filter": "button", "limit": "80"},
+                            "result": {
+                                "ok": "True",
+                                "action": "desktop.ui_elements",
+                                "data": "{'count': 2}",
+                            },
+                        },
+                    ],
+                },
+                created_at="2026-06-22T00:00:05Z",
+            ),
+        ]
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tool_name == "desktop.ui_elements"
+    assert snapshots[0].input_preview == {"role_filter": "button", "limit": 80}
+    assert snapshots[0].completed_at == "2026-06-22T00:00:05Z"
+
+
 def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_boundaries() -> None:
     snapshots = tool_call_snapshots_from_events(
         [

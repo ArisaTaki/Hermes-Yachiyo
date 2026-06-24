@@ -30,23 +30,41 @@ def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCa
             continue
         if not is_tool_event(event.event_type):
             continue
-        payload = tool_call_payload_from_event(event)
-        call = tool_call_snapshot_from_payload(payload, run_id=event.run_id)
-        key = tool_call_correlation_key(payload, call)
-        active_index = active_by_key.get(key) if key else None
-        if active_index is None and event.event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS:
-            active_index = latest_matching_tool_call_index(calls, call)
-        if active_index is None:
-            active_index = len(calls)
-            calls.append(call)
-        else:
-            calls[active_index] = merge_tool_call_snapshots(calls[active_index], call)
-        if key:
-            if tool_call_status_is_terminal(call.status):
-                active_by_key.pop(key, None)
+        for payload in tool_call_payloads_from_event(event):
+            call = tool_call_snapshot_from_payload(payload, run_id=event.run_id)
+            key = tool_call_correlation_key(payload, call)
+            active_index = active_by_key.get(key) if key else None
+            if active_index is None and event.event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS:
+                active_index = latest_matching_tool_call_index(calls, call)
+            if active_index is None:
+                active_index = len(calls)
+                calls.append(call)
             else:
-                active_by_key[key] = active_index
+                calls[active_index] = merge_tool_call_snapshots(calls[active_index], call)
+            if key:
+                if tool_call_status_is_terminal(call.status):
+                    active_by_key.pop(key, None)
+                else:
+                    active_by_key[key] = active_index
     return calls
+
+
+def tool_call_payloads_from_event(event: PublicRunEvent) -> list[dict[str, Any]]:
+    if event.event_type == "agent.desktop.intent_completed":
+        step_payloads = daily_desktop_intent_step_payloads(event)
+        if step_payloads:
+            return [
+                tool_call_payload_from_event(
+                    event.model_copy(
+                        update={
+                            "detail": _text(step_payload.get("tool") or event.detail),
+                            "payload": step_payload,
+                        }
+                    )
+                )
+                for step_payload in step_payloads
+            ]
+    return [tool_call_payload_from_event(event)]
 
 
 def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
@@ -102,6 +120,72 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         },
     )
     return normalized
+
+
+def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, Any]]:
+    payload = event.payload
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return []
+
+    step_payloads: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, Mapping):
+            continue
+        tool_name = _text(step.get("tool") or step.get("tool_name"))
+        if not tool_name:
+            continue
+        input_preview = _mapping_from_first(
+            step,
+            "input_preview",
+            "input",
+            "arguments",
+            "args",
+        )
+        result = _mapping_from_first(step, "result", "output_preview", "output")
+        step_payload = {
+            key: value
+            for key, value in payload.items()
+            if key
+            in {
+                "source",
+                "source_run_id",
+                "source_runnable_id",
+                "source_runnable_name",
+                "workflow_id",
+                "workflow_run_id",
+                "workflow_node_id",
+                "workflow_node_label",
+                "group_id",
+                "group_run_id",
+                "run_group_id",
+                "member_agent_id",
+                "member_agent_name",
+                "agent_id",
+                "agent_name",
+                "risk_level",
+                "risk",
+            }
+        }
+        step_payload.update(
+            {
+                "tool_call_id": _text(
+                    step.get("tool_call_id")
+                    or step.get("id")
+                    or f"{event.run_id or 'run'}:desktop-intent-step:{event.sequence}:{index}"
+                ),
+                "tool": tool_name,
+                "tool_name": tool_name,
+                "input_preview": input_preview,
+                "result": result,
+            }
+        )
+        if step.get("status"):
+            step_payload["status"] = step.get("status")
+        if step.get("summary"):
+            step_payload["summary"] = step.get("summary")
+        step_payloads.append(step_payload)
+    return step_payloads
 
 
 def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -173,7 +257,7 @@ def merge_tool_call_snapshots(
         tool_name=current.tool_name or next_call.tool_name,
         status=next_call.status or current.status,
         risk_level=current.risk_level or next_call.risk_level,
-        input_preview={**current.input_preview, **next_call.input_preview},
+        input_preview=_merge_input_previews(current.input_preview, next_call.input_preview),
         output_preview=output_preview,
         foreground_lock_busy=current.foreground_lock_busy or next_call.foreground_lock_busy,
         foreground_lock_holder=current.foreground_lock_holder or next_call.foreground_lock_holder,
@@ -381,7 +465,11 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "workflow_run_id",
         "workflow_step_label",
     }
-    return {key: value for key, value in preview.items() if key not in trace_keys}
+    return {
+        key: _canonical_preview_value(value)
+        for key, value in preview.items()
+        if key not in trace_keys
+    }
 
 
 def _public_run_event_is_secret(event: PublicRunEvent) -> bool:
@@ -391,6 +479,39 @@ def _public_run_event_is_secret(event: PublicRunEvent) -> bool:
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _mapping_from_first(payload: Mapping[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            return dict(value)
+    return {}
+
+
+def _merge_input_previews(
+    current: Mapping[str, Any],
+    next_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in next_preview.items():
+        merged.setdefault(key, value)
+    return merged
+
+
+def _canonical_preview_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _canonical_preview_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_canonical_preview_value(item) for item in value]
+    if isinstance(value, str):
+        text = value.strip()
+        if text and text.lstrip("-").isdigit():
+            try:
+                return int(text)
+            except ValueError:
+                return value
+    return value
 
 
 def _stable_json(value: Any) -> str:

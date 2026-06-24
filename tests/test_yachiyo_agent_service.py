@@ -291,6 +291,55 @@ class _CompletedDesktopIntentTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+class _CompletedDesktopIntentSequenceTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            status="running",
+            current_step="",
+            progress_text="",
+            timeline=[
+                {
+                    "event": "agent.desktop.intent_completed",
+                    "detail": "desktop.ui_elements",
+                    "tool": "desktop.ui_elements",
+                    "tools": ["app.open", "desktop.ui_elements"],
+                    "source": "daily_desktop_intent",
+                    "input_preview": {"role_filter": "button", "limit": 80},
+                    "result": {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {"count": 2},
+                    },
+                    "steps": [
+                        {
+                            "tool": "app.open",
+                            "input_preview": {"app_name": "WeChat"},
+                            "result": {
+                                "ok": True,
+                                "action": "app.open",
+                                "summary": "已打开 WeChat。",
+                            },
+                            "summary": "已打开 WeChat。",
+                        },
+                        {
+                            "tool": "desktop.ui_elements",
+                            "input_preview": {"role_filter": "button", "limit": 80},
+                            "result": {
+                                "ok": True,
+                                "action": "desktop.ui_elements",
+                                "data": {"count": 2},
+                            },
+                            "summary": "当前 WeChat 界面控件：2 个。",
+                        },
+                    ],
+                    "summary": "已打开 WeChat。 当前 WeChat 界面控件：2 个。",
+                }
+            ],
+        )
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -391,6 +440,28 @@ def test_yachiyo_agent_service_projects_completed_desktop_intent_as_tool_call() 
     assert timeline.tool_calls[0].output_preview["action"] == "desktop.windows"
     assert timeline.tool_calls[0].output_preview["data"]["count"] == 1
     assert port.calls == [("get_task_timeline", "task-windows")]
+
+
+def test_yachiyo_agent_service_projects_completed_desktop_intent_sequence_tool_calls() -> None:
+    port = _CompletedDesktopIntentSequenceTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    timeline = service.get_task_timeline("task-wechat")
+
+    assert timeline.events[0].event_type == "agent.desktop.intent_completed"
+    assert [tool_call.tool_name for tool_call in timeline.tool_calls] == [
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert [tool_call.status for tool_call in timeline.tool_calls] == [
+        "completed",
+        "completed",
+    ]
+    assert timeline.tool_calls[0].input_preview == {"app_name": "WeChat"}
+    assert timeline.tool_calls[0].output_preview["action"] == "app.open"
+    assert timeline.tool_calls[1].input_preview == {"role_filter": "button", "limit": "80"}
+    assert timeline.tool_calls[1].output_preview["action"] == "desktop.ui_elements"
+    assert port.calls == [("get_task_timeline", "task-wechat")]
 
 
 def test_yachiyo_agent_service_pages_task_events() -> None:
