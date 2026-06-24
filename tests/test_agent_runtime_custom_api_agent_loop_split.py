@@ -1099,6 +1099,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_type_text",
         "input": {"app_name": "Notes", "text": "hello yachiyo"},
     }
+    assert daily_desktop_intent_tool_request("打开 Word 输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "Microsoft Word", "text": "hello"},
+    }
     assert daily_desktop_intent_tool_request("open Notes and type hello yachiyo", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_type_text",
@@ -1124,6 +1129,51 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Microsoft Word", "action": "new_document"},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 开新标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("打开浏览器新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Word 保存文档", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_hotkey",
+        "input": {"app_name": "Microsoft Word", "key": "s", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("打开 Slack 点搜索", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    assert daily_desktop_intent_tool_requests("打开微信搜文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开浏览器搜索 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=yachiyo"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开 Excel 然后新建表格", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",

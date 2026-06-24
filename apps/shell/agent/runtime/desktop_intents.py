@@ -249,6 +249,9 @@ def daily_desktop_intent_tool_requests(
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
+    app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
+    if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
+        return app_find_sequence
     app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
     if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
         return [app_shortcut]
@@ -2080,8 +2083,10 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"刷新(?:一下|下)?(?:页面|当前页|当前网页|网页)?|返回上一页|回到上一页|"
         r"网页后退|浏览器后退|后退一页|后退|前进一页|网页前进|浏览器前进|前进|"
         r"查找|打开查找(?:框)?|打开搜索框|页面(?:内|里)?查找|当前页查找|"
-        r"新建标签页|新标签页|打开新标签页|新建窗口|新窗口|打开新窗口|"
-        r"新建文档|新文档|新建文件|新文件|新建表格|新表格|新建工作簿|新工作簿|"
+        r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
+        r"新建窗口|新窗口|打开新窗口|开新窗口|开一个新窗口|"
+        r"新建文档|新文档|新建文件|新文件|开新文档|开一个新文档|开新文件|开一个新文件|"
+        r"新建表格|新表格|新建工作簿|新工作簿|"
         r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
         r"新建笔记|新笔记|新建备忘录|新备忘录|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
@@ -2121,7 +2126,17 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _normalize_app_scoped_ui_action_app(match.group("app"))
+        raw_app = match.group("app")
+        if mode == "focus" and re.match(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|运行|拉起|开启|开)",
+            text,
+        ):
+            continue
+        app_name = _normalize_app_scoped_ui_action_app(raw_app)
+        if not app_name and mode == "open":
+            compact = re.sub(r"[\s._-]+", "", _strip_app_name(raw_app).lower())
+            if compact in _APP_ALIASES:
+                app_name = _normalize_app_name(raw_app)
         action = _desktop_safe_shortcut_action(match.group("action"))
         if app_name and action:
             return {"mode": mode, "app_name": app_name, "action": action}
@@ -2580,7 +2595,31 @@ def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | 
     )
     if focus_match:
         return _app_foreground_action_request_from_match("focus", focus_match)
+
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, _raw_app, app_name, followup = shorthand_match
+        return _app_foreground_action_request(mode, app_name, followup)
     return None
+
+
+def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    if app_name in _BROWSER_APP_NAMES:
+        return []
+    query = _desktop_find_query(followup)
+    if not query:
+        return []
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": query}),
+    ]
 
 
 def _app_foreground_action_match(
@@ -2608,6 +2647,14 @@ def _app_foreground_action_request_from_match(
     app_name = _normalize_app_name(raw_app)
     if not app_name or _looks_like_generic_app_open_target(raw_app):
         return None
+    return _app_foreground_action_request(mode, app_name, followup)
+
+
+def _app_foreground_action_request(
+    mode: str,
+    app_name: str,
+    followup: str,
+) -> dict[str, Any] | None:
     shortcut_action = _desktop_safe_shortcut_action(followup)
     if shortcut_action:
         return {
@@ -2657,6 +2704,125 @@ def _app_foreground_action_request_from_match(
             "input": {"app_name": app_name, "text": typed_text},
         }
     return None
+
+
+def _app_open_or_focus_known_app_followup_match(text: str) -> tuple[str, str, str, str] | None:
+    stripped = _strip_query(text)
+    prefix_patterns: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "open",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+                r"^(?:please\s+)?(?:open|launch|start)\s+",
+            ),
+        ),
+        (
+            "focus",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*",
+                r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+",
+            ),
+        ),
+    )
+    for mode, patterns in prefix_patterns:
+        for pattern in patterns:
+            match = re.search(pattern, stripped, flags=re.IGNORECASE)
+            if not match:
+                continue
+            remainder = stripped[match.end() :].strip()
+            split = _known_app_followup_split(remainder)
+            if split:
+                raw_app, app_name, followup = split
+                return mode, raw_app, app_name, followup
+    return None
+
+
+def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for alias, app_name in _known_app_followup_aliases():
+        split = _split_compact_app_prefix(text, alias)
+        if not split:
+            continue
+        raw_app, followup = split
+        followup = _strip_known_app_followup_prefix(followup)
+        if followup and _looks_like_known_app_followup(followup):
+            return raw_app, app_name, followup
+    return None
+
+
+def _known_app_followup_aliases() -> list[tuple[str, str]]:
+    candidates: dict[str, str] = {}
+    for alias, app_name in _APP_ALIASES.items():
+        candidates.setdefault(alias, app_name)
+    for app_name in set(_APP_ALIASES.values()):
+        candidates.setdefault(app_name, app_name)
+    return sorted(
+        candidates.items(),
+        key=lambda item: len(_compact_app_alias(item[0])),
+        reverse=True,
+    )
+
+
+def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
+    compact_alias = _compact_app_alias(alias)
+    if not compact_alias:
+        return None
+    consumed = 0
+    end_index = 0
+    for index, char in enumerate(value):
+        if re.fullmatch(r"[\s._-]", char):
+            continue
+        if consumed >= len(compact_alias):
+            break
+        if char.lower() != compact_alias[consumed]:
+            return None
+        consumed += 1
+        end_index = index + 1
+    if consumed != len(compact_alias):
+        return None
+    raw_app = value[:end_index].strip()
+    followup = value[end_index:].strip()
+    if not raw_app or not followup:
+        return None
+    if re.search(r"[A-Za-z0-9]$", raw_app) and re.match(r"[A-Za-z0-9]", followup):
+        return None
+    return raw_app, followup
+
+
+def _strip_known_app_followup_prefix(value: str) -> str:
+    followup = _strip_app_foreground_followup_prefix(_strip_query(value))
+    followup = re.sub(
+        r"^(?:应用|app|软件|程序)?(?:里|中|内|上|的|里面|界面里|界面中)\s*",
+        "",
+        followup,
+        flags=re.IGNORECASE,
+    )
+    return followup.strip()
+
+
+def _looks_like_known_app_followup(value: str) -> bool:
+    followup = str(value or "").strip()
+    if not followup:
+        return False
+    return bool(
+        _desktop_safe_shortcut_action(followup)
+        or _desktop_safe_scroll(followup)
+        or _desktop_safe_click(followup)
+        or _desktop_click_ui_element(followup, require_context=False)
+        or _desktop_type_into_ui_element(followup)
+        or _desktop_safe_key(followup)
+        or _desktop_hotkey(followup)
+        or _desktop_safe_type_text(followup)
+        or _desktop_find_query(followup)
+    )
+
+
+def _compact_app_alias(value: str) -> str:
+    return re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
 
 
 def _app_focus_name(text: str) -> str:
@@ -3076,6 +3242,11 @@ def _strip_app_foreground_followup(value: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
+    known_split = _known_app_followup_split(text)
+    if known_split:
+        raw_app, _app_name, _followup = known_split
+        if raw_app:
+            return raw_app.strip()
     return text.strip()
 
 
@@ -3484,7 +3655,12 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "重做": ("z", ("command", "shift")),
         "redo": ("z", ("command", "shift")),
         "保存": ("s", ("command",)),
+        "保存文档": ("s", ("command",)),
+        "保存当前文档": ("s", ("command",)),
+        "保存文件": ("s", ("command",)),
         "save": ("s", ("command",)),
+        "savefile": ("s", ("command",)),
+        "savedocument": ("s", ("command",)),
         "刷新": ("r", ("command",)),
         "reload": ("r", ("command",)),
         "refresh": ("r", ("command",)),
@@ -3592,15 +3768,23 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新建标签页": "new_tab",
         "新标签页": "new_tab",
         "打开新标签页": "new_tab",
+        "开新标签页": "new_tab",
+        "开一个新标签页": "new_tab",
         "newtab": "new_tab",
         "新建窗口": "new_window",
         "新窗口": "new_window",
         "打开新窗口": "new_window",
+        "开新窗口": "new_window",
+        "开一个新窗口": "new_window",
         "newwindow": "new_window",
         "新建文档": "new_document",
         "新文档": "new_document",
         "新建文件": "new_document",
         "新文件": "new_document",
+        "开新文档": "new_document",
+        "开一个新文档": "new_document",
+        "开新文件": "new_document",
+        "开一个新文件": "new_document",
         "新建表格": "new_document",
         "新表格": "new_document",
         "新建工作簿": "new_document",

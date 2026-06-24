@@ -1542,7 +1542,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "打开 Slack 然后点击搜索",
+            "打开 Slack 点搜索",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "live2d",
@@ -2122,7 +2122,7 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开 Notes 并输入 hello yachiyo",
+        "打开 Notes 输入 hello yachiyo",
     )
 
     assert calls == [("open", "Notes"), ("focus", "Notes"), ("type", "hello yachiyo")]
