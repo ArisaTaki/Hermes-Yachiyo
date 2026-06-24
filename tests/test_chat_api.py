@@ -1395,6 +1395,72 @@ def test_send_message_executes_browser_read_followup_before_model(tmp_path, monk
         store.close()
 
 
+def test_send_message_executes_browser_summary_request_before_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    extract_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser summary desktop task should not call model")
+        ),
+    )
+
+    def fake_extract_text(selector: str = "") -> dict:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    try:
+        result = api.send_message("总结当前网页")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "Yachiyo desktop agent runtime"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "Yachiyo desktop agent runtime"
+        assert extract_calls == [""]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_daily_desktop_app_followup_clause_stays_conservative():
     assert ChatAPI._daily_desktop_app_followup_clause("搜索张三") == "搜索张三"
     assert ChatAPI._daily_desktop_app_followup_clause("输入 hello") == "输入 hello"
@@ -2728,7 +2794,7 @@ def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     try:
-        for prompt in ("打开 GitHub 并读一下页面", "打开 GitHub 看看内容"):
+        for prompt in ("打开 GitHub 并读一下页面", "打开 GitHub 看看内容", "打开 GitHub 并概括内容"):
             result = api.send_message(prompt)
             task = runtime.state.get_task(result["task_id"])
             run = service.get_run(result["run_id"])
@@ -2758,6 +2824,8 @@ def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp
             assert "model.requested" not in event_types
 
         assert calls == [
+            ("open", "https://github.com"),
+            ("extract", ""),
             ("open", "https://github.com"),
             ("extract", ""),
             ("open", "https://github.com"),

@@ -782,7 +782,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.extract_text",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("summarize current page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("读当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("总结当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前网页讲了什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
@@ -813,6 +828,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("打开 github.com 读一下内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 GitHub 并概括内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("open github.com and summarize", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
@@ -4421,7 +4446,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么播放 Apple Music？", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("总结当前网页", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("总结当前网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("点击搜索", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None

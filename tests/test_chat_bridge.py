@@ -2157,6 +2157,30 @@ def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_e
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    for prompt, launcher_mode in (
+        ("总结当前网页", "bubble"),
+        ("what is this page about", "live2d"),
+    ):
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "Yachiyo desktop agent runtime"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert extract_calls == ["", "", ""]
+
 
 def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
     tmp_path,
@@ -3175,6 +3199,8 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         ("打开 GitHub 并读一下页面", "live2d"),
         ("打开 GitHub 看看内容", "bubble"),
         ("打开 github.com 读一下内容", "live2d"),
+        ("打开 GitHub 并概括内容", "bubble"),
+        ("open github.com and summarize", "live2d"),
     ]
     for prompt, launcher_mode in prompts:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -3193,6 +3219,10 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         assert "model.request.started" not in event_types
 
     assert calls == [
+        ("open", "https://github.com"),
+        ("extract", ""),
+        ("open", "https://github.com"),
+        ("extract", ""),
         ("open", "https://github.com"),
         ("extract", ""),
         ("open", "https://github.com"),

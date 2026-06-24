@@ -1712,19 +1712,19 @@ def _is_browser_open_followup_extract_text_request(text: str) -> bool:
         _is_browser_extract_text_request(text)
         or re.search(
             r"(?:并且|并|然后|之后|后|再)\s*"
-            r"(?:读取|读一下|读下|读一读|提取|抓取|获取)"
+            r"(?:读取|读一下|读下|读一读|提取|抓取|获取|总结|摘要|概括)"
             r"(?:一下|下|它|网页|页面|网站|正文|文字|文本|内容)?",
             text,
         )
         or re.search(
             r"(?:打开|访问|浏览|前往|去).{0,80}"
-            r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下)"
+            r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下|总结|摘要|概括)"
             r"(?:一下|下|它|网页|页面|网站|正文|文字|文本|内容)?",
             text,
         )
         or re.search(
-            r"\b(?:and|then)\s+(?:read|extract|get)\s+"
-            r"(?:the\s+)?(?:page|webpage|website|site|text|content)?\b",
+            r"\b(?:and|then)\s+(?:read|extract|get|summari[sz]e)"
+            r"(?:\s+(?:the\s+)?(?:page|webpage|website|site|text|content))?\b",
             lowered,
         )
     )
@@ -2245,12 +2245,33 @@ def _is_browser_extract_text_request(text: str) -> bool:
             r"(?:正文|文字|文本|内容)?",
             text,
         )
+        or re.search(
+            r"(?:总结|摘要|概括).{0,10}"
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)"
+            r".{0,10}(?:正文|文字|文本|内容)?",
+            text,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)"
+            r".{0,10}(?:总结|摘要|概括|讲了什么|说了什么|内容是什么)",
+            text,
+        )
         or "extract text from the current page" in lowered
         or "extract text from this page" in lowered
         or "read the current page" in lowered
         or "read current page" in lowered
+        or "read current web page" in lowered
+        or "read the current web page" in lowered
         or "read this page" in lowered
         or "read the page" in lowered
+        or "summarize current page" in lowered
+        or "summarize the current page" in lowered
+        or "summarise current page" in lowered
+        or "summarise the current page" in lowered
+        or "summarize this page" in lowered
+        or "summarise this page" in lowered
+        or "what is this page about" in lowered
+        or "what's this page about" in lowered
     )
 
 
@@ -6962,14 +6983,14 @@ def _strip_browser_followup(value: str) -> str:
     text = re.sub(
         r"\s*(?:并且|并|然后|之后|后|再)\s*"
         r"(?:读取|读一下|读下|读一读|提取|抓取|获取|查看|看看|看一下|"
-        r"截取|截图|截屏|截一下|截个图|截|抓屏).*$",
+        r"总结|摘要|概括|截取|截图|截屏|截一下|截个图|截|抓屏).*$",
         "",
         text,
         flags=re.IGNORECASE,
     )
     text = re.sub(
         r"\s+"
-        r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下)"
+        r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下|总结|摘要|概括)"
         r"(?:一下|下)?(?:网页|页面|网站|正文|文字|文本|内容)?$",
         "",
         text,
@@ -6983,7 +7004,7 @@ def _strip_browser_followup(value: str) -> str:
     )
     text = re.sub(
         r"\s+(?:and|then)\s+"
-        r"(?:read|extract|get|take\s+a\s+screenshot|screenshot|capture).*$",
+        r"(?:read|extract|get|summari[sz]e|take\s+a\s+screenshot|screenshot|capture).*$",
         "",
         text,
         flags=re.IGNORECASE,
