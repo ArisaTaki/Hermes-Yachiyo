@@ -286,6 +286,9 @@ def daily_desktop_intent_tool_requests(
     app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
     if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
         return app_search_type_sequence
+    app_observe_sequence = _app_open_or_focus_observe_tool_requests(context)
+    if app_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_observe_sequence):
+        return app_observe_sequence
     app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
@@ -2840,6 +2843,35 @@ def _app_open_or_focus_screen_capture_tool_requests(text: str) -> list[dict[str,
     ]
 
 
+def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    app_request = _request(f"app.{mode}", {"app_name": app_name})
+
+    ui_payload = _desktop_ui_elements_request(followup)
+    if ui_payload is not None:
+        return [app_request, _request("desktop.ui_elements", ui_payload)]
+
+    windows_payload = _desktop_windows_request(followup)
+    if windows_payload is not None:
+        scoped_windows = dict(windows_payload)
+        scoped_windows.setdefault("app_name", app_name)
+        return [app_request, _request("desktop.windows", scoped_windows)]
+
+    if _is_active_window_request(followup):
+        return [app_request, _request("desktop.active_window", {})]
+
+    if _is_screen_capture_request(followup) or _is_visual_inspection_followup(followup):
+        return [
+            app_request,
+            _request("screen.capture", {"reason": "user asked to capture the screen"}),
+        ]
+
+    return []
+
+
 def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -3169,8 +3201,34 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_hotkey(followup)
         or _desktop_safe_type_text(followup)
         or _desktop_find_query(followup)
+        or _desktop_ui_elements_request(followup) is not None
+        or _desktop_windows_request(followup) is not None
+        or _is_active_window_request(followup)
         or _is_screen_capture_request(followup)
+        or _is_visual_inspection_followup(followup)
         or bool(_safe_shortcut_action_sequence(followup))
+    )
+
+
+def _is_visual_inspection_followup(value: str) -> bool:
+    followup = str(value or "").strip()
+    if not followup:
+        return False
+    lowered = followup.lower()
+    return bool(
+        re.search(
+            r"^(?:看看|看一下|看下|查看|读取|观察|识别)\s*"
+            r"(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|应用|app)(?:内容|状态|情况)?$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|应用|app)"
+            r"(?:内容|状态|情况)?.{0,4}(?:是什么|是啥|长什么样|怎么样)$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"\b(?:look at|inspect|view|read)\s+(?:the\s+)?(?:screen|window|ui|interface)\b", lowered)
     )
 
 
