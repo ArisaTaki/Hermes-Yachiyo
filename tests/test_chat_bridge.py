@@ -652,12 +652,12 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "播放网易云音乐",
+        "打开 Spotify 播放周杰伦",
     )
 
     assert result["ok"] is True
-    assert open_calls == ["网易云音乐"]
-    assert agent_task["summary"] == "已打开网易云音乐。"
+    assert open_calls == ["Spotify"]
+    assert agent_task["summary"] == "已打开 Spotify。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"
@@ -3092,19 +3092,19 @@ def test_chat_bridge_quick_message_executes_app_find_sequence_without_model(
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开 Notes，然后搜索 hello",
+        "打开 Finder，然后搜索下载",
     )
 
     assert calls == [
-        ("open", "Notes"),
-        ("focus", "Notes"),
+        ("open", "Finder"),
+        ("focus", "Finder"),
         ("shortcut", "find"),
-        ("type", "hello"),
+        ("type", "下载"),
     ]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开 Notes 并打开查找。 已向前台输入文字（5 个字符）。"
+    assert agent_task["summary"] == "已打开 Finder 并打开查找。 已向前台输入文字（2 个字符）。"
     assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",

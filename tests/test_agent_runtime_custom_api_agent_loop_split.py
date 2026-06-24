@@ -1827,6 +1827,25 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "yachiyo"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开 Finder，然后搜索下载", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "下载"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开浏览器，然后搜索下雨", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=%E4%B8%8B%E9%9B%A8"},
+        }
+    ]
     assert daily_desktop_intent_tool_requests("打开 Chrome，然后搜索 yachiyo", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2555,9 +2574,25 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Spotify"},
     }
+    assert daily_desktop_intent_tool_request("打开 Spotify 播放周杰伦", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("Spotify 播放周杰伦", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Spotify 播放周杰伦", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", ["media.apple_music_control"]) is None
     assert daily_desktop_intent_tool_request("打开网易云音乐并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网易云音乐"},
+    }
+    assert daily_desktop_intent_tool_request("打开网易云音乐播放周杰伦", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "网易云音乐"},

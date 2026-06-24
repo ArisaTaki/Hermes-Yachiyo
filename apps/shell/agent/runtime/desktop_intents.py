@@ -1873,7 +1873,8 @@ def _looks_like_css_selector(value: str) -> bool:
 
 def _strip_search_query(value: str) -> str:
     query = _strip_query(value)
-    query = re.sub(r"^(?:一下|下|这个|那个)\s*", "", query)
+    query = re.sub(r"^(?:一下|这个|那个)\s*", "", query)
+    query = re.sub(r"^下(?:\s+|$)", "", query)
     query = re.sub(
         r"\s*(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)(?:里|中|上|内)?$",
         "",
@@ -3805,6 +3806,9 @@ def _media_app_open_name(text: str) -> str:
     lowered = text.lower()
     if not re.search(r"(?:播放|放|打开|启动|运行|open|launch|start|play)", lowered):
         return ""
+    named_play_app = _non_apple_music_named_play_app_name(text)
+    if named_play_app:
+        return named_play_app
     generic_play_app = _music_app_generic_play_open_name(text)
     if generic_play_app:
         return generic_play_app
@@ -3837,6 +3841,27 @@ def _media_app_open_name(text: str) -> str:
         return "Music"
     if re.search(r"(?:open|launch|start|play)\s+music(?:\s+app)?\s*$", lowered):
         return "Music"
+    return ""
+
+
+def _non_apple_music_named_play_app_name(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:(?:并|然后|后|之后|再)\s*)?(?:开始)?(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?P<app>[^。！？!?，,]+?)\s*(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
+        r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
+        r"^(?P<app>[^.!?]+?)\s+(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _known_music_app_name(match.group("app"))
+        query = _strip_music_query_context(match.group("query"))
+        if app_name and app_name != "Music" and query and _is_specific_music_query(query):
+            return app_name
     return ""
 
 
@@ -4082,7 +4107,11 @@ def _strip_window_title(value: str) -> str:
 
 
 def _music_query(text: str) -> str:
-    if _looks_like_generic_music_play_request(text) or _music_app_generic_play_open_name(text):
+    if (
+        _looks_like_generic_music_play_request(text)
+        or _music_app_generic_play_open_name(text)
+        or _non_apple_music_named_play_app_name(text)
+    ):
         return ""
     patterns = (
         r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
