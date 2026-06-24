@@ -1421,6 +1421,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("切一下微信", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("把 Chrome 切到前台", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus",
@@ -2935,6 +2940,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.show",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("把微信调出来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("把 Slack 显示出来", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
@@ -3134,6 +3144,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("open the Finder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Finder"},
     }
     assert daily_desktop_intent_tool_request("把 Slack 打开一下", allowed_tools) == {
         "protocol": "json_fallback",

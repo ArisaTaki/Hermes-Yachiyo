@@ -5250,6 +5250,7 @@ def _app_focus_name(text: str) -> str:
         r"(?P<app>[^。！？!?，,]+?)\s*(?:切换到|切到|切回|回到|聚焦|激活|置前)"
         r"(?:\s*(?:前台|前面|最前面|最前|前台来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切一下|切下)\s*(?P<app>[^。！？!?，,]+)",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:switch back to|go back to|return to)\s+(?P<app>[^.!?]+)",
         r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+)",
@@ -5390,9 +5391,9 @@ def _app_show_name(text: str) -> str:
         return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|还原一下|还原|恢复|取消隐藏)",
-        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏)",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:显示(?!器)|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|调出来|还原一下|还原|恢复|取消隐藏)",
+        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|调出来|还原|恢复|取消隐藏)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:显示(?!器)|调出|调出来|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
         r"\b(?:show|unhide|restore)\s+(?P<app>[^.!?]+)",
         r"\bbring\s+back\s+(?P<app>[^.!?]+)",
     )
@@ -5834,9 +5835,15 @@ def _normalize_app_name(value: str) -> str:
         return ""
     if _normalize_url(app):
         return ""
-    lowered = app.lower()
-    compact = re.sub(r"[\s._-]+", "", lowered)
-    return _APP_ALIASES.get(compact, app)
+    candidates = [app]
+    article_stripped = re.sub(r"^(?:the)\s+", "", app, flags=re.IGNORECASE).strip()
+    if article_stripped and article_stripped != app:
+        candidates.append(article_stripped)
+    for candidate in candidates:
+        compact = re.sub(r"[\s._-]+", "", candidate.lower())
+        if compact in _APP_ALIASES:
+            return _APP_ALIASES[compact]
+    return app
 
 
 def _strip_app_name(value: str) -> str:
