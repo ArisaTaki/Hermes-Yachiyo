@@ -197,6 +197,89 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
         store.close()
 
 
+def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_lightweight_entrypoints(tmp_path, monkeypatch):
+    for mode in ("bubble", "live2d"):
+        store = ChatStore(db_path=str(tmp_path / f"{mode}-chat.db"))
+        runtime = _runtime_with_chat_store(store)
+        agent = {
+            "id": "agent_native",
+            "name": "Native Agent",
+            "nickname": "Native Agent",
+            "kind": "agent",
+            "enabled": True,
+            "tool_policy": {
+                "allowed_tools": ["workspace.read"],
+                "approval_required": {},
+            },
+        }
+        captured: list[dict[str, Any]] = []
+
+        class FakeRunnableService:
+            def list_runnables(self):
+                return {"runnables": [agent]}
+
+            def parse_known_chat_runnable(self, text):
+                if text.startswith("@Native Agent"):
+                    return "Native Agent", text.replace("@Native Agent", "", 1).strip()
+                return None
+
+            def resolve_runnable(self, *, runnable_id="", name=""):
+                if runnable_id == agent["id"] or name == agent["name"] or name == agent["nickname"]:
+                    return agent
+                return None
+
+            def create_run_for_runnable_async(self, **kwargs):
+                captured.append(dict(kwargs))
+                run = {
+                    "run_id": f"{mode}-agent-run-{len(captured)}",
+                    "run_group_id": kwargs.get("run_group_id") or f"{mode}-run-group-{len(captured)}",
+                    "status": "processing",
+                    "result": "",
+                    "runnable": agent,
+                }
+                on_complete = kwargs.get("on_complete")
+                if on_complete:
+                    on_complete({
+                        **run,
+                        "status": "completed",
+                        "result": "Agent result",
+                    })
+                return run
+
+        runtime.agent_runtime_service = FakeRunnableService()
+        bridge = ChatBridge(runtime)
+        try:
+            first = bridge.send_quick_message(
+                "@Native Agent 你好",
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": mode,
+                    "launcher_surface": "quick_message",
+                },
+            )
+            assert first["ok"] is True
+            assert "daily_desktop_policy_overlay" not in captured[-1]
+
+            second = bridge.send_quick_message(
+                "能否帮我播放apple Music?",
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": mode,
+                    "launcher_surface": "quick_message",
+                },
+            )
+
+            assert second["ok"] is True
+            assert captured[-1]["runnable_id"] == agent["id"]
+            assert captured[-1]["user_goal"] == "能否帮我播放apple Music?"
+            assert captured[-1]["daily_desktop_policy_overlay"] is True
+            user = [message for message in runtime.chat_session.get_messages() if message.role == "user"][-1]
+            assert user.metadata["launcher_mode"] == mode
+            assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        finally:
+            store.close()
+
+
 def test_chat_bridge_quick_message_plans_structured_recovery_for_lightweight_entrypoints(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
