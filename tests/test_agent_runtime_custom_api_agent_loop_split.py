@@ -2782,6 +2782,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"reason": "user asked to capture the screen"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("微信看看界面", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开微信查看界面元素", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2799,6 +2811,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 当前界面有哪些按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
         },
         {
             "protocol": "json_fallback",

@@ -3211,6 +3211,72 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_app_prefix_screen_capture_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_screen_capture(target_path) -> dict:
+        calls.append(("capture", str(target_path)))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "Chrome 看看界面",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切换到 Google Chrome。 已截取当前屏幕。"
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "app.focus",
+            "screen.capture",
+        ]
+        assert agent_task["tool_calls"][-2]["input_preview"] == {
+            "app_name": "Google Chrome",
+        }
+        assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls[0] == ("focus", "Google Chrome")
+    assert calls[1][0] == "capture"
+    assert calls[1][1].endswith("screenshots/current-screen.png")
+    assert calls[2] == ("focus", "Google Chrome")
+    assert calls[3][0] == "capture"
+    assert calls[3][1].endswith("screenshots/current-screen.png")
+
+
 def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_model(
     tmp_path,
     monkeypatch,

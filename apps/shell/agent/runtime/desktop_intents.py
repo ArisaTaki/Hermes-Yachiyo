@@ -363,6 +363,9 @@ def daily_desktop_intent_tool_requests(
     app_observe_sequence = _app_open_or_focus_observe_tool_requests(context)
     if app_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_observe_sequence):
         return app_observe_sequence
+    app_prefix_observe_sequence = _app_prefix_observe_tool_requests(context)
+    if app_prefix_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_prefix_observe_sequence):
+        return app_prefix_observe_sequence
     app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
@@ -3771,6 +3774,26 @@ def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     if not shorthand_match:
         return []
     mode, _raw_app, app_name, followup = shorthand_match
+    return _app_observe_tool_requests(mode, app_name, followup)
+
+
+def _app_prefix_observe_tool_requests(text: str) -> list[dict[str, Any]]:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return []
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return []
+    return _app_observe_tool_requests("focus", app_name, followup, include_windows=False)
+
+
+def _app_observe_tool_requests(
+    mode: str,
+    app_name: str,
+    followup: str,
+    *,
+    include_windows: bool = True,
+) -> list[dict[str, Any]]:
     app_request = _request(f"app.{mode}", {"app_name": app_name})
 
     if app_name in _BROWSER_APP_NAMES:
@@ -3788,7 +3811,7 @@ def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     if ui_payload is not None:
         return [app_request, _request("desktop.ui_elements", ui_payload)]
 
-    windows_payload = _desktop_windows_request(followup)
+    windows_payload = _desktop_windows_request(followup) if include_windows else None
     if windows_payload is not None:
         scoped_windows = dict(windows_payload)
         scoped_windows.setdefault("app_name", app_name)

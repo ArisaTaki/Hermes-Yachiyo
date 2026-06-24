@@ -3555,6 +3555,111 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         store.close()
 
 
+def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, object, object]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app scoped UI elements task should not call model")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Chrome buttons",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "Send",
+                        "enabled": True,
+                        "center": {"x": 640, "y": 720},
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    try:
+        result = api.send_message("Chrome 当前界面有哪些按钮")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Google Chrome", None), ("ui", "button", 80)]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == (
+            "已切换到 Google Chrome。 当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        )
+        assert [call["tool_name"] for call in result["agent_task"]["tool_calls"][-2:]] == [
+            "app.focus",
+            "desktop.ui_elements",
+        ]
+        assert result["agent_task"]["tool_calls"][-2]["input_preview"] == {
+            "app_name": "Google Chrome",
+        }
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "button",
+            "limit": 80,
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == (
+            "已切换到 Google Chrome。 当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        )
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == (
+            "已切换到 Google Chrome。 当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        )
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_minimize_current_window_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
