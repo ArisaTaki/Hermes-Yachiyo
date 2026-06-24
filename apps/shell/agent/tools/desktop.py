@@ -111,6 +111,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "find": ("f", ("command",), "find"),
     "new_tab": ("t", ("command",), "new tab"),
     "new_window": ("n", ("command",), "new window"),
+    "new_document": ("n", ("command",), "new document"),
     "new_note": ("n", ("command",), "new note"),
     "refresh": ("r", ("command",), "refresh"),
     "browser_back": ("[", ("command",), "browser back"),

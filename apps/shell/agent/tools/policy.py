@@ -100,6 +100,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "find",
     "new_tab",
     "new_window",
+    "new_document",
     "new_note",
     "refresh",
     "browser_back",

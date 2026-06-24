@@ -892,6 +892,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert focus_safe_shortcut.risk_level == "low"
     assert focus_safe_shortcut.input_schema["required"] == ["app_name", "action"]
     assert "paste" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert "new_document" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted safe shortcuts" in note for note in focus_safe_shortcut.fallback_notes)
     assert open_safe_key.capability_id == "foreground_input"
     assert open_safe_key.risk_level == "low"
@@ -962,6 +963,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_shortcut.risk_level == "low"
     assert safe_shortcut.input_schema["required"] == ["action"]
     assert "copy" in safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert "new_document" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted common shortcut" in note for note in safe_shortcut.fallback_notes)
     assert safe_key.capability_id == "foreground_input"
     assert safe_key.risk_level == "low"

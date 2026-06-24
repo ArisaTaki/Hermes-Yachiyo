@@ -620,6 +620,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "copy"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_tab"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_document"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
@@ -3427,6 +3428,27 @@ def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypa
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert 'keystroke keyName using {command down}' in calls[0][0][2]
     assert calls[0][0][-1] == "]"
+
+
+def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="new document\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("new_document")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Executed safe shortcut: new document"
+    assert result["data"]["key"] == "n"
+    assert result["data"]["modifiers"] == ["command"]
+    assert result["data"]["shortcut_action"] == "new_document"
+    assert result["data"]["shortcut_label"] == "new document"
+    assert calls[0][0][-1] == "n"
 
 
 def test_desktop_safe_key_uses_whitelisted_system_events_key_code(monkeypatch) -> None:

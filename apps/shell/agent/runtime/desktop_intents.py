@@ -2081,9 +2081,17 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"网页后退|浏览器后退|后退一页|后退|前进一页|网页前进|浏览器前进|前进|"
         r"查找|打开查找(?:框)?|打开搜索框|页面(?:内|里)?查找|当前页查找|"
         r"新建标签页|新标签页|打开新标签页|新建窗口|新窗口|打开新窗口|"
+        r"新建文档|新文档|新建文件|新文件|新建表格|新表格|新建工作簿|新工作簿|"
+        r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
         r"新建笔记|新笔记|新建备忘录|新备忘录|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
-        r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+note|"
+        r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
+        r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
+        r"new\s+note|make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
+        r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
+        r"make\s+a\s+new\s+workbook|create\s+a\s+new\s+workbook|"
+        r"make\s+a\s+new\s+spreadsheet|create\s+a\s+new\s+spreadsheet|"
+        r"make\s+a\s+new\s+presentation|create\s+a\s+new\s+presentation|"
         r"make\s+a\s+new\s+note|create\s+a\s+new\s+note)"
     )
     patterns: tuple[tuple[str, str], ...] = (
@@ -3589,6 +3597,46 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新窗口": "new_window",
         "打开新窗口": "new_window",
         "newwindow": "new_window",
+        "新建文档": "new_document",
+        "新文档": "new_document",
+        "新建文件": "new_document",
+        "新文件": "new_document",
+        "新建表格": "new_document",
+        "新表格": "new_document",
+        "新建工作簿": "new_document",
+        "新工作簿": "new_document",
+        "新建演示文稿": "new_document",
+        "新演示文稿": "new_document",
+        "新建幻灯片": "new_document",
+        "新幻灯片": "new_document",
+        "新建ppt": "new_document",
+        "新ppt": "new_document",
+        "newdocument": "new_document",
+        "newfile": "new_document",
+        "newworkbook": "new_document",
+        "newspreadsheet": "new_document",
+        "newpresentation": "new_document",
+        "newslide": "new_document",
+        "makeanewdocument": "new_document",
+        "createanewdocument": "new_document",
+        "makenewdocument": "new_document",
+        "createnewdocument": "new_document",
+        "makeanewfile": "new_document",
+        "createanewfile": "new_document",
+        "makenewfile": "new_document",
+        "createnewfile": "new_document",
+        "makeanewworkbook": "new_document",
+        "createanewworkbook": "new_document",
+        "makenewworkbook": "new_document",
+        "createnewworkbook": "new_document",
+        "makeanewspreadsheet": "new_document",
+        "createanewspreadsheet": "new_document",
+        "makenewspreadsheet": "new_document",
+        "createnewspreadsheet": "new_document",
+        "makeanewpresentation": "new_document",
+        "createanewpresentation": "new_document",
+        "makenewpresentation": "new_document",
+        "createnewpresentation": "new_document",
         "新建笔记": "new_note",
         "新笔记": "new_note",
         "新建备忘录": "new_note",
