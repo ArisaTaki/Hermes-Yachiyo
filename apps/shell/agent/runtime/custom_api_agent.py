@@ -277,6 +277,9 @@ class RuntimeCustomApiAgentLoop:
                         ),
                         "input_preview": planned_input,
                     }
+                    presentation = str(planned_tool_request.get("presentation") or "").strip()
+                    if presentation:
+                        planned_payload["presentation"] = presentation
                     timeline.append(
                         self._timeline(
                             "agent.desktop.intent_planned",
@@ -334,12 +337,14 @@ class RuntimeCustomApiAgentLoop:
                 if len(planned_tool_requests) == 1:
                     planned_tool = str(planned_tool_requests[0].get("tool") or "")
                     planned_input = planned_tool_requests[0].get("input") or {}
+                    presentation = str(planned_tool_requests[0].get("presentation") or "").strip()
                     direct_result = self._direct_daily_desktop_result(
                         agent,
                         planned_tool,
                         planned_input,
                         timeline,
                         run_id=run_id,
+                        presentation=presentation,
                     )
                 else:
                     direct_result = self._direct_daily_desktop_sequence_result(
@@ -576,6 +581,7 @@ class RuntimeCustomApiAgentLoop:
         planned_input: dict[str, Any],
         timeline: list[dict[str, Any]],
         run_id: str = "",
+        presentation: str = "",
     ) -> str:
         if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
             return ""
@@ -587,7 +593,13 @@ class RuntimeCustomApiAgentLoop:
             return ""
         result = _with_retry_recovery_action(planned_tool, planned_input, result)
         tool_event["result"] = result
-        summary = self._daily_desktop_summary(planned_tool, planned_input, result)
+        clean_presentation = str(presentation or "").strip()
+        summary = self._daily_desktop_summary(
+            planned_tool,
+            planned_input,
+            result,
+            presentation=clean_presentation,
+        )
         if not summary:
             return ""
         event_payload = {
@@ -597,6 +609,8 @@ class RuntimeCustomApiAgentLoop:
             "result": result,
             "summary": summary,
         }
+        if clean_presentation:
+            event_payload["presentation"] = clean_presentation
         timeline.append(
             self._timeline(
                 "agent.desktop.intent_completed",
@@ -669,17 +683,24 @@ class RuntimeCustomApiAgentLoop:
                 return ""
             result = _with_retry_recovery_action(planned_tool, planned_input, result)
             tool_event["result"] = result
-            summary = self._daily_desktop_summary(planned_tool, planned_input, result)
+            presentation = str(planned_tool_request.get("presentation") or "").strip()
+            summary = self._daily_desktop_summary(
+                planned_tool,
+                planned_input,
+                result,
+                presentation=presentation,
+            )
             if not summary:
                 return ""
-            completed_steps.append(
-                {
-                    "tool": planned_tool,
-                    "input_preview": planned_input,
-                    "result": result,
-                    "summary": summary,
-                }
-            )
+            completed_step = {
+                "tool": planned_tool,
+                "input_preview": planned_input,
+                "result": result,
+                "summary": summary,
+            }
+            if presentation:
+                completed_step["presentation"] = presentation
+            completed_steps.append(completed_step)
             summaries.append(summary)
         summary = _combine_daily_desktop_summaries(summaries)
         if not summary:
@@ -696,6 +717,9 @@ class RuntimeCustomApiAgentLoop:
             "steps": completed_steps,
             "summary": summary,
         }
+        presentation = str(last_step.get("presentation") or "").strip()
+        if presentation:
+            event_payload["presentation"] = presentation
         timeline.append(
             self._timeline(
                 "agent.desktop.intent_completed",
@@ -744,6 +768,8 @@ class RuntimeCustomApiAgentLoop:
         tool_name: str,
         planned_input: dict[str, Any],
         result: dict[str, Any],
+        *,
+        presentation: str = "",
     ) -> str:
         result_summary = str(result.get("summary") or "").strip()
         if result.get("ok"):
@@ -928,6 +954,8 @@ class RuntimeCustomApiAgentLoop:
                 return f"已打开网页：{url}。" if url else (result_summary or "已打开网页。")
             if tool_name == "browser.open_url_and_extract_text":
                 if result.get("ok") is True:
+                    if presentation == "summary":
+                        return _browser_text_digest_summary(result)
                     return _browser_text_summary(result)
                 return result_summary or _browser_text_summary(result)
             if tool_name == "browser.open_url_and_screenshot":
@@ -948,6 +976,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or "没能填写网页输入。"
             if tool_name == "browser.extract_text":
                 if result.get("ok") is True:
+                    if presentation == "summary":
+                        return _browser_text_digest_summary(result)
                     return _browser_text_summary(result)
                 return result_summary or _browser_text_summary(result)
             if tool_name == "browser.screenshot":
@@ -1969,6 +1999,74 @@ def _browser_text_summary(result: dict[str, Any]) -> str:
     if len(text) > 1200:
         text = f"{text[:1200]}..."
     return text
+
+
+def _browser_text_digest_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    text = str(data.get("text") or result.get("text") or "").strip()
+    if not text:
+        return "已读取当前网页文本，但没有可见正文可总结。"
+    points = _browser_text_digest_points(text)
+    if not points:
+        return "已读取当前网页文本，但没有足够正文可总结。"
+    return "网页内容摘要：\n" + "\n".join(f"- {point}" for point in points)
+
+
+def _browser_text_digest_points(text: str) -> list[str]:
+    paragraphs = [
+        _clean_browser_digest_line(line)
+        for line in str(text or "").replace("\r", "\n").split("\n")
+    ]
+    candidates = [line for line in paragraphs if line]
+    if len(candidates) < 2:
+        candidates.extend(
+            _clean_browser_digest_line(sentence)
+            for sentence in _split_browser_digest_sentences(" ".join(candidates or [text]))
+        )
+    points: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        normalized = candidate.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        points.append(_truncate_browser_digest_point(candidate))
+        if len(points) >= 4:
+            break
+    return points
+
+
+def _split_browser_digest_sentences(text: str) -> list[str]:
+    sentences: list[str] = []
+    current: list[str] = []
+    for char in str(text or ""):
+        current.append(char)
+        if char in "。！？.!?":
+            sentence = "".join(current).strip()
+            if sentence:
+                sentences.append(sentence)
+            current = []
+    tail = "".join(current).strip()
+    if tail:
+        sentences.append(tail)
+    return sentences
+
+
+def _clean_browser_digest_line(value: str) -> str:
+    text = " ".join(str(value or "").strip().split())
+    text = text.strip("-*•·#> ")
+    if len(text) < 8:
+        return ""
+    return text
+
+
+def _truncate_browser_digest_point(value: str, limit: int = 180) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
 
 
 def _apple_music_control_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

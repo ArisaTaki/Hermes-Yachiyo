@@ -1242,9 +1242,16 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if safe_key:
         candidates.append(_request("desktop.safe_key", safe_key))
 
+    browser_summary_request = _is_browser_summary_request(text)
     open_extract_payload = _browser_open_url_and_extract_text_request(text)
     if open_extract_payload:
-        candidates.append(_request("browser.open_url_and_extract_text", open_extract_payload))
+        candidates.append(
+            _request(
+                "browser.open_url_and_extract_text",
+                open_extract_payload,
+                presentation="summary" if browser_summary_request else "",
+            )
+        )
 
     open_screenshot_payload = _browser_open_url_and_screenshot_request(text)
     if open_screenshot_payload:
@@ -1255,7 +1262,13 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         candidates.append(_request("browser.open_url", {"url": browser_open_target_url}))
 
     if _is_browser_extract_text_request(text) and not browser_open_target_url:
-        candidates.append(_request("browser.extract_text", {}))
+        candidates.append(
+            _request(
+                "browser.extract_text",
+                {},
+                presentation="summary" if browser_summary_request else "",
+            )
+        )
 
     if _is_browser_screenshot_request(text) and not browser_open_target_url:
         candidates.append(
@@ -1419,8 +1432,12 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     return candidates
 
 
-def _request(tool: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"protocol": "json_fallback", "tool": tool, "input": payload}
+def _request(tool: str, payload: dict[str, Any], *, presentation: str = "") -> dict[str, Any]:
+    request = {"protocol": "json_fallback", "tool": tool, "input": payload}
+    clean_presentation = str(presentation or "").strip()
+    if clean_presentation:
+        request["presentation"] = clean_presentation
+    return request
 
 
 def _clean_text(value: str) -> str:
@@ -2270,6 +2287,16 @@ def _is_browser_extract_text_request(text: str) -> bool:
         or "summarise the current page" in lowered
         or "summarize this page" in lowered
         or "summarise this page" in lowered
+        or "what is this page about" in lowered
+        or "what's this page about" in lowered
+    )
+
+
+def _is_browser_summary_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(r"(?:总结|摘要|概括|讲了什么|说了什么|内容是什么)", text)
+        or re.search(r"\bsummari[sz]e\b", lowered)
         or "what is this page about" in lowered
         or "what's this page about" in lowered
     )

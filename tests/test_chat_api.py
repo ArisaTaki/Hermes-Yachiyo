@@ -1433,25 +1433,32 @@ def test_send_message_executes_browser_summary_request_before_model(tmp_path, mo
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        expected_summary = "网页内容摘要：\n- Yachiyo desktop agent runtime"
 
         assert result["ok"] is True
         assert result["status"] == "completed"
         assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "Yachiyo desktop agent runtime"
+        assert result["agent_task"]["summary"] == expected_summary
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
         assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "Yachiyo desktop agent runtime"
+        assert assistant.content == expected_summary
         assert extract_calls == [""]
         assert run["status"] == "completed"
+        planned_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        completed_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_completed"
+        )
+        assert planned_event["payload"]["presentation"] == "summary"
+        assert completed_event["payload"]["presentation"] == "summary"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -2794,29 +2801,43 @@ def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     try:
-        for prompt in ("打开 GitHub 并读一下页面", "打开 GitHub 看看内容", "打开 GitHub 并概括内容"):
+        cases = (
+            ("打开 GitHub 并读一下页面", "GitHub page text for Yachiyo", ""),
+            ("打开 GitHub 看看内容", "GitHub page text for Yachiyo", ""),
+            (
+                "打开 GitHub 并概括内容",
+                "网页内容摘要：\n- GitHub page text for Yachiyo",
+                "summary",
+            ),
+        )
+        for prompt, expected_summary, expected_presentation in cases:
             result = api.send_message(prompt)
             task = runtime.state.get_task(result["task_id"])
             run = service.get_run(result["run_id"])
-            event_types = [
-                event["event_type"]
-                for event in service.list_run_events(run["run_id"])["events"]
-            ]
+            events = service.list_run_events(run["run_id"])["events"]
+            event_types = [event["event_type"] for event in events]
             assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
             assert result["ok"] is True
             assert result["status"] == "completed"
             assert result["agent_task"]["status"] == "completed"
-            assert result["agent_task"]["summary"] == "GitHub page text for Yachiyo"
+            assert result["agent_task"]["summary"] == expected_summary
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
             assert result["agent_task"]["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
             assert task is not None
             assert task.status == TaskStatus.COMPLETED
-            assert task.result == "GitHub page text for Yachiyo"
+            assert task.result == expected_summary
             assert assistant is not None
             assert assistant.status == MessageStatus.COMPLETED
-            assert assistant.content == "GitHub page text for Yachiyo"
+            assert assistant.content == expected_summary
             assert run["status"] == "completed"
+            completed_event = next(
+                event for event in events if event["event_type"] == "agent.desktop.intent_completed"
+            )
+            if expected_presentation:
+                assert completed_event["payload"]["presentation"] == expected_presentation
+            else:
+                assert "presentation" not in completed_event["payload"]
             assert "agent.desktop.intent_planned" in event_types
             assert "agent.tool.call" in event_types
             assert "agent.desktop.intent_completed" in event_types

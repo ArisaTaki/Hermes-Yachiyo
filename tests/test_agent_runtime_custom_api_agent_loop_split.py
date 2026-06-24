@@ -786,6 +786,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("读当前网页", allowed_tools) == {
         "protocol": "json_fallback",
@@ -796,11 +797,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("当前网页讲了什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("screenshot this page", allowed_tools) == {
         "protocol": "json_fallback",
@@ -836,11 +839,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("open github.com and summarize", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs 并读一下", allowed_tools) == {
         "protocol": "json_fallback",
@@ -4450,6 +4455,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
+        "presentation": "summary",
     }
     assert daily_desktop_intent_tool_request("点击搜索", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
@@ -5714,6 +5720,22 @@ def test_main_chat_desktop_intent_summarizes_browser_extract_text_and_screenshot
             "data": {"text": "Yachiyo desktop agent runtime"},
         },
     )
+    summary_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.extract_text",
+        {},
+        {
+            "ok": True,
+            "summary": "Extracted 30 characters from browser page",
+            "data": {
+                "text": (
+                    "Yachiyo desktop agent runtime makes local tools observable.\n"
+                    "Run Timeline records tool calls, approvals, and artifacts.\n"
+                    "Agent Studio keeps workflow debugging available."
+                )
+            },
+        },
+        presentation="summary",
+    )
     screenshot = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "browser.screenshot",
         {},
@@ -5734,6 +5756,12 @@ def test_main_chat_desktop_intent_summarizes_browser_extract_text_and_screenshot
     )
 
     assert text == "Yachiyo desktop agent runtime"
+    assert summary_text == (
+        "网页内容摘要：\n"
+        "- Yachiyo desktop agent runtime makes local tools observable.\n"
+        "- Run Timeline records tool calls, approvals, and artifacts.\n"
+        "- Agent Studio keeps workflow debugging available."
+    )
     assert screenshot == "已截取当前网页。"
     assert failed == "桌面操作未完成：Chrome CDP unavailable。"
 

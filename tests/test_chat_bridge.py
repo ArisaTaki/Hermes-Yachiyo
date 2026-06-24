@@ -2170,10 +2170,23 @@ def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_e
 
         assert result["ok"] is True
         assert agent_task["status"] == "completed"
-        assert agent_task["summary"] == "Yachiyo desktop agent runtime"
+        assert agent_task["summary"] == "网页内容摘要：\n- Yachiyo desktop agent runtime"
         assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        planned_event = next(
+            event
+            for event in result["_task_timeline"]["events"]
+            if event["event_type"] == "agent.desktop.intent_planned"
+            and event["payload"].get("presentation") == "summary"
+        )
+        completed_event = next(
+            event
+            for event in result["_task_timeline"]["events"]
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+        assert planned_event["payload"]["presentation"] == "summary"
+        assert completed_event["payload"]["presentation"] == "summary"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -3195,15 +3208,15 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
-    prompts = [
-        ("打开 GitHub 并读一下页面", "live2d"),
-        ("打开 GitHub 看看内容", "bubble"),
-        ("打开 github.com 读一下内容", "live2d"),
-        ("打开 GitHub 并概括内容", "bubble"),
-        ("open github.com and summarize", "live2d"),
+    cases = [
+        ("打开 GitHub 并读一下页面", "live2d", "GitHub page text for Yachiyo", ""),
+        ("打开 GitHub 看看内容", "bubble", "GitHub page text for Yachiyo", ""),
+        ("打开 github.com 读一下内容", "live2d", "GitHub page text for Yachiyo", ""),
+        ("打开 GitHub 并概括内容", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
+        ("open github.com and summarize", "live2d", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
     ]
-    for prompt, launcher_mode in prompts:
-        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+    for prompt, launcher_mode, expected_summary, expected_presentation in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
             prompt,
@@ -3211,9 +3224,18 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         )
 
         assert agent_task["status"] == "completed"
-        assert agent_task["summary"] == "GitHub page text for Yachiyo"
+        assert agent_task["summary"] == expected_summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
         assert agent_task["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
+        completed_event = next(
+            event
+            for event in result["_task_timeline"]["events"]
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+        if expected_presentation:
+            assert completed_event["payload"]["presentation"] == expected_presentation
+        else:
+            assert "presentation" not in completed_event["payload"]
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
