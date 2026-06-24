@@ -4631,6 +4631,8 @@ def _app_focus_name(text: str) -> str:
             continue
         if _looks_like_foreground_text_input_phrase(raw_app):
             continue
+        if _is_next_foreground_focus_request(raw_app) or _is_previous_foreground_focus_request(raw_app):
+            continue
         app_name = _normalize_app_name(raw_app)
         if app_name:
             return app_name
@@ -5788,6 +5790,8 @@ def _desktop_safe_shortcut_action(text: str) -> str:
 
 
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:
+    if _is_next_foreground_focus_request(text):
+        return {"action": "tab", "repeat_count": 1}
     count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
     key = (
         r"(?P<{name}>esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
@@ -5839,6 +5843,46 @@ def _desktop_safe_key(text: str) -> dict[str, Any] | None:
         if action and repeat_count:
             return {"action": action, "repeat_count": repeat_count}
     return None
+
+
+def _is_next_foreground_focus_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到|focus\s+)?\s*"
+            r"(?:下一个|下一项|下个|next)\s*"
+            r"(?:输入框|文本框|输入栏|字段|控件|元素|项目|field|input|control|element)?"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^\s*(?:focus|move|go|jump|tab)\s+(?:to\s+)?(?:the\s+)?next\s+"
+            r"(?:field|input|control|element)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_previous_foreground_focus_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到|focus\s+)?\s*"
+            r"(?:上一个|上一项|上个|previous|prev)\s*"
+            r"(?:输入框|文本框|输入栏|字段|控件|元素|项目|field|input|control|element)?"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|嘛|吧|呢)?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^\s*(?:focus|move|go|jump)\s+(?:to\s+)?(?:the\s+)?(?:previous|prev)\s+"
+            r"(?:field|input|control|element)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _safe_key_action(value: str) -> str:
@@ -6108,6 +6152,8 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
 
 def _desktop_type_text(text: str) -> str:
     if _browser_type_text_request(text) or _desktop_type_into_ui_element(text):
+        return ""
+    if _is_next_foreground_focus_request(text) or _is_previous_foreground_focus_request(text):
         return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在前台|向前台|给当前窗口)?"
