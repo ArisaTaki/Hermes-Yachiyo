@@ -3960,6 +3960,79 @@ def test_apple_music_open_and_play_opens_music_then_starts_playback(monkeypatch)
     assert calls == [("open", "Music"), ("control", "play")]
 
 
+def test_apple_music_open_and_play_reports_media_key_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.open",
+            "summary": "Opened Music",
+            "data": {"app_name": app_name},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "apple_music_control",
+        lambda action: {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": "Apple Music play attempted via media key fallback",
+            "data": {
+                "control": action,
+                "player_state": "unknown",
+                "track": "",
+                "artist": "",
+                "fallback": "system_media_key",
+                "fallback_control": "toggle",
+                "media_key": "Play/Pause",
+                "playback_state_unverified": True,
+            },
+            "permission_error": False,
+            "missing_permissions": ["music_app", "automation"],
+            "permission_targets": ["music_app", "automation"],
+            "recovery_hints": ["Grant Automation permission."],
+            "recovery_actions": [
+                {
+                    "label": "打开自动化权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "自动化权限"},
+                    "permission_target": "automation",
+                    "risk_level": "low",
+                }
+            ],
+            "fallback_used": True,
+            "fallback": "system_media_key",
+            "fallback_result": {"media_key": {"ok": True}},
+        },
+    )
+
+    result = desktop_mod.apple_music_open_and_play()
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened Music and attempted playback with media key fallback"
+    assert result["data"] == {
+        "app_name": "Music",
+        "open_ok": True,
+        "open_summary": "Opened Music",
+        "playback_ok": True,
+        "control": "play",
+        "player_state": "unknown",
+        "track": "",
+        "artist": "",
+        "fallback": "system_media_key",
+        "fallback_control": "toggle",
+        "media_key": "Play/Pause",
+        "playback_state_unverified": True,
+    }
+    assert result["permission_error"] is False
+    assert result["permission_targets"] == ["music_app", "automation"]
+    assert result["recovery_actions"][0]["permission_target"] == "automation"
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "system_media_key"
+
+
 def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:
     calls = []
 
@@ -4069,6 +4142,66 @@ def test_apple_music_control_permission_failure_returns_music_and_automation_tar
     assert result["missing_permissions"] == ["music_app", "automation"]
     assert result["permission_targets"] == ["music_app", "automation"]
     assert result["fallback_used"] is True
+
+
+def test_apple_music_control_uses_media_key_fallback_when_automation_fails(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_osascript(_script, args=None):
+        calls.append(args)
+        if len(calls) == 1:
+            return {
+                "ok": True,
+                "stdout": "error|-1743|Not authorized to send Apple events to Music.",
+                "stderr": "",
+            }
+        return {"ok": True, "stdout": "pressed|toggle", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+
+    result = desktop_mod.apple_music_control("play")
+
+    assert result["ok"] is True
+    assert result["action"] == "media.apple_music_control"
+    assert result["summary"] == "Apple Music play attempted via media key fallback"
+    assert result["data"] == {
+        "control": "play",
+        "player_state": "unknown",
+        "track": "",
+        "artist": "",
+        "fallback": "system_media_key",
+        "fallback_control": "toggle",
+        "media_key": "Play/Pause",
+        "playback_state_unverified": True,
+        "direct_error": "Not authorized to send Apple events to Music.",
+    }
+    assert result["permission_error"] is False
+    assert result["missing_permissions"] == ["music_app", "automation"]
+    assert result["permission_targets"] == ["music_app", "automation"]
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "system_media_key"
+    assert result["fallback_result"]["media_key"] == {
+        "ok": True,
+        "action": "media.apple_music.media_key",
+        "summary": "Pressed Play/Pause media key for Apple Music",
+        "data": {
+            "requested_control": "play",
+            "media_control": "toggle",
+            "media_key": "Play/Pause",
+            "key_code": 100,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [["play"], ["100", "toggle"]]
 
 
 def test_apple_music_open_and_play_permission_failure_returns_music_and_automation_targets(

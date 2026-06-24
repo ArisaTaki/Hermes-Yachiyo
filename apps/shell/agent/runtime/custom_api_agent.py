@@ -856,6 +856,8 @@ class RuntimeCustomApiAgentLoop:
                 track = str(data.get("track") or "").strip()
                 artist = str(data.get("artist") or "").strip()
                 track_text = f"当前：{track}{f' - {artist}' if artist else ''}。" if track else ""
+                if data.get("playback_state_unverified"):
+                    return f"已打开 Apple Music，并用媒体键尝试开始播放。{track_text}"
                 return f"已打开 Apple Music 并开始播放。{track_text}"
             if tool_name == "media.apple_music_control":
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
@@ -1879,6 +1881,8 @@ def _apple_music_control_summary(result: dict[str, Any], planned_input: dict[str
     track = str(data.get("track") or "").strip()
     artist = str(data.get("artist") or "").strip()
     track_text = f"当前：{track}{f' - {artist}' if artist else ''}。" if track else ""
+    if data.get("playback_state_unverified"):
+        return f"已用媒体键尝试{label} Apple Music。{track_text}"
     return f"已{label} Apple Music。{track_text}"
 
 

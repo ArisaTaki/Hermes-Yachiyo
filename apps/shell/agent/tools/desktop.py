@@ -133,6 +133,13 @@ _SAFE_KEYS: dict[str, tuple[int, str]] = {
     "page_down": (121, "Page Down"),
 }
 
+_APPLE_MUSIC_MEDIA_KEY_FALLBACKS: dict[str, tuple[int, str, str]] = {
+    "toggle": (100, "Play/Pause", "toggle"),
+    "play": (100, "Play/Pause", "toggle"),
+    "next": (101, "Next", "next"),
+    "previous": (98, "Previous", "previous"),
+}
+
 _PRIVACY_SECURITY_URLS = (
     "x-apple.systempreferences:com.apple.preference.security?Privacy",
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
@@ -1943,6 +1950,9 @@ def apple_music_control(action: str) -> dict[str, Any]:
     )
     if not result["ok"]:
         fallback = app_open("Music")
+        media_key_result = _apple_music_control_media_key_result(clean_action, result, fallback)
+        if media_key_result:
+            return media_key_result
         return {
             **_with_permission_metadata(
                 "media.apple_music_control",
@@ -1975,17 +1985,142 @@ def apple_music_control(action: str) -> dict[str, Any]:
             "fallback_used": False,
         }
     fallback = app_open("Music")
+    permission_error = status == "error" and _looks_like_permission_error(f"{first}\n{second}")
+    media_key_result = _apple_music_control_media_key_result(
+        clean_action,
+        {
+            "ok": False,
+            "action": "media.apple_music_control",
+            "summary": "media.apple_music_control failed",
+            "error": second or first or "Music did not accept the control action",
+            "data": {"control": clean_action, "status": status},
+            "permission_error": permission_error,
+            "fallback_used": False,
+        },
+        fallback,
+    )
+    if media_key_result:
+        return media_key_result
     payload = {
         "ok": False,
         "action": "media.apple_music_control",
         "summary": f"Could not control Apple Music with action {clean_action}; opened Music.",
         "error": second or first or "Music did not accept the control action",
         "data": {"control": clean_action, "status": status},
-        "permission_error": status == "error" and _looks_like_permission_error(f"{first}\n{second}"),
+        "permission_error": permission_error,
         "fallback_used": bool(fallback.get("ok")),
         "fallback_result": fallback,
     }
     return _with_permission_metadata("media.apple_music_control", payload)
+
+
+def _apple_music_control_media_key_result(
+    action: str,
+    direct_result: dict[str, Any],
+    open_result: dict[str, Any],
+) -> dict[str, Any]:
+    media_key_fallback = _apple_music_media_key_fallback(action)
+    if not media_key_fallback.get("ok"):
+        return {}
+    warning = _with_permission_metadata(
+        "media.apple_music_control",
+        {
+            "ok": False,
+            "action": "media.apple_music_control",
+            "summary": "Apple Music automation control failed before media key fallback",
+            "error": str(direct_result.get("error") or ""),
+            "permission_error": bool(direct_result.get("permission_error")),
+        },
+    )
+    media_key_data = (
+        media_key_fallback.get("data") if isinstance(media_key_fallback.get("data"), dict) else {}
+    )
+    return {
+        "ok": True,
+        "action": "media.apple_music_control",
+        "summary": f"Apple Music {action} attempted via media key fallback",
+        "data": {
+            "control": action,
+            "player_state": "unknown",
+            "track": "",
+            "artist": "",
+            "fallback": "system_media_key",
+            "fallback_control": str(media_key_data.get("media_control") or ""),
+            "media_key": str(media_key_data.get("media_key") or ""),
+            "playback_state_unverified": True,
+            "direct_error": str(direct_result.get("error") or ""),
+        },
+        "permission_error": False,
+        "missing_permissions": warning.get("missing_permissions", []),
+        "permission_targets": warning.get("permission_targets", []),
+        "recovery_hints": warning.get("recovery_hints", []),
+        "recovery_actions": warning.get("recovery_actions", []),
+        "fallback_used": True,
+        "fallback": "system_media_key",
+        "fallback_result": {
+            "open": open_result,
+            "media_key": media_key_fallback,
+            "direct": {
+                **direct_result,
+                "action": "media.apple_music_control",
+                "summary": "media.apple_music_control failed",
+            },
+        },
+    }
+
+
+def _apple_music_media_key_fallback(action: str) -> dict[str, Any]:
+    media_key = _APPLE_MUSIC_MEDIA_KEY_FALLBACKS.get(action)
+    if not media_key:
+        return {
+            "ok": False,
+            "action": "media.apple_music.media_key",
+            "summary": f"No safe media key fallback for Apple Music action {action}",
+            "error": "unsupported_media_key_fallback",
+            "data": {"requested_control": action},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    key_code, key_label, media_control = media_key
+    result = _run_osascript(
+        """
+        on run argv
+            set keyCodeValue to item 1 of argv as integer
+            set mediaControl to item 2 of argv
+            tell application "System Events" to key code keyCodeValue
+            return "pressed|" & mediaControl
+        end run
+        """,
+        [str(key_code), media_control],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.safe_key",
+            {
+                **result,
+                "action": "media.apple_music.media_key",
+                "summary": "Apple Music media key fallback failed",
+                "data": {
+                    "requested_control": action,
+                    "media_control": media_control,
+                    "media_key": key_label,
+                    "key_code": key_code,
+                },
+            },
+        )
+    return {
+        "ok": True,
+        "action": "media.apple_music.media_key",
+        "summary": f"Pressed {key_label} media key for Apple Music",
+        "data": {
+            "requested_control": action,
+            "media_control": media_control,
+            "media_key": key_label,
+            "key_code": key_code,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
 
 
 def apple_music_open_and_play() -> dict[str, Any]:
@@ -2004,15 +2139,35 @@ def apple_music_open_and_play() -> dict[str, Any]:
         "track": control_data.get("track") or "",
         "artist": control_data.get("artist") or "",
     }
+    if control_data.get("fallback") or control_result.get("fallback"):
+        data["fallback"] = control_data.get("fallback") or control_result.get("fallback") or ""
+    if control_data.get("fallback_control"):
+        data["fallback_control"] = control_data.get("fallback_control") or ""
+    if control_data.get("media_key"):
+        data["media_key"] = control_data.get("media_key") or ""
+    if control_data.get("playback_state_unverified"):
+        data["playback_state_unverified"] = True
     if control_result.get("ok"):
-        return {
+        payload = {
             "ok": True,
             "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "summary": (
+                "Opened Music and attempted playback with media key fallback"
+                if data.get("playback_state_unverified")
+                else "Opened Music and started playback"
+            ),
             "data": data,
             "permission_error": False,
             "fallback_used": bool(control_result.get("fallback_used")),
         }
+        for key in ("missing_permissions", "permission_targets", "recovery_hints", "recovery_actions"):
+            if control_result.get(key):
+                payload[key] = control_result[key]
+        if control_result.get("fallback"):
+            payload["fallback"] = control_result["fallback"]
+        if control_result.get("fallback_result"):
+            payload["fallback_result"] = control_result["fallback_result"]
+        return payload
 
     payload = {
         "ok": False,

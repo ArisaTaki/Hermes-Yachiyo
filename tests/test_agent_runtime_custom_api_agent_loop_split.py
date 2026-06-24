@@ -4760,6 +4760,22 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
             },
         },
     )
+    open_and_play_fallback = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_open_and_play",
+        {},
+        {
+            "ok": True,
+            "summary": "Opened Music and attempted playback with media key fallback",
+            "data": {
+                "control": "play",
+                "player_state": "unknown",
+                "fallback": "system_media_key",
+                "fallback_control": "toggle",
+                "media_key": "Play/Pause",
+                "playback_state_unverified": True,
+            },
+        },
+    )
     pause = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "media.apple_music_control",
         {"action": "pause"},
@@ -4783,10 +4799,28 @@ def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
             },
         },
     )
+    next_track_fallback = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "media.apple_music_control",
+        {"action": "next"},
+        {
+            "ok": True,
+            "summary": "Apple Music next attempted via media key fallback",
+            "data": {
+                "control": "next",
+                "player_state": "unknown",
+                "fallback": "system_media_key",
+                "fallback_control": "next",
+                "media_key": "Next",
+                "playback_state_unverified": True,
+            },
+        },
+    )
 
     assert pause == "已暂停 Apple Music。"
     assert next_track == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+    assert next_track_fallback == "已用媒体键尝试切到下一首 Apple Music。"
     assert open_and_play == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    assert open_and_play_fallback == "已打开 Apple Music，并用媒体键尝试开始播放。"
 
 
 def test_main_chat_desktop_intent_summarizes_system_volume() -> None:
