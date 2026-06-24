@@ -5300,6 +5300,8 @@ def _app_show_or_open_name(text: str) -> str:
         raw_app = match.group("app")
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
+        if _looks_like_screen_observation_target(raw_app):
+            continue
         if _looks_like_common_path_target(raw_app):
             continue
         if _looks_like_current_app_scope(raw_app):
@@ -5400,6 +5402,8 @@ def _app_show_name(text: str) -> str:
             continue
         raw_app = match.group("app")
         if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_screen_observation_target(raw_app):
             continue
         if _looks_like_common_path_target(raw_app):
             continue
@@ -7453,14 +7457,42 @@ def _is_screen_capture_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(r"(?:截个?图|截图|截屏|屏幕截图|抓屏|拍屏)", text)
-        or re.search(r"(?:当前|现在|这个)?(?:屏幕|桌面).{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)", text)
-        or re.search(r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
-        or re.search(r"(?:看一下|看看|看下|查看|读取).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
-        or re.search(r"(?:当前|现在|这个)?(?:屏幕|桌面).{0,8}(?:是什么|是啥|内容|画面)", text)
+        or re.search(r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面).{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)", text)
+        or re.search(r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏).{0,8}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)", text)
+        or re.search(r"(?:拍一下|拍下|拍一张|拍个).{0,8}(?:屏幕|桌面|界面|画面)", text)
+        or re.search(r"(?:看一下|看看|看下|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?).{0,12}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)", text)
+        or re.search(r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面).{0,8}(?:是什么|是啥|内容|画面|有什么|有啥)", text)
         or "take a screenshot" in lowered
         or "capture the screen" in lowered
         or "screen capture" in lowered
+        or re.search(r"\bscreenshot\s+(?:my|the|this|current)?\s*(?:screen|desktop)?\b", lowered)
+        or re.search(r"\b(?:look at|inspect|view|read|show me|show)\s+(?:my|the|this|current)?\s*(?:screen|desktop|interface|ui)\b", lowered)
+        or re.search(r"\bwhat(?:'s| is)?\s+on\s+(?:my|the|this|current)?\s*(?:screen|desktop)\b", lowered)
     )
+
+
+def _looks_like_screen_observation_target(value: str) -> bool:
+    text = _strip_app_name(value).strip()
+    if not text:
+        return False
+    compact = re.sub(r"\s+", "", text)
+    compact = re.sub(
+        r"^(?:帮我|给我|请|麻烦)?(?:看看|看一下|看下|显示|展示)?"
+        r"(?:我)?(?:现在|当前|这个|该)?(?:的)?",
+        "",
+        compact,
+    )
+    if compact in {"屏幕", "桌面", "界面", "画面"}:
+        return True
+
+    lowered = text.lower()
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    for _ in range(3):
+        next_lowered = re.sub(r"^(?:me|my|the|this|current)\s+", "", lowered).strip()
+        if next_lowered == lowered:
+            break
+        lowered = next_lowered
+    return bool(re.fullmatch(r"(?:screen|desktop|interface|ui)", lowered))
 
 
 def _is_active_window_request(text: str) -> bool:

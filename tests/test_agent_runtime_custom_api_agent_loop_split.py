@@ -2449,6 +2449,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"reason": "user asked to capture the screen"},
         },
     ]
+    for prompt in (
+        "拍一下屏幕",
+        "看一下我现在的界面",
+        "look at my screen",
+        "what is on my screen",
+        "screenshot my screen",
+        "show me the screen",
+        "look at the desktop",
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "screen.capture",
+                "input": {"reason": "user asked to capture the screen"},
+            },
+        ]
     assert daily_desktop_intent_tool_requests("你看到什么", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -4309,6 +4325,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"reason": "user asked to capture the screen"},
     }
     assert daily_desktop_intent_tool_request("当前屏幕是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "screen.capture",
+        "input": {"reason": "user asked to capture the screen"},
+    }
+    assert daily_desktop_intent_tool_request("show me the screen", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",
         "input": {"reason": "user asked to capture the screen"},

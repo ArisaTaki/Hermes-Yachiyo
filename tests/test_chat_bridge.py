@@ -4006,7 +4006,7 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "当前屏幕是什么",
+        "look at my screen",
     )
 
     assert capture_targets
@@ -4019,11 +4019,14 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     assert "artifact.created" in event_types
     assert "agent.desktop.intent_completed" in event_types
 
-    for launcher_mode in ("bubble", "live2d"):
+    for launcher_mode, prompt in (
+        ("bubble", "看一下我现在的界面"),
+        ("live2d", "show me the screen"),
+    ):
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
-            "屏幕上有什么",
+            prompt,
             launcher_mode=launcher_mode,
         )
 
