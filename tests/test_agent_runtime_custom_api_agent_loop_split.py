@@ -23,7 +23,7 @@ from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, Run
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent.runtime.tool_requests import normalize_tool_name
-from apps.shell.agent.tools.policy import PolicyGate
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -610,6 +610,43 @@ def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools(
         ]
         assert "terminal.run" not in tool_runs[-1]["allowed_tools"]
         assert goal in tool_runs[-1]["messages"][1]["content"]
+
+
+def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_selection() -> None:
+    allowed_tools = list(DAILY_DESKTOP_TOOL_NAMES)
+
+    assert daily_desktop_intent_tool_requests(
+        "把微信打开然后看看有没有未读",
+        allowed_tools,
+    ) == [
+        {"protocol": "json_fallback", "tool": "app.open", "input": {"app_name": "WeChat"}},
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "打开微信读一下当前聊天",
+        allowed_tools,
+    ) == [
+        {"protocol": "json_fallback", "tool": "app.open", "input": {"app_name": "WeChat"}},
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_request("打开 Finder 选择的文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "finder_selection"},
+    }
+    assert daily_desktop_intent_tool_request("打开系统活动监视器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Activity Monitor"},
+    }
 
 
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:

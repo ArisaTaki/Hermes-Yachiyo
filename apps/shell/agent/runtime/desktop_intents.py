@@ -88,6 +88,7 @@ _APP_ALIASES = {
     "应用商店": "App Store",
     "activitymonitor": "Activity Monitor",
     "活动监视器": "Activity Monitor",
+    "系统活动监视器": "Activity Monitor",
     "keychainaccess": "Keychain Access",
     "钥匙串": "Keychain Access",
     "钥匙串访问": "Keychain Access",
@@ -4057,11 +4058,11 @@ def _finder_selection_open_path_request(text: str) -> bool:
     lowered = str(text or "").strip().lower()
     return bool(
         re.search(
-            r"(?:打开|开启).{0,10}(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            r"(?:打开|开启).{0,10}(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目)",
             text,
         )
         or re.search(
-            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目).{0,10}(?:打开|开启)",
+            r"(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目).{0,10}(?:打开|开启)",
             text,
         )
         or re.search(
@@ -4080,13 +4081,13 @@ def _finder_selection_reveal_path_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:finder|访达).{0,12}(?:显示|定位|找一下|找到).{0,10}"
-            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            r"(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:显示|定位|找一下|找到).{0,10}"
-            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            r"(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目)",
             text,
         )
         or re.search(
@@ -5228,6 +5229,39 @@ def _app_open_or_focus_known_app_followup_match(text: str) -> tuple[str, str, st
             if split:
                 raw_app, app_name, followup = split
                 return mode, raw_app, app_name, followup
+    postposed_open = _app_postposed_open_followup_match(stripped)
+    if postposed_open:
+        return postposed_open
+    return None
+
+
+def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] | None:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
+        r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+        r"^(?:please\s+)?(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+"
+        r"(?:and|then)\s+(?P<followup>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        followup = _strip_known_app_followup_prefix(match.group("followup"))
+        app_name = _normalize_app_name(raw_app)
+        if (
+            not raw_app
+            or not app_name
+            or not followup
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+            or _looks_like_generic_app_open_target(raw_app)
+            or not _looks_like_known_app_followup(followup)
+        ):
+            continue
+        return "open", raw_app, app_name, followup
     return None
 
 
@@ -5354,7 +5388,7 @@ def _is_visual_inspection_followup(value: str) -> bool:
     lowered = followup.lower()
     return bool(
         re.search(
-            r"^(?:看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+            r"^(?:看看|看一下|看下|看一眼|查看|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
             r"(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|桌面|应用|app)(?:上|里|中|内)?"
             r"(?:内容|状态|情况)?$",
             followup,
@@ -5380,7 +5414,7 @@ def _is_visual_inspection_followup(value: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"^(?:看看|看一下|看下|查看|观察(?:一下|下)?|识别(?:一下|下)?|看一眼)$",
+            r"^(?:看看|看一下|看下|查看|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?|看一眼)$",
             followup,
             flags=re.IGNORECASE,
         )
@@ -5392,7 +5426,7 @@ def _is_bare_visual_inspection_request(value: str) -> bool:
     text = _strip_query(value)
     return bool(
         re.fullmatch(
-            r"(?:看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)",
+            r"(?:看看|看一下|看下|看一眼|查看|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?)",
             text,
             flags=re.IGNORECASE,
         )
@@ -5405,7 +5439,7 @@ def _is_app_visual_inspection_followup(value: str) -> bool:
         return False
     return bool(
         re.match(
-            r"^(?:看看|看一下|看下|看一眼|查看|检查|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+            r"^(?:看看|看一下|看下|看一眼|查看|检查|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
             r"[^。！？!?]{0,40}$",
             followup,
             flags=re.IGNORECASE,

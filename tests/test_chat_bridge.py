@@ -4190,7 +4190,10 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
 
     cases = (
         ("打开微信看看有没有新消息", "bubble", "WeChat"),
+        ("把微信打开然后看看有没有未读", "live2d", "WeChat"),
+        ("打开微信读一下当前聊天", "bubble", "WeChat"),
         ("打开活动监视器看看 CPU", "live2d", "Activity Monitor"),
+        ("打开系统活动监视器看看 CPU", "bubble", "Activity Monitor"),
     )
     for prompt, launcher_mode, app_name in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
