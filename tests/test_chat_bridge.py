@@ -459,6 +459,10 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
         ("打开输入监控权限", "bubble", "输入监控", "已打开输入监控。"),
         ("打开完全磁盘访问权限", "live2d", "完全磁盘访问", "已打开完全磁盘访问。"),
         ("打开摄像头权限", "bubble", "摄像头", "已打开摄像头。"),
+        ("修复自动化权限", "bubble", "自动化权限", "已打开自动化权限。"),
+        ("修一下屏幕录制权限", "live2d", "屏幕录制权限", "已打开屏幕录制权限。"),
+        ("fix full disk access permissions", "bubble", "完全磁盘访问", "已打开完全磁盘访问。"),
+        ("fix input monitoring permissions", "live2d", "输入监控", "已打开输入监控。"),
     )
     for prompt, launcher_mode, app_name, summary in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -488,6 +492,10 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
         "输入监控",
         "完全磁盘访问",
         "摄像头",
+        "自动化权限",
+        "屏幕录制权限",
+        "完全磁盘访问",
+        "输入监控",
     ]
 
 

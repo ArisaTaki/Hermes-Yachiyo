@@ -5697,22 +5697,24 @@ def _system_settings_target_name(text: str) -> str:
 def _permission_settings_open_name(text: str) -> str:
     lowered = text.lower()
     if re.search(
-        r"(?:打开|启动|开启|拉起|显示|前往|进入).{0,20}"
+        r"(?:打开|启动|开启|拉起|显示|前往|进入|去|修复|修一下|修下|处理|解决).{0,20}"
         r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面|"
-        r"屏幕录制|辅助功能|自动化|隐私与安全性|隐私.*安全)",
+        r"屏幕录制|辅助功能|自动化|输入监控|完全磁盘访问|文件和文件夹|摄像头|相机|麦克风|"
+        r"隐私与安全性|隐私.*安全)",
         text,
     ):
         return _permission_settings_target_name(text) or "隐私与安全性"
     if re.search(
-        r"\b(?:open|launch|show)\s+(?:desktop|missing|required|permission|permissions)"
+        r"\b(?:open|launch|show|fix|repair|resolve)\s+(?:desktop|missing|required|permission|permissions)"
         r".{0,24}(?:settings|page|pane)\b",
         lowered,
     ):
         return _permission_settings_target_name(text) or "隐私与安全性"
     english_target = _permission_settings_target_name(text)
     if english_target and re.search(
-        r"\b(?:open|launch|show|go\s+to)\b.{0,24}"
-        r"(?:privacy|security|accessibility|automation|screen\s+recording|screen\s+capture)"
+        r"\b(?:open|launch|show|go\s+to|fix|repair|resolve)\b.{0,24}"
+        r"(?:privacy|security|accessibility|automation|screen\s+recording|screen\s+capture|"
+        r"full\s+disk\s+access|input\s+monitoring|camera|microphone|files?\s+and\s+folders?)"
         r".{0,24}(?:settings|permissions?|pane|page)?\b",
         lowered,
     ):
@@ -5728,6 +5730,16 @@ def _permission_settings_target_name(text: str) -> str:
         return "屏幕录制权限"
     if re.search(r"(?:自动化|\bautomation\b|\bapple\s*events?\b)", lowered):
         return "自动化权限"
+    if re.search(r"(?:完全磁盘访问|\bfull\s+disk\s+access\b)", lowered):
+        return "完全磁盘访问"
+    if re.search(r"(?:文件和文件夹|文件与文件夹|\bfiles?\s+and\s+folders?\b)", lowered):
+        return "文件和文件夹"
+    if re.search(r"(?:输入监控|\binput\s+monitoring\b)", lowered):
+        return "输入监控"
+    if re.search(r"(?:麦克风|\bmicrophone\b)", lowered):
+        return "麦克风"
+    if re.search(r"(?:摄像头|相机|\bcamera\b)", lowered):
+        return "摄像头"
     if re.search(
         r"(?:隐私与安全性|隐私和安全性|隐私.*安全|系统隐私设置|隐私设置|安全隐私设置|"
         r"桌面权限|桌面执行权限|本地工具权限|\bprivacy\b|\bsecurity\b|"

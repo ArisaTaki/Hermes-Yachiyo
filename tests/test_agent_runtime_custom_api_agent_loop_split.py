@@ -3478,6 +3478,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "自动化权限"},
     }
+    for prompt, app_name in (
+        ("修复自动化权限", "自动化权限"),
+        ("修一下屏幕录制权限", "屏幕录制权限"),
+        ("修复辅助功能权限", "辅助功能权限"),
+        ("修复输入监控权限", "输入监控"),
+        ("修复完全磁盘访问权限", "完全磁盘访问"),
+        ("fix screen recording permissions", "屏幕录制权限"),
+        ("fix full disk access permissions", "完全磁盘访问"),
+        ("fix input monitoring permissions", "输入监控"),
+    ):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": app_name},
+        }
     assert daily_desktop_intent_tool_request("open accessibility settings", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
