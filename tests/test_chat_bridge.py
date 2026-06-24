@@ -3720,6 +3720,11 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
         ("打开访达看看下载文件夹", "live2d", "~/Downloads"),
         ("打开图片文件夹", "bubble", "~/Pictures"),
         ("在 Finder 打开照片目录", "live2d", "~/Pictures"),
+        ("打开公共文件夹", "bubble", "~/Public"),
+        ("打开 Public 文件夹", "live2d", "~/Public"),
+        ("打开影片文件夹", "live2d", "~/Movies"),
+        ("打开音乐目录", "bubble", "~/Music"),
+        ("打开 Music 文件夹", "live2d", "~/Music"),
     )
     for prompt, launcher_mode, expected_path in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
