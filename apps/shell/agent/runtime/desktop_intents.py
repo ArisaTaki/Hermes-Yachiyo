@@ -5439,6 +5439,9 @@ def _app_open_name(text: str) -> str:
     permission_settings = _permission_settings_open_name(text)
     if permission_settings:
         return permission_settings
+    system_settings_target = _system_settings_open_name(text)
+    if system_settings_target:
+        return system_settings_target
     if (
         _looks_like_search_request(text)
         or _is_running_apps_request(text)
@@ -5473,6 +5476,52 @@ def _app_open_name(text: str) -> str:
             continue
         if app_name:
             return app_name
+    return ""
+
+
+def _system_settings_open_name(text: str) -> str:
+    lowered = text.lower()
+    if not re.search(
+        r"(?:打开|启动|开启|拉起|显示|前往|进入|open|launch|show|go\s+to)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    if not re.search(
+        r"(?:系统设置|系统偏好|设置|偏好|settings?|preferences?|pane|page|面板|页面|权限|permission)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    return _system_settings_target_name(text)
+
+
+def _system_settings_target_name(text: str) -> str:
+    lowered = text.lower()
+    if re.search(r"(?:蓝牙|\bbluetooth\b)", lowered):
+        return "蓝牙"
+    if re.search(r"(?:wi-?fi|无线网络|无线局域网)", lowered):
+        return "Wi-Fi"
+    if re.search(r"(?:网络|\bnetwork\b)", lowered):
+        return "网络"
+    if re.search(r"(?:辅助功能|无障碍|\baccessibility\b|\bassistive\b)", lowered):
+        return "辅助功能权限"
+    if re.search(r"(?:屏幕录制|屏幕录像|\bscreen\s+recording\b|\bscreen\s+capture\b)", lowered):
+        return "屏幕录制权限"
+    if re.search(r"(?:自动化|\bautomation\b|\bapple\s*events?\b)", lowered):
+        return "自动化权限"
+    if re.search(r"(?:完全磁盘访问|\bfull\s+disk\s+access\b)", lowered):
+        return "完全磁盘访问"
+    if re.search(r"(?:文件和文件夹|文件与文件夹|\bfiles?\s+and\s+folders?\b)", lowered):
+        return "文件和文件夹"
+    if re.search(r"(?:输入监控|\binput\s+monitoring\b)", lowered):
+        return "输入监控"
+    if re.search(r"(?:麦克风|\bmicrophone\b)", lowered):
+        return "麦克风"
+    if re.search(r"(?:摄像头|相机|\bcamera\b)", lowered):
+        return "摄像头"
+    if re.search(r"(?:隐私与安全性|隐私和安全性|隐私.*安全|\bprivacy\b|\bsecurity\b)", lowered):
+        return "隐私与安全性"
     return ""
 
 

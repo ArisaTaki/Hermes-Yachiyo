@@ -3168,22 +3168,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "input": {"app_name": "蓝牙"},
     }
     assert daily_desktop_intent_tool_request("打开 Wi-Fi 设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "input": {"app_name": "Wi-Fi"},
     }
     assert daily_desktop_intent_tool_request("打开系统设置蓝牙", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "input": {"app_name": "蓝牙"},
     }
     assert daily_desktop_intent_tool_request("打开 WiFi 设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "input": {"app_name": "Wi-Fi"},
+    }
+    assert daily_desktop_intent_tool_request("打开网络设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网络"},
     }
     assert daily_desktop_intent_tool_request("打开显示器设置", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3269,6 +3274,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "辅助功能权限"},
+    }
+    assert daily_desktop_intent_tool_request("open Bluetooth settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "蓝牙"},
+    }
+    assert daily_desktop_intent_tool_request("打开麦克风权限", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "麦克风"},
     }
     assert daily_desktop_intent_tool_request("打开桌面权限设置", allowed_tools) == {
         "protocol": "json_fallback",
