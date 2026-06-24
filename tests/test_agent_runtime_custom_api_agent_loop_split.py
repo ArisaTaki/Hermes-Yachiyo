@@ -729,6 +729,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://chatgpt.com"},
     }
+    assert daily_desktop_intent_tool_request("打开 ChatGPT 客户端", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "ChatGPT"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Claude 桌面版", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Claude"},
+    }
+    assert daily_desktop_intent_tool_request("打开飞书客户端", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "飞书"},
+    }
+    assert daily_desktop_intent_tool_request("启动企业微信客户端", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "WeCom"},
+    }
     assert daily_desktop_intent_tool_request("可以帮我打开 GitHub 吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",

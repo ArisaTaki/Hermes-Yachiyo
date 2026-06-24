@@ -96,6 +96,8 @@ _APP_ALIASES = {
     "discord": "Discord",
     "notion": "Notion",
     "obsidian": "Obsidian",
+    "chatgpt": "ChatGPT",
+    "claude": "Claude",
     "vscode": "Visual Studio Code",
     "vsc": "Visual Studio Code",
     "visualstudiocode": "Visual Studio Code",
@@ -135,6 +137,11 @@ _APP_ALIASES = {
     "telegram": "Telegram",
     "telegramdesktop": "Telegram",
     "whatsapp": "WhatsApp",
+    "企业微信": "WeCom",
+    "企业微信客户端": "WeCom",
+    "wecom": "WeCom",
+    "wecomclient": "WeCom",
+    "wechatwork": "WeCom",
     "飞书": "飞书",
     "feishu": "Feishu",
     "lark": "Lark",
@@ -4663,7 +4670,12 @@ def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
     app = _strip_app_foreground_followup(app)
     app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
-    app = re.sub(r"\s*(?:应用|app|软件|程序)$", "", app, flags=re.IGNORECASE)
+    app = re.sub(
+        r"\s*(?:应用|app|软件|程序|客户端|桌面版|桌面客户端|client|desktop\s*app|desktop\s*client)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
     app = _strip_polite_suffix(app)
     return app.strip()
 
