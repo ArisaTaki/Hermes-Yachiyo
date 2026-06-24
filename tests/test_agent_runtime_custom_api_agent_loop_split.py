@@ -3685,6 +3685,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Music"},
     }
+    assert daily_desktop_intent_tool_request("打开默认浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("启动系统默认浏览器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("打开 Apple Music", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
