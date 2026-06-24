@@ -343,6 +343,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
     ):
         return app_browser_action_sequence
+    desktop_path_request = _desktop_path_tool_request(context)
+    if desktop_path_request and str(desktop_path_request.get("tool") or "") in allowed:
+        return [desktop_path_request]
     foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
     if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
         return foreground_click_search_type_sequence
@@ -717,6 +720,16 @@ def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
         tool = str(request.get("tool") or "")
         if tool in _FOREGROUND_SEQUENCE_TOOLS:
             return request
+    return None
+
+
+def _desktop_path_tool_request(text: str) -> dict[str, Any] | None:
+    open_path = _desktop_open_path(text)
+    if open_path:
+        return _request("desktop.open_path", {"path": open_path})
+    reveal_path = _desktop_reveal_path(text)
+    if reveal_path:
+        return _request("desktop.reveal_path", {"path": reveal_path})
     return None
 
 
@@ -2841,6 +2854,14 @@ def _desktop_open_path(text: str) -> str:
         return ""
     if _finder_selection_open_path_request(original_text):
         return "finder_selection"
+    if _latest_screenshot_reveal_path_request(original_text):
+        return ""
+    if _latest_screenshot_open_path_request(original_text):
+        return "latest_screenshot"
+    if _latest_desktop_item_reveal_path_request(original_text):
+        return ""
+    if _latest_desktop_item_open_path_request(original_text):
+        return "latest_desktop_item"
     if _latest_download_reveal_path_request(original_text):
         return ""
     if _latest_download_open_path_request(original_text):
@@ -2850,6 +2871,14 @@ def _desktop_open_path(text: str) -> str:
         return ""
     if _finder_selection_open_path_request(text):
         return "finder_selection"
+    if _latest_screenshot_reveal_path_request(text):
+        return ""
+    if _latest_screenshot_open_path_request(text):
+        return "latest_screenshot"
+    if _latest_desktop_item_reveal_path_request(text):
+        return ""
+    if _latest_desktop_item_open_path_request(text):
+        return "latest_desktop_item"
     if _latest_download_reveal_path_request(text):
         return ""
     if _latest_download_open_path_request(text):
@@ -2888,11 +2917,19 @@ def _desktop_reveal_path(text: str) -> str:
     original_text = str(text or "").strip()
     if _finder_selection_reveal_path_request(original_text):
         return "finder_selection"
+    if _latest_screenshot_reveal_path_request(original_text):
+        return "latest_screenshot"
+    if _latest_desktop_item_reveal_path_request(original_text):
+        return "latest_desktop_item"
     if _latest_download_reveal_path_request(original_text):
         return "latest_download"
     text = _strip_finder_path_prefix(original_text)
     if _finder_selection_reveal_path_request(text):
         return "finder_selection"
+    if _latest_screenshot_reveal_path_request(text):
+        return "latest_screenshot"
+    if _latest_desktop_item_reveal_path_request(text):
+        return "latest_desktop_item"
     if _latest_download_reveal_path_request(text):
         return "latest_download"
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
@@ -2926,6 +2963,100 @@ def _desktop_reveal_path(text: str) -> str:
         if path:
             return path
     return ""
+
+
+def _latest_screenshot_open_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:打开|开启).{0,12}(?:最近|最新|刚刚|刚才|上一张|上一个).{0,8}"
+            r"(?:截图|截屏|屏幕截图|屏幕快照)",
+            text,
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent|last)\s+"
+            r"(?:screenshot|screen\s+shot)\b",
+            lowered,
+        )
+    )
+
+
+def _latest_screenshot_reveal_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:finder|访达).{0,12}(?:显示|定位|找一下|找到|打开).{0,12}"
+            r"(?:最近|最新|刚刚|刚才|上一张|上一个).{0,8}(?:截图|截屏|屏幕截图|屏幕快照)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:显示|定位|找一下|找到).{0,12}"
+            r"(?:最近|最新|刚刚|刚才|上一张|上一个).{0,8}(?:截图|截屏|屏幕截图|屏幕快照)",
+            text,
+        )
+        or re.search(
+            r"\b(?:show|reveal|locate)\s+(?:the\s+)?"
+            r"(?:latest|newest|most\s+recent|recent|last)\s+"
+            r"(?:screenshot|screen\s+shot)(?:\s+in\s+(?:the\s+)?finder)?\b",
+            lowered,
+        )
+    )
+
+
+def _latest_desktop_item_open_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:打开|开启).{0,12}(?:桌面).{0,8}(?:最近|最新|刚刚|刚才).{0,8}"
+            r"(?:文件|项目|内容|东西)?",
+            text,
+        )
+        or re.search(
+            r"(?:桌面).{0,8}(?:最近|最新|刚刚|刚才).{0,8}"
+            r"(?:文件|项目|内容|东西).{0,12}(?:打开|开启)",
+            text,
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+"
+            r"(?:desktop\s+)?(?:file|item)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+"
+            r"(?:file|item)\s+on\s+(?:the\s+)?desktop\b",
+            lowered,
+        )
+    )
+
+
+def _latest_desktop_item_reveal_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:finder|访达).{0,12}(?:显示|定位|找一下|找到|打开).{0,12}"
+            r"(?:桌面).{0,8}(?:最近|最新|刚刚|刚才).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:显示|定位|找一下|找到).{0,12}(?:桌面).{0,8}"
+            r"(?:最近|最新|刚刚|刚才).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+        )
+        or re.search(
+            r"\b(?:show|reveal|locate)\s+(?:the\s+)?"
+            r"(?:latest|newest|most\s+recent|recent)\s+(?:desktop\s+)?(?:file|item)"
+            r"(?:\s+in\s+(?:the\s+)?finder)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:show|reveal|locate)\s+(?:the\s+)?"
+            r"(?:latest|newest|most\s+recent|recent)\s+(?:file|item)\s+on\s+"
+            r"(?:the\s+)?desktop(?:\s+in\s+(?:the\s+)?finder)?\b",
+            lowered,
+        )
+    )
 
 
 def _finder_selection_open_path_request(text: str) -> bool:

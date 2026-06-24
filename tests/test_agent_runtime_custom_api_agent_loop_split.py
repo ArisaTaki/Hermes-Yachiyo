@@ -2908,6 +2908,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "latest_download"},
     }
+    assert daily_desktop_intent_tool_request("打开刚才的截图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_screenshot"},
+    }
+    assert daily_desktop_intent_tool_request("open latest screenshot", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_screenshot"},
+    }
+    assert daily_desktop_intent_tool_request("打开桌面最新文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_desktop_item"},
+    }
+    assert daily_desktop_intent_tool_request("open latest file on desktop", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_desktop_item"},
+    }
     assert daily_desktop_intent_tool_request("打开选中的文件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -2957,6 +2977,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
         "input": {"path": "latest_download"},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示最新截图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "latest_screenshot"},
+    }
+    assert daily_desktop_intent_tool_request("reveal latest screenshot in Finder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "latest_screenshot"},
+    }
+    assert daily_desktop_intent_tool_request("显示桌面最新文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "latest_desktop_item"},
+    }
+    assert daily_desktop_intent_tool_request("show latest desktop item in Finder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "latest_desktop_item"},
     }
     assert daily_desktop_intent_tool_request("在 Finder 中显示选中的文件", allowed_tools) == {
         "protocol": "json_fallback",

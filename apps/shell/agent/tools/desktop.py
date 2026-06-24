@@ -1390,6 +1390,15 @@ def _special_desktop_object_path(
         "selecteditem",
     }:
         return _finder_selection_desktop_object_path(value, action, open_target)
+    if compact in {"latestscreenshot", "recentscreenshot", "lastscreenshot"}:
+        return _latest_screenshot_desktop_object_path(value, action, open_target)
+    if compact in {
+        "latestdesktopitem",
+        "recentdesktopitem",
+        "latestdesktopfile",
+        "recentdesktopfile",
+    }:
+        return _latest_desktop_item_object_path(value, action, open_target)
     if compact not in {"latestdownload", "recentdownload"}:
         return {}
     downloads = Path.home() / "Downloads"
@@ -1465,6 +1474,155 @@ def _latest_download_item(downloads: Path) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[0])[1]
+
+
+def _latest_screenshot_desktop_object_path(
+    value: str,
+    action: str,
+    open_target: str,
+) -> dict[str, Any]:
+    home = Path.home()
+    return _latest_desktop_object_from_folders(
+        value,
+        action,
+        open_target,
+        desktop_object="latest_screenshot",
+        folders=[home / "Desktop", home / "Downloads", home / "Pictures"],
+        matcher=_looks_like_screenshot_item,
+        missing_error="Screenshot folders not found",
+        missing_error_code="screenshot_folders_not_found",
+        not_found_error="No recent screenshots found",
+        not_found_error_code="latest_screenshot_not_found",
+    )
+
+
+def _latest_desktop_item_object_path(
+    value: str,
+    action: str,
+    open_target: str,
+) -> dict[str, Any]:
+    desktop = Path.home() / "Desktop"
+    return _latest_desktop_object_from_folders(
+        value,
+        action,
+        open_target,
+        desktop_object="latest_desktop_item",
+        folders=[desktop],
+        matcher=lambda _item: True,
+        missing_error="Desktop folder not found",
+        missing_error_code="desktop_folder_not_found",
+        not_found_error="No desktop items found",
+        not_found_error_code="latest_desktop_item_not_found",
+    )
+
+
+def _latest_desktop_object_from_folders(
+    value: str,
+    action: str,
+    open_target: str,
+    *,
+    desktop_object: str,
+    folders: list[Path],
+    matcher: Any,
+    missing_error: str,
+    missing_error_code: str,
+    not_found_error: str,
+    not_found_error_code: str,
+) -> dict[str, Any]:
+    source_folders = [str(folder) for folder in folders]
+    base_data = {
+        "path": str(value or "").strip(),
+        "open_target": open_target,
+        "desktop_object": desktop_object,
+        "source_folders": source_folders,
+    }
+    if len(folders) == 1:
+        base_data["source_folder"] = source_folders[0]
+    existing_folders = [folder for folder in folders if folder.exists() and folder.is_dir()]
+    if not existing_folders:
+        return {
+            "error_payload": {
+                "ok": False,
+                "action": action,
+                "summary": f"{action} failed",
+                "error": missing_error,
+                "error_code": missing_error_code,
+                "data": {
+                    **base_data,
+                    "exists": False,
+                    "source_exists": False,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            }
+        }
+    target = _latest_item_in_folders(existing_folders, matcher)
+    if target is None:
+        return {
+            "error_payload": {
+                "ok": False,
+                "action": action,
+                "summary": f"{action} failed",
+                "error": not_found_error,
+                "error_code": not_found_error_code,
+                "data": {
+                    **base_data,
+                    "exists": False,
+                    "source_exists": True,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            }
+        }
+    return {
+        "target": target,
+        "data": {
+            **base_data,
+            "source_folder": str(target.parent),
+            "expanded_path": str(target),
+            "resolved_path": str(target),
+            "display_path": str(target),
+            "source_exists": True,
+        },
+    }
+
+
+def _latest_item_in_folders(folders: list[Path], matcher: Any) -> Path | None:
+    candidates: list[tuple[float, Path]] = []
+    for folder in folders:
+        try:
+            items = list(folder.iterdir())
+        except OSError:
+            continue
+        for item in items:
+            name = item.name
+            if name.startswith(".") or _is_incomplete_desktop_item(name):
+                continue
+            if not matcher(item):
+                continue
+            try:
+                candidates.append((item.stat().st_mtime, item))
+            except OSError:
+                continue
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _is_incomplete_desktop_item(name: str) -> bool:
+    return str(name or "").lower().endswith((".download", ".crdownload", ".part"))
+
+
+def _looks_like_screenshot_item(item: Path) -> bool:
+    name = item.name
+    lowered = name.lower()
+    if item.suffix.lower() not in {".png", ".jpg", ".jpeg", ".heic", ".webp"}:
+        return False
+    compact = re.sub(r"[\s._-]+", "", lowered)
+    return any(
+        marker in compact
+        for marker in ("screenshot", "截屏", "截圖", "屏幕截图", "螢幕截圖")
+    )
 
 
 def _finder_selection_desktop_object_path(

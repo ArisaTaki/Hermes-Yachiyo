@@ -2464,6 +2464,113 @@ def test_desktop_open_path_reports_empty_finder_selection(monkeypatch) -> None:
     assert len(calls) == 1
 
 
+def test_desktop_open_path_resolves_latest_screenshot_alias(monkeypatch, tmp_path) -> None:
+    desktop = tmp_path / "Desktop"
+    downloads = tmp_path / "Downloads"
+    pictures = tmp_path / "Pictures"
+    desktop.mkdir()
+    downloads.mkdir()
+    pictures.mkdir()
+    older = desktop / "Screenshot 2026-06-01 at 10.00.00.png"
+    newer = downloads / "Screen Shot 2026-06-01 at 11.00.00.png"
+    not_screenshot = pictures / "vacation.png"
+    older.write_text("old", encoding="utf-8")
+    newer.write_text("new", encoding="utf-8")
+    not_screenshot.write_text("image", encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+    os.utime(not_screenshot, (300, 300))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path("latest_screenshot")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.open_path"
+    assert result["summary"] == "Opened Screen Shot 2026-06-01 at 11.00.00.png"
+    assert result["data"] == {
+        "path": "latest_screenshot",
+        "open_target": "system_open",
+        "desktop_object": "latest_screenshot",
+        "source_folders": [str(desktop), str(downloads), str(pictures)],
+        "source_folder": str(downloads),
+        "expanded_path": str(newer),
+        "resolved_path": str(newer),
+        "display_path": str(newer),
+        "source_exists": True,
+        "exists": True,
+        "is_dir": False,
+        "suffix": ".png",
+    }
+    assert calls[0][0] == ["open", str(newer)]
+
+
+def test_desktop_reveal_path_resolves_latest_desktop_item_alias(monkeypatch, tmp_path) -> None:
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    older = desktop / "older.txt"
+    newer = desktop / "newer.txt"
+    partial = desktop / "still-downloading.part"
+    older.write_text("old", encoding="utf-8")
+    newer.write_text("new", encoding="utf-8")
+    partial.write_text("partial", encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+    os.utime(partial, (300, 300))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.reveal_path("latest_desktop_item")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.reveal_path"
+    assert result["summary"] == "Revealed newer.txt in Finder"
+    assert result["data"]["desktop_object"] == "latest_desktop_item"
+    assert result["data"]["source_folder"] == str(desktop)
+    assert result["data"]["resolved_path"] == str(newer)
+    assert calls[0][0] == ["open", "-R", str(newer)]
+
+
+def test_desktop_open_path_keeps_safety_for_latest_desktop_item_alias(monkeypatch, tmp_path) -> None:
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    target = desktop / "run.sh"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path("latest_desktop_item")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.open_path"
+    assert result["error_code"] == "unsafe_path_type"
+    assert result["data"]["desktop_object"] == "latest_desktop_item"
+    assert result["data"]["resolved_path"] == str(target)
+    assert result["data"]["suffix"] == ".sh"
+    assert calls == []
+
+
 def test_desktop_open_path_blocks_unsafe_file_types(monkeypatch, tmp_path) -> None:
     target = tmp_path / "run.sh"
     target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
