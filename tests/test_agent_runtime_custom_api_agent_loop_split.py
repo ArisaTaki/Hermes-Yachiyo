@@ -2640,6 +2640,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.hide",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("Chrome 隐藏一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 收起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("隐藏 Slack", ["desktop.hide_app"]) is None
     assert daily_desktop_intent_tool_request("最小化 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2656,6 +2666,19 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.minimize",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("Chrome 最小化一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.minimize",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 最小化一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.minimize",
+        "input": {"app_name": "Finder"},
+    }
+    safe_window_tools = ["app.hide", "app.minimize", "app.show"]
+    assert daily_desktop_intent_tool_requests("Chrome 退出一下", safe_window_tools) == []
+    assert daily_desktop_intent_tool_requests("Chrome 关闭一下", safe_window_tools) == []
     assert daily_desktop_intent_tool_request("最小化当前窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.minimize_window",

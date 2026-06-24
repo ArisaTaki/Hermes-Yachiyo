@@ -1763,13 +1763,16 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus_window", fake_app_focus_window)
     try:
         cases = [
-            ("Slack 显示出来", "app.show", "已显示 Slack。"),
-            ("打开 Slack 并切到前台", "app.show", "已显示 Slack。"),
-            ("隐藏 Slack", "app.hide", "已隐藏 Slack。"),
-            ("最小化 Slack", "app.minimize", "已最小化 Slack。"),
-            ("切到 Slack 的 general 窗口", "app.focus_window", "已切换到 Slack 的 general 窗口。"),
+            ("Slack 显示出来", "app.show", "已显示 Slack。", "Slack"),
+            ("打开 Slack 并切到前台", "app.show", "已显示 Slack。", "Slack"),
+            ("隐藏 Slack", "app.hide", "已隐藏 Slack。", "Slack"),
+            ("Chrome 隐藏一下", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
+            ("Chrome 收起来", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
+            ("最小化 Slack", "app.minimize", "已最小化 Slack。", "Slack"),
+            ("Chrome 最小化一下", "app.minimize", "已最小化 Google Chrome。", "Google Chrome"),
+            ("切到 Slack 的 general 窗口", "app.focus_window", "已切换到 Slack 的 general 窗口。", "Slack"),
         ]
-        for prompt, tool_name, summary in cases:
+        for prompt, tool_name, summary, app_name in cases:
             result = api.send_message(prompt)
             task = runtime.state.get_task(result["task_id"])
             run = service.get_run(result["run_id"])
@@ -1787,7 +1790,7 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
             assert result["agent_task"]["summary"] == summary
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
             assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
-            assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == app_name
             assert task is not None
             assert task.status == TaskStatus.COMPLETED
             assert task.result == summary
@@ -1804,8 +1807,8 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
             assert "model.requested" not in event_types
 
         assert show_calls == ["Slack", "Slack"]
-        assert hide_calls == ["Slack"]
-        assert minimize_calls == ["Slack"]
+        assert hide_calls == ["Slack", "Google Chrome", "Google Chrome"]
+        assert minimize_calls == ["Slack", "Google Chrome"]
         assert focus_window_calls == [("Slack", "general")]
     finally:
         service.close()

@@ -408,6 +408,9 @@ def daily_desktop_intent_tool_requests(
     app_safe_type_text = _app_prefix_safe_type_text_tool_request(context)
     if app_safe_type_text and str(app_safe_type_text.get("tool") or "") in allowed:
         return [app_safe_type_text]
+    app_window_management = _app_prefix_window_management_tool_request(context)
+    if app_window_management and str(app_window_management.get("tool") or "") in allowed:
+        return [app_window_management]
     app_ui_action = _app_scoped_ui_action_tool_request(context)
     if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
         return [app_ui_action]
@@ -1214,6 +1217,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_prefix_safe_type_text = _app_prefix_safe_type_text_tool_request(text)
     if app_prefix_safe_type_text:
         candidates.append(app_prefix_safe_type_text)
+
+    app_prefix_window_management = _app_prefix_window_management_tool_request(text)
+    if app_prefix_window_management:
+        candidates.append(app_prefix_window_management)
 
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
@@ -2708,6 +2715,46 @@ def _app_prefix_safe_type_text_tool_request(text: str) -> dict[str, Any] | None:
     return _request(
         "app.focus_and_safe_type_text",
         {"app_name": app_name, "text": typed_text},
+    )
+
+
+def _app_prefix_window_management_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    if _is_app_prefix_hide_followup(followup):
+        return _request("app.hide", {"app_name": app_name})
+    if _is_app_prefix_minimize_followup(followup):
+        return _request("app.minimize", {"app_name": app_name})
+    return None
+
+
+def _is_app_prefix_hide_followup(value: str) -> bool:
+    text = _strip_query(value)
+    if not text:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:隐藏|隐藏一下|隐藏下|藏起来|收起|收起来|收一下|收下|hide(?:\s+(?:it|this\s+app))?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_app_prefix_minimize_followup(value: str) -> bool:
+    text = _strip_query(value)
+    if not text:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:最小化|最小化一下|最小化下|窗口最小化|把窗口最小化|最小化窗口|minimi[sz]e(?:\s+(?:it|this\s+window))?)",
+            text,
+            flags=re.IGNORECASE,
+        )
     )
 
 
