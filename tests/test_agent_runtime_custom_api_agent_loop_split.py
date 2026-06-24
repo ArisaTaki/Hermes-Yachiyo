@@ -2373,6 +2373,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "copy"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("选择全部并复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开微信然后全选再复制", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -3150,9 +3162,24 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hide_app",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("当前应用隐藏一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("hide current app", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hide_app",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前应用最小化", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("前台应用最小化", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
         "input": {},
     }
     assert daily_desktop_intent_tool_request("别关闭当前窗口", allowed_tools) is None
@@ -4937,6 +4964,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "find"},
     }
+    assert daily_desktop_intent_tool_requests("查找 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("页面查找 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "OpenAI"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开查找", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("刷新一下页面", allowed_tools) == {
         "protocol": "json_fallback",

@@ -361,6 +361,14 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    foreground_find_sequence = _foreground_find_text_tool_requests(context)
+    if foreground_find_sequence and all(
+        str(request.get("tool") or "") in allowed for request in foreground_find_sequence
+    ):
+        return foreground_find_sequence
+    app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
+    if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
+        return app_find_sequence
     browser_open_request = _browser_open_url_tool_request(context, allowed)
     if browser_open_request:
         return [browser_open_request]
@@ -1244,6 +1252,24 @@ def _desktop_find_query(text: str) -> str:
     return ""
 
 
+def _desktop_foreground_find_query(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在(?:当前|前台)?(?:页面|网页|窗口|应用|app)?(?:里|中|内|上)?\s*)?"
+        r"(?:(?:页面|网页|页内|页面内)\s*)?"
+        r"(?:查找|找一下|打开查找(?:框)?(?:并输入|输入)?|\bfind\b(?:\s+in\s+page)?)\s*"
+        r"(?P<query>[^。！？!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_search_query(match.group("query"))
+        if query:
+            return query
+    return ""
+
+
 def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     """Return ordered desktop tool candidates before policy filtering."""
 
@@ -1422,6 +1448,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_hide_current_app_request(text):
         candidates.append(_request("desktop.hide_app", {}))
+
+    if _is_minimize_current_app_request(text):
+        candidates.append(_request("desktop.minimize_window", {}))
 
     if _is_minimize_current_window_request(text):
         candidates.append(_request("desktop.minimize_window", {}))
@@ -3994,11 +4023,13 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
     if not shorthand_match:
         return []
     mode, _raw_app, app_name, followup = shorthand_match
-    if app_name in _BROWSER_APP_NAMES:
-        return []
     if _desktop_type_into_ui_element(followup):
         return []
-    query = _desktop_find_query(followup)
+    query = (
+        _desktop_foreground_find_query(followup)
+        if app_name in _BROWSER_APP_NAMES
+        else _desktop_find_query(followup)
+    )
     if not query:
         return []
     return [
@@ -4006,6 +4037,16 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
             f"app.{mode}_and_safe_shortcut",
             {"app_name": app_name, "action": "find"},
         ),
+        _request("desktop.safe_type_text", {"text": query}),
+    ]
+
+
+def _foreground_find_text_tool_requests(text: str) -> list[dict[str, Any]]:
+    query = _desktop_foreground_find_query(text)
+    if not query:
+        return []
+    return [
+        _request("desktop.safe_shortcut", {"action": "find"}),
         _request("desktop.safe_type_text", {"text": query}),
     ]
 
@@ -5154,6 +5195,8 @@ def _safe_shortcut_action_sequence(value: str) -> list[str]:
         "全选并复制": ["select_all", "copy"],
         "全选后复制": ["select_all", "copy"],
         "全选再复制": ["select_all", "copy"],
+        "选择全部并复制": ["select_all", "copy"],
+        "选择全部后复制": ["select_all", "copy"],
         "复制当前窗口": ["select_all", "copy"],
         "复制当前窗口内容": ["select_all", "copy"],
         "复制当前页面": ["select_all", "copy"],
@@ -7518,18 +7561,53 @@ def _is_hide_current_app_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:隐藏|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
+            r"(?:隐藏|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)",
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)(?:一下|下)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\bhide\s+(?:the\s+)?(?:current|foreground|active|this)\s+"
+            r"(?:app|application)\b",
+            lowered,
+        )
+    )
+
+
+def _is_minimize_current_app_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:最小化|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:最小化|收起)(?:一下|下)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*(?:最小化|收起)(?:一下|下)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bminimi[sz]e\s+(?:the\s+)?(?:current|foreground|active|this)\s+"
             r"(?:app|application)\b",
             lowered,
         )
