@@ -75,6 +75,9 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') {
+    return runtimeTimelinePolicyDecisionLabel(event);
+  }
   const typeLabel = runtimeTimelineEventTypeLabel(type || title);
   if (typeLabel) return typeLabel;
   if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
@@ -91,6 +94,18 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
   return detail;
 }
 
+function runtimeTimelinePolicyDecisionLabel(event: RuntimeTimelineEventSnapshot): string {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+  const decision = String(payload.decision || payload.status || '').trim();
+  const prefix = decision === 'deny' || decision === 'denied' || decision === 'blocked'
+    ? '策略拦截'
+    : '策略放行';
+  return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
+}
+
 function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'task.created') return '任务已创建';
   if (type === 'run.started' || type === 'task.started') return '任务已启动';
@@ -100,6 +115,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
   if (type === 'tool.requested') return '工具请求';
+  if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') return '工具策略决策';
   if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';
   if (type === 'agent.tool.skipped' || type === 'tool.skipped') return '工具已跳过';

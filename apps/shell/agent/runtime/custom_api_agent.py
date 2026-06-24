@@ -310,6 +310,12 @@ class RuntimeCustomApiAgentLoop:
                     timeline=timeline,
                     run_id=run_id,
                 )
+                self._record_desktop_tool_policy_decisions(
+                    planned_tool_requests,
+                    allowed_tools=allowed_tools,
+                    agent=agent,
+                    run_id=run_id,
+                )
                 tool_timeline_start = len(timeline)
                 try:
                     self._run_tool_requests(
@@ -554,6 +560,45 @@ class RuntimeCustomApiAgentLoop:
                 "agent.desktop.permission_preflight",
                 payload,
             )
+
+    def _record_desktop_tool_policy_decisions(
+        self,
+        planned_tool_requests: list[dict[str, Any]],
+        *,
+        allowed_tools: list[str],
+        agent: dict[str, Any],
+        run_id: str = "",
+    ) -> None:
+        if not run_id or self._append_run_event is None:
+            return
+        allowed = [
+            str(tool or "").strip()
+            for tool in allowed_tools
+            if str(tool or "").strip()
+        ]
+        policy_overlay = agent.get("_daily_desktop_policy_overlay") is True
+        reason = "daily_desktop_policy_overlay" if policy_overlay else "agent_tool_policy"
+        for request in planned_tool_requests:
+            tool_name = str(request.get("tool") or "").strip()
+            if not tool_name:
+                continue
+            payload = {
+                "tool": tool_name,
+                "status": "allowed",
+                "decision": "allow",
+                "source": str(request.get("source") or "daily_desktop_intent"),
+                "reason": reason,
+                "policy_scope": "daily_desktop",
+                "policy_overlay": policy_overlay,
+                "input_preview": request.get("input") if isinstance(request.get("input"), dict) else {},
+                "allowed_tools": allowed,
+            }
+            planning_reason = str(
+                request.get("planning_reason") or "clear_daily_desktop_intent"
+            ).strip()
+            if planning_reason:
+                payload["planning_reason"] = planning_reason
+            self._append_run_event(run_id, "agent.tool.policy_decision", payload)
 
     def _record_desktop_intent_approval_required(
         self,

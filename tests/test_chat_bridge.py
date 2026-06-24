@@ -103,6 +103,9 @@ def _run_launcher_daily_desktop_quick_message(
         ).model_dump(mode="json")
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
+        policy_decision_events = [
+            event for event in events if event["event_type"] == "agent.tool.policy_decision"
+        ]
         messages = store.load_messages("session-current", limit=10)
         user = [message for message in messages if message.role == "user"][-1]
         assistant = [message for message in messages if message.role == "assistant"][-1]
@@ -119,6 +122,10 @@ def _run_launcher_daily_desktop_quick_message(
         assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
         assert user_metadata["daily_desktop_tool"]
         assert user_metadata["daily_desktop_tools"]
+        assert policy_decision_events
+        assert policy_decision_events[0]["payload"]["decision"] == "allow"
+        assert policy_decision_events[0]["payload"]["policy_scope"] == "daily_desktop"
+        assert policy_decision_events[0]["payload"]["tool"] == user_metadata["daily_desktop_tool"]
         assert assistant.content == agent_task["summary"]
         result["_events"] = events
         result["_task_timeline"] = task_timeline

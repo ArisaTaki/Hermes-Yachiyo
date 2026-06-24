@@ -8629,7 +8629,27 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
                 "planning_reason": "clear_daily_desktop_intent",
                 "input_preview": {"query": "超时空辉夜姬"},
             },
-        }
+        },
+        {
+            "run_id": "run-music",
+            "event_type": "agent.tool.policy_decision",
+            "payload": {
+                "tool": "media.apple_music_play",
+                "status": "allowed",
+                "decision": "allow",
+                "source": "daily_desktop_intent",
+                "reason": "agent_tool_policy",
+                "policy_scope": "daily_desktop",
+                "policy_overlay": False,
+                "input_preview": {"query": "超时空辉夜姬"},
+                "allowed_tools": [
+                    "media.apple_music_play",
+                    "screen.capture",
+                    "desktop.active_window",
+                ],
+                "planning_reason": "clear_daily_desktop_intent",
+            },
+        },
     ]
 
 

@@ -155,6 +155,9 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("agent.tool.completed") == ["tool.completed"]
     assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
     assert canonical_run_event_aliases("agent.tool.denied") == ["tool.denied"]
+    assert canonical_run_event_aliases("agent.tool.policy_decision") == [
+        "tool.policy_decision"
+    ]
     assert canonical_run_event_aliases("agent.tool.approval_required") == [
         "tool.approval_required",
         "approval.required",
@@ -224,6 +227,21 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "agent.tool.denied",
         "tool.denied",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.policy_decision",
+        {
+            "tool": "app.open",
+            "decision": "allow",
+            "reason": "daily_desktop_policy_overlay",
+        },
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.policy_decision",
+        "tool.policy_decision",
     ]
 
     repository.calls.clear()

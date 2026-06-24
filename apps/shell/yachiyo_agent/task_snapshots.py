@@ -109,13 +109,12 @@ def agent_task_snapshot_from_payload(
     task_id = _text(payload.get("task_id") or payload.get("run_id"))
     run_id = _text(payload.get("run_id") or task_id)
     group_run_id = _group_run_id(payload)
-    recent_events = _chat_visible_events(
-        run_events_from_payload(
-            payload,
-            run_id=run_id,
-            keys=("recent_events", "events", "timeline"),
-        )
+    all_events = run_events_from_payload(
+        payload,
+        run_id=run_id,
+        keys=("recent_events", "events", "timeline"),
     )
+    recent_events = _chat_visible_events(all_events)
     approvals = [
         approval
         for approval in approval_snapshots_from_payload(
@@ -143,7 +142,7 @@ def agent_task_snapshot_from_payload(
     needs_user_action = bool(
         payload.get("needs_user_action")
         or approvals
-        or _has_desktop_recovery_user_action(recent_events, tool_calls)
+        or _has_desktop_recovery_user_action(recent_events, tool_calls, all_events=all_events)
     )
 
     return AgentTaskSnapshot(
@@ -335,7 +334,14 @@ def _desktop_tool_result_progress_text(label: str, result: Mapping[str, Any]) ->
 def _has_desktop_recovery_user_action(
     events: list[PublicRunEvent],
     tool_calls: list[Any],
+    *,
+    all_events: list[PublicRunEvent] | None = None,
 ) -> bool:
+    is_recovery_execution = any(
+        event.event_type == _RECOVERY_RETRY_CONTEXT_EVENT_TYPE
+        or _is_structured_recovery_metadata_event(event)
+        for event in (all_events or events)
+    )
     for event in events:
         if (event.sensitivity or "public") == "secret":
             continue
@@ -350,24 +356,52 @@ def _has_desktop_recovery_user_action(
             return True
         if (
             event.event_type in {_COMPLETED_DESKTOP_INTENT_EVENT_TYPE, _TOOL_CALL_EVENT_TYPE}
-            and _has_recovery_signal(result)
+            and _has_recovery_signal(
+                result,
+                count_success_recovery_actions=not is_recovery_execution,
+            )
         ):
             return True
     for tool_call in tool_calls:
         output_preview = getattr(tool_call, "output_preview", {})
-        if isinstance(output_preview, Mapping) and _has_recovery_signal(output_preview):
+        if isinstance(output_preview, Mapping) and _has_recovery_signal(
+            output_preview,
+            count_success_recovery_actions=not is_recovery_execution,
+        ):
             return True
     return False
 
 
-def _has_recovery_signal(source: Mapping[str, Any]) -> bool:
+def _has_recovery_signal(
+    source: Mapping[str, Any],
+    *,
+    count_success_recovery_actions: bool = True,
+) -> bool:
     data = source.get("data") if isinstance(source.get("data"), Mapping) else {}
-    return bool(
+    has_permission_signal = bool(
         source.get("permission_error")
         or _result_text_list(source, "permission_targets", "missing_permissions")
         or _result_text_list(data, "permission_targets", "missing_permissions")
-        or _has_recovery_actions(source)
-        or _has_recovery_actions(data)
+    )
+    if has_permission_signal:
+        return True
+    has_recovery_actions = _has_recovery_actions(source) or _has_recovery_actions(data)
+    if not has_recovery_actions:
+        return False
+    return bool(
+        count_success_recovery_actions
+        or source.get("ok") is False
+        or data.get("ok") is False
+    )
+
+
+def _is_structured_recovery_metadata_event(event: PublicRunEvent) -> bool:
+    if event.event_type != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+        return False
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    return (
+        _text(payload.get("source")) == "daily_desktop_metadata"
+        and _text(payload.get("planning_reason")) == "structured_recovery_metadata"
     )
 
 

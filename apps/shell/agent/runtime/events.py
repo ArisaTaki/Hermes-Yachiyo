@@ -799,6 +799,7 @@ def canonical_run_event_aliases(
         "agent.tool.completed": ["tool.completed"],
         "agent.tool.failed": ["tool.failed"],
         "agent.tool.denied": ["tool.denied"],
+        "agent.tool.policy_decision": ["tool.policy_decision"],
         "agent.tool.approval_required": ["tool.approval_required", "approval.required"],
         "workflow.node.approval_required": ["workflow.paused_for_approval", "approval.required"],
         "group.approval_required": ["approval.required"],

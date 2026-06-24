@@ -58,6 +58,9 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
+    return policyDecisionTitle(event, detail);
+  }
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.started') return detail ? `工具执行中 · ${detail}` : '工具执行中';
   if (name === 'agent.tool.skipped' || name === 'tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
@@ -149,6 +152,13 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'agent.desktop.permission_recovery') return 'approval';
   if (name === 'agent.desktop.intent_completed') return 'ready';
   if (name === 'agent.desktop.intent_unavailable') return 'danger';
+  if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
+    const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+      ? event.payload as Record<string, unknown>
+      : {};
+    const decision = String(payload.decision || payload.status || '').trim();
+    return decision === 'deny' || decision === 'denied' || decision === 'blocked' ? 'danger' : 'tool';
+  }
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';
@@ -166,6 +176,18 @@ function plannedDesktopToolLabel(event: Record<string, unknown>, detail: string)
     : {};
   const tool = String(event.tool || event.tool_name || payload.tool || payload.tool_name || detail || '').trim();
   return tool ? runtimeToolDisplayLabelOrName(tool) : '';
+}
+
+function policyDecisionTitle(event: Record<string, unknown>, detail: string): string {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const toolLabel = plannedDesktopToolLabel(event, detail);
+  const decision = String(payload.decision || payload.status || '').trim();
+  const prefix = decision === 'deny' || decision === 'denied' || decision === 'blocked'
+    ? '策略拦截'
+    : '策略放行';
+  return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
 }
 
 export function timelineEventName(event: Record<string, unknown>): string {
