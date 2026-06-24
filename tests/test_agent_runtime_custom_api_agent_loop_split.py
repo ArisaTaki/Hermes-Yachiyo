@@ -1256,6 +1256,29 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("在地址栏输入 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("在地址栏输入 github.com 并回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("地址栏输入 yachiyo 并回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.google.com/search?q=yachiyo"},
+    }
+    assert daily_desktop_intent_tool_request(
+        "type github.com into address bar then enter",
+        allowed_tools,
+    ) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("在 Chrome 输入 github.com 再回车", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -1641,18 +1664,15 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 github.com，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
         },
+    ]
+    assert daily_desktop_intent_tool_requests("按 Command+L，再输入 yachiyo，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "github.com"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "return", "modifiers": []},
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=yachiyo"},
         },
     ]
     assert daily_desktop_intent_tool_requests("全选，再复制", allowed_tools) == [

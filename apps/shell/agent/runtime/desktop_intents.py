@@ -1300,6 +1300,25 @@ def _browser_address_bar_url(text: str) -> str:
         r"edge(?:浏览器)?|microsoft\s*edge|arc(?:浏览器)?|brave(?:浏览器)?|browser)"
     )
     patterns = (
+        r"(?:press|hit)\s+(?:command|cmd|⌘)\s*\+?\s*l\s*(?:,?\s*(?:and\s+then|then|and))?\s*"
+        r"(?:type|enter|input)\s+(?P<target>[^!?]+?)\s*"
+        r"(?:,?\s*(?:and\s+then|then|and))?\s*(?:press|hit)?\s*(?:enter|return)\s*$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:按|敲|使用)\s*(?:command|cmd|⌘|Command|Cmd)\s*\+?\s*l\s*"
+        r"(?:[，,；;。]?\s*(?:并|然后|后|之后|再)\s*)?"
+        r"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)\s*"
+        r"(?:[，,；;。]?\s*(?:并|然后|后|之后|再)?\s*(?:按)?(?:回车|enter|return))\s*$",
+        r"(?:type|enter|input)\s+(?P<target>[^!?]+?)\s+"
+        r"(?:in|into)\s+(?:the\s+)?(?:address\s+bar|url\s+bar|omnibox)"
+        r"(?:\s+(?:(?:and\s+then|then|and)\s*)?(?:(?:press|hit)\s*)?(?:enter|return))?\s*$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在)?(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?\s*"
+        r"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
+        r"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
+        r"\s*(?:到|进|在)\s*(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?"
+        r"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
         rf"(?:open|launch|start)\s+{browser_name}\s+(?:and\s+)?"
         rf"(?:type|enter|input)\s+(?P<target>[^!?]+?)\s+"
         rf"(?:in|into)\s+(?:the\s+)?(?:address\s+bar|url\s+bar|omnibox)"
@@ -1313,14 +1332,14 @@ def _browser_address_bar_url(text: str) -> str:
         rf"(?:(?:并|然后|后|之后|再)\s*)?"
         rf"(?:在)?(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?\s*"
         rf"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
-        rf"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
+        rf"(?:\s*(?:再|然后|并)?\s*(?:按)?(?:回车|enter|return))?\s*$",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
         rf"[，,；;。]?\s*"
         rf"(?:(?:并|然后|后|之后|再)\s*)?"
         rf"(?:输入|键入|填入)\s*(?P<target>[^。！？!?，,]+?)"
         rf"\s*(?:到|进|在)\s*(?:地址栏|网址栏|url栏|omnibox)(?:里|中|内)?"
-        rf"(?:\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return))?\s*$",
+        rf"(?:\s*(?:再|然后|并)?\s*(?:按)?(?:回车|enter|return))?\s*$",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
         rf"[，,；;。]?\s*"
@@ -1342,7 +1361,7 @@ def _browser_address_bar_url(text: str) -> str:
         if not match:
             continue
         target = _strip_browser_address_bar_target(match.group("target"))
-        url = _browser_target_url(target)
+        url = _browser_address_bar_target_url(target)
         if url:
             return url
     return ""
@@ -1351,18 +1370,34 @@ def _browser_address_bar_url(text: str) -> str:
 def _strip_browser_address_bar_target(value: str) -> str:
     target = _strip_query(value)
     target = re.sub(
-        r"\s+(?:and\s+)?(?:press|hit)\s+(?:enter|return)\s*$",
+        r"\s+(?:(?:and\s+then|then|and)\s*)?(?:(?:press|hit)\s*)?(?:enter|return)\s*$",
         "",
         target,
         flags=re.IGNORECASE,
     )
     target = re.sub(
-        r"\s*(?:再|然后)?\s*(?:按)?(?:回车|enter|return)\s*$",
+        r"\s*(?:再|然后|并)?\s*(?:按)?(?:回车|enter|return)\s*$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
+    target = re.sub(
+        r"\s+(?:并|再|然后|and\s+then|then|and)$",
         "",
         target,
         flags=re.IGNORECASE,
     )
     return _strip_query(target)
+
+
+def _browser_address_bar_target_url(target: str) -> str:
+    clean_target = _strip_browser_address_bar_target(target)
+    if not clean_target:
+        return ""
+    url = _browser_target_url(clean_target)
+    if url:
+        return url
+    return f"https://www.google.com/search?q={quote_plus(clean_target)}"
 
 
 def _browser_open_target_url(text: str) -> str:

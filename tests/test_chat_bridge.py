@@ -2157,6 +2157,42 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_address_bar_url_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    opened_urls: list[str] = []
+
+    def fake_open_url(url: str) -> dict:
+        opened_urls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "在地址栏输入 github.com 并回车",
+    )
+
+    assert opened_urls == ["https://github.com"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开网页：https://github.com。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
     tmp_path,
     monkeypatch,
