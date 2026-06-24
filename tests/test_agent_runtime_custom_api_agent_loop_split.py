@@ -1443,6 +1443,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             },
         }
     ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 然后点击搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack，然后点击搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+        }
+    ]
     assert daily_desktop_intent_tool_requests("打开 Notes，然后按 Command+L，再复制", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2888,6 +2914,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么播放 Apple Music？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("总结当前网页", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("点击搜索", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None

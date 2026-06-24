@@ -303,9 +303,13 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
         request = _first_daily_desktop_candidate(stripped_clause)
         if request is None:
             find_requests = _app_context_find_text_requests(stripped_clause, requests)
-            if not find_requests:
+            if find_requests:
+                requests.extend(find_requests)
+                continue
+            click_requests = _app_context_click_ui_element_requests(stripped_clause, requests)
+            if not click_requests:
                 return []
-            requests.extend(find_requests)
+            requests.extend(click_requests)
             continue
         requests.append(request)
     if len(requests) < 2:
@@ -706,6 +710,18 @@ def _app_context_find_text_requests(
         _request("desktop.safe_shortcut", {"action": "find"}),
         _request("desktop.safe_type_text", {"text": query}),
     ]
+
+
+def _app_context_click_ui_element_requests(
+    text: str,
+    previous_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not _latest_sequence_app_context_name(previous_requests):
+        return []
+    click_payload = _desktop_click_ui_element(text, require_context=False)
+    if not click_payload:
+        return []
+    return [_request("desktop.click_ui_element", click_payload)]
 
 
 def _typed_input_followup_requests(
@@ -1489,7 +1505,7 @@ def _looks_like_search_request(text: str) -> bool:
 
 
 def _browser_search_url(text: str) -> str:
-    if _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
+    if _looks_like_click_command(text) or _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
         return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
@@ -1509,6 +1525,18 @@ def _browser_search_url(text: str) -> str:
                 return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
     return ""
+
+
+def _looks_like_click_command(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:(?:双击)|点击|点一下|点按|单击|点|按一下|按)\s*\S+",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.match(r"^(?:double\s+click|click|press|tap)\s+\S+", text, flags=re.IGNORECASE)
+    )
 
 
 def _browser_click_request(text: str) -> dict[str, Any] | None:
@@ -2590,7 +2618,7 @@ def _app_foreground_action_request_from_match(
             "tool": f"app.{mode}_and_safe_click",
             "input": {"app_name": app_name, **safe_click},
         }
-    click_ui_element = _desktop_click_ui_element(followup)
+    click_ui_element = _desktop_click_ui_element(followup, require_context=False)
     if click_ui_element:
         return {
             "tool": f"app.{mode}_and_click_ui_element",
@@ -3992,7 +4020,7 @@ def _desktop_safe_click(text: str) -> dict[str, Any] | None:
     return {"x": payload["x"], "y": payload["y"]}
 
 
-def _desktop_click_ui_element(text: str) -> dict[str, Any] | None:
+def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
     patterns = (
@@ -4015,7 +4043,7 @@ def _desktop_click_ui_element(text: str) -> dict[str, Any] | None:
         raw_label = groups.get("label") or groups.get("label_en") or ""
         kind = groups.get("kind") or groups.get("kind_en") or ""
         context = groups.get("context") or ""
-        if not kind and not _desktop_ui_click_has_context(text, context):
+        if require_context and not kind and not _desktop_ui_click_has_context(text, context):
             continue
         label = _strip_desktop_ui_element_label(raw_label)
         if not label or _looks_like_click_coordinate_label(label):
