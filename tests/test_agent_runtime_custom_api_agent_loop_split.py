@@ -1733,6 +1733,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_scroll",
         "input": {"app_name": "Slack", "direction": "up", "pages": 1},
     }
+    assert daily_desktop_intent_tool_request("Chrome 向下滚动一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_scroll",
+        "input": {"app_name": "Google Chrome", "direction": "down", "pages": 1},
+    }
+    assert daily_desktop_intent_tool_request("Google Chrome 上滑一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_scroll",
+        "input": {"app_name": "Google Chrome", "direction": "up", "pages": 1},
+    }
     assert daily_desktop_intent_tool_request("打开 Chrome 并点击 120, 240", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_click",

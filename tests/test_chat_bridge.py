@@ -4080,6 +4080,67 @@ def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
     assert scrolled == [("down", 1), ("down", 1)]
 
 
+def test_chat_bridge_quick_message_executes_app_prefix_safe_scroll_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str] | tuple[str, str, int]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_scroll(direction: str, *, pages: int = 1) -> dict:
+        calls.append(("scroll", direction, pages))
+        return {
+            "ok": True,
+            "action": "desktop.safe_scroll",
+            "summary": "Scrolled foreground desktop down 1 page",
+            "data": {
+                "direction": direction,
+                "pages": pages,
+                "explicit_user_scroll": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "Chrome 向下滚动一下",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切到 Google Chrome 并向下滚动前台界面（1 页）。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_scroll"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "direction": "down",
+            "pages": 1,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("focus", "Google Chrome"),
+        ("scroll", "down", 1),
+        ("focus", "Google Chrome"),
+        ("scroll", "down", 1),
+    ]
+
+
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     tmp_path,
     monkeypatch,

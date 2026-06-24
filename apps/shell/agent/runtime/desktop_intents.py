@@ -1169,6 +1169,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
             )
         )
 
+    app_prefix_safe_scroll = _app_prefix_safe_scroll_tool_request(text)
+    if app_prefix_safe_scroll:
+        candidates.append(app_prefix_safe_scroll)
+
     safe_shortcut_action = _desktop_safe_shortcut_action(text)
     if safe_shortcut_action:
         candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
@@ -2588,6 +2592,22 @@ def _app_scoped_safe_shortcut_tool_request(text: str) -> dict[str, Any] | None:
         return None
     mode = str(shortcut.pop("mode"))
     return _request(f"app.{mode}_and_safe_shortcut", shortcut)
+
+
+def _app_prefix_safe_scroll_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    safe_scroll = _desktop_safe_scroll(followup)
+    if not safe_scroll:
+        return None
+    return _request(
+        "app.focus_and_safe_scroll",
+        {"app_name": app_name, **safe_scroll},
+    )
 
 
 def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
@@ -4318,7 +4338,7 @@ def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
 def _strip_known_app_followup_prefix(value: str) -> str:
     followup = _strip_app_foreground_followup_prefix(_strip_query(value))
     followup = re.sub(
-        r"^(?:应用|app|软件|程序)?(?:里|中|内|上|的|里面|界面里|界面中)\s*",
+        r"^(?:应用|app|软件|程序)?(?:里|中|内|上(?!滑|滚|翻|一页)|的|里面|界面里|界面中)\s*",
         "",
         followup,
         flags=re.IGNORECASE,
