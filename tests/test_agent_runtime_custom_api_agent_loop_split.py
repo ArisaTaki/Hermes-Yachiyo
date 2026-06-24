@@ -1537,6 +1537,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_type_text",
         "input": {"app_name": "Notes", "text": "hello yachiyo"},
     }
+    assert daily_desktop_intent_tool_request("打开微信发你好", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "WeChat", "text": "你好"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack send hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_type_text",
+        "input": {"app_name": "Slack", "text": "hello"},
+    }
     assert daily_desktop_intent_tool_request("open Notes and new note", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
@@ -1599,8 +1609,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开微信发送 hello", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "WeChat"},
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "WeChat", "text": "hello"},
     }
     assert daily_desktop_intent_tool_request("打开 Slack 点搜索", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3667,6 +3677,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 看消息", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("open Discord and read messages", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Discord"},
         },
         {
             "protocol": "json_fallback",

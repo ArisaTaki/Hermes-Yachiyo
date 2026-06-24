@@ -5464,8 +5464,14 @@ def _is_app_visual_inspection_followup(value: str) -> bool:
         return False
     return bool(
         re.match(
-            r"^(?:看看|看一下|看下|看一眼|查看|检查|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+            r"^(?:看看|看一下|看下|看一眼|查看|检查|读取|读一下|读下|读一读|阅读(?:一下|下)?|观察(?:一下|下)?|识别(?:一下|下)?|看)\s*"
             r"[^。！？!?]{0,40}$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:look\s+at|check|read|view|inspect)\s+(?:my\s+|the\s+)?"
+            r"(?:messages?|unread\s+messages?|notifications?|inbox|chats?)$",
             followup,
             flags=re.IGNORECASE,
         )
@@ -5519,6 +5525,9 @@ def _app_followup_safe_type_text(value: str) -> str:
         return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:发送|发出|发|说)\s*(?:消息|信息|message)?\s*(?P<send_text>[^。！？!?]+)$",
+        r"^(?:send|say)\s+(?P<send_text_en>[^.!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在(?:当前|前台)?(?:窗口|应用|app)?(?:里|中|内|上)?\s*)?"
         r"(?:写入|写下|写上|写|记录|记下|记一下|记上)\s*(?P<text>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
@@ -5532,7 +5541,12 @@ def _app_followup_safe_type_text(value: str) -> str:
             continue
         groups = match.groupdict()
         typed_text = _strip_typed_text(
-            groups.get("text") or groups.get("text2") or groups.get("text_en") or ""
+            groups.get("send_text")
+            or groups.get("send_text_en")
+            or groups.get("text")
+            or groups.get("text2")
+            or groups.get("text_en")
+            or ""
         )
         if typed_text:
             return typed_text

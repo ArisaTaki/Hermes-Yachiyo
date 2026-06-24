@@ -4351,6 +4351,8 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
         ("打开微信看看有没有新消息", "bubble", "WeChat"),
         ("把微信打开然后看看有没有未读", "live2d", "WeChat"),
         ("打开微信读一下当前聊天", "bubble", "WeChat"),
+        ("打开 Slack 看消息", "bubble", "Slack"),
+        ("open Discord and read messages", "live2d", "Discord"),
         ("打开活动监视器看看 CPU", "live2d", "Activity Monitor"),
         ("打开系统活动监视器看看 CPU", "bubble", "Activity Monitor"),
     )
@@ -5082,6 +5084,27 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Notes 并输入文字（13 个字符）。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开微信发你好",
+    )
+
+    assert calls[-3:] == [("open", "WeChat"), ("focus", "WeChat"), ("type", "你好")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 WeChat 并输入文字（2 个字符）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "app_name": "WeChat",
+        "text": "你好",
+    }
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
