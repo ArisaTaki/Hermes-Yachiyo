@@ -1246,7 +1246,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/new document/new note/refresh/browser back/browser forward to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
@@ -2010,6 +2010,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "new_document": "新建文档",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
+        "new_event": "新建日程",
         "refresh": "刷新",
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",

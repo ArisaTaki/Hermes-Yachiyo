@@ -2845,15 +2845,20 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
         r"新建笔记|新建一个笔记|新建一条笔记|新建一篇笔记|新笔记|"
         r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
+        r"新建日程|新建一个日程|新建一条日程|新建日历事件|新建一个日历事件|新日程|"
+        r"新建事件|新建一个事件|新事件|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
         r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
         r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
-        r"new\s+note|make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
+        r"new\s+note|new\s+event|new\s+calendar\s+event|"
+        r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
         r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
         r"make\s+a\s+new\s+workbook|create\s+a\s+new\s+workbook|"
         r"make\s+a\s+new\s+spreadsheet|create\s+a\s+new\s+spreadsheet|"
         r"make\s+a\s+new\s+presentation|create\s+a\s+new\s+presentation|"
-        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note)"
+        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note|"
+        r"make\s+a\s+new\s+event|create\s+a\s+new\s+event|"
+        r"make\s+a\s+new\s+calendar\s+event|create\s+a\s+new\s+calendar\s+event)"
     )
     patterns: tuple[tuple[str, str], ...] = (
         (
@@ -4824,11 +4829,15 @@ def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
         r"新建笔记|新建一个笔记|新建一条笔记|新建一篇笔记|新笔记|"
         r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
         r"新建提醒事项|新建一个提醒事项|新建一条提醒事项|新建一项提醒事项|新建提醒|新提醒|"
+        r"新建日程|新建一个日程|新建一条日程|新建日历事件|新建一个日历事件|新日程|"
+        r"新建事件|新建一个事件|新事件|"
         r"new\s+tab|new\s+window|new\s+document|new\s+file|new\s+note|"
-        r"new\s+reminder|"
+        r"new\s+reminder|new\s+event|new\s+calendar\s+event|"
         r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
         r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
         r"make\s+a\s+new\s+note|create\s+a\s+new\s+note|"
+        r"make\s+a\s+new\s+event|create\s+a\s+new\s+event|"
+        r"make\s+a\s+new\s+calendar\s+event|create\s+a\s+new\s+calendar\s+event|"
         r"make\s+a\s+new\s+reminder|create\s+a\s+new\s+reminder"
     )
     pattern = (
@@ -6210,6 +6219,15 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新建一项提醒事项": "new_reminder",
         "新建提醒": "new_reminder",
         "新提醒": "new_reminder",
+        "新建日程": "new_event",
+        "新建一个日程": "new_event",
+        "新建一条日程": "new_event",
+        "新建日历事件": "new_event",
+        "新建一个日历事件": "new_event",
+        "新日程": "new_event",
+        "新建事件": "new_event",
+        "新建一个事件": "new_event",
+        "新事件": "new_event",
         "newnote": "new_note",
         "makeanewnote": "new_note",
         "createanewnote": "new_note",
@@ -6220,6 +6238,16 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "createanewreminder": "new_reminder",
         "makenewreminder": "new_reminder",
         "createnewreminder": "new_reminder",
+        "newevent": "new_event",
+        "newcalendarevent": "new_event",
+        "makeanewevent": "new_event",
+        "createanewevent": "new_event",
+        "makenewevent": "new_event",
+        "createnewevent": "new_event",
+        "makeanewcalendarevent": "new_event",
+        "createanewcalendarevent": "new_event",
+        "makenewcalendarevent": "new_event",
+        "createnewcalendarevent": "new_event",
     }
     return mapping.get(phrase, "")
 

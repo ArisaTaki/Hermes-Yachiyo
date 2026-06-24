@@ -115,6 +115,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "new_document": ("n", ("command",), "new document"),
     "new_note": ("n", ("command",), "new note"),
     "new_reminder": ("n", ("command",), "new reminder"),
+    "new_event": ("n", ("command",), "new calendar event"),
     "refresh": ("r", ("command",), "refresh"),
     "browser_back": ("[", ("command",), "browser back"),
     "browser_forward": ("]", ("command",), "browser forward"),

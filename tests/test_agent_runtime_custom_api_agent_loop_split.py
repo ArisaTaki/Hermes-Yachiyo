@@ -1381,10 +1381,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
     }
+    assert daily_desktop_intent_tool_request("open Calendar and create a new calendar event", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
     assert daily_desktop_intent_tool_request("打开 Notes 并新建笔记", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("打开日历新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
     }
     assert daily_desktop_intent_tool_request("打开 Word 新建文档", allowed_tools) == {
         "protocol": "json_fallback",
@@ -1781,6 +1791,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("日历新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("Calendar new event", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
     }
     assert daily_desktop_intent_tool_request("打开 Notes write hello yachiyo", allowed_tools) == {
         "protocol": "json_fallback",
@@ -4236,6 +4256,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_note"},
     }
+    assert daily_desktop_intent_tool_request("新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_event"},
+    }
     assert daily_desktop_intent_tool_request("新建窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -6067,6 +6092,19 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    app_open_new_event = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_shortcut",
+        {"app_name": "Calendar", "action": "new_event"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Calendar",
+                "foreground_action": "safe_shortcut",
+                "shortcut_action": "new_event",
+            },
+        },
+    )
     app_open_safe_key = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
@@ -6333,6 +6371,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_focus_safe_shortcut == "已切到 Slack 并粘贴。"
     assert app_open_new_document == "已打开 Microsoft Word 并新建文档。"
     assert app_open_new_reminder == "已打开 Reminders 并新建提醒事项。"
+    assert app_open_new_event == "已打开 Calendar 并新建日程。"
     assert app_open_safe_key == "已打开 Google Chrome 并按Tab。"
     assert app_open_safe_scroll == "已打开 Google Chrome 并向下滚动前台界面（2 页）。"
     assert app_open_safe_click == "已打开 Google Chrome 并点击前台位置：120, 240。"

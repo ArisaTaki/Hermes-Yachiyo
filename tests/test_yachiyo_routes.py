@@ -7322,6 +7322,7 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     ]
     assert "paste" in tools["app.focus_and_safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
     assert "new_document" in tools["app.focus_and_safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
+    assert "new_event" in tools["app.focus_and_safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
     assert tools["app.open_and_safe_key"]["capability_id"] == "foreground_input"
     assert tools["app.open_and_safe_key"]["risk_level"] == "low"
     assert tools["app.open_and_safe_key"]["input_schema"]["required"] == [
@@ -7470,6 +7471,7 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["desktop.safe_shortcut"]["input_schema"]["required"] == ["action"]
     assert "copy" in tools["desktop.safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
     assert "new_document" in tools["desktop.safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
+    assert "new_event" in tools["desktop.safe_shortcut"]["input_schema"]["properties"]["action"]["enum"]
     assert any(
         "whitelisted common shortcut" in note
         for note in tools["desktop.safe_shortcut"]["fallback_notes"]
