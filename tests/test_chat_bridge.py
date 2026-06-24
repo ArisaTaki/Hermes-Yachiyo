@@ -3697,6 +3697,8 @@ def test_chat_bridge_quick_message_executes_clipboard_read_for_launcher_entrypoi
     cases = (
         ("剪贴板里是什么", "bubble"),
         ("读一下剪贴板", "live2d"),
+        ("把剪贴板读给我", "bubble"),
+        ("what is on my clipboard", "live2d"),
     )
     for text, launcher_mode in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -3714,7 +3716,7 @@ def test_chat_bridge_quick_message_executes_clipboard_read_for_launcher_entrypoi
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert read_calls == [2000, 2000]
+    assert read_calls == [2000, 2000, 2000, 2000]
 
 
 def test_chat_bridge_quick_message_copies_and_reads_selected_text_without_model(
@@ -4538,6 +4540,7 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
     cases = (
         ("复制一下选中的内容", "live2d", "copy", "已复制选中内容。"),
         ("复制选中文字", "bubble", "copy", "已复制选中内容。"),
+        ("copy current selection", "live2d", "copy", "已复制选中内容。"),
         ("浏览器刷新", "live2d", "refresh", "已刷新。"),
         ("把剪贴板内容粘贴到当前输入框", "bubble", "paste", "已粘贴。"),
         ("关闭当前标签页", "bubble", "close_tab", "已关闭标签页。"),

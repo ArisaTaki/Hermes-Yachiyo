@@ -2525,21 +2525,23 @@ def _clipboard_read_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:读取|读一下|读下|读一读|查看|看看|看一下|看下|显示|告诉我).{0,8}"
-            r"(?:系统)?(?:剪贴板|粘贴板).{0,8}(?:内容|里|里面|是什么|有啥|有什么)?",
+            r"(?:系统)?(?:剪贴板|粘贴板|clipboard).{0,8}(?:内容|里|里面|是什么|有啥|有什么|给我)?",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:系统)?(?:剪贴板|粘贴板).{0,8}"
-            r"(?:内容|里|里面|是什么|有啥|有什么|读取|读一下|读下|读一读|查看|看看|看一下|看下|显示)",
+            r"(?:系统)?(?:剪贴板|粘贴板|clipboard).{0,8}"
+            r"(?:内容|里|里面|是什么|有啥|有什么|读取|读一下|读下|读一读|读给我|查看|看看|看一下|看下|显示)",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:read|show|display|check|tell\s+me)\s+(?:the\s+)?"
-            r"(?:system\s+)?clipboard(?:\s+contents?)?\b",
+            r"(?:(?:system|my)\s+)?clipboard(?:\s+contents?)?\b",
             lowered,
         )
         or re.search(
-            r"\b(?:what(?:'s| is)|what)\s+(?:is\s+)?(?:on|in)\s+(?:the\s+)?"
+            r"\b(?:what(?:'s| is)|what)\s+(?:is\s+)?(?:on|in)\s+(?:the\s+|my\s+)?"
             r"(?:system\s+)?clipboard\b",
             lowered,
         )
@@ -6525,6 +6527,8 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "复制一下选中的文字": "copy",
         "copy": "copy",
         "copyselection": "copy",
+        "copycurrentselection": "copy",
+        "copytheselection": "copy",
         "copyselectedtext": "copy",
         "粘贴": "paste",
         "粘贴剪贴板": "paste",
