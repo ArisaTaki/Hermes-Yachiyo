@@ -7013,6 +7013,9 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
 
 
 def _desktop_safe_shortcut_action(text: str) -> str:
+    hotkey_action = _safe_shortcut_action_from_hotkey(text)
+    if hotkey_action:
+        return hotkey_action
     phrase = _normalize_named_hotkey_phrase(text)
     mapping = {
         "复制": "copy",
@@ -7275,6 +7278,43 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "createnewcalendarevent": "new_event",
     }
     return mapping.get(phrase, "")
+
+
+def _safe_shortcut_action_from_hotkey(text: str) -> str:
+    phrase = _strip_query(text)
+    phrase = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:按一下|按下|按|执行|触发|发送|敲一下|敲下|敲)?\s*",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"\s*(?:一下|下|一次|键|快捷键|热键|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$",
+        "",
+        phrase,
+    ).strip()
+    parsed = _parse_hotkey_combo(phrase)
+    if not parsed:
+        return ""
+    key = str(parsed.get("key") or "").strip().lower()
+    modifiers = frozenset(str(item).strip().lower() for item in parsed.get("modifiers") or [])
+    if not key or not modifiers.issubset({"command", "shift"}):
+        return ""
+    mapping = {
+        ("c", frozenset({"command"})): "copy",
+        ("v", frozenset({"command"})): "paste",
+        ("a", frozenset({"command"})): "select_all",
+        ("z", frozenset({"command"})): "undo",
+        ("z", frozenset({"command", "shift"})): "redo",
+        ("f", frozenset({"command"})): "find",
+        ("t", frozenset({"command"})): "new_tab",
+        ("t", frozenset({"command", "shift"})): "reopen_closed_tab",
+        ("w", frozenset({"command"})): "close_tab",
+        ("n", frozenset({"command"})): "new_window",
+        ("r", frozenset({"command"})): "refresh",
+    }
+    return mapping.get((key, modifiers), "")
 
 
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:

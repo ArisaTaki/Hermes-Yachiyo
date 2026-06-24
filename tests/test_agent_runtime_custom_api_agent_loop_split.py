@@ -1520,6 +1520,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并按 Command T", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 并按 Command N", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "new_window"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并按 Command L", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_hotkey",
+        "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+    }
     assert daily_desktop_intent_tool_request("打开浏览器新建标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
@@ -1939,6 +1954,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Slack", "action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 并按 Command F", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "find"},
     }
     assert daily_desktop_intent_tool_request("Slack 粘贴", allowed_tools) == {
         "protocol": "json_fallback",
@@ -4817,6 +4837,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
         "input": {"key": "l", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("按 Command V", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("按 Shift Command Z", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "redo"},
+    }
+    assert daily_desktop_intent_tool_request("按 Command Option P", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "p", "modifiers": ["command", "option"]},
     }
     assert daily_desktop_intent_tool_request("按 Ctrl Shift P", allowed_tools) == {
         "protocol": "json_fallback",

@@ -4391,6 +4391,31 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    calls.clear()
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Finder 并按 Command N",
+    )
+
+    assert calls == [
+        ("open", "Finder"),
+        ("focus", "Finder"),
+        ("shortcut", "new_window"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 Finder 并新建窗口。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "app_name": "Finder",
+        "action": "new_window",
+    }
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_entrypoints(
     tmp_path,
