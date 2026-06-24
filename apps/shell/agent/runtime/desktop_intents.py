@@ -6321,12 +6321,13 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
     suffix = r"\s*(?:键|快捷键|热键|一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$"
     patterns = (
         rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        rf"(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*(?:一下|下|一次)?\s*"
+        rf"(?:按下|按|敲下|敲|发送|触发|快捷键|热键|组合键|按键)\s*(?:一下|下|一次)?\s*"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+){suffix}",
-        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*(?:一下|下|一次)?\s*"
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|敲下|敲|发送|触发)\s*(?:一下|下|一次)?\s*"
         rf"(?P<combo>{hotkey_part}){suffix}",
-        rf"^press\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
-        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)\s*[.!?]*$",
+        rf"^(?:press|hit|tap)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)"
+        rf"(?:\s+key)?\s*[.!?]*$",
         rf"^trigger\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)"
         rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)\s*[.!?]*$",
     )
@@ -7306,13 +7307,19 @@ def _is_close_current_window_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:关闭|关掉)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:关闭|关掉)",
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:关闭|关掉|关上|关(?:一下|下|了)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:关闭|关掉|关上|关(?:一下|下|了)?)",
             text,
             flags=re.IGNORECASE,
         )

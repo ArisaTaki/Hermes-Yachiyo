@@ -3041,6 +3041,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.close_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("把当前窗口关了", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.close_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前窗口关一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.close_window",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("close current window", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
@@ -4514,6 +4524,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"key": "return", "modifiers": []},
     }
     assert daily_desktop_intent_tool_request("enter", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("敲一下回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("hit enter", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("tap the return key", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},

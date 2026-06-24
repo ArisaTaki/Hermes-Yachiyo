@@ -6153,10 +6153,18 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             AssertionError("close_window should wait for approval")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_hotkey",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hotkey should wait for approval")
+        ),
+    )
     bridge = ChatBridge(runtime)
     try:
         cases = [
             ("关闭当前窗口", "desktop.close_window", {}),
+            ("把当前窗口关了", "desktop.close_window", {}),
+            ("当前窗口关一下", "desktop.close_window", {}),
             (
                 "click the search field",
                 "desktop.click_ui_element",
@@ -6170,6 +6178,9 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             ("send current message", "desktop.submit_foreground", {"action": "send"}),
             ("发送当前内容", "desktop.submit_foreground", {"action": "send"}),
             ("按回车提交", "desktop.submit_foreground", {"action": "submit"}),
+            ("敲一下回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
+            ("hit enter", "desktop.hotkey", {"key": "return", "modifiers": []}),
+            ("tap the return key", "desktop.hotkey", {"key": "return", "modifiers": []}),
         ]
         for text, tool_name, input_preview in cases:
             result = bridge.send_quick_message(
