@@ -72,6 +72,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "低风险桌面动作默认直接执行" in config["instructions"]
     assert "多个明确低风险桌面动作" in config["instructions"]
     assert "Runtime 生成审批卡" in config["instructions"]
+    assert "terminal.run" in config["instructions"]
     assert "权限缺失" in config["instructions"]
     assert "approval/policy gate" in config["instructions"]
     assert config["model_profile_id"] == "profile-chat"
@@ -89,10 +90,11 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
     assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
-    assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
+    assert allowed_tools & set(HIGH_RISK_AGENT_TOOLS) == {"terminal.run"}
     assert config["tool_policy"]["approval_required"] == {
         tool: True
         for tool in (
+            "terminal.run",
             *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
             *HIGH_RISK_DESKTOP_TOOL_NAMES,
             *MEDIUM_RISK_BROWSER_TOOL_NAMES,

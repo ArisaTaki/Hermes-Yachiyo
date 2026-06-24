@@ -70,6 +70,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.close_window",
+    "terminal.run",
     "desktop.hotkey",
     "desktop.submit_foreground",
     "desktop.type_text",
@@ -125,6 +126,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.hide_app": "隐藏当前应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
+    "terminal.run": "运行终端命令",
     "desktop.hotkey": "发送快捷键",
     "desktop.submit_foreground": "发送/提交前台内容",
     "desktop.type_text": "输入前台文字",
@@ -880,6 +882,8 @@ class RuntimeCustomApiAgentLoop:
                 return "已最小化当前窗口。"
             if tool_name == "desktop.close_window":
                 return "已关闭当前窗口。"
+            if tool_name == "terminal.run":
+                return _terminal_run_summary(result, planned_input)
             if tool_name == "browser.open_url":
                 url = _payload_text(result, planned_input, "url")
                 if result.get("fallback_used") and result.get("fallback") == "system_browser":
@@ -1025,6 +1029,8 @@ class RuntimeCustomApiAgentLoop:
             action = _payload_text(result, planned_input, "action")
             label = _apple_music_control_label(action)
             return f"没能直接{label}，但已打开 Apple Music。" if label else "没能直接控制，但已打开 Apple Music。"
+        if tool_name == "terminal.run":
+            return _terminal_run_summary(result, planned_input)
         diagnostics = _permission_diagnostics(result)
         return f"桌面操作未完成：{_sentence(error)}{diagnostics}".strip()
 
@@ -1981,6 +1987,33 @@ def _desktop_open_path_summary(result: dict[str, Any], planned_input: dict[str, 
     if data.get("is_dir") is True:
         return f"已打开文件夹：{path}。"
     return f"已打开文件：{path}。"
+
+
+def _terminal_run_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    command = str(planned_input.get("command") or "").strip()
+    command_text = f"：{command}" if command else ""
+    stdout = str(result.get("stdout") or "").strip()
+    stderr = str(result.get("stderr") or "").strip()
+    if result.get("ok"):
+        if stdout:
+            return f"已运行命令{command_text}。\n输出：{_terminal_output_preview(stdout)}"
+        return f"已运行命令{command_text}。"
+    parts = [f"命令执行失败{command_text}。"]
+    returncode = result.get("returncode")
+    if returncode not in (None, ""):
+        parts.append(f"退出码：{returncode}。")
+    if stderr:
+        parts.append(f"stderr：{_terminal_output_preview(stderr)}")
+    elif stdout:
+        parts.append(f"stdout：{_terminal_output_preview(stdout)}")
+    return " ".join(parts)
+
+
+def _terminal_output_preview(value: str) -> str:
+    text = str(value or "").strip()
+    if len(text) > 600:
+        return f"{text[:600]}..."
+    return text
 
 
 def _sentence(value: str) -> str:

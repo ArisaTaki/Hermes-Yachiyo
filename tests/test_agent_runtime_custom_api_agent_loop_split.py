@@ -673,6 +673,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.submit_foreground",
         "desktop.type_text",
         "desktop.click",
+        "terminal.run",
     ]
 
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs", allowed_tools) == {
@@ -2198,6 +2199,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.open",
         "input": {"app_name": "Cursor"},
+    }
+    assert daily_desktop_intent_tool_request("打开终端运行 ls", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "terminal.run",
+        "input": {"command": "ls"},
+    }
+    assert daily_desktop_intent_tool_request("运行 ls | head", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "terminal.run",
+        "input": {"command": "ls | head", "shell": True},
     }
     assert daily_desktop_intent_tool_request("打开 VS Code", allowed_tools) == {
         "protocol": "json_fallback",
@@ -4914,6 +4925,16 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"submit_action": "send"},
         },
     )
+    terminal_run = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "terminal.run",
+        {"command": "printf ok"},
+        {"ok": True, "stdout": "ok\n", "stderr": "", "returncode": 0},
+    )
+    terminal_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "terminal.run",
+        {"command": "false"},
+        {"ok": False, "stdout": "", "stderr": "failed", "returncode": 1},
+    )
 
     assert app_unverified == "已向 macOS 发送打开 Google Chrome 的请求，但未能确认它已启动。"
     assert browser_fallback == "已用系统浏览器打开网页：https://example.com。"
@@ -4949,6 +4970,8 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"
     assert browser_type_text_point == "已在网页位置：120, 240 输入文字（5 个字符）。"
     assert submit_foreground == "已确认发送前台内容。"
+    assert terminal_run == "已运行命令：printf ok。\n输出：ok"
+    assert terminal_failed == "命令执行失败：false。 退出码：1。 stderr：failed"
     assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
 
 

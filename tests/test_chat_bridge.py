@@ -3545,6 +3545,95 @@ def test_chat_bridge_quick_message_requires_approval_for_app_quit(
         store.close()
 
 
+def test_chat_bridge_quick_message_requires_approval_for_terminal_run_intent(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-terminal-run-approval.db",
+        workspace_dir=tmp_path / "runtime-terminal-run-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    terminal_calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher terminal run intent should not call model")
+        ),
+    )
+
+    def fake_run_terminal_command(command: str, **kwargs: Any) -> dict:
+        terminal_calls.append((command, bool(kwargs.get("shell", False))))
+        return {
+            "ok": True,
+            "returncode": 0,
+            "timed_out": False,
+            "shell": bool(kwargs.get("shell", False)),
+            "stdout": "Desktop\n",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.broker.run_terminal_command", fake_run_terminal_command)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开终端运行 ls",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert terminal_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "terminal.run"
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "command": "ls",
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "terminal.run"
+        assert waiting_run["pending_approval"]["input_preview"] == {
+            "command": "ls",
+        }
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert terminal_calls == [("ls", False)]
+        assert approved.status == "completed"
+        assert approved.summary == "已运行命令：ls。\n输出：Desktop"
+        assert approved.needs_user_action is False
+        assert approved.pending_approvals == []
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
     tmp_path,
     monkeypatch,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote_plus, urlparse
@@ -150,6 +151,42 @@ _BROWSER_APP_NAMES = {
     "Google Chrome",
     "Microsoft Edge",
     "Safari",
+}
+
+_TERMINAL_COMMAND_HEADS = {
+    "awk",
+    "brew",
+    "cat",
+    "cargo",
+    "curl",
+    "date",
+    "df",
+    "du",
+    "echo",
+    "find",
+    "git",
+    "go",
+    "grep",
+    "ifconfig",
+    "ls",
+    "make",
+    "netstat",
+    "node",
+    "npm",
+    "pnpm",
+    "ps",
+    "pwd",
+    "pytest",
+    "python",
+    "python3",
+    "rg",
+    "ruby",
+    "sed",
+    "sw_vers",
+    "uname",
+    "uv",
+    "whoami",
+    "yarn",
 }
 
 _COMMON_REVEAL_PATHS = {
@@ -1105,6 +1142,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     music = _music_query(text)
     if music:
         candidates.append(_request("media.apple_music_play", {"query": music}))
+
+    terminal_run_payload = _terminal_run_payload(text)
+    if terminal_run_payload:
+        candidates.append(_request("terminal.run", terminal_run_payload))
 
     app_focus_name = _app_focus_name(text)
     if app_focus_name:
@@ -3543,6 +3584,103 @@ def _app_minimize_name(text: str) -> str:
         if app_name:
             return app_name
     return ""
+
+
+def _terminal_run_payload(text: str) -> dict[str, Any] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+    terminal_patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:terminal|终端|命令行)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:运行|执行|跑|run|execute)\s*(?:一下\s*)?(?:命令|指令|command)?\s*[:：]?\s*"
+        r"(?P<command>.+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)\s*(?:terminal|终端|命令行|shell)\s*(?:里|中|内|上)?\s*"
+        r"(?:运行|执行|跑|run|execute)\s*(?:一下\s*)?(?:命令|指令|command)?\s*[:：]?\s*"
+        r"(?P<command>.+)$",
+        r"^(?:please\s+)?(?:run|execute)\s+(?P<command>.+?)\s+"
+        r"(?:in|with|from)\s+(?:the\s+)?(?:terminal|shell)$",
+        r"^(?:terminal|shell)\s+(?:run|execute)\s+(?P<command>.+)$",
+    )
+    for pattern in terminal_patterns:
+        match = re.search(pattern, stripped, flags=re.IGNORECASE)
+        if not match:
+            continue
+        payload = _terminal_run_payload_from_command(match.group("command"), terminal_context=True)
+        if payload:
+            return payload
+    generic_patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:运行|执行|跑)\s*(?:一下\s*)?(?:命令|指令)?\s*[:：]?\s*(?P<command>.+)$",
+        r"^(?:please\s+)?(?:run|execute)\s+(?P<command>.+)$",
+    )
+    for pattern in generic_patterns:
+        match = re.search(pattern, stripped, flags=re.IGNORECASE)
+        if not match:
+            continue
+        payload = _terminal_run_payload_from_command(match.group("command"), terminal_context=False)
+        if payload:
+            return payload
+    return None
+
+
+def _terminal_run_payload_from_command(
+    value: str,
+    *,
+    terminal_context: bool,
+) -> dict[str, Any] | None:
+    command = _strip_terminal_command(value)
+    if not _looks_like_terminal_command(command, terminal_context=terminal_context):
+        return None
+    payload: dict[str, Any] = {"command": command}
+    if _terminal_command_requires_shell(command):
+        payload["shell"] = True
+    return payload
+
+
+def _strip_terminal_command(value: str) -> str:
+    command = _strip_query(value)
+    command = re.sub(r"^(?:命令|指令|command)\s*[:：]?\s*", "", command, flags=re.IGNORECASE)
+    command = command.strip()
+    for left, right in (("```", "```"), ("`", "`"), ("“", "”"), ("\"", "\""), ("'", "'")):
+        if command.startswith(left) and command.endswith(right) and len(command) > len(left) + len(right):
+            return command[len(left) : -len(right)].strip()
+    return command
+
+
+def _looks_like_terminal_command(command: str, *, terminal_context: bool) -> bool:
+    if not command or len(command) > 400:
+        return False
+    parts = _terminal_command_parts(command)
+    head = str(parts[0] if parts else "").strip()
+    if not head:
+        return False
+    compact_head = re.sub(r"[\s._-]+", "", head.lower())
+    if compact_head in _APP_ALIASES and len(parts) <= 1:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", head):
+        return False
+    if re.match(r"^(?:一个|一条|某个|这个|那个)?(?:会|能|可以)?(?:失败|成功)?(?:的)?(?:命令|指令|脚本|代码|任务)", command):
+        return False
+    normalized_head = head.lower()
+    if normalized_head.startswith(("./", "../", "/")):
+        return True
+    if normalized_head in _TERMINAL_COMMAND_HEADS:
+        return True
+    return bool(terminal_context and re.fullmatch(r"[A-Za-z0-9_./+-]+", head))
+
+
+def _terminal_command_parts(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _terminal_command_requires_shell(command: str) -> bool:
+    return bool(re.search(r"(?:&&|\|\||[|;&<>]|\$\(|`)", command))
 
 
 def _app_open_name(text: str) -> str:
