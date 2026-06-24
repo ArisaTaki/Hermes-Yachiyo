@@ -354,10 +354,10 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
     )
 
     assert result["ok"] is True
-    assert open_calls == ["蓝牙设置"]
-    assert agent_task["summary"] == "已打开蓝牙设置。"
+    assert open_calls == ["System Settings"]
+    assert agent_task["summary"] == "已打开 System Settings。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "蓝牙设置"}
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "System Settings"}
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types

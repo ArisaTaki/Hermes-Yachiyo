@@ -165,6 +165,18 @@ _BROWSER_APP_NAMES = {
     "Safari",
 }
 
+_COMMUNICATION_APP_NAMES = {
+    "DingTalk",
+    "Feishu",
+    "Lark",
+    "Messages",
+    "QQ",
+    "Slack",
+    "Telegram",
+    "WeChat",
+    "WhatsApp",
+}
+
 _TERMINAL_COMMAND_HEADS = {
     "awk",
     "brew",
@@ -292,6 +304,11 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    communication_compose_sequence = _communication_compose_tool_requests(context)
+    if communication_compose_sequence and all(
+        str(request.get("tool") or "") in allowed for request in communication_compose_sequence
+    ):
+        return communication_compose_sequence
     browser_search_click_sequence = _browser_search_then_click_tool_requests(context)
     if browser_search_click_sequence and all(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
@@ -2919,6 +2936,124 @@ def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | 
         mode, _raw_app, app_name, followup = shorthand_match
         return _app_foreground_action_request(mode, app_name, followup)
     return None
+
+
+def _communication_compose_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _communication_compose_request(text)
+    if not parsed:
+        return []
+    mode, app_name, recipient, message, should_submit = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": recipient}),
+        _request("desktop.search_submit", {}),
+        _request("desktop.safe_type_text", {"text": message}),
+    ]
+    if should_submit:
+        requests.append(_request("desktop.submit_foreground", {"action": "send"}))
+    return requests
+
+
+def _communication_compose_request(text: str) -> tuple[str, str, str, str, bool] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+
+    mode = "focus"
+    body = stripped
+    prefix_patterns: tuple[tuple[str, str], ...] = (
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+        ),
+        (
+            "open",
+            r"^(?:please\s+)?(?:open|launch|start)\s+",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+",
+        ),
+    )
+    for candidate_mode, pattern in prefix_patterns:
+        match = re.search(pattern, stripped, flags=re.IGNORECASE)
+        if match:
+            mode = candidate_mode
+            body = stripped[match.end() :].strip()
+            break
+
+    split = _known_app_prefix_split(body)
+    if not split:
+        return None
+    _raw_app, app_name, followup = split
+    if app_name not in _COMMUNICATION_APP_NAMES:
+        return None
+
+    parsed = _communication_recipient_message(followup)
+    if not parsed:
+        return None
+    recipient, message, should_submit = parsed
+    return mode, app_name, recipient, message, should_submit
+
+
+def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
+    followup = _strip_query(text)
+    if not followup:
+        return None
+    patterns = (
+        r"^(?:给|向)\s*(?P<recipient>.+?)\s*"
+        r"(?P<verb>发送|发出|发|send)\s*(?P<message>.+)$",
+        r"^(?:搜索|搜一下|搜|查找|查一下|检索|find|search)\s*"
+        r"(?P<recipient>.+?)\s*"
+        r"(?:然后|并且|并|之后|后|再|接着|and\s+then|then|and)\s*"
+        r"(?P<verb>输入|打字|键入|敲入|打入|写入|写|发送|发出|发|"
+        r"type|enter|input|send)\s*(?P<message>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        recipient = _strip_communication_piece(match.group("recipient"))
+        raw_message = str(match.group("message") or "").strip()
+        message = _strip_typed_text(raw_message)
+        verb = str(match.group("verb") or "").strip().lower()
+        should_submit = bool(
+            re.search(r"^(?:发送|发出|发|send)$", verb, flags=re.IGNORECASE)
+            or _communication_message_has_submit_suffix(raw_message)
+        )
+        if recipient and message:
+            return recipient, message, should_submit
+    return None
+
+
+def _strip_communication_piece(value: str) -> str:
+    text = _strip_query(value)
+    text = re.sub(r"\s*(?:聊天|会话|对话|chat|conversation)$", "", text, flags=re.IGNORECASE)
+    return text.strip(" 「」『』“”\"'`")
+
+
+def _communication_message_has_submit_suffix(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:然后|并且|并|再|接着)\s*(?:发送|发出|提交)$",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:send|submit|post)$",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]]:
