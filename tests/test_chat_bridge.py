@@ -1815,6 +1815,119 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         store.close()
 
 
+def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_result_click(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-browser-search-click.db",
+        workspace_dir=tmp_path / "runtime-browser-search-click",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    click_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher browser search+click should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_open_url(url: str) -> dict:
+        open_calls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened browser page: {url}",
+            "data": {"url": url, "title": "Search"},
+        }
+
+    def fake_browser_click(selector: str, **kwargs: Any) -> dict:
+        click_calls.append((selector, int(kwargs.get("click_count") or 1)))
+        return {
+            "ok": True,
+            "action": "browser.click",
+            "summary": "Clicked browser selector",
+            "data": {
+                "selector": selector,
+                "label": "Yachiyo result",
+                "tag": "A",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开 Chrome 搜索 yachiyo 然后打开第一个结果",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert open_calls == ["https://www.google.com/search?q=yachiyo"]
+        assert click_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert any(
+            call["tool_name"] == "browser.open_url" and call["status"] == "completed"
+            for call in waiting_task["tool_calls"]
+        )
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "selector": "search-result=1",
+            "click_count": 1,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "browser.click"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert open_calls == ["https://www.google.com/search?q=yachiyo"]
+        assert click_calls == [("search-result=1", 1)]
+        assert approved.status == "completed"
+        assert approved.summary == (
+            "已打开网页：https://www.google.com/search?q=yachiyo。 "
+            "已点击网页元素：Yachiyo result。"
+        )
+        assert approved.needs_user_action is False
+        assert approved.pending_approvals == []
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
     tmp_path,
     monkeypatch,

@@ -140,6 +140,36 @@ def test_browser_click_accepts_text_selector(monkeypatch) -> None:
     assert "findByText" in expressions[0]
 
 
+def test_browser_click_accepts_search_result_selector(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def fake_evaluate(expression: str) -> dict[str, object]:
+        expressions.append(expression)
+        return {
+            "ok": True,
+            "selector": "search-result=1",
+            "tag": "A",
+            "label": "Yachiyo result",
+            "click_count": 1,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", fake_evaluate)
+
+    result = browser_mod.click("search-result=1")
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.click"
+    assert result["data"] == {
+        "ok": True,
+        "selector": "search-result=1",
+        "tag": "A",
+        "label": "Yachiyo result",
+        "click_count": 1,
+    }
+    assert "searchResultSelectorPrefix" in expressions[0]
+    assert "findSearchResult" in expressions[0]
+
+
 def test_browser_click_accepts_point_selector(monkeypatch) -> None:
     expressions: list[str] = []
 

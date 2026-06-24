@@ -852,6 +852,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "url": "https://www.google.com/search?q=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
         },
     }
+    assert daily_desktop_intent_tool_requests("打开浏览器搜索天气然后点第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=%E5%A4%A9%E6%B0%94"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 搜索 yachiyo 然后打开第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("百度一下 八千代 agent 然后打开第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
     assert daily_desktop_intent_tool_request("当前网页是什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.current_page",

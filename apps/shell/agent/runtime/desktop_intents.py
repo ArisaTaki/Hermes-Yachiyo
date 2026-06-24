@@ -280,6 +280,11 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    browser_search_click_sequence = _browser_search_then_click_tool_requests(context)
+    if browser_search_click_sequence and all(
+        str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
+    ):
+        return browser_search_click_sequence
     notes_create_type_sequence = _notes_create_and_type_tool_requests(context)
     if notes_create_type_sequence and all(
         str(request.get("tool") or "") in allowed for request in notes_create_type_sequence
@@ -1700,6 +1705,74 @@ def _browser_search_url(text: str) -> str:
                 return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
     return ""
+
+
+def _browser_search_then_click_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _browser_search_then_click(text)
+    if not parsed:
+        return []
+    query, engine, index = parsed
+    if engine in {"百度", "baidu"}:
+        url = f"https://www.baidu.com/s?wd={quote_plus(query)}"
+    else:
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
+    return [
+        _request("browser.open_url", {"url": url}),
+        _request(
+            "browser.click",
+            {"selector": f"search-result={index}", "click_count": 1},
+        ),
+    ]
+
+
+def _browser_search_then_click(text: str) -> tuple[str, str, int] | None:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<engine_baidu>百度|baidu)\s*一下\s*"
+        r"(?P<query_baidu>.+?)\s*"
+        r"(?:然后|并且|并|之后|随后|再|后)\s*"
+        r"(?:点击|点一下|点按|单击|点|打开|进入|访问)\s*"
+        r"(?:搜索结果|结果|链接)?(?:中|里|里的|的)?\s*"
+        r"(?P<rank_baidu>第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)?$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:浏览器|chrome|google\s*chrome|谷歌|谷歌浏览器|safari)\s*)?"
+        r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*"
+        r"(?P<query>.+?)\s*"
+        r"(?:然后|并且|并|之后|随后|再|后)\s*"
+        r"(?:点击|点一下|点按|单击|点|打开|进入|访问)\s*"
+        r"(?:搜索结果|结果|链接)?(?:中|里|里的|的)?\s*"
+        r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)?$",
+        r"^(?:please\s+)?(?:(?:open|launch|start)\s+(?:chrome|browser|safari)\s+(?:and\s+)?)?"
+        r"(?:(?P<engine_en>google|search|look\s+up)\s+)"
+        r"(?P<query_en>.+?)\s+(?:and|then)\s+"
+        r"(?:open|click|visit)\s+(?:the\s+)?(?P<rank_en>first|1st)\s+(?:result|link)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, _clean_text(text), flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        query = _strip_search_query(
+            groups.get("query") or groups.get("query_baidu") or groups.get("query_en") or ""
+        )
+        if not query:
+            continue
+        engine = str(
+            groups.get("engine") or groups.get("engine_baidu") or groups.get("engine_en") or ""
+        ).strip().lower()
+        rank = groups.get("rank") or groups.get("rank_baidu") or groups.get("rank_en") or ""
+        index = _browser_search_result_rank_index(rank)
+        if index:
+            return query, engine, index
+    return None
+
+
+def _browser_search_result_rank_index(value: str) -> int:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    if compact in {"第一个", "第一条", "首个", "第1个", "第1条", "1", "first", "1st"}:
+        return 1
+    return 0
 
 
 def _looks_like_click_command(text: str) -> bool:

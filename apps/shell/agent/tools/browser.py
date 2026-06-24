@@ -70,6 +70,7 @@ def click(
       const requestedClickCount = {json.dumps(click_count)};
       const textSelectorPrefix = 'text=';
       const pointSelectorPrefix = 'point=';
+      const searchResultSelectorPrefix = 'search-result=';
       function normalized(value) {{
         return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
       }}
@@ -96,11 +97,64 @@ def click(
         if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return null;
         return {{ x: parts[0], y: parts[1] }};
       }}
+      function parseIndex(value) {{
+        const index = Number.parseInt(value, 10);
+        return Number.isFinite(index) && index > 0 ? index : 1;
+      }}
+      function isVisible(el) {{
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      }}
+      function cleanHref(el) {{
+        try {{
+          return new URL(el.href, window.location.href);
+        }} catch (_) {{
+          return null;
+        }}
+      }}
+      function searchResultLinks() {{
+        const roots = [
+          document.querySelector('#search'),
+          document.querySelector('main'),
+          document.querySelector('[role="main"]'),
+          document.body,
+        ].filter(Boolean);
+        const seen = new Set();
+        const links = [];
+        for (const root of roots) {{
+          for (const el of Array.from(root.querySelectorAll('a[href]'))) {{
+            if (seen.has(el)) continue;
+            seen.add(el);
+            if (!isVisible(el)) continue;
+            const label = labelFor(el);
+            if (!label) continue;
+            const url = cleanHref(el);
+            if (!url || !/^https?:$/.test(url.protocol)) continue;
+            if (el.closest('nav,header,footer')) continue;
+            if (/google\\.[^/]+\\/search/.test(url.href)) continue;
+            if (/\\/preferences|\\/advanced_search|\\/intl\\//.test(url.pathname)) continue;
+            links.push(el);
+          }}
+          if (links.length) break;
+        }}
+        return links;
+      }}
+      function findSearchResult(value) {{
+        const links = searchResultLinks();
+        return links[parseIndex(value) - 1] || null;
+      }}
       const point = selector.startsWith(pointSelectorPrefix)
         ? parsePoint(selector.slice(pointSelectorPrefix.length))
         : null;
+      const isSearchResultSelector = selector.startsWith(searchResultSelectorPrefix);
+      const searchResult = isSearchResultSelector
+        ? findSearchResult(selector.slice(searchResultSelectorPrefix.length))
+        : null;
       const el = selector.startsWith(textSelectorPrefix)
         ? findByText(selector.slice(textSelectorPrefix.length))
+        : isSearchResultSelector
+          ? searchResult
         : point
           ? document.elementFromPoint(point.x, point.y)
         : document.querySelector(selector);
