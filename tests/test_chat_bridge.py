@@ -529,7 +529,7 @@ def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_mo
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开备忘录新建笔记输入 hello",
+        "新建一个备忘录写 hello",
     )
 
     assert result["ok"] is True

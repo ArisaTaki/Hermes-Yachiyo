@@ -1336,6 +1336,54 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "hello"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("新建一个备忘录写 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("新建一条笔记记下 明天十点开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "明天十点开会"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开备忘录新建一个笔记写 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开备忘录写 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开 Word 新建文档输入 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1472,6 +1520,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("Notes 新建一个笔记", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Notes write hello yachiyo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_type_text",
+        "input": {"app_name": "Notes", "text": "hello yachiyo"},
     }
     assert daily_desktop_intent_tool_request("focus Chrome and then new tab", allowed_tools) == {
         "protocol": "json_fallback",

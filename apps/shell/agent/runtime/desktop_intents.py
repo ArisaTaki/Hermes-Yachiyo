@@ -280,6 +280,11 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    notes_create_type_sequence = _notes_create_and_type_tool_requests(context)
+    if notes_create_type_sequence and all(
+        str(request.get("tool") or "") in allowed for request in notes_create_type_sequence
+    ):
+        return notes_create_type_sequence
     app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
     if app_browser_action_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
@@ -2262,7 +2267,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"新建文档|新文档|新建文件|新文件|开新文档|开一个新文档|开新文件|开一个新文件|"
         r"新建表格|新表格|新建工作簿|新工作簿|"
         r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
-        r"新建笔记|新笔记|新建备忘录|新备忘录|"
+        r"新建笔记|新建一个笔记|新建一条笔记|新建一篇笔记|新笔记|"
+        r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
         r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
         r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
@@ -3079,6 +3085,41 @@ def _search_type_requests(
     return requests
 
 
+def _notes_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    typed_text = _notes_create_and_type_text(text)
+    if not typed_text:
+        return []
+    return [
+        _request(
+            "app.open_and_safe_shortcut",
+            {"app_name": "Notes", "action": "new_note"},
+        ),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+
+
+def _notes_create_and_type_text(value: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|开|打开)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)\s*"
+        r"(?P<text>[^。！？!?]+)$",
+        r"^(?:please\s+)?(?:create|make|open)\s+(?:a\s+)?(?:new\s+)?note\s+"
+        r"(?:and\s+)?(?:type|write|enter|record|with|saying)\s+(?P<text_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, str(value or "").strip(), flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        typed_text = _strip_typed_text(groups.get("text") or groups.get("text_en") or "")
+        if typed_text:
+            return typed_text
+    return ""
+
+
 def _is_search_text_input_payload(payload: dict[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -3168,7 +3209,7 @@ def _app_foreground_action_request(
             "tool": f"app.{mode}_and_hotkey",
             "input": {"app_name": app_name, **hotkey},
         }
-    typed_text = _desktop_safe_type_text(followup)
+    typed_text = _app_followup_safe_type_text(followup)
     if typed_text:
         return {
             "tool": f"app.{mode}_and_safe_type_text",
@@ -3274,7 +3315,12 @@ def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
     followup = value[end_index:].strip()
     if not raw_app or not followup:
         return None
-    if re.search(r"[A-Za-z0-9]$", raw_app) and re.match(r"[A-Za-z0-9]", followup):
+    separator = value[end_index : end_index + 1]
+    if (
+        re.search(r"[A-Za-z0-9]$", raw_app)
+        and re.match(r"[A-Za-z0-9]", followup)
+        and not re.fullmatch(r"[\s._-]", separator or "")
+    ):
         return None
     return raw_app, followup
 
@@ -3302,7 +3348,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_type_into_ui_element(followup)
         or _desktop_safe_key(followup)
         or _desktop_hotkey(followup)
-        or _desktop_safe_type_text(followup)
+        or _app_followup_safe_type_text(followup)
         or _desktop_find_query(followup)
         or _browser_click_request(_browser_context_followup(followup)) is not None
         or _browser_type_text_request(_browser_context_followup(followup)) is not None
@@ -3314,6 +3360,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _is_browser_current_page_request(followup)
         or _is_screen_capture_request(followup)
         or _is_visual_inspection_followup(followup)
+        or _safe_shortcut_then_type(followup) is not None
         or bool(_safe_shortcut_action_sequence(followup))
     )
 
@@ -3366,6 +3413,35 @@ def _looks_like_possible_app_followup(value: str) -> bool:
     )
 
 
+def _app_followup_safe_type_text(value: str) -> str:
+    typed_text = _desktop_safe_type_text(value)
+    if typed_text:
+        return typed_text
+    text = str(value or "").strip()
+    if not text or re.search(r"(?:剪贴板|粘贴板|clipboard)", text, flags=re.IGNORECASE):
+        return ""
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在(?:当前|前台)?(?:窗口|应用|app)?(?:里|中|内|上)?\s*)?"
+        r"(?:写入|写下|写上|写|记录|记下|记一下|记上)\s*(?P<text>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+        r"(?P<text2>[^。！？!?]+?)\s*"
+        r"(?:写入|写下|写上|写|记录|记下|记一下|记上)(?:进去|到当前窗口|到前台)?$",
+        r"^(?:write|record|note\s+down)\s+(?P<text_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        typed_text = _strip_typed_text(
+            groups.get("text") or groups.get("text2") or groups.get("text_en") or ""
+        )
+        if typed_text:
+            return typed_text
+    return ""
+
+
 def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
     action_pattern = (
         r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
@@ -3373,7 +3449,8 @@ def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
         r"新建文档|新文档|新建文件|新文件|开新文档|开一个新文档|开新文件|开一个新文件|"
         r"新建表格|新表格|新建工作簿|新工作簿|"
         r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
-        r"新建笔记|新笔记|新建备忘录|新备忘录|"
+        r"新建笔记|新建一个笔记|新建一条笔记|新建一篇笔记|新笔记|"
+        r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
         r"new\s+tab|new\s+window|new\s+document|new\s+file|new\s+note|"
         r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
         r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
@@ -4672,8 +4749,14 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "makenewpresentation": "new_document",
         "createnewpresentation": "new_document",
         "新建笔记": "new_note",
+        "新建一个笔记": "new_note",
+        "新建一条笔记": "new_note",
+        "新建一篇笔记": "new_note",
         "新笔记": "new_note",
         "新建备忘录": "new_note",
+        "新建一个备忘录": "new_note",
+        "新建一条备忘录": "new_note",
+        "新建一篇备忘录": "new_note",
         "新备忘录": "new_note",
         "newnote": "new_note",
         "makeanewnote": "new_note",
