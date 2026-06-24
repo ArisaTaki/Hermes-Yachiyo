@@ -3241,7 +3241,7 @@ def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_en
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "read this page",
+        "读当前网页",
     )
 
     assert extract_calls == [""]

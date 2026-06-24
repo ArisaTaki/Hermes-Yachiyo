@@ -770,7 +770,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.current_page",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("当前网页是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("read this page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("读当前网页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},

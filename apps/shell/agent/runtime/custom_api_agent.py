@@ -1240,6 +1240,7 @@ class RuntimeCustomApiAgentLoop:
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
+            "map explicit current-page reading/extraction requests to browser.extract_text; "
             "map foreground UI control/button/input field list questions to desktop.ui_elements; "
             "map explicit foreground UI control/button clicks by visible label to desktop.click_ui_element; "
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
