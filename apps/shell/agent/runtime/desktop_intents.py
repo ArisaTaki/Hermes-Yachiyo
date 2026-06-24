@@ -367,6 +367,9 @@ def daily_desktop_intent_tool_requests(
     app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
     if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
         return app_search_type_sequence
+    app_preposed_observe_sequence = _app_preposed_observe_tool_requests(context)
+    if app_preposed_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_preposed_observe_sequence):
+        return app_preposed_observe_sequence
     app_observe_sequence = _app_open_or_focus_observe_tool_requests(context)
     if app_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_observe_sequence):
         return app_observe_sequence
@@ -1422,7 +1425,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         candidates.append(_request("desktop.click", click))
 
     if _is_screen_capture_request(text) or (
-        _is_visual_inspection_followup(text) and not _is_active_window_request(text)
+        _is_visual_inspection_followup(text)
+        and not _is_active_window_request(text)
+        and not _is_bare_visual_inspection_request(text)
     ):
         candidates.append(_request("screen.capture", {"reason": "user asked to capture the screen"}))
 
@@ -2615,12 +2620,12 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
         re.search(
             r"(?:当前|现在|这个|前台)?(?:窗口|界面|屏幕|应用|app)?"
             r".{0,10}(?:有哪些|有什么|列出|列一下|显示|查看|看看|看一下|读取|识别)"
-            r".{0,10}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+            r".{0,10}(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)"
+            r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)"
             r".{0,10}(?:有哪些|有什么|列表|列一下|显示|查看|看看|看一下|读取|识别)",
             text,
             flags=re.IGNORECASE,
@@ -3918,6 +3923,31 @@ def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     return _app_observe_tool_requests(mode, app_name, followup)
 
 
+def _app_preposed_observe_tool_requests(text: str) -> list[dict[str, Any]]:
+    match = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<action>看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+        r"(?P<target>[^。！？!?，,]+)$",
+        _strip_query(text),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    split = _known_app_prefix_split(match.group("target"))
+    if not split:
+        return []
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return []
+    if (
+        _desktop_windows_request(match.group("target")) is not None
+        or _desktop_windows_request(_strip_query(text)) is not None
+    ):
+        return []
+    action_followup = f"{match.group('action')} {followup}".strip()
+    return _app_observe_tool_requests("focus", app_name, action_followup, include_windows=False)
+
+
 def _app_prefix_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     split = _known_app_prefix_split(text)
     if not split:
@@ -4792,13 +4822,34 @@ def _is_visual_inspection_followup(value: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"^(?:当前|这个|该|现在)?(?:界面|画面|窗口|屏幕|桌面|应用|app)"
+            r"(?:上|里|中|内)?$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"^(?:你|你现在|现在)?(?:能)?(?:看见|看到|观察到|识别到)"
             r"(?:什么|啥|哪些内容|什么内容)?$",
             followup,
             flags=re.IGNORECASE,
         )
-        or re.search(r"^(?:观察(?:一下|下)?|识别(?:一下|下)?|看一眼)$", followup, flags=re.IGNORECASE)
+        or re.search(
+            r"^(?:看看|看一下|看下|查看|观察(?:一下|下)?|识别(?:一下|下)?|看一眼)$",
+            followup,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\b(?:look at|inspect|view|read)\s+(?:the\s+)?(?:screen|window|ui|interface)\b", lowered)
+    )
+
+
+def _is_bare_visual_inspection_request(value: str) -> bool:
+    text = _strip_query(value)
+    return bool(
+        re.fullmatch(
+            r"(?:看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
     )
 
 

@@ -1192,6 +1192,83 @@ def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read System Settings options",
+            "data": {
+                "app_name": "System Settings",
+                "title": "Settings",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "General",
+                        "center": {"x": 120, "y": 88},
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    for launcher_mode in ("bubble", "live2d"):
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "打开系统设置看看有哪些选项",
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == (
+            "已打开 System Settings。 当前 System Settings 界面控件："
+            "Button General（120, 88）。"
+        )
+        assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
+            "app.open",
+            "desktop.ui_elements",
+        ]
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "",
+            "limit": 80,
+        }
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert calls == [
+        ("open", "System Settings", None),
+        ("ui", "", 80),
+        ("open", "System Settings", None),
+        ("ui", "", 80),
+    ]
+
+
 def test_chat_bridge_quick_message_executes_app_status_without_model(
     tmp_path,
     monkeypatch,
@@ -3831,7 +3908,30 @@ def test_chat_bridge_quick_message_executes_app_prefix_screen_capture_without_mo
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert len(calls) == 8
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "看一下 Chrome 当前界面",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切换到 Google Chrome。 已截取当前屏幕。"
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "app.focus",
+            "screen.capture",
+        ]
+        assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert len(calls) == 12
     for index in range(0, len(calls), 2):
         assert calls[index] == ("focus", "Google Chrome")
         assert calls[index + 1][0] == "capture"
@@ -5914,6 +6014,41 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
             "source": "daily_desktop_intent",
             "status": "planned",
             "tool": "screen.capture",
+        }
+    finally:
+        store.close()
+
+
+def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-app-observe",
+            "task_id": "task-app-observe",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("看一下 Chrome 当前界面")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-app-observe"
+        assert result["agent_task"]["task_id"] == "task-app-observe"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 聚焦应用"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "app.focus"
+        assert result["agent_task"]["recent_events"][0]["payload"] == {
+            "input_preview": {"app_name": "Google Chrome"},
+            "planning_reason": "clear_daily_desktop_intent",
+            "source": "daily_desktop_intent",
+            "status": "planned",
+            "tool": "app.focus",
         }
     finally:
         store.close()

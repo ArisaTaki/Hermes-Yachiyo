@@ -2381,6 +2381,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"reason": "user asked to capture the screen"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("看一下 Chrome 当前界面", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 当前界面", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("看一下屏幕，然后向下滚动", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -3042,6 +3066,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"role_filter": "", "limit": 80},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("读取 Chrome 界面控件", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开系统设置看看有哪些选项", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "System Settings"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开系统设置看看", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "System Settings"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开微信看看有什么按钮", allowed_tools) == [
