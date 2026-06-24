@@ -2507,6 +2507,8 @@ def _app_scoped_ui_elements_tool_requests(text: str) -> list[dict[str, Any]]:
     ui_payload = _desktop_ui_elements_request(text)
     if ui_payload is None:
         return []
+    if _is_current_ui_elements_request(text):
+        return []
     app_name = _desktop_ui_elements_app_name(text)
     if not app_name:
         return []
@@ -2514,6 +2516,27 @@ def _app_scoped_ui_elements_tool_requests(text: str) -> list[dict[str, Any]]:
         _request("app.focus", {"app_name": app_name}),
         _request("desktop.ui_elements", ui_payload),
     ]
+
+
+def _is_current_ui_elements_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)?\s*"
+            r"(?:当前|现在|这个|前台|该)\s*(?:应用|app|界面|窗口|屏幕)?\s*"
+            r"(?:有哪些|有什么|有啥|有哪个|有哪几个|列出|列一下|显示|查看|看看|看一下|读取|识别|的)?\s*"
+            r"(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^\s*(?:list|show|read|inspect|what|which)\b.{0,24}\b"
+            r"(?:current|frontmost|foreground|this)\s+"
+            r"(?:app|application|window|interface|screen)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _desktop_ui_elements_app_name(text: str) -> str:
@@ -2897,24 +2920,71 @@ def _strip_app_scoped_ui_action_target(value: str) -> str:
 def _looks_like_generic_ui_scope(value: str) -> bool:
     if _looks_like_generic_window_scope(value):
         return True
-    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    scope_value = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|识别)\s*",
+        "",
+        str(value or "").strip().lower(),
+    )
+    compact = re.sub(r"[\s._-]+", "", scope_value)
     return compact in {
+        "当前",
+        "现在",
+        "这个",
+        "前台",
+        "该",
+        "当前应用",
+        "当前app",
         "当前界面",
         "当前窗口",
         "当前屏幕",
+        "当前应用有哪些",
+        "当前app有哪些",
         "当前应用界面",
+        "前台应用",
+        "前台app",
         "前台界面",
         "前台窗口",
+        "这个应用",
+        "这个app",
         "这个界面",
         "这个窗口",
+        "该应用",
+        "该app",
         "thecurrent",
         "thecurrentapp",
         "currentapplication",
+        "currentapp",
         "currentwindow",
         "currentinterface",
+        "current",
+        "this",
+        "foreground",
+        "frontmost",
         "thisapp",
         "thiswindow",
-    }
+    } or (
+        compact.startswith(
+            (
+                "当前",
+                "现在",
+                "这个",
+                "前台",
+                "该",
+                "当前应用",
+                "当前app",
+                "当前界面",
+                "前台应用",
+                "前台app",
+                "前台界面",
+                "这个应用",
+                "这个app",
+                "这个界面",
+                "该应用",
+                "该app",
+            )
+        )
+        and any(marker in compact for marker in ("有哪些", "有什么", "有啥", "有哪个", "有哪几个"))
+    )
 
 
 def _is_general_windows_request(text: str) -> bool:

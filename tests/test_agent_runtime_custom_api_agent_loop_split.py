@@ -3664,6 +3664,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.status",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_requests("查看当前应用有哪些按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("看看当前界面有哪些按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("当前界面有哪些输入框", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+        }
+    ]
     assert daily_desktop_intent_tool_request("按 Command+L", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",

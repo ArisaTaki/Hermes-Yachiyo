@@ -957,6 +957,60 @@ def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_focus(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read current buttons",
+            "data": {
+                "app_name": "Google Chrome",
+                "title": "ChatGPT",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "Send",
+                        "center": {"x": 640, "y": 720},
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        lambda app_name: (_ for _ in ()).throw(
+            AssertionError(f"current UI query should not focus fake app: {app_name}")
+        ),
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "看看当前界面有哪些按钮",
+    )
+
+    assert calls == [("ui", "button", 80)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["summary"] == "当前 Google Chrome 界面控件：Button Send（640, 720）。"
+    assert [call["tool_name"] for call in agent_task["tool_calls"][-1:]] == [
+        "desktop.ui_elements",
+    ]
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_followup(
     tmp_path,
     monkeypatch,
