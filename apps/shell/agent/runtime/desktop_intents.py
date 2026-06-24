@@ -2594,7 +2594,10 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     shortcut_pattern = (
         r"(?:复制(?:一下)?(?:选中(?:的)?内容)?|粘贴(?:到这(?:里)?)?|全选|撤销|重做|"
         r"刷新(?:一下|下)?(?:页面|当前页|当前网页|网页)?|返回上一页|回到上一页|"
-        r"网页后退|浏览器后退|后退一页|后退|前进一页|网页前进|浏览器前进|前进|"
+        r"网页后退(?:一下|下|一次)?|浏览器后退(?:一下|下|一次)?|"
+        r"后退一页|后退(?:一下|下|一次)?|前进一页|"
+        r"网页前进(?:一下|下|一次)?|浏览器前进(?:一下|下|一次)?|"
+        r"前进(?:一下|下|一次)?|"
         r"查找|打开查找(?:框)?|打开搜索框|页面(?:内|里)?查找|当前页查找|"
         r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
         r"新建窗口|新窗口|打开新窗口|开新窗口|开一个新窗口|"
@@ -3389,7 +3392,7 @@ def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | 
         (
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
-            r"(?:并且|并|然后|之后|后|再)\s*(?P<followup>.+)$",
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
             r"(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and|then)\s+(?P<followup>.+)$",
         ),
     )
@@ -3401,7 +3404,7 @@ def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | 
         (
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)\s*"
-            r"(?:并且|并|然后|之后|后|再)\s*(?P<followup>.+)$",
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
             r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+?)\s+"
             r"(?:and|then)\s+(?P<followup>.+)$",
         ),
@@ -5163,7 +5166,7 @@ def _strip_app_foreground_followup(value: str) -> str:
 
 def _strip_app_foreground_followup_prefix(value: str) -> str:
     return re.sub(
-        r"^(?:并且|并|然后|之后|后|再|and|then)\s*",
+        r"^(?:并且|并|然后|之后|后(?!退)|再|and|then)\s*",
         "",
         str(value or "").strip(),
         flags=re.IGNORECASE,

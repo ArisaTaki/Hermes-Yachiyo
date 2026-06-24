@@ -1668,6 +1668,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "browser_back"},
     }
+    assert daily_desktop_intent_tool_request("Chrome 后退一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 后退一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("切到 Chrome 后退一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "browser_back"},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack 并粘贴", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
