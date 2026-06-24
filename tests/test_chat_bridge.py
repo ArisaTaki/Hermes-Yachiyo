@@ -3588,6 +3588,60 @@ def test_chat_bridge_quick_message_executes_app_scoped_browser_back_without_fake
     ]
 
 
+def test_chat_bridge_quick_message_executes_app_prefix_find_shortcut_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {
+                "shortcut_action": action,
+                "shortcut_label": "find",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "Chrome 查找一下",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已切到 Google Chrome 并打开查找。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "action": "find",
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("focus", "Google Chrome"),
+        ("shortcut", "find"),
+        ("focus", "Google Chrome"),
+        ("shortcut", "find"),
+    ]
+
+
 def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
     tmp_path,
     monkeypatch,
