@@ -244,6 +244,39 @@ def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_in
 
     assert task.current_step == "需要权限 · 播放 Apple Music · music_app, automation"
     assert task.progress_text == "需要权限 · 播放 Apple Music · music_app, automation"
+    assert task.needs_user_action is True
+
+
+def test_agent_task_snapshot_marks_recovery_actions_as_user_action() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-app-not-found",
+            "run_id": "run-app-not-found",
+            "status": "completed",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.permission_recovery",
+                    "detail": "app.open",
+                    "payload": {
+                        "tool": "app.open",
+                        "permission_targets": [],
+                        "recovery_actions": [
+                            {
+                                "label": "打开应用程序文件夹",
+                                "tool": "desktop.open_path",
+                                "input": {"path": "/Applications"},
+                                "permission_target": "app_not_found",
+                                "risk_level": "low",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.status == "completed"
+    assert task.needs_user_action is True
 
 
 def test_agent_task_snapshot_derives_progress_from_app_not_found_desktop_intent() -> None:

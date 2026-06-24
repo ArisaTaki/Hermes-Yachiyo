@@ -5296,7 +5296,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     ]
     assert permission_probe_calls == [True]
     assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
+    assert agent_task["needs_user_action"] is True
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
     assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
@@ -5895,7 +5895,7 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     assert osascript_calls
     assert osascript_calls[0][1] == ["120", "240", "1"]
     assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
+    assert agent_task["needs_user_action"] is True
     assert agent_task["pending_approvals"] == []
     assert "桌面操作未完成：Not authorized to send Apple events to System Events." in agent_task["summary"]
     assert "缺少权限：accessibility" in agent_task["summary"]
@@ -5907,8 +5907,8 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     assert agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"] == [
         {
             "label": "打开辅助功能权限",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "permission_target": "accessibility",
             "recovery_retry_input": {"x": 120, "y": 240},
             "recovery_retry_prompt": "点击 120, 240",
@@ -5946,7 +5946,7 @@ def test_chat_bridge_quick_message_surfaces_browser_cdp_recovery(
     )
 
     assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
+    assert agent_task["needs_user_action"] is True
     assert agent_task["pending_approvals"] == []
     assert "桌面操作未完成：chrome_cdp_unavailable" in agent_task["summary"]
     assert "缺少权限：chrome_cdp" in agent_task["summary"]
@@ -6026,6 +6026,7 @@ def test_chat_bridge_quick_message_surfaces_app_open_recovery(
     )
 
     assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is True
     assert "已尝试启动 MissingTool，但 macOS 没找到这个应用。" in agent_task["summary"]
     assert "可直接打开：打开应用程序文件夹、打开 App Store。" in agent_task["summary"]
     assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
@@ -6104,6 +6105,7 @@ def test_chat_bridge_quick_message_surfaces_app_foreground_action_recovery(
 
     assert calls == [("open", "Google Chrome"), ("focus", "Google Chrome"), ("key", "tab")]
     assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is True
     assert agent_task["summary"].startswith(
         "已打开 Google Chrome，但没能按Tab。 缺少权限：accessibility。"
     )

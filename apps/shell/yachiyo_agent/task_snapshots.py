@@ -133,6 +133,16 @@ def agent_task_snapshot_from_payload(
         task_status=status,
         has_explicit_progress=bool(current_step or progress_text),
     )
+    tool_calls = tool_call_snapshots_from_payloads(
+        payload.get("tool_calls"),
+        run_id=run_id,
+        events=recent_events,
+    )
+    needs_user_action = bool(
+        payload.get("needs_user_action")
+        or approvals
+        or _has_desktop_recovery_user_action(recent_events, tool_calls)
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
@@ -142,14 +152,10 @@ def agent_task_snapshot_from_payload(
         summary=_optional_text(payload.get("summary") or payload.get("result")),
         current_step=current_step or derived_progress,
         progress_text=progress_text or derived_progress,
-        needs_user_action=bool(payload.get("needs_user_action") or approvals),
+        needs_user_action=needs_user_action,
         pending_approvals=approvals,
         recent_events=recent_events,
-        tool_calls=tool_call_snapshots_from_payloads(
-            payload.get("tool_calls"),
-            run_id=run_id,
-            events=recent_events,
-        ),
+        tool_calls=tool_calls,
         artifacts=artifact_snapshots_from_task_payload(
             payload,
             run_id=run_id,
@@ -322,6 +328,42 @@ def _desktop_tool_result_progress_text(label: str, result: Mapping[str, Any]) ->
             detail=_failure_detail(result),
         )
     return _progress_text("已执行", label, "已执行桌面动作")
+
+
+def _has_desktop_recovery_user_action(
+    events: list[PublicRunEvent],
+    tool_calls: list[Any],
+) -> bool:
+    for event in events:
+        if (event.sensitivity or "public") == "secret":
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+        if _has_recovery_signal(payload) or _has_recovery_signal(result):
+            return True
+    for tool_call in tool_calls:
+        output_preview = getattr(tool_call, "output_preview", {})
+        if isinstance(output_preview, Mapping) and _has_recovery_signal(output_preview):
+            return True
+    return False
+
+
+def _has_recovery_signal(source: Mapping[str, Any]) -> bool:
+    data = source.get("data") if isinstance(source.get("data"), Mapping) else {}
+    return bool(
+        source.get("permission_error")
+        or _result_text_list(source, "permission_targets", "missing_permissions")
+        or _result_text_list(data, "permission_targets", "missing_permissions")
+        or _has_recovery_actions(source)
+        or _has_recovery_actions(data)
+    )
+
+
+def _has_recovery_actions(source: Mapping[str, Any]) -> bool:
+    actions = source.get("recovery_actions")
+    if not isinstance(actions, list):
+        return False
+    return any(isinstance(action, Mapping) for action in actions)
 
 
 def _progress_text(
