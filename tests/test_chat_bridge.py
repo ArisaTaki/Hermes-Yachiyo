@@ -49,6 +49,7 @@ def _run_launcher_daily_desktop_quick_message(
     permission_probe: Any | None = None,
     permission_preflight: Any | None = None,
     seed_messages: list[tuple[str, str]] | None = None,
+    launcher_mode: str = "live2d",
 ) -> tuple[dict, dict, dict, list[str]]:
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
@@ -89,7 +90,7 @@ def _run_launcher_daily_desktop_quick_message(
             text,
             metadata={
                 "source": "launcher",
-                "launcher_mode": "live2d",
+                "launcher_mode": launcher_mode,
                 "launcher_surface": "quick_message",
             },
         )
@@ -111,7 +112,7 @@ def _run_launcher_daily_desktop_quick_message(
         assert agent_task["conversation_id"] == "session-current"
         assert agent_task["open_in_studio_url"] == f"#/agents?run_id={run['run_id']}"
         assert user_metadata["source"] == "launcher"
-        assert user_metadata["launcher_mode"] == "live2d"
+        assert user_metadata["launcher_mode"] == launcher_mode
         assert user_metadata["daily_desktop_intent"] is True
         assert user_metadata["daily_desktop_source"] == "daily_desktop_intent"
         assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
@@ -3853,26 +3854,29 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "按向下箭头三次",
-    )
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "按向下箭头三次",
+            launcher_mode=launcher_mode,
+        )
 
-    assert pressed == [("arrow_down", 3)]
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已按下箭头（3 次）。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
-        "action": "arrow_down",
-        "repeat_count": 3,
-    }
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已按下箭头（3 次）。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {
+            "action": "arrow_down",
+            "repeat_count": 3,
+        }
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert pressed == [("arrow_down", 3), ("arrow_down", 3)]
 
 
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
