@@ -112,6 +112,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "refresh",
     "browser_back",
     "browser_forward",
+    "reopen_closed_tab",
 )
 SAFE_KEY_ACTIONS = (
     "escape",

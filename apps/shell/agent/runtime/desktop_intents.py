@@ -2910,8 +2910,12 @@ def _looks_like_bare_safe_key_followup(value: str) -> bool:
 
 def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     shortcut_pattern = (
-        r"(?:复制(?:一下)?(?:选中(?:的)?内容)?|粘贴(?:到这(?:里)?)?|全选|撤销|重做|"
+        r"(?:复制(?:一下|下)?(?:选中(?:的)?(?:内容|文字))?|"
+        r"粘贴(?:一下|下)?(?:(?:到|进|在)?(?:这(?:里)?|当前输入框|输入框|当前窗口|前台))?|"
+        r"全选|撤销|重做|"
+        r"(?:浏览器|网页|当前网页|当前页)刷新(?:一下|下)?|"
         r"刷新(?:一下|下)?(?:页面|当前页|当前网页|网页)?|返回上一页|回到上一页|"
+        r"重新打开(?:上个|上一个)?关闭的标签页|恢复(?:上个|上一个)?关闭的标签页|"
         r"网页后退(?:一下|下|一次)?|浏览器后退(?:一下|下|一次)?|"
         r"后退一页|后退(?:一下|下|一次)?|前进一页|"
         r"网页前进(?:一下|下|一次)?|浏览器前进(?:一下|下|一次)?|"
@@ -2928,7 +2932,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
         r"新建日程|新建一个日程|新建一条日程|新建日历事件|新建一个日历事件|新日程|"
         r"新建事件|新建一个事件|新事件|"
-        r"copy|paste|select\s+all|undo|redo|refresh|reload|go\s+back|back|"
+        r"copy|paste|select\s+all|undo|redo|refresh|reload|reopen\s+(?:the\s+)?(?:last\s+)?closed\s+tab|"
+        r"restore\s+(?:the\s+)?(?:last\s+)?closed\s+tab|go\s+back|back|"
         r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
         r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
         r"new\s+note|new\s+event|new\s+calendar\s+event|"
@@ -2980,6 +2985,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         if not match:
             continue
         raw_app = match.group("app")
+        if re.search(r"(?:剪贴板|粘贴板|clipboard)", raw_app, flags=re.IGNORECASE):
+            continue
         if mode == "focus" and re.match(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|运行|拉起|开启|开)",
             text,
@@ -6227,7 +6234,10 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
     mapping: dict[str, tuple[str, tuple[str, ...]]] = {
         "复制": ("c", ("command",)),
         "复制选中内容": ("c", ("command",)),
+        "复制选中文字": ("c", ("command",)),
+        "复制选中的文字": ("c", ("command",)),
         "复制当前选中内容": ("c", ("command",)),
+        "复制当前选中文字": ("c", ("command",)),
         "copy": ("c", ("command",)),
         "copyselection": ("c", ("command",)),
         "copyselectedtext": ("c", ("command",)),
@@ -6247,8 +6257,20 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "savefile": ("s", ("command",)),
         "savedocument": ("s", ("command",)),
         "刷新": ("r", ("command",)),
+        "浏览器刷新": ("r", ("command",)),
+        "网页刷新": ("r", ("command",)),
+        "当前网页刷新": ("r", ("command",)),
+        "当前页刷新": ("r", ("command",)),
         "reload": ("r", ("command",)),
         "refresh": ("r", ("command",)),
+        "重新打开关闭的标签页": ("t", ("command", "shift")),
+        "重新打开上个关闭的标签页": ("t", ("command", "shift")),
+        "恢复关闭的标签页": ("t", ("command", "shift")),
+        "恢复上一个关闭的标签页": ("t", ("command", "shift")),
+        "reopenclosedtab": ("t", ("command", "shift")),
+        "reopentheclosedtab": ("t", ("command", "shift")),
+        "reopenlastclosedtab": ("t", ("command", "shift")),
+        "restoreclosedtab": ("t", ("command", "shift")),
         "查找": ("f", ("command",)),
         "打开查找": ("f", ("command",)),
         "打开查找框": ("f", ("command",)),
@@ -6289,26 +6311,52 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "复制": "copy",
         "复制选中内容": "copy",
         "复制选中的内容": "copy",
+        "复制选中文字": "copy",
+        "复制选中的文字": "copy",
         "复制当前选中内容": "copy",
         "复制当前选中的内容": "copy",
+        "复制当前选中文字": "copy",
+        "复制当前选中的文字": "copy",
         "复制一下选中内容": "copy",
         "复制一下选中的内容": "copy",
+        "复制一下选中文字": "copy",
+        "复制一下选中的文字": "copy",
         "copy": "copy",
         "copyselection": "copy",
         "copyselectedtext": "copy",
         "粘贴": "paste",
+        "粘贴剪贴板": "paste",
+        "粘贴剪贴板内容": "paste",
+        "剪贴板内容粘贴": "paste",
+        "把剪贴板内容粘贴": "paste",
+        "把剪贴板内容粘贴到当前输入框": "paste",
+        "把剪贴板内容粘贴到输入框": "paste",
+        "剪贴板内容粘贴到当前输入框": "paste",
+        "剪贴板内容粘贴到输入框": "paste",
         "粘贴到这里": "paste",
         "粘贴到这": "paste",
         "粘贴在这里": "paste",
+        "粘贴到当前输入框": "paste",
+        "粘贴到输入框": "paste",
         "粘贴到当前窗口": "paste",
         "粘贴到前台": "paste",
+        "粘贴进当前输入框": "paste",
+        "粘贴进输入框": "paste",
         "粘贴进当前窗口": "paste",
         "粘贴进前台": "paste",
+        "粘贴在当前输入框": "paste",
+        "粘贴在输入框": "paste",
         "粘贴在当前窗口": "paste",
         "粘贴在前台": "paste",
         "paste": "paste",
+        "pasteclipboard": "paste",
+        "pasteclipboardcontents": "paste",
+        "pasteintocurrentinput": "paste",
+        "pasteintoinput": "paste",
         "pasteintocurrentwindow": "paste",
         "pasteintoforeground": "paste",
+        "pasteincurrentinput": "paste",
+        "pasteininput": "paste",
         "pasteincurrentwindow": "paste",
         "pasteinforeground": "paste",
         "全选": "select_all",
@@ -6318,6 +6366,10 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "重做": "redo",
         "redo": "redo",
         "刷新": "refresh",
+        "浏览器刷新": "refresh",
+        "网页刷新": "refresh",
+        "当前网页刷新": "refresh",
+        "当前页刷新": "refresh",
         "刷新一下页面": "refresh",
         "刷新下页面": "refresh",
         "刷新页面": "refresh",
@@ -6332,6 +6384,14 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "刷新网页": "refresh",
         "reload": "refresh",
         "refresh": "refresh",
+        "重新打开关闭的标签页": "reopen_closed_tab",
+        "重新打开上个关闭的标签页": "reopen_closed_tab",
+        "恢复关闭的标签页": "reopen_closed_tab",
+        "恢复上一个关闭的标签页": "reopen_closed_tab",
+        "reopenclosedtab": "reopen_closed_tab",
+        "reopentheclosedtab": "reopen_closed_tab",
+        "reopenlastclosedtab": "reopen_closed_tab",
+        "restoreclosedtab": "reopen_closed_tab",
         "返回上一页": "browser_back",
         "回到上一页": "browser_back",
         "网页后退": "browser_back",

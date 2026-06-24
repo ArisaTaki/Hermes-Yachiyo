@@ -631,6 +631,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_event"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "reopen_closed_tab"})
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
@@ -3802,6 +3803,36 @@ def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypa
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert 'keystroke keyName using {command down}' in calls[0][0][2]
     assert calls[0][0][-1] == "]"
+
+
+def test_desktop_safe_shortcut_reopen_closed_tab_uses_command_shift_t(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("reopen_closed_tab")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_shortcut",
+        "summary": "Executed safe shortcut: reopen closed tab",
+        "data": {
+            "key": "t",
+            "modifiers": ["command", "shift"],
+            "shortcut_action": "reopen_closed_tab",
+            "shortcut_label": "reopen closed tab",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert "keystroke keyName using {command down, shift down}" in calls[0][0][2]
+    assert calls[0][0][-1] == "t"
 
 
 def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:

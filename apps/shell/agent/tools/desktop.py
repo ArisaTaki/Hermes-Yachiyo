@@ -119,6 +119,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "refresh": ("r", ("command",), "refresh"),
     "browser_back": ("[", ("command",), "browser back"),
     "browser_forward": ("]", ("command",), "browser forward"),
+    "reopen_closed_tab": ("t", ("command", "shift"), "reopen closed tab"),
 }
 
 _SAFE_KEYS: dict[str, tuple[int, str]] = {

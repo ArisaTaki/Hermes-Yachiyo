@@ -4346,22 +4346,37 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "复制一下选中的内容",
+    cases = (
+        ("复制一下选中的内容", "live2d", "copy", "已复制选中内容。"),
+        ("复制选中文字", "bubble", "copy", "已复制选中内容。"),
+        ("浏览器刷新", "live2d", "refresh", "已刷新。"),
+        ("把剪贴板内容粘贴到当前输入框", "bubble", "paste", "已粘贴。"),
+        (
+            "重新打开关闭的标签页",
+            "live2d",
+            "reopen_closed_tab",
+            "已重新打开关闭的标签页。",
+        ),
     )
+    for text, launcher_mode, action, summary in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
 
-    assert shortcut_calls == ["copy"]
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已复制选中内容。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert shortcut_calls[-1] == action
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == summary
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"action": action}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_app_scoped_safe_shortcut_without_approval(

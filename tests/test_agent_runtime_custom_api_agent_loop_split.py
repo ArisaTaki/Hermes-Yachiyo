@@ -4411,7 +4411,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "copy"},
     }
+    assert daily_desktop_intent_tool_request("复制选中文字", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
     assert daily_desktop_intent_tool_request("粘贴一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("把剪贴板内容粘贴到当前输入框", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "paste"},
@@ -4502,6 +4512,36 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("浏览器刷新", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("重新打开关闭的标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "reopen_closed_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 重新打开关闭的标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "reopen_closed_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 复制选中文字", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "copy"},
+    }
+    assert daily_desktop_intent_tool_request("Slack 粘贴到当前输入框", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 浏览器刷新", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "refresh"},
     }
     assert daily_desktop_intent_tool_request("返回上一页", allowed_tools) == {
         "protocol": "json_fallback",
@@ -6247,6 +6287,19 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"shortcut_action": "copy", "key": "c", "modifiers": ["command"]},
         },
     )
+    safe_reopen_closed_tab = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.safe_shortcut",
+        {"action": "reopen_closed_tab"},
+        {
+            "ok": True,
+            "summary": "Executed safe shortcut: reopen closed tab",
+            "data": {
+                "shortcut_action": "reopen_closed_tab",
+                "key": "t",
+                "modifiers": ["command", "shift"],
+            },
+        },
+    )
     safe_key = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.safe_key",
         {"action": "arrow_down", "repeat_count": 3},
@@ -6597,6 +6650,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
     assert app_focus_window == "已切换到 Slack 的 general 窗口。"
     assert safe_shortcut == "已复制选中内容。"
+    assert safe_reopen_closed_tab == "已重新打开关闭的标签页。"
     assert safe_key == "已按下箭头（3 次）。"
     assert safe_type_text == "已向前台输入文字（5 个字符）。"
     assert app_open_safe_type_text == "已打开 Notes 并输入文字（5 个字符）。"
