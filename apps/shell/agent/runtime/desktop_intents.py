@@ -5793,7 +5793,9 @@ def _desktop_safe_key(text: str) -> dict[str, Any] | None:
         r"(?P<{name}>esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
         r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
         r"arrow\s+left|arrow\s+right|up|down|left|right|"
-        r"退出|取消|制表键|制表|上箭头|下箭头|左箭头|右箭头|上|下|左|右|"
+        r"退出|取消|制表键|制表|向上箭头|往上箭头|朝上箭头|向下箭头|往下箭头|朝下箭头|"
+        r"向左箭头|往左箭头|朝左箭头|向右箭头|往右箭头|朝右箭头|"
+        r"上箭头|下箭头|左箭头|右箭头|向上键|向下键|向左键|向右键|上|下|左|右|"
         r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
     )
     patterns = (
@@ -5854,21 +5856,37 @@ def _safe_key_action(value: str) -> str:
         "arrowup": "arrow_up",
         "上": "arrow_up",
         "上箭头": "arrow_up",
+        "向上箭头": "arrow_up",
+        "往上箭头": "arrow_up",
+        "朝上箭头": "arrow_up",
+        "向上键": "arrow_up",
         "down": "arrow_down",
         "downarrow": "arrow_down",
         "arrowdown": "arrow_down",
         "下": "arrow_down",
         "下箭头": "arrow_down",
+        "向下箭头": "arrow_down",
+        "往下箭头": "arrow_down",
+        "朝下箭头": "arrow_down",
+        "向下键": "arrow_down",
         "left": "arrow_left",
         "leftarrow": "arrow_left",
         "arrowleft": "arrow_left",
         "左": "arrow_left",
         "左箭头": "arrow_left",
+        "向左箭头": "arrow_left",
+        "往左箭头": "arrow_left",
+        "朝左箭头": "arrow_left",
+        "向左键": "arrow_left",
         "right": "arrow_right",
         "rightarrow": "arrow_right",
         "arrowright": "arrow_right",
         "右": "arrow_right",
         "右箭头": "arrow_right",
+        "向右箭头": "arrow_right",
+        "往右箭头": "arrow_right",
+        "朝右箭头": "arrow_right",
+        "向右键": "arrow_right",
         "home": "home",
         "home键": "home",
         "end": "end",

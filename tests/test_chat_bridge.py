@@ -3833,6 +3833,48 @@ def test_chat_bridge_quick_message_executes_safe_click_without_approval(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    pressed: list[tuple[str, int]] = []
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        pressed.append((action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": "Pressed Down Arrow",
+            "data": {
+                "key_action": action,
+                "key_label": "Down Arrow",
+                "repeat_count": repeat_count,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "按向下箭头三次",
+    )
+
+    assert pressed == [("arrow_down", 3)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已按下箭头（3 次）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "action": "arrow_down",
+        "repeat_count": 3,
+    }
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     tmp_path,
     monkeypatch,

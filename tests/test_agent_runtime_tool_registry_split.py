@@ -3965,6 +3965,25 @@ def test_desktop_safe_key_uses_whitelisted_system_events_key_code(monkeypatch) -
     assert calls[0][0][-2:] == ["125", "3"]
 
 
+def test_desktop_safe_key_accepts_directional_chinese_aliases(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="pressed\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_key("向下箭头", repeat_count=2)
+
+    assert result["ok"] is True
+    assert result["data"]["key_action"] == "arrow_down"
+    assert result["data"]["key_label"] == "Down Arrow"
+    assert result["data"]["repeat_count"] == 2
+    assert calls[0][0][-2:] == ["125", "2"]
+
+
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(

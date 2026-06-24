@@ -4116,6 +4116,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_key",
         "input": {"action": "arrow_down", "repeat_count": 3},
     }
+    assert daily_desktop_intent_tool_request("按向下箭头三次", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_key",
+        "input": {"action": "arrow_down", "repeat_count": 3},
+    }
     assert daily_desktop_intent_tool_request("press escape", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_key",
