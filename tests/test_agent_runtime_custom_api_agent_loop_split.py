@@ -865,6 +865,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "reason": "user asked to capture the browser page after opening a URL",
         },
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 访问 github.com 并截图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://github.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
     assert daily_desktop_intent_tool_request("打开 GitHub 截图", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_screenshot",
@@ -900,6 +908,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 Chrome 并访问 github.com", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Chrome 访问 github.com 并读一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("浏览器打开 GitHub 然后读一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("open browser and visit github.com", allowed_tools) == {

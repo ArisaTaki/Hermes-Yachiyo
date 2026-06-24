@@ -3320,6 +3320,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         ("打开 GitHub 并读一下页面", "live2d", "GitHub page text for Yachiyo", ""),
         ("打开 GitHub 看看内容", "bubble", "GitHub page text for Yachiyo", ""),
         ("打开 github.com 读一下内容", "live2d", "GitHub page text for Yachiyo", ""),
+        ("浏览器打开 GitHub 然后读一下", "bubble", "GitHub page text for Yachiyo", ""),
         ("打开 GitHub 并概括内容", "bubble", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
         ("open github.com and summarize", "live2d", "网页内容摘要：\n- GitHub page text for Yachiyo", "summary"),
     ]
@@ -3359,7 +3360,72 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
         ("extract", ""),
         ("open", "https://github.com"),
         ("extract", ""),
+        ("open", "https://github.com"),
+        ("extract", ""),
     ]
+
+
+def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_open_url(url: str) -> dict:
+        calls.append(("open", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    def fake_screenshot(target_path) -> dict:
+        calls.append(("screenshot", str(target_path)))
+        return {
+            "ok": True,
+            "action": "browser.screenshot",
+            "summary": "Captured current browser page",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "format": "png",
+                "size": 10,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_screenshot)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Chrome 访问 github.com 并截图",
+        launcher_mode="bubble",
+    )
+
+    assert calls[0] == ("open", "https://github.com")
+    assert calls[1][0] == "screenshot"
+    assert calls[1][1].endswith("browser/current-page.png")
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开网页并截取当前网页。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_screenshot"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "url": "https://github.com",
+        "reason": "user asked to capture the browser page after opening a URL",
+    }
+    assert agent_task["artifacts"][-1]["path"] == "browser/current-page.png"
+    completed_event = next(
+        event
+        for event in result["_task_timeline"]["events"]
+        if event["event_type"] == "agent.desktop.intent_completed"
+    )
+    assert completed_event["detail"] == "browser.open_url_and_screenshot"
+    assert run["status"] == "completed"
+    assert "artifact.created" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoints(

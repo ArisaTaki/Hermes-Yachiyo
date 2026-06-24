@@ -329,6 +329,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    browser_open_request = _browser_open_url_tool_request(context, allowed)
+    if browser_open_request:
+        return [browser_open_request]
     schedule_create_request = _schedule_create_tool_request(context)
     if schedule_create_request and str(schedule_create_request.get("tool") or "") in allowed:
         return [schedule_create_request]
@@ -780,6 +783,26 @@ def _desktop_path_tool_request(text: str) -> dict[str, Any] | None:
     reveal_path = _desktop_reveal_path(text)
     if reveal_path:
         return _request("desktop.reveal_path", {"path": reveal_path})
+    return None
+
+
+def _browser_open_url_tool_request(text: str, allowed: set[str]) -> dict[str, Any] | None:
+    if _looks_like_explanation_request(text):
+        return None
+    browser_summary_request = _is_browser_summary_request(text)
+    open_extract_payload = _browser_open_url_and_extract_text_request(text)
+    if open_extract_payload and "browser.open_url_and_extract_text" in allowed:
+        return _request(
+            "browser.open_url_and_extract_text",
+            open_extract_payload,
+            presentation="summary" if browser_summary_request else "",
+        )
+    open_screenshot_payload = _browser_open_url_and_screenshot_request(text)
+    if open_screenshot_payload and "browser.open_url_and_screenshot" in allowed:
+        return _request("browser.open_url_and_screenshot", open_screenshot_payload)
+    browser_open_target_url = _browser_open_target_url(text)
+    if browser_open_target_url and "browser.open_url" in allowed:
+        return _request("browser.open_url", {"url": browser_open_target_url})
     return None
 
 
@@ -1577,6 +1600,9 @@ def _browser_composite_open_url(text: str) -> str:
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:打开|启动|运行|拉起|开启)\s*{browser_name}\s*"
         rf"(?:(?:并|然后|后|之后|再)\s*)?(?:打开|访问|浏览|前往|去)\s*(?P<target>[^。！？!?，,]+)",
+        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:在|用)?\s*{browser_name}\s*(?:里|中|内|上)?\s*"
+        rf"(?:打开|访问|浏览|前往|去)\s*(?P<target>[^。！？!?，,]+)",
         rf"(?:open|launch|start)\s+{browser_name}\s+(?:and\s+)?"
         rf"(?:open|visit|browse|go to)\s+(?P<target>[^.!?]+)",
     )
