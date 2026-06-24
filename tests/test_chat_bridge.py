@@ -855,6 +855,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
     monkeypatch,
 ):
     open_calls: list[str] = []
+    music_calls: list[str] = []
 
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
@@ -868,13 +869,31 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
             },
         }
 
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        music_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and attempted playback with media key",
+            "data": {
+                "app_name": app_name,
+                "playback_state_unverified": True,
+            },
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    cases = (
-        ("打开 Spotify 播放周杰伦", "bubble", "Spotify"),
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
+    app_cases = (
         ("微信帮我打开一下", "live2d", "WeChat"),
         ("open WeChat for me", "bubble", "WeChat"),
     )
-    for prompt, launcher_mode, app_name in cases:
+    for prompt, launcher_mode, app_name in app_cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
@@ -894,7 +913,33 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_calls == ["Spotify", "WeChat", "WeChat"]
+    music_cases = (
+        ("打开 Spotify 播放周杰伦", "bubble", "Spotify"),
+        ("用 Spotify 播放音乐", "live2d", "Spotify"),
+    )
+    for prompt, launcher_mode, app_name in music_cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert agent_task["summary"] == f"已打开 {app_name}，并用媒体键尝试开始播放。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert music_calls == ["Spotify", "Spotify"]
+
+    assert open_calls == ["WeChat", "WeChat"]
 
 
 def test_chat_bridge_quick_message_opens_default_browser_without_model(

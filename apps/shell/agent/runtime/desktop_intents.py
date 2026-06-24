@@ -6231,6 +6231,9 @@ def _media_app_open_name(text: str) -> str:
 
 
 def _music_app_open_and_play_app_name(text: str) -> str:
+    named_app = _non_apple_music_named_play_app_name(text)
+    if named_app:
+        return named_app
     app_name = _music_app_generic_play_open_name(text)
     if app_name and app_name != "Music":
         return app_name
@@ -6240,9 +6243,15 @@ def _music_app_open_and_play_app_name(text: str) -> str:
 def _non_apple_music_named_play_app_name(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
+        r"(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:并|然后|后|之后|再)\s*)?(?:开始)?(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
         r"^(?P<app>[^。！？!?，,]+?)\s*(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+?)\s+"
+        r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)$",
         r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
         r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
         r"^(?P<app>[^.!?]+?)\s+(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
@@ -6270,12 +6279,27 @@ def _known_music_app_name(value: str) -> str:
 def _music_app_generic_play_open_name(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
+        r"(?:随便|随机)?(?:开始)?"
+        r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
+        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
+        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:并|然后|后|之后|再)\s*)?(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
         r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
         r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:play|start\s+playing)\s+(?:music|songs?|something)\s+"
+        r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)[.!?]*$",
         r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
         r"(?:play|start\s+playing)[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
