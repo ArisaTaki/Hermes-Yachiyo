@@ -6366,7 +6366,7 @@ def _music_control_action(text: str) -> str:
     ):
         return "toggle"
     if re.search(
-        r"(?:暂停|停一下|停止播放|停止(?:音乐|歌曲|歌)|先停一下)"
+        r"(?:暂停|停一下|停止播放|停止(?:一下|下)?(?:音乐|歌曲|歌)|先停一下)"
         r"(?:\s*(?:音乐|歌曲|歌|apple\s*music|music))?",
         lowered,
     ) or re.search(
@@ -6376,11 +6376,12 @@ def _music_control_action(text: str) -> str:
         return "pause"
     if re.search(
         r"(?:继续播放|恢复播放|接着播放|开始播放|"
+        r"(?:继续|接着|恢复|开始)(?:播放|播|放)\s*|"
         r"(?:继续|接着|恢复|开始)(?:播放|播|放)?\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))"
         r"(?:\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))?",
         lowered,
     ) or re.search(
-        r"\b(?:resume|continue|start)(?:\s+playing)?\s+"
+        r"\b(?:resume|continue|start|play)(?:\s+playing)?\s+"
         r"(?:the\s+|my\s+)?(?:music|apple\s*music|song|track|playback)\b",
         lowered,
     ):
