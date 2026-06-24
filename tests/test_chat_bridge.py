@@ -1844,6 +1844,43 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    launcher_cases = [
+        ("在微信搜索文件传输助手", "bubble", "WeChat", "文件传输助手"),
+        ("Apple Music 搜索超时空辉夜姬", "live2d", "Music", "超时空辉夜姬"),
+    ]
+    for prompt, launcher_mode, app_name, typed_text in launcher_cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert calls[-3:] == [
+            ("focus", app_name),
+            ("shortcut", "find"),
+            ("type", typed_text),
+        ]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == (
+            f"已切到 {app_name} 并打开查找。 已向前台输入文字（{len(typed_text)} 个字符）。"
+        )
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_foreground_search_type_submit_without_model(
     tmp_path,

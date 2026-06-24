@@ -2503,6 +2503,54 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在微信搜索文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Apple Music 搜索超时空辉夜姬", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "超时空辉夜姬"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("用 Apple Music 搜索超时空辉夜姬并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "超时空辉夜姬"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("用浏览器搜索天气", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=%E5%A4%A9%E6%B0%94"},
+        }
+    ]
     assert daily_desktop_intent_tool_requests("微信搜索文件传输助手然后输入 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",

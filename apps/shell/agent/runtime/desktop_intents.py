@@ -348,6 +348,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
     ):
         return app_browser_action_sequence
+    app_direct_search_sequence = _app_direct_search_type_tool_requests(context)
+    if app_direct_search_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_direct_search_sequence
+    ):
+        return app_direct_search_sequence
     desktop_path_request = _desktop_path_tool_request(context)
     if desktop_path_request and str(desktop_path_request.get("tool") or "") in allowed:
         return [desktop_path_request]
@@ -460,7 +465,8 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
             requests.extend(input_followup_requests)
             continue
         search_type_requests = (
-            _app_scoped_search_type_tool_requests(stripped_clause)
+            _app_direct_search_type_tool_requests(stripped_clause)
+            or _app_scoped_search_type_tool_requests(stripped_clause)
             or _app_open_or_focus_search_type_tool_requests(stripped_clause)
             or _foreground_search_type_tool_requests(stripped_clause)
         )
@@ -3957,6 +3963,83 @@ def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, An
     )
 
 
+def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, _raw_app, app_name, followup = shorthand_match
+    else:
+        scoped_text = _strip_app_search_scope_prefix(text)
+        split = _known_app_prefix_split(scoped_text)
+        if not split:
+            return []
+        _raw_app, app_name, followup = split
+        mode = "focus"
+    if not app_name or app_name in _BROWSER_APP_NAMES:
+        return []
+    parsed = _app_search_query_from_followup(followup)
+    if parsed is None:
+        return []
+    typed_text, submit_return = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if submit_return:
+        requests.append(_request("desktop.search_submit", {}))
+    return requests
+
+
+def _strip_app_search_scope_prefix(text: str) -> str:
+    return re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在|用|通过|到)\s*",
+        "",
+        _strip_query(text),
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
+    followup = _strip_query(value)
+    patterns = (
+        r"^(?:搜索(?!框|栏)|搜一下|搜|查找(?!框)|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:find|search)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_query = match.group("query")
+        if re.search(
+            r"(?:然后|并且|并|再|接着|and\s+then|then|and)\s*"
+            r"(?:输入|打字|键入|敲入|发送|提交|点击|点|打开|播放|写入|写|粘贴|"
+            r"type|enter\s+text|send|submit|click|open|play|write|paste)\b",
+            raw_query,
+            flags=re.IGNORECASE,
+        ):
+            return None
+        submit_return = _typed_text_has_return_followup(raw_query, "搜索")
+        query = re.sub(
+            r"\s*(?:然后|并且|并|再|接着)\s*(?:按|执行|开始)?"
+            r"(?:回车|确认|确定|搜索|查找|检索)$",
+            "",
+            raw_query,
+            flags=re.IGNORECASE,
+        )
+        query = re.sub(
+            r"\s*(?:and\s+then|then|and)\s*(?:press\s+)?(?:enter|return|search|find|go)$",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        )
+        query = _strip_search_query(query)
+        if query:
+            return query, submit_return
+    return None
+
+
 def _app_open_or_focus_browser_action_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -4592,6 +4675,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_safe_key(followup)
         or _desktop_hotkey(followup)
         or _app_followup_safe_type_text(followup)
+        or _app_search_query_from_followup(followup) is not None
         or _desktop_find_query(followup)
         or _browser_click_request(_browser_context_followup(followup)) is not None
         or _browser_type_text_request(_browser_context_followup(followup)) is not None

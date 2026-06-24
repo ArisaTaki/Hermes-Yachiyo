@@ -1076,6 +1076,41 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("在微信搜索文件传输助手")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_events = service.list_run_events(second_run["run_id"])["events"]
+        second_event_types = [event["event_type"] for event in second_events]
+        second_messages = store.load_messages(runtime.chat_session.session_id, limit=20)
+        second_latest_user = [message for message in second_messages if message.role == "user"][-1]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert calls[-3:] == [
+            ("focus", "WeChat"),
+            ("shortcut", "find"),
+            ("type", "文件传输助手"),
+        ]
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（6 个字符）。"
+        assert [tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"][-2:]] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == second["agent_task"]["summary"]
+        assert second_latest_user.content == "在微信搜索文件传输助手"
+        assert second_run["status"] == "completed"
+        assert second_event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
