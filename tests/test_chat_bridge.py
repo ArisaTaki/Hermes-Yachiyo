@@ -446,6 +446,7 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
+
     assert "model.requested" not in event_types
 
 
@@ -2848,6 +2849,28 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    for launcher_mode in ("bubble", "live2d"):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "百度 open hanako",
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已打开网页：https://www.baidu.com/s?wd=open+hanako。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
+        assert agent_task["tool_calls"][-1]["input_preview"]["url"] == "https://www.baidu.com/s?wd=open+hanako"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert opened_urls == [
+        "https://github.com",
+        "https://www.baidu.com/s?wd=open+hanako",
+        "https://www.baidu.com/s?wd=open+hanako",
+    ]
+
 
 def test_chat_bridge_quick_message_executes_address_bar_url_without_approval(
     tmp_path,
@@ -2915,19 +2938,35 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "打开 GitHub 并读一下页面",
-    )
+    prompts = [
+        ("打开 GitHub 并读一下页面", "live2d"),
+        ("打开 GitHub 看看内容", "bubble"),
+        ("打开 github.com 读一下内容", "live2d"),
+    ]
+    for prompt, launcher_mode in prompts:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert calls == [("open", "https://github.com"), ("extract", "")]
-    assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "GitHub page text for Yachiyo"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "GitHub page text for Yachiyo"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
+        assert agent_task["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert calls == [
+        ("open", "https://github.com"),
+        ("extract", ""),
+        ("open", "https://github.com"),
+        ("extract", ""),
+        ("open", "https://github.com"),
+        ("extract", ""),
+    ]
 
 
 def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoints(

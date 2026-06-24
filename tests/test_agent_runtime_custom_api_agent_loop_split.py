@@ -805,6 +805,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url_and_extract_text",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开 GitHub 看看内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 github.com 读一下内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs 并读一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
@@ -816,6 +826,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("打开 GitHub 并截个图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://github.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
+    assert daily_desktop_intent_tool_request("打开 GitHub 截图", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_screenshot",
         "input": {
@@ -835,6 +853,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("看看当前网页内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("这是哪个网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
     }
     assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", ["browser.extract_text"]) is None
     assert daily_desktop_intent_tool_request("打开 Chrome 并访问 github.com", allowed_tools) == {
@@ -883,6 +911,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"},
+    }
+    assert daily_desktop_intent_tool_request("百度 open hanako", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.baidu.com/s?wd=open+hanako"},
     }
     assert daily_desktop_intent_tool_request("搜索 超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",

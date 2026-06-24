@@ -1709,6 +1709,12 @@ def _is_browser_open_followup_extract_text_request(text: str) -> bool:
             text,
         )
         or re.search(
+            r"(?:打开|访问|浏览|前往|去).{0,80}"
+            r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下)"
+            r"(?:一下|下|它|网页|页面|网站|正文|文字|文本|内容)?",
+            text,
+        )
+        or re.search(
             r"\b(?:and|then)\s+(?:read|extract|get)\s+"
             r"(?:the\s+)?(?:page|webpage|website|site|text|content)?\b",
             lowered,
@@ -1883,6 +1889,7 @@ def _browser_search_url(text: str) -> str:
     if _looks_like_click_command(text) or _desktop_click_ui_element(text) or _desktop_type_into_ui_element(text):
         return ""
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
@@ -2187,6 +2194,10 @@ def _is_browser_current_page_request(text: str) -> bool:
             text,
         )
         or re.search(
+            r"(?:这是|这|当前打开的是).{0,4}(?:哪个|什么).{0,4}(?:网页|网站|页面|页|标签页)",
+            text,
+        )
+        or re.search(
             r"(?:看一下|看看|看下|查看).{0,8}"
             r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)",
             text,
@@ -2212,6 +2223,12 @@ def _is_browser_extract_text_request(text: str) -> bool:
         re.search(
             r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取).{0,10}"
             r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页).{0,10}(?:正文|文字|文本|内容)?",
+            text,
+        )
+        or re.search(
+            r"(?:看看|看一下|看下|查看).{0,10}"
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|页|浏览器|标签页)"
+            r".{0,10}(?:正文|文字|文本|内容)",
             text,
         )
         or re.search(
@@ -6751,6 +6768,20 @@ def _strip_browser_followup(value: str) -> str:
         r"\s*(?:并且|并|然后|之后|后|再)\s*"
         r"(?:读取|读一下|读下|读一读|提取|抓取|获取|查看|看看|看一下|"
         r"截取|截图|截屏|截一下|截个图|截|抓屏).*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+"
+        r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|看下)"
+        r"(?:一下|下)?(?:网页|页面|网站|正文|文字|文本|内容)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:截取|截图|截屏|截一下|截个图|截|抓屏|屏幕截图)$",
         "",
         text,
         flags=re.IGNORECASE,

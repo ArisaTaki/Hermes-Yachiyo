@@ -2374,6 +2374,7 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("搜索 open hanako", "https://www.google.com/search?q=open+hanako"),
             ("查 OpenAI 最新消息", "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"),
             ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
+            ("百度 open hanako", "https://www.baidu.com/s?wd=open+hanako"),
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
             ("打开浏览器并访问 GitHub", "https://github.com"),
@@ -2462,34 +2463,41 @@ def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     try:
-        result = api.send_message("打开 GitHub 并读一下页面")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        for prompt in ("打开 GitHub 并读一下页面", "打开 GitHub 看看内容"):
+            result = api.send_message(prompt)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert calls == [("open", "https://github.com"), ("extract", "")]
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "GitHub page text for Yachiyo"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "GitHub page text for Yachiyo"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "GitHub page text for Yachiyo"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["summary"] == "GitHub page text for Yachiyo"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "GitHub page text for Yachiyo"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "GitHub page text for Yachiyo"
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert calls == [
+            ("open", "https://github.com"),
+            ("extract", ""),
+            ("open", "https://github.com"),
+            ("extract", ""),
+        ]
     finally:
         service.close()
         store.close()
