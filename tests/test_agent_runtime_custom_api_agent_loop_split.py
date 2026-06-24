@@ -4101,6 +4101,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.read",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("读一下剪贴板", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.read",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("粘贴板读下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.read",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("read clipboard", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "clipboard.read",

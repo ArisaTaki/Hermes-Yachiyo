@@ -3589,20 +3589,27 @@ def test_chat_bridge_quick_message_executes_clipboard_read_for_launcher_entrypoi
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_read", fake_clipboard_read)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "剪贴板里是什么",
+    cases = (
+        ("剪贴板里是什么", "bubble"),
+        ("读一下剪贴板", "live2d"),
     )
+    for text, launcher_mode in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
 
-    assert read_calls == [2000]
-    assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "剪贴板内容：hello world"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "clipboard.read"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {}
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "剪贴板内容：hello world"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "clipboard.read"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {}
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert read_calls == [2000, 2000]
 
 
 def test_chat_bridge_quick_message_copies_and_reads_selected_text_without_model(
