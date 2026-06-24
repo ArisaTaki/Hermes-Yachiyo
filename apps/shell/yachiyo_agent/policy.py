@@ -55,6 +55,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "system.settings_open",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -242,6 +243,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "media.music_app_open_and_play",
     ),
+    "system_settings": ("system.settings_open",),
     "control_system_volume": ("system.volume",),
     "control_system_brightness": ("system.brightness",),
     "write_clipboard": ("clipboard.write",),
@@ -341,6 +343,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "quit_app": "Quit a local desktop application after approval.",
     "open_path": "Open a safe local file or folder with the system default app.",
     "play_or_pause_media": "Control local media playback such as Apple Music or a named music app.",
+    "system_settings": "Open macOS System Settings panes or privacy permission pages.",
     "control_system_volume": "Read or adjust local system output volume.",
     "control_system_brightness": "Adjust local display brightness up or down.",
     "write_clipboard": "Write explicit user-provided text to the system clipboard.",
@@ -424,6 +427,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "system.settings_open",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -462,6 +466,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "app_control": (
         "app.status",
         "app.open",
+        "system.settings_open",
         "app.focus",
         "app.focus_window",
         "app.show",
@@ -839,6 +844,8 @@ def _tool_missing_permissions(
     values = [*_missing_permissions(missing_by_capability, "desktop_execution")]
     capability_missing = _missing_permissions(missing_by_capability, capability_id)
     if tool == "app.open":
+        values.extend(value for value in capability_missing if value == "open_command")
+    elif tool == "system.settings_open":
         values.extend(value for value in capability_missing if value == "open_command")
     elif tool == "app.focus":
         values.extend(value for value in capability_missing if value != "open_command")

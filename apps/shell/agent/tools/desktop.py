@@ -296,6 +296,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
     "app_control": (
         "app.status",
         "app.open",
+        "system.settings_open",
         "app.focus",
         "app.focus_window",
         "app.show",
@@ -363,8 +364,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "screen_recording": (
         {
             "label": "打开屏幕录制权限",
-            "tool": "app.open",
-            "input": {"app_name": "屏幕录制权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "屏幕录制权限"},
             "permission_target": "screen_recording",
             "risk_level": "low",
         },
@@ -372,8 +373,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "screen_capture_probe_failed": (
         {
             "label": "打开屏幕录制权限",
-            "tool": "app.open",
-            "input": {"app_name": "屏幕录制权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "屏幕录制权限"},
             "permission_target": "screen_recording",
             "risk_level": "low",
         },
@@ -381,8 +382,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "automation": (
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
@@ -390,15 +391,15 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "automation_or_accessibility": (
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
         {
             "label": "打开辅助功能权限",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "permission_target": "accessibility",
             "risk_level": "low",
         },
@@ -406,8 +407,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "accessibility": (
         {
             "label": "打开辅助功能权限",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "permission_target": "accessibility",
             "risk_level": "low",
         },
@@ -415,8 +416,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "input_monitoring": (
         {
             "label": "打开输入监控权限",
-            "tool": "app.open",
-            "input": {"app_name": "输入监控"},
+            "tool": "system.settings_open",
+            "input": {"target": "输入监控"},
             "permission_target": "input_monitoring",
             "risk_level": "low",
         },
@@ -424,8 +425,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "full_disk_access": (
         {
             "label": "打开完全磁盘访问权限",
-            "tool": "app.open",
-            "input": {"app_name": "完全磁盘访问"},
+            "tool": "system.settings_open",
+            "input": {"target": "完全磁盘访问"},
             "permission_target": "full_disk_access",
             "risk_level": "low",
         },
@@ -433,8 +434,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "files_and_folders": (
         {
             "label": "打开文件和文件夹权限",
-            "tool": "app.open",
-            "input": {"app_name": "文件和文件夹"},
+            "tool": "system.settings_open",
+            "input": {"target": "文件和文件夹"},
             "permission_target": "files_and_folders",
             "risk_level": "low",
         },
@@ -442,8 +443,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "microphone": (
         {
             "label": "打开麦克风权限",
-            "tool": "app.open",
-            "input": {"app_name": "麦克风"},
+            "tool": "system.settings_open",
+            "input": {"target": "麦克风"},
             "permission_target": "microphone",
             "risk_level": "low",
         },
@@ -451,8 +452,8 @@ _PERMISSION_RECOVERY_ACTIONS = {
     "camera": (
         {
             "label": "打开摄像头权限",
-            "tool": "app.open",
-            "input": {"app_name": "摄像头"},
+            "tool": "system.settings_open",
+            "input": {"target": "摄像头"},
             "permission_target": "camera",
             "risk_level": "low",
         },
@@ -1145,6 +1146,31 @@ def app_open(app_name: str) -> dict[str, Any]:
     }
 
 
+def system_settings_open(target: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("system.settings_open")
+    clean_target = _clean_required(target, "target")
+    settings_target = _system_settings_target(clean_target)
+    if settings_target is not None:
+        return _open_system_settings_target(
+            clean_target,
+            settings_target,
+            action="system.settings_open",
+        )
+    if _looks_like_system_settings_home(clean_target):
+        return _open_system_settings_home(clean_target)
+    return {
+        "ok": False,
+        "action": "system.settings_open",
+        "summary": "system.settings_open failed",
+        "error": f"Unknown System Settings target: {clean_target}",
+        "error_code": "unknown_system_settings_target",
+        "data": {"target": clean_target, "open_target": "system_settings"},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def reveal_path(path: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.reveal_path")
@@ -1330,6 +1356,8 @@ def _open_common_folder(label: str, folder_path: Path) -> dict[str, Any]:
 def _open_system_settings_target(
     label: str,
     target: tuple[str, tuple[str, ...]],
+    *,
+    action: str = "app.open",
 ) -> dict[str, Any]:
     settings_label, urls = target
     errors: list[str] = []
@@ -1343,19 +1371,19 @@ def _open_system_settings_target(
                 check=False,
             )
         except Exception as exc:
-            return _error("app.open", exc)
+            return _error(action, exc)
         if result.returncode == 0:
             return {
                 "ok": True,
-                "action": "app.open",
+                "action": action,
                 "summary": f"Opened System Settings: {settings_label}",
-                "data": {
-                    "app_name": label,
-                    "open_target": "system_settings",
-                    "settings_label": settings_label,
-                    "settings_url": url,
-                    "fallback_used": index > 0,
-                },
+                "data": _system_settings_open_data(
+                    action,
+                    label,
+                    settings_label=settings_label,
+                    settings_url=url,
+                    fallback_used=index > 0,
+                ),
                 "permission_error": False,
                 "fallback_used": index > 0,
             }
@@ -1365,15 +1393,77 @@ def _open_system_settings_target(
             if isinstance(part, str) and part.strip()
         )
         errors.append(error or f"{url}: exit code {result.returncode}")
-    payload = _failed("app.open", result)
-    payload["data"] = {
-        "app_name": label,
+    payload = _failed(action, result)
+    payload["data"] = _system_settings_open_data(
+        action,
+        label,
+        settings_label=settings_label,
+        attempted_urls=list(urls),
+        settings_errors=errors,
+    )
+    return payload
+
+
+def _open_system_settings_home(label: str) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["open", "-a", "System Settings"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("system.settings_open", exc)
+    if result.returncode != 0:
+        payload = _failed("system.settings_open", result)
+        payload["data"] = {
+            "target": label,
+            "open_target": "system_settings",
+            "settings_label": "System Settings",
+        }
+        return payload
+    return {
+        "ok": True,
+        "action": "system.settings_open",
+        "summary": "Opened System Settings",
+        "data": {
+            "target": label,
+            "open_target": "system_settings",
+            "settings_label": "System Settings",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _system_settings_open_data(
+    action: str,
+    label: str,
+    *,
+    settings_label: str,
+    settings_url: str | None = None,
+    attempted_urls: list[str] | None = None,
+    settings_errors: list[str] | None = None,
+    fallback_used: bool | None = None,
+) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "open_target": "system_settings",
         "settings_label": settings_label,
-        "attempted_urls": list(urls),
-        "settings_errors": errors,
     }
-    return payload
+    if action == "app.open":
+        data["app_name"] = label
+    else:
+        data["target"] = label
+    if settings_url is not None:
+        data["settings_url"] = settings_url
+    if attempted_urls is not None:
+        data["attempted_urls"] = attempted_urls
+    if settings_errors is not None:
+        data["settings_errors"] = settings_errors
+    if fallback_used is not None:
+        data["fallback_used"] = fallback_used
+    return data
 
 
 def _system_settings_target(value: str) -> tuple[str, tuple[str, ...]] | None:
@@ -1383,6 +1473,25 @@ def _system_settings_target(value: str) -> tuple[str, tuple[str, ...]] | None:
         if target is not None:
             return target
     return None
+
+
+def _looks_like_system_settings_home(value: str) -> bool:
+    variants = _system_settings_alias_variants(value)
+    return any(
+        variant
+        in {
+            "systemsettings",
+            "systempreferences",
+            "settings",
+            "preferences",
+            "系统设置",
+            "系统偏好",
+            "系统偏好设置",
+            "设置",
+            "偏好设置",
+        }
+        for variant in variants
+    )
 
 
 def _system_settings_alias_variants(value: str) -> list[str]:

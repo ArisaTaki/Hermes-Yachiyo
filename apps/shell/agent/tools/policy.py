@@ -64,6 +64,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
     "media.music_app_open_and_play": "media_music_app_open_and_play",
+    "system.settings_open": "system_settings_open",
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
     "clipboard.write": "clipboard_write",
@@ -162,6 +163,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "media.music_app_open_and_play",
+    "system.settings_open",
     "system.volume",
     "system.brightness",
     "clipboard.write",
@@ -296,6 +298,14 @@ class ToolDescriptor:
                 if payload.get(key) in (None, ""):
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
                 continue
+            if self.name == "system.settings_open" and key == "target":
+                if payload.get(key) in (None, ""):
+                    raise AgentRuntimeError("system.settings_open 参数 target 必须是非空字符串")
+                if not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError("system.settings_open 参数 target 必须是字符串")
+                if not str(payload.get(key) or "").strip():
+                    raise AgentRuntimeError("system.settings_open 参数 target 必须是非空字符串")
+                continue
             if not isinstance(payload.get(key), str) or not str(payload.get(key) or "").strip():
                 raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非空字符串")
         if self.name == "workspace.write_patch":
@@ -382,6 +392,11 @@ class ToolDescriptor:
             raise AgentRuntimeError("desktop.reveal_path 参数 path 必须是非空字符串")
         if self.name == "desktop.open_path" and not str(payload.get("path") or "").strip():
             raise AgentRuntimeError("desktop.open_path 参数 path 必须是非空字符串")
+        if self.name == "system.settings_open":
+            if not isinstance(payload.get("target"), str):
+                raise AgentRuntimeError("system.settings_open 参数 target 必须是字符串")
+            if not str(payload.get("target") or "").strip():
+                raise AgentRuntimeError("system.settings_open 参数 target 必须是非空字符串")
         if "timeout_seconds" in payload:
             value = payload.get("timeout_seconds")
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 120:
@@ -1516,6 +1531,20 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("app_name",),
+    ),
+    "system.settings_open": ToolDescriptor(
+        name="system.settings_open",
+        description=(
+            "Open a macOS System Settings pane or privacy permission page, such as "
+            "Accessibility, Screen Recording, Automation, Bluetooth, Wi-Fi, or Privacy & Security."
+        ),
+        properties={
+            "target": {
+                "type": "string",
+                "description": "System Settings pane or permission target to open.",
+            }
+        },
+        required=("target",),
     ),
     "system.volume": ToolDescriptor(
         name="system.volume",

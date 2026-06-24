@@ -2535,8 +2535,8 @@ async def test_yachiyo_task_route_surfaces_music_permission_recovery_when_fallba
         },
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
@@ -3950,8 +3950,8 @@ async def test_yachiyo_task_route_surfaces_safe_click_accessibility_recovery(
         assert tool_call["output_preview"]["recovery_actions"] == [
             {
                 "label": "打开辅助功能权限",
-                "tool": "app.open",
-                "input": {"app_name": "辅助功能权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "辅助功能权限"},
                 "permission_target": "accessibility",
                 "recovery_retry_input": {"x": 120, "y": 240},
                 "recovery_retry_prompt": "点击 120, 240",
@@ -4798,8 +4798,8 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
             },
             {
                 "label": "打开自动化权限",
-                "tool": "app.open",
-                "input": {"app_name": "自动化权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "自动化权限"},
                 "permission_target": "automation",
                 "recovery_retry_input": {},
                 "recovery_retry_prompt": "检查桌面权限",
@@ -6238,8 +6238,8 @@ async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
         assert tool_call["output_preview"]["recovery_actions"] == [
             {
                 "label": "打开屏幕录制权限",
-                "tool": "app.open",
-                "input": {"app_name": "屏幕录制权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "屏幕录制权限"},
                 "permission_target": "screen_recording",
                 "recovery_retry_input": {"reason": "user asked to capture the screen"},
                 "recovery_retry_prompt": "截图当前屏幕",
@@ -6293,7 +6293,7 @@ async def test_yachiyo_task_route_executes_structured_recovery_action_without_mo
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    open_calls: list[str] = []
+    settings_open_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -6308,19 +6308,22 @@ async def test_yachiyo_task_route_executes_structured_recovery_action_without_mo
         ),
     )
 
-    def fake_app_open(app_name: str) -> dict[str, Any]:
-        open_calls.append(app_name)
+    def fake_system_settings_open(target: str) -> dict[str, Any]:
+        settings_open_calls.append(target)
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
+            "action": "system.settings_open",
+            "summary": f"Opened System Settings: {target}",
             "data": {
-                "app_name": app_name,
+                "target": target,
                 "open_target": "system_settings",
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_settings_open",
+        fake_system_settings_open,
+    )
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
@@ -6333,8 +6336,8 @@ async def test_yachiyo_task_route_executes_structured_recovery_action_without_mo
                     "runnable_kind": "main",
                     "daily_desktop_intent": True,
                     "desktop_permission_recovery": True,
-                    "recovery_tool": "app.open",
-                    "recovery_input": {"app_name": "屏幕录制权限"},
+                    "recovery_tool": "system.settings_open",
+                    "recovery_input": {"target": "屏幕录制权限"},
                     "recovery_permission_target": "screen_recording",
                     "recovery_risk_level": "low",
                 },
@@ -6352,17 +6355,17 @@ async def test_yachiyo_task_route_executes_structured_recovery_action_without_mo
         )
         event_types = [event["event_type"] for event in events["events"]]
 
-        assert open_calls == ["屏幕录制权限"]
+        assert settings_open_calls == ["屏幕录制权限"]
         assert started["status"] == "completed"
-        assert started["summary"] == "已打开屏幕录制权限。"
-        assert started["tool_calls"][-1]["tool_name"] == "app.open"
-        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "屏幕录制权限"
-        assert planned_event["payload"]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert started["summary"] == "已打开系统设置：屏幕录制权限。"
+        assert started["tool_calls"][-1]["tool_name"] == "system.settings_open"
+        assert started["tool_calls"][-1]["input_preview"]["target"] == "屏幕录制权限"
+        assert planned_event["payload"]["input_preview"]["target"] == "屏幕录制权限"
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert user_metadata["desktop_permission_recovery"] is True
-        assert user_metadata["recovery_tool"] == "app.open"
-        assert user_metadata["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert user_metadata["recovery_tool"] == "system.settings_open"
+        assert user_metadata["recovery_input"] == {"target": "屏幕录制权限"}
     finally:
         service.close()
         store.close()
@@ -7280,6 +7283,14 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert any(
         "media play key" in note
         for note in tools["media.music_app_open_and_play"]["fallback_notes"]
+    )
+    assert tools["system.settings_open"]["capability_id"] == "app_control"
+    assert tools["system.settings_open"]["risk_level"] == "low"
+    assert tools["system.settings_open"]["input_schema"]["required"] == ["target"]
+    assert tools["system.settings_open"]["missing_permissions"] == []
+    assert any(
+        "does not change settings" in note
+        for note in tools["system.settings_open"]["fallback_notes"]
     )
     assert tools["system.volume"]["capability_id"] == "desktop_execution"
     assert tools["system.volume"]["risk_level"] == "low"

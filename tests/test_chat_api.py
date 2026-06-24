@@ -1560,8 +1560,8 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
             "recovery_actions": [
                 {
                     "label": "打开辅助功能权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "辅助功能权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "辅助功能权限"},
                     "permission_target": "accessibility",
                     "risk_level": "low",
                 }
@@ -1658,8 +1658,8 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         assert preflight_event["payload"]["recovery_actions"] == [
             {
                 "label": "打开辅助功能权限",
-                "tool": "app.open",
-                "input": {"app_name": "辅助功能权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "辅助功能权限"},
                 "permission_target": "accessibility",
                 "risk_level": "low",
             }
@@ -1860,8 +1860,8 @@ def test_send_message_surfaces_music_permission_recovery_when_fallback_opens_mus
         },
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
@@ -3526,8 +3526,8 @@ def test_send_message_projects_screen_capture_permission_recovery_actions(tmp_pa
         assert tool_call["output_preview"]["recovery_actions"] == [
             {
                 "label": "打开屏幕录制权限",
-                "tool": "app.open",
-                "input": {"app_name": "屏幕录制权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "屏幕录制权限"},
                 "permission_target": "screen_recording",
                 "recovery_retry_input": {"reason": "user asked to capture the screen"},
                 "recovery_retry_prompt": "截图当前屏幕",
@@ -3562,7 +3562,7 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
-    open_calls: list[str] = []
+    settings_open_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -3577,19 +3577,22 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
         ),
     )
 
-    def fake_app_open(app_name: str) -> dict:
-        open_calls.append(app_name)
+    def fake_system_settings_open(target: str) -> dict:
+        settings_open_calls.append(target)
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
+            "action": "system.settings_open",
+            "summary": f"Opened System Settings: {target}",
             "data": {
-                "app_name": app_name,
+                "target": target,
                 "open_target": "system_settings",
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_settings_open",
+        fake_system_settings_open,
+    )
     try:
         result = api.send_message(
             "修复屏幕录制",
@@ -3598,8 +3601,8 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
                 "runnable_kind": "main",
                 "daily_desktop_intent": True,
                 "desktop_permission_recovery": True,
-                "recovery_tool": "app.open",
-                "recovery_input": {"app_name": "屏幕录制权限"},
+                "recovery_tool": "system.settings_open",
+                "recovery_input": {"target": "屏幕录制权限"},
                 "recovery_permission_target": "screen_recording",
                 "recovery_risk_level": "low",
                 "recovery_retry_input": {"display_id": "main"},
@@ -3631,26 +3634,26 @@ def test_send_message_executes_structured_recovery_action_without_model(tmp_path
         assert result["agent_task"]["status"] == "completed"
         assert result["agent_task"]["needs_user_action"] is False
         assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "已打开屏幕录制权限。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["app_name"] == "屏幕录制权限"
-        assert planned_event["payload"]["input_preview"]["app_name"] == "屏幕录制权限"
+        assert result["agent_task"]["summary"] == "已打开系统设置：屏幕录制权限。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.settings_open"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["target"] == "屏幕录制权限"
+        assert planned_event["payload"]["input_preview"]["target"] == "屏幕录制权限"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已打开屏幕录制权限。"
+        assert task.result == "已打开系统设置：屏幕录制权限。"
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已打开屏幕录制权限。"
-        assert open_calls == ["屏幕录制权限"]
+        assert assistant.content == "已打开系统设置：屏幕录制权限。"
+        assert settings_open_calls == ["屏幕录制权限"]
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
         assert user_metadata["desktop_permission_recovery"] is True
-        assert user_metadata["recovery_tool"] == "app.open"
-        assert user_metadata["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert user_metadata["recovery_tool"] == "system.settings_open"
+        assert user_metadata["recovery_input"] == {"target": "屏幕录制权限"}
         assert user_metadata["recovery_retry_tool"] == "screen.capture"
         assert user_metadata["recovery_retry_input"] == {"display_id": "main"}
-        assert retry_context_event["payload"]["recovery_tool"] == "app.open"
-        assert retry_context_event["payload"]["recovery_input"] == {"app_name": "屏幕录制权限"}
+        assert retry_context_event["payload"]["recovery_tool"] == "system.settings_open"
+        assert retry_context_event["payload"]["recovery_input"] == {"target": "屏幕录制权限"}
         assert retry_context_event["payload"]["retry_tool"] == "screen.capture"
         assert retry_context_event["payload"]["retry_input"] == {"display_id": "main"}
         assert retry_context_event["payload"]["source_task_id"] == "task-source-screen"

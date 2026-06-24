@@ -301,6 +301,8 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_play",
         "media_apple_music_open_and_play",
         "media_apple_music_control",
+        "media_music_app_open_and_play",
+        "system_settings_open",
         "system_volume",
         "system_brightness",
         "clipboard_write",
@@ -725,6 +727,18 @@ def test_desktop_open_path_schema_accepts_local_path() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.open_path", {"path": ""})
 
 
+def test_system_settings_open_schema_requires_target() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "system.settings_open",
+        {"target": "辅助功能权限"},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="system.settings_open 参数 target 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("system.settings_open", {})
+    with pytest.raises(AgentRuntimeError, match="system.settings_open 参数 target 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("system.settings_open", {"target": 123})
+
+
 def test_system_volume_schema_accepts_safe_volume_actions() -> None:
     ToolDescriptorRegistry.validate_payload("system.volume", {"action": "status"})
     ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set", "level": 35})
@@ -1093,6 +1107,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "system_settings_open",
+        lambda target: calls.append(("settings_open", target)) or {"ok": True, "target": target},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_permissions",
         lambda: calls.append(("permissions",)) or {"ok": True, "action": "desktop.permissions"},
     )
@@ -1445,6 +1464,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.reveal_path",
         {"path": "~/Downloads/report.pdf"},
     ) == {"ok": True, "path": "~/Downloads/report.pdf"}
+    assert dispatch_tool_call(
+        broker,
+        "system.settings_open",
+        {"target": "辅助功能权限"},
+    ) == {"ok": True, "target": "辅助功能权限"}
     assert dispatch_tool_call(broker, "desktop.permissions", {}) == {
         "ok": True,
         "action": "desktop.permissions",
@@ -1506,6 +1530,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("minimize_window",),
         ("close_window",),
         ("reveal", "~/Downloads/report.pdf"),
+        ("settings_open", "辅助功能权限"),
         ("permissions",),
         ("running",),
         ("windows", "Google Chrome"),
@@ -2074,8 +2099,8 @@ def test_screen_capture_permission_failure_returns_recovery_targets(tmp_path, mo
     assert result["recovery_actions"] == [
         {
             "label": "打开屏幕录制权限",
-            "tool": "app.open",
-            "input": {"app_name": "屏幕录制权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "屏幕录制权限"},
             "permission_target": "screen_recording",
             "risk_level": "low",
         }
@@ -2242,6 +2267,35 @@ def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> Non
         "open",
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
     ]
+
+    result = desktop_mod.system_settings_open("辅助功能权限")
+
+    assert result["ok"] is True
+    assert result["action"] == "system.settings_open"
+    assert result["summary"] == "Opened System Settings: Accessibility Permission"
+    assert result["data"] == {
+        "target": "辅助功能权限",
+        "open_target": "system_settings",
+        "settings_label": "Accessibility Permission",
+        "settings_url": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "fallback_used": False,
+    }
+    assert calls[5][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ]
+
+    result = desktop_mod.system_settings_open("系统设置")
+
+    assert result["ok"] is True
+    assert result["action"] == "system.settings_open"
+    assert result["summary"] == "Opened System Settings"
+    assert result["data"] == {
+        "target": "系统设置",
+        "open_target": "system_settings",
+        "settings_label": "System Settings",
+    }
+    assert calls[6][0] == ["open", "-a", "System Settings"]
 
 
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
@@ -3000,22 +3054,22 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
     assert result["recovery_actions"] == [
         {
             "label": "打开屏幕录制权限",
-            "tool": "app.open",
-            "input": {"app_name": "屏幕录制权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "屏幕录制权限"},
             "permission_target": "screen_recording",
             "risk_level": "low",
         },
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
         {
             "label": "打开辅助功能权限",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "permission_target": "accessibility",
             "risk_level": "low",
         },
@@ -3053,36 +3107,36 @@ def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypat
     assert result["recovery_actions"] == [
         {
             "label": "打开输入监控权限",
-            "tool": "app.open",
-            "input": {"app_name": "输入监控"},
+            "tool": "system.settings_open",
+            "input": {"target": "输入监控"},
             "permission_target": "input_monitoring",
             "risk_level": "low",
         },
         {
             "label": "打开完全磁盘访问权限",
-            "tool": "app.open",
-            "input": {"app_name": "完全磁盘访问"},
+            "tool": "system.settings_open",
+            "input": {"target": "完全磁盘访问"},
             "permission_target": "full_disk_access",
             "risk_level": "low",
         },
         {
             "label": "打开文件和文件夹权限",
-            "tool": "app.open",
-            "input": {"app_name": "文件和文件夹"},
+            "tool": "system.settings_open",
+            "input": {"target": "文件和文件夹"},
             "permission_target": "files_and_folders",
             "risk_level": "low",
         },
         {
             "label": "打开麦克风权限",
-            "tool": "app.open",
-            "input": {"app_name": "麦克风"},
+            "tool": "system.settings_open",
+            "input": {"target": "麦克风"},
             "permission_target": "microphone",
             "risk_level": "low",
         },
         {
             "label": "打开摄像头权限",
-            "tool": "app.open",
-            "input": {"app_name": "摄像头"},
+            "tool": "system.settings_open",
+            "input": {"target": "摄像头"},
             "permission_target": "camera",
             "risk_level": "low",
         },
@@ -3111,8 +3165,8 @@ def test_desktop_permission_preflight_reports_cached_missing_targets(monkeypatch
     assert result["recovery_actions"] == [
         {
             "label": "打开辅助功能权限",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "permission_target": "accessibility",
             "risk_level": "low",
         }
@@ -4303,8 +4357,8 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
         },
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         },
@@ -4499,8 +4553,8 @@ def test_apple_music_open_and_play_reports_media_key_fallback(monkeypatch) -> No
             "recovery_actions": [
                 {
                     "label": "打开自动化权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "自动化权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "自动化权限"},
                     "permission_target": "automation",
                     "risk_level": "low",
                 }

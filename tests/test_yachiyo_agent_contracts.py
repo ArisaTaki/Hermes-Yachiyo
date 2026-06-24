@@ -391,6 +391,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "desktop.ui_elements",
             "app.status",
             "app.open",
+            "system.settings_open",
             "app.focus",
             "app.focus_window",
             "app.show",
@@ -462,6 +463,7 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
             "screen.capture",
             "desktop.active_window",
             "app.open",
+            "system.settings_open",
             "app.focus",
             "app.show",
             "app.hide",
@@ -503,6 +505,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
             "screen.capture",
             "desktop.active_window",
             "app.open",
+            "system.settings_open",
             "app.focus",
             "app.hide",
             "app.minimize",
@@ -535,7 +538,12 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
     root = capabilities["desktop_execution"]
 
     assert app_control["available"] is False
-    assert app_control["available_tools"] == ["app.open", "app.hide", "app.minimize"]
+    assert app_control["available_tools"] == [
+        "app.open",
+        "system.settings_open",
+        "app.hide",
+        "app.minimize",
+    ]
     assert app_control["unavailable_tools"] == [
         "app.status",
         "app.focus",
@@ -613,6 +621,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
     assert desktop_tool_risk_level("desktop.open_path") == "low"
     assert desktop_tool_risk_level("media.music_app_open_and_play") == "low"
+    assert desktop_tool_risk_level("system.settings_open") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("system.brightness") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
@@ -721,6 +730,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "media.apple_music_control",
         "media.music_app_open_and_play",
     ]
+    assert catalog["system_settings"].tools == ["system.settings_open"]
     assert catalog["control_system_volume"].tools == ["system.volume"]
     assert catalog["control_system_brightness"].tools == ["system.brightness"]
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
@@ -854,6 +864,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
 
     music = tools["media.apple_music_play"]
     music_app = tools["media.music_app_open_and_play"]
+    settings = tools["system.settings_open"]
     brightness = tools["system.brightness"]
     permissions = tools["desktop.permissions"]
     quit_app = tools["app.quit"]
@@ -903,6 +914,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert music_app.input_schema["required"] == ["app_name"]
     assert music_app.missing_permissions == []
     assert any("media play key" in note for note in music_app.fallback_notes)
+    assert settings.capability_id == "app_control"
+    assert settings.risk_level == "low"
+    assert settings.input_schema["required"] == ["target"]
+    assert settings.missing_permissions == []
+    assert any("does not change settings" in note for note in settings.fallback_notes)
     assert brightness.capability_id == "desktop_execution"
     assert brightness.risk_level == "low"
     assert brightness.input_schema["required"] == ["action"]

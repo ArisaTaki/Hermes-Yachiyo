@@ -89,8 +89,8 @@ class PermissionPreflightDesktopBroker(RecordingDesktopBroker):
             "recovery_actions": [
                 {
                     "label": "打开自动化权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "自动化权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "自动化权限"},
                     "permission_target": "automation",
                     "risk_level": "low",
                 }
@@ -641,6 +641,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "system.settings_open",
         "system.volume",
         "system.brightness",
         "clipboard.write",
@@ -3324,8 +3325,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开系统设置看看有哪些选项", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "System Settings"},
+            "tool": "system.settings_open",
+            "input": {"target": "系统设置"},
         },
         {
             "protocol": "json_fallback",
@@ -3336,8 +3337,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开系统设置看看", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "System Settings"},
+            "tool": "system.settings_open",
+            "input": {"target": "系统设置"},
         },
         {
             "protocol": "json_fallback",
@@ -3398,13 +3399,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "tool": "system.settings_open",
+        "input": {"target": "系统设置"},
     }
     assert daily_desktop_intent_tool_request("打开系统偏好设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "tool": "system.settings_open",
+        "input": {"target": "系统设置"},
     }
     assert daily_desktop_intent_tool_request("打开声音设置", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3413,28 +3414,28 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "蓝牙"},
+        "tool": "system.settings_open",
+        "input": {"target": "蓝牙"},
     }
     assert daily_desktop_intent_tool_request("打开 Wi-Fi 设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Wi-Fi"},
+        "tool": "system.settings_open",
+        "input": {"target": "Wi-Fi"},
     }
     assert daily_desktop_intent_tool_request("打开系统设置蓝牙", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "蓝牙"},
+        "tool": "system.settings_open",
+        "input": {"target": "蓝牙"},
     }
     assert daily_desktop_intent_tool_request("打开 WiFi 设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "Wi-Fi"},
+        "tool": "system.settings_open",
+        "input": {"target": "Wi-Fi"},
     }
     assert daily_desktop_intent_tool_request("打开网络设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "网络"},
+        "tool": "system.settings_open",
+        "input": {"target": "网络"},
     }
     assert daily_desktop_intent_tool_request("打开显示器设置", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3519,30 +3520,35 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     ]
     assert daily_desktop_intent_tool_request("打开设置的隐私与安全性", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("打开屏幕录制权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "屏幕录制权限"},
+        "tool": "system.settings_open",
+        "input": {"target": "屏幕录制权限"},
     }
     assert daily_desktop_intent_tool_request("打开辅助功能权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "辅助功能权限"},
+        "tool": "system.settings_open",
+        "input": {"target": "辅助功能权限"},
     }
     assert daily_desktop_intent_tool_request("打开系统设置里的辅助功能", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "辅助功能权限"},
+        "tool": "system.settings_open",
+        "input": {"target": "辅助功能权限"},
     }
     assert daily_desktop_intent_tool_request("打开自动化权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "自动化权限"},
+        "tool": "system.settings_open",
+        "input": {"target": "自动化权限"},
     }
-    for prompt, app_name in (
+    assert daily_desktop_intent_tool_request("打开辅助功能权限", ["app.open"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "辅助功能权限"},
+    }
+    for prompt, target in (
         ("修复自动化权限", "自动化权限"),
         ("修一下屏幕录制权限", "屏幕录制权限"),
         ("修复辅助功能权限", "辅助功能权限"),
@@ -3554,63 +3560,63 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     ):
         assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": app_name},
+            "tool": "system.settings_open",
+            "input": {"target": target},
         }
     assert daily_desktop_intent_tool_request("open accessibility settings", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "辅助功能权限"},
+        "tool": "system.settings_open",
+        "input": {"target": "辅助功能权限"},
     }
     assert daily_desktop_intent_tool_request("open Bluetooth settings", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "蓝牙"},
+        "tool": "system.settings_open",
+        "input": {"target": "蓝牙"},
     }
     assert daily_desktop_intent_tool_request("打开麦克风权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "麦克风"},
+        "tool": "system.settings_open",
+        "input": {"target": "麦克风"},
     }
     assert daily_desktop_intent_tool_request("打开输入监控权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "输入监控"},
+        "tool": "system.settings_open",
+        "input": {"target": "输入监控"},
     }
     assert daily_desktop_intent_tool_request("打开完全磁盘访问权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "完全磁盘访问"},
+        "tool": "system.settings_open",
+        "input": {"target": "完全磁盘访问"},
     }
     assert daily_desktop_intent_tool_request("打开摄像头权限", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "摄像头"},
+        "tool": "system.settings_open",
+        "input": {"target": "摄像头"},
     }
     assert daily_desktop_intent_tool_request("打开桌面权限设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("打开隐私设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("打开系统隐私设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("open desktop permissions", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("打开需要的权限设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "tool": "system.settings_open",
+        "input": {"target": "隐私与安全性"},
     }
     assert daily_desktop_intent_tool_request("检查桌面权限", allowed_tools) == {
         "protocol": "json_fallback",
@@ -5497,13 +5503,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
 def test_daily_desktop_entrypoint_tool_requests_share_metadata_and_sequence_detection() -> None:
     allowed_tools = [
         "app.open",
+        "system.settings_open",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
     ]
     metadata = {
         "desktop_permission_recovery": True,
-        "recovery_tool": "app.open",
-        "recovery_input": {"app_name": "辅助功能权限"},
+        "recovery_tool": "system.settings_open",
+        "recovery_input": {"target": "辅助功能权限"},
         "recovery_risk_level": "low",
     }
 
@@ -5529,8 +5536,8 @@ def test_daily_desktop_entrypoint_tool_requests_share_metadata_and_sequence_dete
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "辅助功能权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
             "source": "daily_desktop_metadata",
             "planning_reason": "structured_recovery_metadata",
         }
@@ -5653,15 +5660,23 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
     assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]
 
 
-def test_daily_desktop_recovery_prompt_accepts_only_low_risk_app_open() -> None:
+def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "system.settings_open",
+            "recovery_input": {"target": "屏幕录制权限"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开屏幕录制权限"
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
             "recovery_tool": "app.open",
-            "recovery_input": {"app_name": "屏幕录制权限"},
+            "recovery_input": {"app_name": "Music"},
             "recovery_risk_level": "low",
         }
-    ) == "打开屏幕录制权限"
+    ) == "打开Music"
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
@@ -6042,8 +6057,8 @@ def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execu
     assert preflight["recovery_actions"] == [
         {
             "label": "打开自动化权限",
-            "tool": "app.open",
-            "input": {"app_name": "自动化权限"},
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
             "permission_target": "automation",
             "risk_level": "low",
         }
@@ -6191,8 +6206,8 @@ def test_main_chat_desktop_intent_permission_failure_includes_recovery_hint() ->
                 },
                 {
                     "label": "打开自动化权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "自动化权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "自动化权限"},
                     "permission_target": "automation",
                     "risk_level": "low",
                 },
@@ -6275,8 +6290,8 @@ def test_main_chat_desktop_intent_permission_failure_records_recovery_event() ->
         "recovery_actions": [
             {
                 "label": "打开屏幕录制权限",
-                "tool": "app.open",
-                "input": {"app_name": "屏幕录制权限"},
+                "tool": "system.settings_open",
+                "input": {"target": "屏幕录制权限"},
                 "permission_target": "screen_recording",
                 "risk_level": "low",
             }
@@ -6868,13 +6883,13 @@ def test_main_chat_desktop_intent_summarizes_desktop_permissions() -> None:
             "recovery_actions": [
                 {
                     "label": "打开屏幕录制权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "屏幕录制权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "屏幕录制权限"},
                 },
                 {
                     "label": "打开自动化权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "自动化权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "自动化权限"},
                 },
             ],
         },
@@ -7207,8 +7222,8 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "recovery_actions": [
                 {
                     "label": "打开辅助功能权限",
-                    "tool": "app.open",
-                    "input": {"app_name": "辅助功能权限"},
+                    "tool": "system.settings_open",
+                    "input": {"target": "辅助功能权限"},
                     "permission_target": "accessibility",
                     "risk_level": "low",
                 }

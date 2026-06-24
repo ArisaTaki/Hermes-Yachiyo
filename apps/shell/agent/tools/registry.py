@@ -448,6 +448,14 @@ def _media_music_app_open_and_play(
     return broker.media_music_app_open_and_play(str(payload.get("app_name") or ""))
 
 
+def _system_settings_open(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.system_settings_open(str(payload.get("target") or ""))
+
+
 def _system_volume(
     broker: Any,
     payload: dict[str, Any],
@@ -761,6 +769,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_open_and_play": _media_apple_music_open_and_play,
     "media.apple_music_control": _media_apple_music_control,
     "media.music_app_open_and_play": _media_music_app_open_and_play,
+    "system.settings_open": _system_settings_open,
     "system.volume": _system_volume,
     "system.brightness": _system_brightness,
     "clipboard.write": _clipboard_write,

@@ -343,7 +343,10 @@ def daily_desktop_intent_tool_requests(
     """Return structured desktop tool requests for clear daily Chat intents."""
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
-    sequence = daily_desktop_intent_sequence_candidates(context)
+    sequence = _prefer_system_settings_open_sequence(
+        daily_desktop_intent_sequence_candidates(context),
+        allowed,
+    )
     selected_text_read_sequence = _selected_text_read_tool_requests(context)
     if selected_text_read_sequence and all(
         str(request.get("tool") or "") in allowed for request in selected_text_read_sequence
@@ -434,22 +437,37 @@ def daily_desktop_intent_tool_requests(
     app_shortcut = _app_scoped_safe_shortcut_tool_request(context)
     if app_shortcut and str(app_shortcut.get("tool") or "") in allowed:
         return [app_shortcut]
-    app_preposed_observe_sequence = _app_preposed_observe_tool_requests(context)
+    app_preposed_observe_sequence = _prefer_system_settings_open_sequence(
+        _app_preposed_observe_tool_requests(context),
+        allowed,
+    )
     if app_preposed_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_preposed_observe_sequence):
         return app_preposed_observe_sequence
-    app_observe_sequence = _app_open_or_focus_observe_tool_requests(context)
+    app_observe_sequence = _prefer_system_settings_open_sequence(
+        _app_open_or_focus_observe_tool_requests(context),
+        allowed,
+    )
     if app_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_observe_sequence):
         return app_observe_sequence
-    app_prefix_observe_sequence = _app_prefix_observe_tool_requests(context)
+    app_prefix_observe_sequence = _prefer_system_settings_open_sequence(
+        _app_prefix_observe_tool_requests(context),
+        allowed,
+    )
     if app_prefix_observe_sequence and all(str(request.get("tool") or "") in allowed for request in app_prefix_observe_sequence):
         return app_prefix_observe_sequence
-    app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
+    app_ui_elements = _prefer_system_settings_open_sequence(
+        _app_scoped_ui_elements_tool_requests(context),
+        allowed,
+    )
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
     if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
         return click_type_sequence
-    app_screen_capture_sequence = _app_open_or_focus_screen_capture_tool_requests(context)
+    app_screen_capture_sequence = _prefer_system_settings_open_sequence(
+        _app_open_or_focus_screen_capture_tool_requests(context),
+        allowed,
+    )
     if app_screen_capture_sequence and all(str(request.get("tool") or "") in allowed for request in app_screen_capture_sequence):
         return app_screen_capture_sequence
     foreground_type_into_ui_element = (
@@ -761,6 +779,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "notes.create",
     "reminders.create",
     "screen.capture",
+    "system.settings_open",
     "system.brightness",
     "system.volume",
 }
@@ -899,11 +918,15 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         return ""
     if str(metadata.get("recovery_risk_level") or "").strip().lower() != "low":
         return ""
-    if str(metadata.get("recovery_tool") or "").strip() != "app.open":
+    recovery_tool = str(metadata.get("recovery_tool") or "").strip()
+    if recovery_tool not in {"app.open", "system.settings_open"}:
         return ""
     recovery_input = metadata.get("recovery_input")
     if not isinstance(recovery_input, Mapping):
         return ""
+    if recovery_tool == "system.settings_open":
+        target = str(recovery_input.get("target") or "").strip()
+        return f"打开{target}" if target else ""
     app_name = str(recovery_input.get("app_name") or "").strip()
     if not app_name:
         return ""
@@ -1580,6 +1603,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
 
+    system_settings_target = _system_settings_tool_target(text)
+    if system_settings_target:
+        candidates.append(_request("system.settings_open", {"target": system_settings_target}))
+
     music_app_open_and_play = _music_app_open_and_play_app_name(text)
     if music_app_open_and_play:
         candidates.append(
@@ -1701,6 +1728,29 @@ def _request(tool: str, payload: dict[str, Any], *, presentation: str = "") -> d
     if clean_presentation:
         request["presentation"] = clean_presentation
     return request
+
+
+def _prefer_system_settings_open_sequence(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if "system.settings_open" not in allowed:
+        return requests
+    preferred: list[dict[str, Any]] = []
+    changed = False
+    for request in requests:
+        tool = str(request.get("tool") or "")
+        payload = request.get("input")
+        if (
+            tool == "app.open"
+            and isinstance(payload, Mapping)
+            and payload.get("app_name") == "System Settings"
+        ):
+            preferred.append(_request("system.settings_open", {"target": "系统设置"}))
+            changed = True
+            continue
+        preferred.append(request)
+    return preferred if changed else requests
 
 
 def _clean_text(value: str) -> str:
@@ -6037,6 +6087,10 @@ def _system_settings_open_name(text: str) -> str:
     return _system_settings_target_name(text)
 
 
+def _system_settings_tool_target(text: str) -> str:
+    return _permission_settings_open_name(text) or _system_settings_open_name(text)
+
+
 def _system_settings_target_name(text: str) -> str:
     lowered = text.lower()
     if re.search(r"(?:蓝牙|\bbluetooth\b)", lowered):
@@ -6068,6 +6122,13 @@ def _system_settings_target_name(text: str) -> str:
         lowered,
     ):
         return "隐私与安全性"
+    if re.search(r"(?:声音|音量|显示器|显示设置|\bsound\b|\bvolume\b|\bdisplay\b)", lowered):
+        return ""
+    if re.search(
+        r"(?:系统设置|系统偏好|系统偏好设置|设置|偏好|system\s+settings?|system\s+preferences?|settings?|preferences?)",
+        lowered,
+    ):
+        return "系统设置"
     return ""
 
 

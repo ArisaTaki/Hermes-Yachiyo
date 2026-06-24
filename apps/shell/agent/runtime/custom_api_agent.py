@@ -41,6 +41,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "media.music_app_open_and_play",
+    "system.settings_open",
     "system.volume",
     "system.brightness",
     "clipboard.write",
@@ -139,6 +140,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "media.apple_music_open_and_play": "打开并播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "media.music_app_open_and_play": "打开并播放音乐应用",
+    "system.settings_open": "打开系统设置",
     "system.volume": "控制系统音量",
     "system.brightness": "调整屏幕亮度",
     "clipboard.write": "写入剪贴板",
@@ -919,6 +921,8 @@ class RuntimeCustomApiAgentLoop:
                 return _apple_music_control_summary(result, planned_input) or result_summary or "已控制 Apple Music。"
             if tool_name == "media.music_app_open_and_play":
                 return _music_app_open_and_play_summary(result, planned_input) or result_summary or "已尝试播放音乐。"
+            if tool_name == "system.settings_open":
+                return _system_settings_open_summary(result, planned_input) or result_summary or "已打开系统设置。"
             if tool_name == "system.volume":
                 return _system_volume_summary(result, planned_input) or result_summary or "已处理系统音量。"
             if tool_name == "system.brightness":
@@ -1273,10 +1277,10 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.volume, system.brightness, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.settings_open, system.volume, system.brightness, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
-            "requests to media.apple_music_open_and_play when allowed; map generic playback requests for named non-Apple music apps to media.music_app_open_and_play; map pause/resume/next/previous media "
+            "requests to media.apple_music_open_and_play when allowed; map generic playback requests for named non-Apple music apps to media.music_app_open_and_play; map macOS System Settings pane or permission page open requests to system.settings_open; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
             "commands to system.volume; map explicit relative brightness up/down commands to system.brightness; map explicit 'copy/write to clipboard' requests to "
             "clipboard.write without reading clipboard contents; map explicit clipboard content read/status questions to clipboard.read; map explicit selected text read requests to desktop.safe_shortcut(copy) followed by clipboard.read; map explicit create/new note requests with user-provided body text to notes.create; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
@@ -1679,7 +1683,7 @@ def _with_retry_recovery_action(
     enriched_actions: list[dict[str, Any]] = []
     changed = False
     for action in actions:
-        if str(action.get("tool") or "").strip() != "app.open":
+        if str(action.get("tool") or "").strip() not in {"app.open", "system.settings_open"}:
             enriched_actions.append(action)
             continue
         enriched_action = dict(action)
@@ -1728,6 +1732,9 @@ def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -
     if tool_name == "media.music_app_open_and_play":
         app_name = str(planned_input.get("app_name") or "").strip()
         return f"打开{app_name}并播放" if app_name else "播放音乐"
+    if tool_name == "system.settings_open":
+        target = str(planned_input.get("target") or "").strip()
+        return f"打开{target}" if target else "打开系统设置"
     if tool_name == "browser.extract_text":
         return "读取当前网页正文"
     if tool_name == "browser.screenshot":
@@ -2107,6 +2114,17 @@ def _music_app_open_and_play_summary(result: dict[str, Any], planned_input: dict
     if data.get("playback_state_unverified"):
         return f"已打开{_display_target_name(app_name)}，并用媒体键尝试开始播放。"
     return f"已打开{_display_target_name(app_name)}并开始播放。"
+
+
+def _system_settings_open_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    label = str(data.get("settings_label") or "").strip()
+    target = str(data.get("target") or planned_input.get("target") or "").strip()
+    if target and target not in {"System Settings", "系统设置", "设置"}:
+        return f"已打开系统设置：{_display_target_name(target)}。"
+    if label and label != "System Settings":
+        return f"已打开系统设置：{label}。"
+    return "已打开系统设置。"
 
 
 def _apple_music_control_label(action: str) -> str:
