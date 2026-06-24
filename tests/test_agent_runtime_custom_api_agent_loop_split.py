@@ -1542,6 +1542,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"body": "hello"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("新建备忘录 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("记一下 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("帮我记下 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "hello"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests(
         "新建一个备忘录写 hello",
         ["app.open_and_safe_shortcut", "desktop.safe_type_text"],

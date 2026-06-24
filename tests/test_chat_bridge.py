@@ -629,6 +629,32 @@ def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_mo
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    cases = (
+        ("新建备忘录 hello", "bubble"),
+        ("帮我记下 hello", "live2d"),
+    )
+    for prompt, launcher_mode in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert calls[-1] == ("note", "hello", "", "")
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已创建备忘录：hello（5 个字符）。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "notes.create"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
 
 def test_chat_bridge_quick_message_opens_word_and_creates_document_without_model(
     tmp_path,
@@ -6142,6 +6168,41 @@ def test_chat_bridge_quick_message_plans_app_open_visual_followup_for_lightweigh
             "source": "daily_desktop_intent",
             "status": "planned",
             "tool": "app.open",
+        }
+    finally:
+        store.close()
+
+
+def test_chat_bridge_quick_message_plans_note_creation_for_lightweight_entrypoints(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-note",
+            "task_id": "task-note",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message("帮我记下 hello")
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-note"
+        assert result["agent_task"]["task_id"] == "task-note"
+        assert result["agent_task"]["status"] == "queued"
+        assert result["agent_task"]["current_step"] == "准备执行 · 创建备忘录"
+        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "notes.create"
+        assert result["agent_task"]["recent_events"][0]["payload"] == {
+            "input_preview": {"body": "hello"},
+            "planning_reason": "clear_daily_desktop_intent",
+            "source": "daily_desktop_intent",
+            "status": "planned",
+            "tool": "notes.create",
         }
     finally:
         store.close()

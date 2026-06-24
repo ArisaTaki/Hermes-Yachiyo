@@ -4543,6 +4543,11 @@ def _looks_like_reminder_title_with_due_time(value: str) -> bool:
 def _notes_create_and_type_text(value: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)\s+(?P<text_short>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:记一下|记下|记录一下|记录|记上)\s*(?P<text_memory>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|开|打开)\s*(?:一个|一条|一篇|新的?)?\s*"
         r"(?:备忘录|笔记|note)\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
@@ -4557,7 +4562,13 @@ def _notes_create_and_type_text(value: str) -> str:
         if not match:
             continue
         groups = match.groupdict()
-        typed_text = _strip_typed_text(groups.get("text") or groups.get("text_en") or "")
+        typed_text = _strip_typed_text(
+            groups.get("text")
+            or groups.get("text_en")
+            or groups.get("text_short")
+            or groups.get("text_memory")
+            or ""
+        )
         if typed_text:
             return typed_text
     return ""
