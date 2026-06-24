@@ -40,7 +40,7 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
-                ("startYachiyoTask({", "source: 'chat'", "pollAgentRunInBackground(task.task_id);"),
+                ("startYachiyoTask({", "source: 'chat'", "pollAgentRunInBackground(taskId);"),
             ),
             (
                 "source",
@@ -352,7 +352,7 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "startYachiyoTask({",
             "rememberYachiyoTasks([task]);",
-            "pollAgentRunInBackground(task.task_id);",
+            "pollAgentRunInBackground(taskId);",
             "return true;",
         ],
     )

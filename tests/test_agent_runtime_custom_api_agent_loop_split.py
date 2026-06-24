@@ -3410,6 +3410,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("读取剪贴板", ["clipboard.write"]) is None
+    assert daily_desktop_intent_tool_requests("读一下选中的内容", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("read selected text", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("读一下选中的内容", ["clipboard.read"]) == []
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",

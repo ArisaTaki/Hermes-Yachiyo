@@ -1236,7 +1236,7 @@ class RuntimeCustomApiAgentLoop:
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
             "commands to system.volume; map explicit 'copy/write to clipboard' requests to "
-            "clipboard.write without reading clipboard contents; map explicit clipboard content read/status questions to clipboard.read; map explicit create/new note requests with user-provided body text to notes.create; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
+            "clipboard.write without reading clipboard contents; map explicit clipboard content read/status questions to clipboard.read; map explicit selected text read requests to desktop.safe_shortcut(copy) followed by clipboard.read; map explicit create/new note requests with user-provided body text to notes.create; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "

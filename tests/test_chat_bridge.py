@@ -2817,6 +2817,57 @@ def test_chat_bridge_quick_message_executes_clipboard_read_for_launcher_entrypoi
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_copies_and_reads_selected_text_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str | int]] = []
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: copy",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_clipboard_read(*, max_chars=2000) -> dict:
+        calls.append(("read", max_chars))
+        return {
+            "ok": True,
+            "action": "clipboard.read",
+            "summary": "Read 13 characters from clipboard",
+            "data": {
+                "text": "selected text",
+                "text_length": 13,
+                "truncated": False,
+                "max_chars": max_chars,
+                "platform": "macos",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_read", fake_clipboard_read)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "读一下选中的内容",
+    )
+
+    assert calls == [("shortcut", "copy"), ("read", 2000)]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "desktop.safe_shortcut",
+        "clipboard.read",
+    ]
+    assert run["status"] == "completed"
+    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

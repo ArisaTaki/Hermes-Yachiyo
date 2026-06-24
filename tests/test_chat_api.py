@@ -2402,6 +2402,87 @@ def test_send_message_executes_direct_clipboard_read_task(tmp_path, monkeypatch)
         store.close()
 
 
+def test_send_message_copies_and_reads_selected_text_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str | int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("selected text read task should not call model")
+        ),
+    )
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: copy",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_clipboard_read(*, max_chars=2000) -> dict:
+        calls.append(("read", max_chars))
+        return {
+            "ok": True,
+            "action": "clipboard.read",
+            "summary": "Read 13 characters from clipboard",
+            "data": {
+                "text": "selected text",
+                "text_length": 13,
+                "truncated": False,
+                "max_chars": max_chars,
+                "platform": "macos",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_read", fake_clipboard_read)
+    try:
+        result = api.send_message("读一下选中的内容")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+        assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "clipboard.read",
+        ]
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已复制选中内容。 剪贴板内容：selected text。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已复制选中内容。 剪贴板内容：selected text。"
+        assert calls == [("shortcut", "copy"), ("read", 2000)]
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

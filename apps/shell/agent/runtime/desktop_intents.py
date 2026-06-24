@@ -312,6 +312,11 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    selected_text_read_sequence = _selected_text_read_tool_requests(context)
+    if selected_text_read_sequence and all(
+        str(request.get("tool") or "") in allowed for request in selected_text_read_sequence
+    ):
+        return selected_text_read_sequence
     communication_compose_sequence = _communication_compose_tool_requests(context)
     if communication_compose_sequence and all(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
@@ -2244,6 +2249,46 @@ def _clipboard_read_request(text: str) -> bool:
         or re.search(
             r"\b(?:what(?:'s| is)|what)\s+(?:is\s+)?(?:on|in)\s+(?:the\s+)?"
             r"(?:system\s+)?clipboard\b",
+            lowered,
+        )
+    )
+
+
+def _selected_text_read_tool_requests(text: str) -> list[dict[str, Any]]:
+    if not _selected_text_read_request(text):
+        return []
+    return [
+        _request("desktop.safe_shortcut", {"action": "copy"}),
+        _request("clipboard.read", {}),
+    ]
+
+
+def _selected_text_read_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean or _clipboard_write_text(clean) or _clipboard_read_request(clean):
+        return False
+    lowered = clean.lower()
+    return bool(
+        re.search(
+            r"(?:读|读取|查看|看看|看一下|看下|显示|告诉我).{0,12}"
+            r"(?:选中|选取|高亮|选择).{0,12}"
+            r"(?:内容|文字|文本|这段|这部分|选区)",
+            clean,
+        )
+        or re.search(
+            r"(?:选中|选取|高亮|选择).{0,12}"
+            r"(?:内容|文字|文本|这段|这部分|选区).{0,12}"
+            r"(?:是什么|是啥|有啥|有什么|读|读取|查看|看看|看一下|看下|显示|告诉我)",
+            clean,
+        )
+        or re.search(
+            r"\b(?:read|show|display|check|tell\s+me)\s+(?:the\s+)?"
+            r"(?:selected|highlighted)\s+(?:text|content|selection)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bwhat(?:'s| is)\s+(?:the\s+)?"
+            r"(?:selected|highlighted)\s+(?:text|content|selection)\b",
             lowered,
         )
     )
