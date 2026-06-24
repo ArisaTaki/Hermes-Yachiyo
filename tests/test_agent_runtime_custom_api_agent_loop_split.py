@@ -4409,6 +4409,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("播放一下 Apple Music 里的歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 随便放点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("Music app play something", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("start playing in Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("给我来点音乐", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -4526,12 +4546,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_tool_request("帮我在 Apple Music 搜一下超时空辉夜姬并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 搜索超时空辉夜姬并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
     assert daily_desktop_intent_tool_request("播放 Music For a Sushi Restaurant", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "Music For a Sushi Restaurant"},
     }
     assert daily_desktop_intent_tool_request("play Space Oddity in Apple Music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "Space Oddity"},
+    }
+    assert daily_desktop_intent_tool_request("search Space Oddity in Apple Music and play it", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "Space Oddity"},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music search Space Oddity and play it", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "Space Oddity"},

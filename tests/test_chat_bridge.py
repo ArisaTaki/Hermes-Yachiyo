@@ -1963,6 +1963,10 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         ("用 Apple Music 随便放点歌", "bubble"),
         ("打开 Apple Music 播放音乐", "live2d"),
         ("打开 Apple Music 随便放点音乐", "bubble"),
+        ("播放一下 Apple Music 里的歌", "live2d"),
+        ("Apple Music 随便放点", "bubble"),
+        ("Music app play something", "live2d"),
+        ("start playing in Music", "bubble"),
         ("放音乐听听", "live2d"),
         ("听点音乐", "bubble"),
         ("想听音乐", "live2d"),
@@ -1996,7 +2000,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_and_play_calls == 16
+    assert open_and_play_calls == 20
 
 
 def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(
@@ -2132,6 +2136,10 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     direct_prompts = (
         ("我想听超时空辉夜姬吧", "bubble", "超时空辉夜姬"),
         ("播放超时空辉夜姬 Apple Music", "live2d", "超时空辉夜姬"),
+        ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "bubble", "超时空辉夜姬"),
+        ("Apple Music 搜索超时空辉夜姬并播放", "live2d", "超时空辉夜姬"),
+        ("search Space Oddity in Apple Music and play it", "bubble", "Space Oddity"),
+        ("Apple Music search Space Oddity and play it", "live2d", "Space Oddity"),
     )
     for prompt, launcher_mode, query in direct_prompts:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -2156,7 +2164,15 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert play_calls == ["超时空辉夜姬", "超时空辉夜姬", "超时空辉夜姬"]
+    assert play_calls == [
+        "超时空辉夜姬",
+        "超时空辉夜姬",
+        "超时空辉夜姬",
+        "超时空辉夜姬",
+        "超时空辉夜姬",
+        "Space Oddity",
+        "Space Oddity",
+    ]
 
 
 def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoints(

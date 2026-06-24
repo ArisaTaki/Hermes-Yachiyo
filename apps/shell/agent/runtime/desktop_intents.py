@@ -383,6 +383,9 @@ def daily_desktop_intent_tool_requests(
     app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
     if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
         return app_find_sequence
+    apple_music_search_play = _apple_music_search_play_query(context)
+    if apple_music_search_play and "media.apple_music_play" in allowed:
+        return [_request("media.apple_music_play", {"query": apple_music_search_play})]
     browser_open_request = _browser_open_url_tool_request(context, allowed)
     if browser_open_request:
         return [browser_open_request]
@@ -1610,6 +1613,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_settings_target = _direct_system_settings_tool_target(text)
     if system_settings_target:
         candidates.append(_request("system.settings_open", {"target": system_settings_target}))
+
+    apple_music_search_play = _apple_music_search_play_query(text)
+    if apple_music_search_play:
+        candidates.append(_request("media.apple_music_play", {"query": apple_music_search_play}))
 
     music_app_open_and_play = _music_app_open_and_play_app_name(text)
     if music_app_open_and_play:
@@ -6461,13 +6468,13 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
         r"(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
-        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
         r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
-        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
         r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
@@ -6475,7 +6482,7 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:并|然后|后|之后|再)\s*)?(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
-        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
         r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
@@ -6484,6 +6491,9 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)[.!?]*$",
         r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
         r"(?:play|start\s+playing)(?:\s+(?:music|songs?|something|anything|a\s+song|a\s+track|some\s+music))?[.!?]*$",
+        r"^(?P<app>[^.!?]+?)\s+"
+        r"(?:play|start\s+playing)"
+        r"(?:\s+(?:music|songs?|something|anything|a\s+song|a\s+track|some\s+music))?[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:play|start\s+playing)\s+(?P<app>[^.!?]+?)[.!?]*$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -6800,9 +6810,49 @@ def _strip_window_title(value: str) -> str:
     return _strip_query(title)
 
 
+def _apple_music_search_play_query(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)?\s*(?:apple\s*music|music|苹果音乐|音乐)"
+        r"(?:应用|app|软件|程序)?(?:里|中|上|内|里面)?\s*"
+        r"(?:搜索|搜|查找|找|检索)(?:一下|下)?\s*(?P<query>[^。！？!?，,]+?)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
+        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:搜索|搜|查找|找|检索)(?:一下|下)?\s*(?P<query2>[^。！？!?，,]+?)\s*"
+        r"(?:在|用|通过)\s*(?:apple\s*music|music|苹果音乐|音乐)"
+        r"(?:应用|app|软件|程序)?(?:里|中|上|内|里面)?\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
+        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:apple\s*music|music(?:\s+app)?)\s+"
+        r"(?:search|find|look\s+up)\s+(?P<query3>[^.!?]+?)\s+"
+        r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query4>[^.!?]+?)\s+"
+        r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
+        r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
+        r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query5>[^.!?]+?)\s+"
+        r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_query = next((value for value in match.groupdict().values() if value), "")
+        query = _strip_music_query_context(raw_query)
+        if query and _is_specific_music_query(query):
+            return query
+    return ""
+
+
 def _music_query(text: str) -> str:
     if (
-        _looks_like_generic_music_play_request(text)
+        _apple_music_search_play_query(text)
+        or _looks_like_generic_music_play_request(text)
         or _looks_like_scoped_generic_music_play_request(text)
         or _music_app_generic_play_open_name(text)
         or _non_apple_music_named_play_app_name(text)
@@ -6831,6 +6881,20 @@ def _music_query(text: str) -> str:
 
 def _strip_music_query_context(value: str) -> str:
     query = _strip_query(value)
+    query = re.sub(
+        r"\s*(?:并且|并|然后|之后|后|再|接着)\s*"
+        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"\s+(?:and\s+)?(?:play|start\s+playing)"
+        r"(?:\s+(?:it|that|this|the\s+(?:song|track)))?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
     query = re.sub(
         r"\s*(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?$",
         "",
@@ -6884,6 +6948,9 @@ def _is_specific_music_query(query: str) -> bool:
         "些东西",
         "一点东西",
         "一点儿东西",
+        "点",
+        "一点",
+        "点儿",
         "something",
         "anything",
         "track",
@@ -6990,7 +7057,7 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
             r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
             r"(?:播放|放)(?:一下)?\s*"
             r"(?:apple\s*music|music|苹果音乐|音乐)(?:应用|app|软件|程序)?\s*"
-            r"(?:听听|听一下|听下|听)?"
+            r"(?:(?:里|中|上|内|里面)?(?:的)?(?:音乐|歌|歌曲)|听听|听一下|听下|听)?"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
             lowered,
         )
@@ -7009,6 +7076,15 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
             lowered,
         )
+        or re.search(
+            r"^(?:apple\s*music|music|苹果音乐|音乐)(?:应用|app|软件|程序)?\s*"
+            r"(?:随便|随机)?"
+            r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)"
+            r"(?:音乐|歌|歌曲|东西)?"
+            r"(?:听听|听一下|听下|听)?"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+            lowered,
+        )
         or re.fullmatch(r"(?:play|start)\s+(?:apple\s*music|music)(?:\s+app)?", lowered)
     )
 
@@ -7022,7 +7098,7 @@ def _looks_like_scoped_generic_music_play_request(text: str) -> bool:
             r"(?:里|中|上|内|里面)?\s*"
             r"(?:随便|随机)?"
             r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
-            r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:东西)|"
+            r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
             r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
             r"(?:来点|来些)(?:音乐|歌|歌曲|东西)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
             r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?|"
@@ -7032,7 +7108,8 @@ def _looks_like_scoped_generic_music_play_request(text: str) -> bool:
             lowered,
         )
         or re.fullmatch(
-            r"(?:play|start)\s+(?:a\s+)?(?:song|music|some\s+music)\s+"
+            r"(?:play|start(?:\s+playing)?)\s+"
+            r"(?:(?:a\s+)?(?:song|track|music)|some\s+music|something|anything)?\s*"
             r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
             lowered,
         )
