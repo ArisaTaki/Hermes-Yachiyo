@@ -3471,12 +3471,28 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("帮我用 Apple Music 放一首歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("用 Apple Music 随便放点歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("给我来点音乐", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
+    assert daily_desktop_intent_tool_request("帮我用 Apple Music 放一首歌", ["media.apple_music_control"]) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
     assert daily_desktop_intent_tool_request("来一首", ["media.apple_music_play"]) is None
+    assert daily_desktop_intent_tool_request("帮我用 Apple Music 放一首歌", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("暂停音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -3523,6 +3539,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"query": "超时空辉夜姬"},
     }
     assert daily_desktop_intent_tool_request("在 Apple Music 播放超时空辉夜姬", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("用 Apple Music 播放超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},

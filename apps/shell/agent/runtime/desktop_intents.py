@@ -5600,6 +5600,7 @@ def _strip_window_title(value: str) -> str:
 def _music_query(text: str) -> str:
     if (
         _looks_like_generic_music_play_request(text)
+        or _looks_like_scoped_generic_music_play_request(text)
         or _music_app_generic_play_open_name(text)
         or _non_apple_music_named_play_app_name(text)
     ):
@@ -5665,6 +5666,12 @@ def _is_specific_music_query(query: str) -> bool:
         "音乐软件",
         "音乐播放器",
         "播放器",
+        "歌",
+        "点歌",
+        "点儿歌",
+        "些歌",
+        "一点歌",
+        "一点儿歌",
     }
 
 
@@ -5696,6 +5703,8 @@ def _music_control_action(text: str) -> str:
     ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
         return "play"
     if _music_app_generic_play_open_name(text) == "Music":
+        return "play"
+    if _looks_like_scoped_generic_music_play_request(text):
         return "play"
     if re.search(
         r"^(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
@@ -5738,6 +5747,8 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
         return True
     if _looks_like_generic_music_play_request(text):
         return True
+    if _looks_like_scoped_generic_music_play_request(text):
+        return True
     return bool(
         re.search(
             r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
@@ -5761,6 +5772,28 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
             lowered,
         )
         or re.fullmatch(r"(?:play|start)\s+(?:apple\s*music|music)(?:\s+app)?", lowered)
+    )
+
+
+def _looks_like_scoped_generic_music_play_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"(?:用|在|通过)\s*(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?"
+            r"(?:里|中|上|内|里面)?\s*"
+            r"(?:随便|随机)?"
+            r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
+            r"(?:来点|来些)(?:音乐|歌|歌曲)|(?:放|播放|播)(?:一下)?(?:音乐|歌|歌曲)|"
+            r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+            lowered,
+        )
+        or re.fullmatch(
+            r"(?:play|start)\s+(?:a\s+)?(?:song|music|some\s+music)\s+"
+            r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
+            lowered,
+        )
     )
 
 
