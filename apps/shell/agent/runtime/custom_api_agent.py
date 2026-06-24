@@ -231,6 +231,7 @@ class RuntimeCustomApiAgentLoop:
         *,
         messages: list[dict[str, Any]] | None = None,
         direct_tool_request: dict[str, Any] | None = None,
+        daily_desktop_planning_context: str | None = None,
         start_iteration: int = 0,
         run_id: str = "",
         budget: Any | None = None,
@@ -254,7 +255,11 @@ class RuntimeCustomApiAgentLoop:
             if resumed_result:
                 return resumed_result
         if default_messages or start_iteration == 0:
-            planning_context = context if default_messages else self._latest_user_intent_text(messages)
+            planning_context = (
+                str(daily_desktop_planning_context or "").strip()
+                if daily_desktop_planning_context is not None
+                else context if default_messages else self._latest_user_intent_text(messages)
+            )
             direct_planned_tool_request = self._direct_daily_desktop_tool_request(
                 direct_tool_request,
                 allowed_tools,

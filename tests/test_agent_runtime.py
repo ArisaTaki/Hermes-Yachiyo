@@ -4346,6 +4346,77 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         service.close()
 
 
+def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    open_and_play_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("agent daily desktop intent should execute before model call"),
+    )
+
+    def fake_music_open_and_play() -> dict[str, Any]:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
+        return {
+            "ok": True,
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
+            "data": {
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Native Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read"],
+                    "approval_required": {},
+                },
+            }
+        )
+
+        run = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "能否帮我播放apple Music?",
+                "daily_desktop_policy_overlay": True,
+            }
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert open_and_play_calls == 1
+        assert run["status"] == "completed"
+        assert "已打开 Apple Music 并开始播放" in run["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert all(
+            event.get("payload", {}).get("tool") != "browser.open_url_and_extract_text"
+            for event in events
+        )
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_profile(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     open_calls: list[str] = []

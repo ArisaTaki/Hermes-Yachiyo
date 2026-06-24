@@ -134,6 +134,9 @@ class RuntimeAgentRunExecutor:
                 preparation.broker,
                 timeline,
                 artifacts,
+                daily_desktop_planning_context=(
+                    user_goal if agent.get("_daily_desktop_policy_overlay") is True else ""
+                ),
                 run_id=run_id,
             )
             return self._agent_run_outcomes.completed(
@@ -346,6 +349,7 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
     approval_required = dict(policy.get("approval_required")) if isinstance(policy.get("approval_required"), dict) else {}
     return {
         **agent,
+        "_daily_desktop_policy_overlay": True,
         "tool_policy": {
             **policy,
             "allowed_tools": _unique_tools([*allowed, *DAILY_DESKTOP_TOOL_NAMES]),
