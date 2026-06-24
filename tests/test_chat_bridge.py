@@ -1037,28 +1037,35 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "what app am I using?",
+    cases = (
+        ("what app am I using?", "live2d"),
+        ("what is the frontmost window", "bubble"),
     )
+    for prompt, launcher_mode in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert active_window_calls == 1
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.active_window"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.active_window"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert active_window_calls == 2
 
 
 def test_chat_bridge_quick_message_executes_named_windows_list_without_model(

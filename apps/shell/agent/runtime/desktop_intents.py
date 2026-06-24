@@ -7530,6 +7530,7 @@ def _is_active_window_request(text: str) -> bool:
         )
         or "active window" in lowered
         or "foreground window" in lowered
+        or "frontmost window" in lowered
         or "current window" in lowered
         or re.search(r"\b(?:what|which)\s+(?:app|application)\s+am\s+i\s+using\b", lowered)
         or re.search(r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:active|foreground|frontmost)\s+(?:app|application)\b", lowered)

@@ -4359,6 +4359,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.active_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("what is the frontmost window", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("现在开了哪些应用", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.running_apps",
