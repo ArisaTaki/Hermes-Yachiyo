@@ -821,6 +821,9 @@ def _desktop_path_tool_request(text: str) -> dict[str, Any] | None:
 def _browser_open_url_tool_request(text: str, allowed: set[str]) -> dict[str, Any] | None:
     if _looks_like_explanation_request(text):
         return None
+    new_tab_search_url = _browser_new_tab_search_url(text)
+    if new_tab_search_url and "browser.open_url" in allowed:
+        return _request("browser.open_url", {"url": new_tab_search_url})
     browser_summary_request = _is_browser_summary_request(text)
     open_extract_payload = _browser_open_url_and_extract_text_request(text)
     if open_extract_payload and "browser.open_url_and_extract_text" in allowed:
@@ -2035,6 +2038,31 @@ def _browser_search_url(text: str) -> str:
             if engine in {"百度", "baidu"}:
                 return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
+    return ""
+
+
+def _browser_new_tab_search_url(text: str) -> str:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:用|在)?\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:打开|新建|开)\s*(?:一个|个)?\s*(?:新标签页?|新\s*tab|new\s+tab)\s*"
+        r"(?:并|然后|再|后)?\s*(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:用|在)?\s*(?P<engine2>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:新标签页?|新\s*tab|new\s+tab)\s*"
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query2>[^。！？!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_search_query(match.groupdict().get("query") or match.groupdict().get("query2") or "")
+        if not query:
+            continue
+        engine = str(match.groupdict().get("engine") or match.groupdict().get("engine2") or "").strip().lower()
+        if engine in {"百度", "baidu"}:
+            return f"https://www.baidu.com/s?wd={quote_plus(query)}"
+        return f"https://www.google.com/search?q={quote_plus(query)}"
     return ""
 
 
@@ -7467,6 +7495,12 @@ def _is_minimize_current_window_request(text: str) -> bool:
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
             r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:最小化|收起)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )

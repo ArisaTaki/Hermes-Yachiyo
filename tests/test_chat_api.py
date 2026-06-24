@@ -2713,6 +2713,7 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("查 OpenAI 最新消息", "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%B6%88%E6%81%AF"),
             ("百度一下 八千代 agent", "https://www.baidu.com/s?wd=%E5%85%AB%E5%8D%83%E4%BB%A3+agent"),
             ("百度 open hanako", "https://www.baidu.com/s?wd=open+hanako"),
+            ("打开新标签并搜索 OpenAI", "https://www.google.com/search?q=OpenAI"),
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
             ("打开浏览器并访问 GitHub", "https://github.com"),
@@ -4239,6 +4240,33 @@ def test_send_message_executes_direct_minimize_current_window_task(tmp_path, mon
         assert "agent.desktop.intent_approval_required" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("当前窗口最小化")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已最小化当前窗口。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "已最小化当前窗口。"
+        assert minimize_calls == 2
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()

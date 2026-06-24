@@ -1791,6 +1791,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"url": "https://www.google.com/search?q=yachiyo"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开新标签并搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("百度新标签搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.baidu.com/s?wd=OpenAI"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开 Excel 然后新建表格", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
@@ -3067,6 +3081,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("把当前窗口最小化", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前窗口最小化", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.minimize_window",
         "input": {},
