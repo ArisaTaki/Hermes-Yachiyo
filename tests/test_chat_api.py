@@ -6,7 +6,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -829,6 +829,92 @@ def test_send_message_executes_app_prefix_find_shortcut_without_model(tmp_path, 
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == "已切到 Google Chrome 并打开查找。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_natural_calendar_event_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    tomorrow = date.today() + timedelta(days=1)
+    tomorrow_1000 = f"{tomorrow.isoformat()}T10:00"
+    tomorrow_1100 = f"{tomorrow.isoformat()}T11:00"
+    calendar_calls: list[tuple[str, str, str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct calendar event task should not call model")
+        ),
+    )
+
+    def fake_calendar_create_event(
+        title: str,
+        *,
+        start_at: str,
+        end_at: str | None = None,
+        calendar_name: str = "",
+    ) -> dict:
+        calendar_calls.append((title, start_at, str(end_at or ""), calendar_name))
+        return {
+            "ok": True,
+            "action": "calendar.create_event",
+            "summary": "Created calendar event",
+            "data": {
+                "title": title,
+                "start_at": start_at,
+                "end_at": str(end_at or ""),
+                "calendar_name": calendar_name,
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.calendar_create_event",
+        fake_calendar_create_event,
+    )
+    try:
+        result = api.send_message("创建明天上午10点开会的日程")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["run_id"] == run["run_id"]
+        assert calendar_calls == [("开会", tomorrow_1000, tomorrow_1100, "")]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == f"已创建日历事件：开会（{tomorrow_1000} - {tomorrow_1100}）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "calendar.create_event"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "title": "开会",
+            "start_at": tomorrow_1000,
+            "end_at": tomorrow_1100,
+        }
+        assert planned_event["payload"]["tool"] == "calendar.create_event"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == f"已创建日历事件：开会（{tomorrow_1000} - {tomorrow_1100}）。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == task.result
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

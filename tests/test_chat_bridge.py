@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -1588,6 +1589,84 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.requested" not in event_types
 
     assert open_and_play_calls == 4
+
+
+def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    tomorrow = date.today() + timedelta(days=1)
+    tomorrow_1000 = f"{tomorrow.isoformat()}T10:00"
+    tomorrow_1100 = f"{tomorrow.isoformat()}T11:00"
+    calls: list[tuple[str, str, str, str]] = []
+
+    def fake_calendar_create_event(
+        title: str,
+        *,
+        start_at: str,
+        end_at: str | None = None,
+        calendar_name: str = "",
+    ) -> dict:
+        calls.append(("calendar", title, start_at, str(end_at or "")))
+        return {
+            "ok": True,
+            "action": "calendar.create_event",
+            "summary": "Created calendar event",
+            "data": {
+                "title": title,
+                "start_at": start_at,
+                "end_at": str(end_at or ""),
+                "calendar_name": calendar_name,
+            },
+        }
+
+    def fake_reminders_create(title: str, *, due_at: str | None = None, list_name: str = "") -> dict:
+        calls.append(("reminder", title, str(due_at or ""), list_name))
+        return {
+            "ok": True,
+            "action": "reminders.create",
+            "summary": "Created reminder",
+            "data": {
+                "title": title,
+                "due_at": str(due_at or ""),
+                "list_name": list_name,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.calendar_create_event", fake_calendar_create_event)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.reminders_create", fake_reminders_create)
+
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "创建明天上午10点开会的日程",
+        launcher_mode="bubble",
+    )
+
+    assert result["ok"] is True
+    assert calls[-1] == ("calendar", "开会", tomorrow_1000, tomorrow_1100)
+    assert agent_task["summary"] == f"已创建日历事件：开会（{tomorrow_1000} - {tomorrow_1100}）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "calendar.create_event"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "创建明天上午10点开会的提醒",
+        launcher_mode="live2d",
+    )
+
+    assert result["ok"] is True
+    assert calls[-1] == ("reminder", "开会", tomorrow_1000, "")
+    assert agent_task["summary"] == f"已创建提醒事项：开会（{tomorrow_1000}）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "reminders.create"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoints(

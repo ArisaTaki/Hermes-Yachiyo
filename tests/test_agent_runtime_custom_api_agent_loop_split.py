@@ -682,6 +682,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     ]
     today_1500 = f"{date.today().isoformat()}T15:00"
     tomorrow = date.today() + timedelta(days=1)
+    tomorrow_1000 = f"{tomorrow.isoformat()}T10:00"
+    tomorrow_1100 = f"{tomorrow.isoformat()}T11:00"
     tomorrow_1500 = f"{tomorrow.isoformat()}T15:00"
     tomorrow_1600 = f"{tomorrow.isoformat()}T16:00"
 
@@ -1536,6 +1538,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"title": "开会", "due_at": tomorrow_1500},
         },
     ]
+    assert daily_desktop_intent_tool_requests("创建明天上午10点开会的提醒", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "开会", "due_at": tomorrow_1000},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("创建日历事件 明天下午三点开会", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1544,6 +1553,28 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
                 "title": "开会",
                 "start_at": tomorrow_1500,
                 "end_at": tomorrow_1600,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("创建明天上午10点开会的日程", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1000,
+                "end_at": tomorrow_1100,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("把明天上午10点开会加到日历", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1000,
+                "end_at": tomorrow_1100,
             },
         },
     ]
@@ -4366,6 +4397,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "calendar.create_event",
         "input": {"title": "开会", "start_at": tomorrow_1500, "end_at": tomorrow_1600},
+    }
+    assert daily_desktop_intent_tool_request("创建明天上午10点开会的日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "calendar.create_event",
+        "input": {
+            "title": "开会",
+            "start_at": f"{tomorrow.isoformat()}T10:00",
+            "end_at": f"{tomorrow.isoformat()}T11:00",
+        },
+    }
+    assert daily_desktop_intent_tool_request("创建明天上午10点开会的提醒", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "reminders.create",
+        "input": {"title": "开会", "due_at": f"{tomorrow.isoformat()}T10:00"},
     }
     assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {

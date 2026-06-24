@@ -4226,10 +4226,16 @@ def _reminder_create_body(value: str) -> str:
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:提醒事项|提醒|reminder)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<body_prefixed>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒|reminder)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?:提醒事项|reminders?)\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
         r"(?:新建|创建|添加|新增|加)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:提醒事项|提醒)?\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<body_to_reminders>[^。！？!?]+?)\s*"
+        r"(?:加到|添加到|新增到|放到|加入)\s*(?:提醒事项|提醒|reminders?)$",
         r"^(?:please\s+)?remind me\s+(?P<body>[^.!?]+)$",
         r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
         r"(?:called|named|for|to)?\s*(?P<body>[^.!?]+)$",
@@ -4237,7 +4243,13 @@ def _reminder_create_body(value: str) -> str:
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            return _strip_query(match.group("body"))
+            groups = match.groupdict()
+            return _strip_query(
+                groups.get("body")
+                or groups.get("body_prefixed")
+                or groups.get("body_to_reminders")
+                or ""
+            )
     return ""
 
 
@@ -4248,17 +4260,29 @@ def _calendar_event_create_body(value: str) -> str:
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:日历事件|日程|日历日程|calendar event)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<body_prefixed>[^。！？!?]+?)\s*(?:的)?(?:日历事件|日程|日历日程|calendar event)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)?\s*(?:日历|calendar)\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:日程|事件|event)?\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<body_to_calendar>[^。！？!?]+?)\s*"
+        r"(?:加到|添加到|新增到|放到|加入)\s*(?:日历|calendar)$",
         r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?calendar event\s+"
         r"(?:called|named|for)?\s*(?P<body>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            return _strip_query(match.group("body"))
+            groups = match.groupdict()
+            return _strip_query(
+                groups.get("body")
+                or groups.get("body_prefixed")
+                or groups.get("body_to_calendar")
+                or ""
+            )
     return ""
 
 
