@@ -16,6 +16,7 @@ type StartPublicYachiyoTaskRequest = {
 };
 
 type UseYachiyoTaskSubmitOptions = {
+  expectPendingAssistantReply: (taskId: string) => void;
   loadSessions: () => Promise<void>;
   onAccepted: () => void;
   onRunning: () => void;
@@ -30,6 +31,7 @@ type UseYachiyoTaskSubmitOptions = {
 };
 
 export function useYachiyoTaskSubmit({
+  expectPendingAssistantReply,
   loadSessions,
   onAccepted,
   onRunning,
@@ -68,11 +70,13 @@ export function useYachiyoTaskSubmit({
       });
       rememberYachiyoTasks([task]);
       onAccepted();
-      if (task.status === 'running' && task.task_id) {
+      const taskId = String(task.task_id || '').trim();
+      if (taskId) expectPendingAssistantReply(taskId);
+      if (task.status === 'running' && taskId) {
         setStatus(chatRunnableRunningStatusText(runnableLabel));
         onRunning();
         await refreshMessages();
-        pollAgentRunInBackground(task.task_id);
+        pollAgentRunInBackground(taskId);
         return true;
       }
       onSettled();
@@ -90,6 +94,7 @@ export function useYachiyoTaskSubmit({
     }
   }, [
     loadSessions,
+    expectPendingAssistantReply,
     onAccepted,
     onRunning,
     onSettled,

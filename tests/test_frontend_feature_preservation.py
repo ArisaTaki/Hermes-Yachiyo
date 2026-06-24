@@ -604,9 +604,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "...metadata",
             "source: 'chat'",
             "rememberYachiyoTasks([task])",
+            "if (taskId) expectPendingAssistantReply(taskId);",
             "chatRunnableRunningStatusText(runnableLabel)",
             "chatRunnableSettledStatusText({",
-            "pollAgentRunInBackground(task.task_id)",
+            "pollAgentRunInBackground(taskId)",
             "Fall through to the legacy Chat API with the same idempotency key.",
         ],
     )
@@ -1074,6 +1075,7 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "runnableId: publicTaskTarget?.id || null",
             "runnableKind: publicTaskTarget?.kind || 'main'",
             "daily_desktop_intent: Boolean(dailyDesktopTaskPrompt)",
+            "expectPendingAssistantReply,",
             "const retryDailyDesktopTaskPrompt = !message.attachments?.length",
             "retry_of_message_id: message.id",
         ],
@@ -1087,6 +1089,8 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "runnableKind === 'main' ? MAIN_CHAT_AGENT_ID",
             "const cleanRunnableId = String(runnableId || (runnableKind === 'main' ? MAIN_CHAT_AGENT_ID : '')).trim();",
             "runnable_kind: runnableKind || 'main'",
+            "expectPendingAssistantReply: (taskId: string) => void;",
+            "if (taskId) expectPendingAssistantReply(taskId);",
             "...metadata",
         ],
     )

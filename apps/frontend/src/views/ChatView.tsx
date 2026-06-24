@@ -416,6 +416,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus,
   });
   const { startPublicYachiyoTask } = useYachiyoTaskSubmit({
+    expectPendingAssistantReply,
     loadSessions,
     onAccepted: () => {
       transientEmptySessionIdRef.current = '';
