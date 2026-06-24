@@ -1144,6 +1144,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_hotkey",
         "input": {"app_name": "Microsoft Word", "key": "s", "modifiers": ["command"]},
     }
+    assert daily_desktop_intent_tool_request("打开微信发送 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("打开 Slack 点搜索", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_click_ui_element",
@@ -1208,6 +1213,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("切到 Slack 并在消息框输入 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_type_into_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "消息",
+            "text": "hello",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    assert daily_desktop_intent_tool_request("切到 Slack 在消息框输入 hello", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_type_into_ui_element",
         "input": {
@@ -1741,6 +1757,24 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
                 "app_name": "Google Chrome",
                 "target": "搜索",
                 "text": "yachiyo",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
                 "role_filter": "text",
                 "limit": 80,
             },
@@ -2771,6 +2805,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "send"},
     }
+    assert daily_desktop_intent_tool_request("发送 hello", allowed_tools) is None
     assert daily_desktop_intent_tool_request("send current message", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",

@@ -2312,6 +2312,13 @@ def _normalize_app_scoped_ui_action_app(value: str) -> str:
     raw_app = _strip_app_name(value)
     if not raw_app:
         return ""
+    if re.match(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启|开|切换到|切到|切回|回到|聚焦|激活|置前)",
+        raw_app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
     compact = re.sub(r"[\s._-]+", "", raw_app.lower())
     if compact in {
         "在",
@@ -2610,6 +2617,8 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
     mode, _raw_app, app_name, followup = shorthand_match
     if app_name in _BROWSER_APP_NAMES:
         return []
+    if _desktop_type_into_ui_element(followup):
+        return []
     query = _desktop_find_query(followup)
     if not query:
         return []
@@ -2754,6 +2763,21 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
     return None
 
 
+def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for alias, app_name in _known_app_followup_aliases():
+        split = _split_compact_app_prefix(text, alias)
+        if not split:
+            continue
+        raw_app, followup = split
+        followup = _strip_app_foreground_followup_prefix(_strip_query(followup))
+        if raw_app and followup:
+            return raw_app, app_name, followup
+    return None
+
+
 def _known_app_followup_aliases() -> list[tuple[str, str]]:
     candidates: dict[str, str] = {}
     for alias, app_name in _APP_ALIASES.items():
@@ -2818,6 +2842,32 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_hotkey(followup)
         or _desktop_safe_type_text(followup)
         or _desktop_find_query(followup)
+    )
+
+
+def _looks_like_possible_app_followup(value: str) -> bool:
+    followup = str(value or "").strip()
+    if not followup:
+        return False
+    return bool(
+        re.match(
+            r"^(?:在|向|给)?(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
+            r"(?:上|里|中|内|的|里的|中的)?\s*"
+            r"(?:输入|填写|键入|打入|填入|写入|写|打字|打上|打|"
+            r"搜索|搜一下|搜|查找|查一下|查查|检索|"
+            r"点击|点一下|点按|单击|点|按一下|按|双击|"
+            r"发送|发出|提交|确认|确定|"
+            r"新建|开新|保存|复制|粘贴|全选|撤销|重做|"
+            r"滚动|上滑|下滑|向上滚动|向下滚动|向左滚动|向右滚动)",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:type|enter|input|fill|search|find|click|press|tap|send|submit|"
+            r"save|copy|paste|undo|redo|scroll|new)\b",
+            followup,
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -3247,6 +3297,11 @@ def _strip_app_foreground_followup(value: str) -> str:
         raw_app, _app_name, _followup = known_split
         if raw_app:
             return raw_app.strip()
+    known_prefix = _known_app_prefix_split(text)
+    if known_prefix:
+        raw_app, _app_name, followup = known_prefix
+        if raw_app and _looks_like_possible_app_followup(followup):
+            return raw_app.strip()
     return text.strip()
 
 
@@ -3616,16 +3671,17 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
         r"enter|return|escape|esc|tab|space|delete|backspace|up|down|left|right|"
         r"[A-Za-z0-9])"
     )
+    suffix = r"\s*(?:键|快捷键|热键|一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$"
     patterns = (
-        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?:按下|按|发送|触发|快捷键|热键|组合键|按键)\s*(?:一下|下|一次)?\s*"
-        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+)",
-        rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*(?:一下|下|一次)?\s*"
-        rf"(?P<combo>{hotkey_part})",
-        rf"press\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
-        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
-        rf"trigger\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)"
-        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)",
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})+){suffix}",
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按下|按|发送|触发)\s*(?:一下|下|一次)?\s*"
+        rf"(?P<combo>{hotkey_part}){suffix}",
+        rf"^press\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)\s*[.!?]*$",
+        rf"^trigger\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)"
+        rf"(?P<combo>{hotkey_part}(?:[+\-\s]+{hotkey_part})*)\s*[.!?]*$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)

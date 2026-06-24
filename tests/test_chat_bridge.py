@@ -1592,6 +1592,136 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         store.close()
 
 
+def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_element(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-app-open-type-into-ui.db",
+        workspace_dir=tmp_path / "runtime-app-open-type-into-ui",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    focus_calls: list[str] = []
+    type_calls: list[tuple[str, str, str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher app open UI type should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_type_into_ui_element(
+        target: str,
+        text: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        type_calls.append((target, text, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.type_into_ui_element",
+            "summary": f"Typed into {target}",
+            "data": {
+                "target": target,
+                "text": text,
+                "role_filter": role_filter,
+                "character_count": len(text),
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.type_into_ui_element",
+        fake_type_into_ui_element,
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开微信在搜索框输入文件传输助手",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert open_calls == []
+        assert focus_calls == []
+        assert type_calls == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == (
+            "app.open_and_type_into_ui_element"
+        )
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "app_name": "WeChat",
+            "target": "搜索",
+            "text": "文件传输助手",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert open_calls == ["WeChat"]
+        assert focus_calls == ["WeChat"]
+        assert type_calls == [("搜索", "文件传输助手", "text", 80)]
+        assert approved.status == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
