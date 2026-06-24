@@ -2201,6 +2201,16 @@ def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> Non
         "x-apple.systempreferences:com.apple.wifi-settings-extension",
     ]
 
+    result = desktop_mod.app_open("系统设置里的辅助功能")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened System Settings: Accessibility Permission"
+    assert result["data"]["settings_label"] == "Accessibility Permission"
+    assert calls[4][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ]
+
 
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
     calls = []

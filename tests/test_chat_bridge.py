@@ -449,6 +449,26 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
 
     assert "model.requested" not in event_types
 
+    for launcher_mode in ("bubble", "live2d"):
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            "打开系统设置里的辅助功能",
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert agent_task["summary"] == "已打开辅助功能权限。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "辅助功能权限"}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert open_calls == ["System Settings", "辅助功能权限", "辅助功能权限"]
+
 
 def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
     tmp_path,
