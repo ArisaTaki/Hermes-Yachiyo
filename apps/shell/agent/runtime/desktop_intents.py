@@ -2915,7 +2915,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"全选|撤销|重做|"
         r"(?:浏览器|网页|当前网页|当前页)刷新(?:一下|下)?|"
         r"刷新(?:一下|下)?(?:页面|当前页|当前网页|网页)?|返回上一页|回到上一页|"
-        r"重新打开(?:上个|上一个)?关闭的标签页|恢复(?:上个|上一个)?关闭的标签页|"
+        r"重新打开(?:(?:刚刚|刚|最近|上次|上个|上一个)关闭的|关闭的)标签页|"
+        r"恢复(?:(?:刚刚|刚|最近|上次|上个|上一个)关闭的|关闭的)标签页|"
         r"网页后退(?:一下|下|一次)?|浏览器后退(?:一下|下|一次)?|"
         r"后退一页|后退(?:一下|下|一次)?|前进一页|"
         r"网页前进(?:一下|下|一次)?|浏览器前进(?:一下|下|一次)?|"
@@ -6410,8 +6411,18 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "reload": "refresh",
         "refresh": "refresh",
         "重新打开关闭的标签页": "reopen_closed_tab",
+        "重新打开刚关闭的标签页": "reopen_closed_tab",
+        "重新打开刚刚关闭的标签页": "reopen_closed_tab",
+        "重新打开最近关闭的标签页": "reopen_closed_tab",
+        "重新打开上次关闭的标签页": "reopen_closed_tab",
         "重新打开上个关闭的标签页": "reopen_closed_tab",
+        "重新打开上一个关闭的标签页": "reopen_closed_tab",
         "恢复关闭的标签页": "reopen_closed_tab",
+        "恢复刚关闭的标签页": "reopen_closed_tab",
+        "恢复刚刚关闭的标签页": "reopen_closed_tab",
+        "恢复最近关闭的标签页": "reopen_closed_tab",
+        "恢复上次关闭的标签页": "reopen_closed_tab",
+        "恢复上个关闭的标签页": "reopen_closed_tab",
         "恢复上一个关闭的标签页": "reopen_closed_tab",
         "reopenclosedtab": "reopen_closed_tab",
         "reopentheclosedtab": "reopen_closed_tab",

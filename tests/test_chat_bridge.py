@@ -4360,6 +4360,12 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
             "reopen_closed_tab",
             "已重新打开关闭的标签页。",
         ),
+        (
+            "重新打开刚关闭的标签页",
+            "bubble",
+            "reopen_closed_tab",
+            "已重新打开关闭的标签页。",
+        ),
     )
     for text, launcher_mode, action, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(

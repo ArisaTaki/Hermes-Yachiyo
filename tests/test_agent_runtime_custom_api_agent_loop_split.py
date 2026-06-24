@@ -4461,6 +4461,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("重新打开刚关闭的标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "reopen_closed_tab"},
+    }
+    assert daily_desktop_intent_tool_request("恢复上次关闭的标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "reopen_closed_tab"},
+    }
     assert daily_desktop_intent_tool_request("关闭当前标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -4587,6 +4597,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "previous_tab"},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 重新打开刚关闭的标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "reopen_closed_tab"},
     }
     assert daily_desktop_intent_tool_request("返回上一页", allowed_tools) == {
         "protocol": "json_fallback",
