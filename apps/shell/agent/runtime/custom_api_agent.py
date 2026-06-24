@@ -1894,6 +1894,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "new_window": "新建窗口",
         "new_document": "新建文档",
         "new_note": "新建笔记",
+        "new_reminder": "新建提醒事项",
         "refresh": "刷新",
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",

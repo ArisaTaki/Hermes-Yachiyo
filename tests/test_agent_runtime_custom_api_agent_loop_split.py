@@ -1438,6 +1438,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "hello"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("新建一个提醒事项 买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "买牛奶"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开提醒事项添加买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "买牛奶"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("新建一条笔记记下 明天十点开会", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -3730,8 +3754,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("别把 GitHub 打开", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
     assert daily_desktop_intent_tool_request("提醒我下午三点开会", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("新建一个提醒事项 买牛奶", allowed_tools) is None
-    assert daily_desktop_intent_tool_request("打开提醒事项添加买牛奶", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("新建一个提醒事项 明天下午三点开会", allowed_tools) is None
     assert daily_desktop_intent_tool_request("创建日历事件 明天下午三点开会", allowed_tools) is None
     assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
@@ -5242,6 +5265,19 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             },
         },
     )
+    app_open_new_reminder = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.open_and_safe_shortcut",
+        {"app_name": "Reminders", "action": "new_reminder"},
+        {
+            "ok": True,
+            "summary": "Focused app and completed foreground action",
+            "data": {
+                "app_name": "Reminders",
+                "foreground_action": "safe_shortcut",
+                "shortcut_action": "new_reminder",
+            },
+        },
+    )
     app_open_safe_key = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
@@ -5483,6 +5519,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_open_safe_type_text == "已打开 Notes 并输入文字（5 个字符）。"
     assert app_focus_safe_shortcut == "已切到 Slack 并粘贴。"
     assert app_open_new_document == "已打开 Microsoft Word 并新建文档。"
+    assert app_open_new_reminder == "已打开 Reminders 并新建提醒事项。"
     assert app_open_safe_key == "已打开 Google Chrome 并按Tab。"
     assert app_open_safe_scroll == "已打开 Google Chrome 并向下滚动前台界面（2 页）。"
     assert app_open_safe_click == "已打开 Google Chrome 并点击前台位置：120, 240。"

@@ -319,6 +319,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in notes_create_type_sequence
     ):
         return notes_create_type_sequence
+    reminders_create_type_sequence = _reminders_create_and_type_tool_requests(context)
+    if reminders_create_type_sequence and all(
+        str(request.get("tool") or "") in allowed for request in reminders_create_type_sequence
+    ):
+        return reminders_create_type_sequence
     app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
     if app_browser_action_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
@@ -3348,6 +3353,59 @@ def _notes_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:
     ]
 
 
+def _reminders_create_and_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    title = _reminders_create_and_type_text(text)
+    if not title:
+        return []
+    return [
+        _request(
+            "app.open_and_safe_shortcut",
+            {"app_name": "Reminders", "action": "new_reminder"},
+        ),
+        _request("desktop.safe_type_text", {"text": title}),
+    ]
+
+
+def _reminders_create_and_type_text(value: str) -> str:
+    text = str(value or "").strip()
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:提醒事项|提醒|reminder)\s*[:：]?\s*(?P<title>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:提醒事项|reminders?)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
+        r"(?:新建|创建|添加|新增|加)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:提醒事项|提醒)?\s*[:：]?\s*(?P<title_open>[^。！？!?]+)$",
+        r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+        r"(?:called|named|for|to)?\s*(?P<title_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        title = _strip_typed_text(
+            groups.get("title") or groups.get("title_open") or groups.get("title_en") or ""
+        )
+        if _looks_like_reminder_title_with_due_time(title):
+            continue
+        if title:
+            return title
+    return ""
+
+
+def _looks_like_reminder_title_with_due_time(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:今天|明天|后天|上午|下午|晚上|今晚|早上|中午|凌晨|"
+            r"\d{1,2}\s*(?:点|:|：)|半小时后|一小时后|[一二两三四五六七八九十]+点)",
+            str(value or ""),
+        )
+        or re.search(r"\b(?:today|tomorrow|tonight|am|pm|a\.m\.|p\.m\.)\b", str(value or ""), flags=re.IGNORECASE)
+    )
+
+
 def _notes_create_and_type_text(value: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -3713,10 +3771,13 @@ def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
         r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
         r"新建笔记|新建一个笔记|新建一条笔记|新建一篇笔记|新笔记|"
         r"新建备忘录|新建一个备忘录|新建一条备忘录|新建一篇备忘录|新备忘录|"
+        r"新建提醒事项|新建一个提醒事项|新建一条提醒事项|新建一项提醒事项|新建提醒|新提醒|"
         r"new\s+tab|new\s+window|new\s+document|new\s+file|new\s+note|"
+        r"new\s+reminder|"
         r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
         r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
-        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note"
+        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note|"
+        r"make\s+a\s+new\s+reminder|create\s+a\s+new\s+reminder"
     )
     pattern = (
         rf"^(?P<action>{action_pattern})\s*"
@@ -5022,11 +5083,22 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新建一条备忘录": "new_note",
         "新建一篇备忘录": "new_note",
         "新备忘录": "new_note",
+        "新建提醒事项": "new_reminder",
+        "新建一个提醒事项": "new_reminder",
+        "新建一条提醒事项": "new_reminder",
+        "新建一项提醒事项": "new_reminder",
+        "新建提醒": "new_reminder",
+        "新提醒": "new_reminder",
         "newnote": "new_note",
         "makeanewnote": "new_note",
         "createanewnote": "new_note",
         "makenewnote": "new_note",
         "createnewnote": "new_note",
+        "newreminder": "new_reminder",
+        "makeanewreminder": "new_reminder",
+        "createanewreminder": "new_reminder",
+        "makenewreminder": "new_reminder",
+        "createnewreminder": "new_reminder",
     }
     return mapping.get(phrase, "")
 
