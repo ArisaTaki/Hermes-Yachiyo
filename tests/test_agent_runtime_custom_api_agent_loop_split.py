@@ -752,6 +752,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "WeCom"},
     }
+    assert daily_desktop_intent_tool_request("微信帮我打开一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("open WeChat for me", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("可以帮我打开 GitHub 吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -1417,6 +1427,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Google Chrome"},
     }
     assert daily_desktop_intent_tool_request("微信切过来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("微信切一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("go back to WeChat", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("switch back to WeChat", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus",
         "input": {"app_name": "WeChat"},

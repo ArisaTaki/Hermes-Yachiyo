@@ -507,29 +507,38 @@ def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "能不能切到 Slack",
+    cases = (
+        ("能不能切到 Slack", "bubble", "Slack"),
+        ("微信切一下", "live2d", "WeChat"),
+        ("go back to WeChat", "bubble", "WeChat"),
+        ("switch back to WeChat", "live2d", "WeChat"),
     )
+    for prompt, launcher_mode, app_name in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert focus_calls == ["Slack"]
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已切换到 Slack。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Slack"}
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == f"已切换到 {app_name}。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert focus_calls == ["Slack", "WeChat", "WeChat", "WeChat"]
 
 
 def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
@@ -851,23 +860,32 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "打开 Spotify 播放周杰伦",
+    cases = (
+        ("打开 Spotify 播放周杰伦", "bubble", "Spotify"),
+        ("微信帮我打开一下", "live2d", "WeChat"),
+        ("open WeChat for me", "bubble", "WeChat"),
     )
+    for prompt, launcher_mode, app_name in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert open_calls == ["Spotify"]
-    assert agent_task["summary"] == "已打开 Spotify。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert agent_task["summary"] == f"已打开 {app_name}。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert open_calls == ["Spotify", "WeChat", "WeChat"]
 
 
 def test_chat_bridge_quick_message_opens_default_browser_without_model(

@@ -5232,7 +5232,7 @@ def _app_focus_name(text: str) -> str:
         r"(?:\s*(?:前台|前面|最前面|最前|前台来|这边|过来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*"
-        r"(?:切换到|切到|切回|回到|聚焦|激活|置前|带到|带回|移到|放到|切过来)"
+        r"(?:切换到|切到|切回|回到|聚焦|激活|置前|带到|带回|移到|放到|切过来|切一下|切下)"
         r"(?:\s*(?:前台|前面|最前面|最前|前台来|这边|过来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:到|回到)\s*(?:前台|前面|最前面|最前)",
@@ -5240,6 +5240,8 @@ def _app_focus_name(text: str) -> str:
         r"(?P<app>[^。！？!?，,]+?)\s*(?:切换到|切到|切回|回到|聚焦|激活|置前)"
         r"(?:\s*(?:前台|前面|最前面|最前|前台来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:switch back to|go back to|return to)\s+(?P<app>[^.!?]+)",
         r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+)",
         r"bring\s+(?P<app>[^.!?]+?)\s+to\s+(?:the\s+)?(?:front|foreground)",
     )
@@ -7423,7 +7425,7 @@ def _strip_browser_followup(value: str) -> str:
 
 def _strip_polite_suffix(value: str) -> str:
     return re.sub(
-        r"\s*(?:一下|一下儿|一下子|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
+        r"\s*(?:一下|一下儿|一下子|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|帮我|给我|please|for\s+me)$",
         "",
         str(value or "").strip(),
         flags=re.IGNORECASE,
