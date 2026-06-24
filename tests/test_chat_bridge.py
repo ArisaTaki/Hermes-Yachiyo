@@ -1820,6 +1820,11 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         ("用 Apple Music 随便放点歌", "bubble"),
         ("打开 Apple Music 播放音乐", "live2d"),
         ("打开 Apple Music 随便放点音乐", "bubble"),
+        ("放音乐听听", "live2d"),
+        ("听点音乐", "bubble"),
+        ("想听音乐", "live2d"),
+        ("用 Apple Music 听点音乐", "bubble"),
+        ("播放苹果音乐", "live2d"),
     ]
     for prompt, launcher_mode in launcher_prompts:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1843,7 +1848,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_and_play_calls == 6
+    assert open_and_play_calls == 11
 
 
 def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(

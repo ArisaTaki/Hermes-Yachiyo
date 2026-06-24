@@ -3898,6 +3898,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("放音乐听听", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("听点音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("想听音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("播放苹果音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("帮我用 Apple Music 放一首歌", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
