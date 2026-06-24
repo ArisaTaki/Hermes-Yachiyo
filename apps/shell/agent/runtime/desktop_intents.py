@@ -7065,6 +7065,12 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
                 "direction": "up" if _scroll_direction_is_up(direction) else "down",
                 "pages": pages,
             }
+    if re.search(
+        zh_prefix + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(r"^(?:please\s+)?(?:scroll|page)(?:\s+(?:a\s+)?(?:little|bit))?\s*$", text, flags=re.IGNORECASE):
+        return {"direction": "down", "pages": 1}
     return None
 
 

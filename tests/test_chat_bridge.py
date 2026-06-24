@@ -5276,11 +5276,17 @@ def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
-    for launcher_mode in ("bubble", "live2d"):
+    cases = (
+        ("翻到下一页", "bubble"),
+        ("翻到下一页", "live2d"),
+        ("滚动一下", "bubble"),
+        ("scroll a little", "live2d"),
+    )
+    for prompt, launcher_mode in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
-            "翻到下一页",
+            prompt,
             launcher_mode=launcher_mode,
         )
 
@@ -5298,7 +5304,7 @@ def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert scrolled == [("down", 1), ("down", 1)]
+    assert scrolled == [("down", 1), ("down", 1), ("down", 1), ("down", 1)]
 
 
 def test_chat_bridge_quick_message_executes_app_prefix_safe_scroll_without_model(

@@ -5182,6 +5182,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_scroll",
         "input": {"direction": "down", "pages": 1},
     }
+    for prompt in ("滚动一下", "页面滚动一下", "scroll", "scroll a little"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_scroll",
+            "input": {"direction": "down", "pages": 1},
+        }
     assert daily_desktop_intent_tool_request("向上滚动两页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_scroll",
