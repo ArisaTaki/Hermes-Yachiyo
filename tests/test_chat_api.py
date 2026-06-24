@@ -4397,6 +4397,134 @@ def test_agent_mention_session_title_uses_goal_without_mention(tmp_path, monkeyp
         store.close()
 
 
+def test_agent_runnable_daily_desktop_intent_requests_policy_overlay(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    agent = {
+        "id": "agent_native",
+        "name": "Native Agent",
+        "nickname": "Native Agent",
+        "kind": "agent",
+        "enabled": True,
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+    captured: dict[str, object] = {}
+
+    class FakeRunnableService:
+        def list_runnables(self):
+            return {"runnables": [agent]}
+
+        def parse_known_chat_runnable(self, _text):
+            return "Native Agent", "能否帮我播放apple Music?"
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == agent["id"] or name == agent["name"] or name == agent["nickname"]:
+                return agent
+            return None
+
+        def create_run_for_runnable_async(self, **kwargs):
+            captured.update(kwargs)
+            run = {
+                "run_id": "agent_run_music",
+                "run_group_id": kwargs.get("run_group_id") or "run_group_music",
+                "status": "processing",
+                "result": "",
+                "runnable": agent,
+            }
+            on_complete = kwargs.get("on_complete")
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": "已打开 Apple Music 并开始播放。",
+                })
+            return run
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        result = api.send_message("@Native Agent 能否帮我播放apple Music?")
+
+        assert result["ok"] is True
+        assert captured["runnable_id"] == agent["id"]
+        assert captured["user_goal"] == "能否帮我播放apple Music?"
+        assert captured["daily_desktop_policy_overlay"] is True
+        user_message = runtime.chat_session.get_messages()[0]
+        assert user_message.metadata["daily_desktop_intent"] is True
+        assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        _wait_for_assistant_content(runtime, "已打开 Apple Music 并开始播放。")
+    finally:
+        store.close()
+
+
+def test_bound_agent_session_daily_desktop_intent_requests_policy_overlay(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    agent = {
+        "id": "agent_native",
+        "name": "Native Agent",
+        "nickname": "Native Agent",
+        "kind": "agent",
+        "enabled": True,
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+    captured: list[dict[str, object]] = []
+
+    class FakeRunnableService:
+        def list_runnables(self):
+            return {"runnables": [agent]}
+
+        def parse_known_chat_runnable(self, text):
+            if text.startswith("@Native Agent"):
+                return "Native Agent", text.replace("@Native Agent", "", 1).strip()
+            return None
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == agent["id"] or name == agent["name"] or name == agent["nickname"]:
+                return agent
+            return None
+
+        def create_run_for_runnable_async(self, **kwargs):
+            captured.append(dict(kwargs))
+            run = {
+                "run_id": f"agent_run_{len(captured)}",
+                "run_group_id": kwargs.get("run_group_id") or f"run_group_{len(captured)}",
+                "status": "processing",
+                "result": "",
+                "runnable": agent,
+            }
+            on_complete = kwargs.get("on_complete")
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": "Agent result",
+                })
+            return run
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        first = api.send_message("@Native Agent 你好")
+        assert first["ok"] is True
+        assert "daily_desktop_policy_overlay" not in captured[-1]
+
+        second = api.send_message("能否帮我播放apple Music?")
+
+        assert second["ok"] is True
+        assert captured[-1]["runnable_id"] == agent["id"]
+        assert captured[-1]["user_goal"] == "能否帮我播放apple Music?"
+        assert captured[-1]["daily_desktop_policy_overlay"] is True
+        user_message = runtime.chat_session.get_messages()[-2]
+        assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+    finally:
+        store.close()
+
+
 def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {

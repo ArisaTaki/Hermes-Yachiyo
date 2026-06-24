@@ -707,6 +707,17 @@ class ChatAPI:
         except Exception:
             logger.debug("刷新桌面执行权限缓存失败", exc_info=True)
 
+    def _daily_desktop_runnable_policy_overlay_requests(
+        self,
+        text: str,
+        metadata: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        return daily_desktop_entrypoint_tool_requests(
+            text,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+            metadata=metadata,
+        )
+
     def _daily_desktop_followup_goal_text(
         self,
         text: str,
@@ -1515,6 +1526,18 @@ class ChatAPI:
             "run_group_id": run_group_id,
         }
         user_metadata = self._merge_user_metadata(user_metadata, metadata) or {}
+        runnable_daily_desktop_requests: list[dict[str, Any]] = []
+        if current_context.get("conversation_kind") != "group" and runnable.get("kind") == "agent":
+            runnable_daily_desktop_requests = self._daily_desktop_runnable_policy_overlay_requests(
+                user_goal,
+                user_metadata,
+            )
+            if runnable_daily_desktop_requests:
+                self._warm_daily_desktop_permission_cache(runnable_daily_desktop_requests)
+                user_metadata = self._merge_user_metadata(
+                    user_metadata,
+                    self._daily_desktop_user_metadata(runnable_daily_desktop_requests),
+                ) or {}
         user_metadata = self._with_client_message_id(user_metadata, client_message_id) or {}
         message_content = text or user_goal
         should_set_runnable_title = (
@@ -1664,14 +1687,17 @@ class ChatAPI:
             logger.info("Agent Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), run_result.get("status"))
 
         try:
-            run = service.create_run_for_runnable_async(
-                runnable_id=str(runnable.get("id") or ""),
-                name=name,
-                user_goal=user_goal,
-                run_group_id=run_group_id,
-                upstream=upstream,
-                on_complete=_on_run_complete,
-            )
+            run_kwargs = {
+                "runnable_id": str(runnable.get("id") or ""),
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+                "on_complete": _on_run_complete,
+            }
+            if runnable_daily_desktop_requests:
+                run_kwargs["daily_desktop_policy_overlay"] = True
+            run = service.create_run_for_runnable_async(**run_kwargs)
         except AgentRuntimeError as exc:
             content = redact_api_error_text(exc)
             metadata_update: dict[str, Any] = {

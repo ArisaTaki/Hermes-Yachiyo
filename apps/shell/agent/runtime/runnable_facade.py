@@ -45,6 +45,7 @@ class RuntimeRunnableFacadeMixin:
         client_run_id: str = "",
         client_request_id: str = "",
         agent_override: dict[str, Any] | None = None,
+        daily_desktop_policy_overlay: bool = False,
     ) -> dict[str, Any]:
         return self.runnable_run_coordinator.create_run(
             runnable_id=runnable_id,
@@ -55,6 +56,7 @@ class RuntimeRunnableFacadeMixin:
             client_run_id=client_run_id,
             client_request_id=client_request_id,
             agent_override=agent_override,
+            daily_desktop_policy_overlay=daily_desktop_policy_overlay,
         )
 
     def create_run_for_runnable_async(
@@ -66,6 +68,7 @@ class RuntimeRunnableFacadeMixin:
         run_group_id: str = "",
         upstream: str = "",
         agent_override: dict[str, Any] | None = None,
+        daily_desktop_policy_overlay: bool = False,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """创建 Run 并立即返回，异步执行实际任务。"""
@@ -76,6 +79,7 @@ class RuntimeRunnableFacadeMixin:
             run_group_id=run_group_id,
             upstream=upstream,
             agent_override=agent_override,
+            daily_desktop_policy_overlay=daily_desktop_policy_overlay,
             on_complete=on_complete,
         )
 

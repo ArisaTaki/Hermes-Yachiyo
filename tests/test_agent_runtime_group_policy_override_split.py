@@ -101,6 +101,90 @@ def test_agent_run_async_uses_agent_override_without_persisted_lookup() -> None:
     assert completed[0]["status"] == "completed"
 
 
+def test_agent_run_async_overlays_daily_desktop_policy_for_clear_chat_intent() -> None:
+    captured: dict[str, Any] = {}
+    persisted_agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "enabled": True,
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda _agent_id: persisted_agent,
+        validate_agent_run_readiness=lambda agent: captured.setdefault("validated", agent),
+        starter=_FakeStarter(captured),
+        execute_agent_run=lambda run_id, agent, user_goal, **_kwargs: captured.setdefault(
+            "executed",
+            {
+                "run_id": run_id,
+                "agent": agent,
+                "user_goal": user_goal,
+                "status": "completed",
+            },
+        ),
+        project_agent_run_group_if_root=lambda run: run,
+        resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
+        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
+        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
+        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        redact_error=str,
+        error_type=RuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    coordinator.create_async({
+        "agent_id": "agent-yachiyo",
+        "user_goal": "能否帮我播放apple Music?",
+        "daily_desktop_policy_overlay": True,
+    })
+
+    allowed = captured["validated"]["tool_policy"]["allowed_tools"]
+    assert allowed[:1] == ["workspace.read"]
+    assert "media.apple_music_open_and_play" in allowed
+    assert "app.open" in allowed
+    assert captured["executed"]["agent"] == captured["validated"]
+
+
+def test_agent_run_async_does_not_overlay_daily_desktop_policy_for_howto_question() -> None:
+    captured: dict[str, Any] = {}
+    persisted_agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "enabled": True,
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda _agent_id: persisted_agent,
+        validate_agent_run_readiness=lambda agent: captured.setdefault("validated", agent),
+        starter=_FakeStarter(captured),
+        execute_agent_run=lambda *_args, **_kwargs: {"status": "completed"},
+        project_agent_run_group_if_root=lambda run: run,
+        resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
+        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
+        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
+        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        redact_error=str,
+        error_type=RuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    coordinator.create_async({
+        "agent_id": "agent-yachiyo",
+        "user_goal": "怎么播放 Apple Music？",
+        "daily_desktop_policy_overlay": True,
+    })
+
+    assert captured["validated"]["tool_policy"]["allowed_tools"] == ["workspace.read"]
+
+
 def test_agent_run_async_rejects_mismatched_agent_override() -> None:
     coordinator = RuntimeAgentRunAsyncCoordinator(
         get_agent_private=lambda _agent_id: pytest.fail("mismatched override should fail first"),

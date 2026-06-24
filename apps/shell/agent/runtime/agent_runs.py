@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 
 
 @dataclass(frozen=True)
@@ -211,11 +213,12 @@ class RuntimeAgentRunCoordinator:
     def _agent_for_payload(self, payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
         override = payload.get("agent_override")
         if not isinstance(override, dict):
-            return self._get_agent_private(agent_id)
+            agent = self._get_agent_private(agent_id)
+            return _with_daily_desktop_policy_overlay(agent, payload)
         override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
         if override_agent_id != agent_id:
             raise self._error_type("agent_override 与 agent_id 不一致")
-        return {**override, "agent_id": agent_id}
+        return _with_daily_desktop_policy_overlay({**override, "agent_id": agent_id}, payload)
 
 
 class RuntimeAgentRunAsyncCoordinator:
@@ -324,8 +327,45 @@ class RuntimeAgentRunAsyncCoordinator:
     def _agent_for_payload(self, payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
         override = payload.get("agent_override")
         if not isinstance(override, dict):
-            return self._get_agent_private(agent_id)
+            agent = self._get_agent_private(agent_id)
+            return _with_daily_desktop_policy_overlay(agent, payload)
         override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
         if override_agent_id != agent_id:
             raise self._error_type("agent_override 与 agent_id 不一致")
-        return {**override, "agent_id": agent_id}
+        return _with_daily_desktop_policy_overlay({**override, "agent_id": agent_id}, payload)
+
+
+def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload.get("daily_desktop_policy_overlay"):
+        return agent
+    user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+    if not daily_desktop_entrypoint_tool_requests(user_goal, list(DAILY_DESKTOP_TOOL_NAMES)):
+        return agent
+    policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+    allowed = _string_list(policy.get("allowed_tools"))
+    approval_required = dict(policy.get("approval_required")) if isinstance(policy.get("approval_required"), dict) else {}
+    return {
+        **agent,
+        "tool_policy": {
+            **policy,
+            "allowed_tools": _unique_tools([*allowed, *DAILY_DESKTOP_TOOL_NAMES]),
+            "approval_required": approval_required,
+        },
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _unique_tools(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
