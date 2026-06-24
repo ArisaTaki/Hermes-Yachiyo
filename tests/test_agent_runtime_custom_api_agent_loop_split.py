@@ -2591,17 +2591,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "蓝牙设置"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开 Wi-Fi 设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "Wi-Fi 设置"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开系统设置蓝牙", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "系统设置蓝牙"},
+        "input": {"app_name": "System Settings"},
+    }
+    assert daily_desktop_intent_tool_request("打开 WiFi 设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Settings"},
+    }
+    assert daily_desktop_intent_tool_request("打开显示器设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开文件管理器", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2643,30 +2653,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Activity Monitor"},
     }
+    assert daily_desktop_intent_tool_request("打开活动监视器看看 CPU", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Activity Monitor"},
+    }
+    assert daily_desktop_intent_tool_request("打开日历看看今天安排", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Calendar"},
+    }
     assert daily_desktop_intent_tool_request("打开设置的隐私与安全性", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "设置的隐私与安全性"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开屏幕录制权限", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "屏幕录制权限"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开辅助功能权限", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "辅助功能权限"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开桌面权限设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("打开需要的权限设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
-        "input": {"app_name": "隐私与安全性"},
+        "input": {"app_name": "System Settings"},
     }
     assert daily_desktop_intent_tool_request("检查桌面权限", allowed_tools) == {
         "protocol": "json_fallback",

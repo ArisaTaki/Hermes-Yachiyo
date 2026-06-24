@@ -38,6 +38,18 @@ _APP_ALIASES = {
     "系统偏好": "System Settings",
     "系统偏好设置": "System Settings",
     "设置": "System Settings",
+    "蓝牙设置": "System Settings",
+    "bluetoothsettings": "System Settings",
+    "wifi设置": "System Settings",
+    "wi-fi设置": "System Settings",
+    "wifisettings": "System Settings",
+    "wi-fisettings": "System Settings",
+    "无线网络设置": "System Settings",
+    "网络设置": "System Settings",
+    "声音设置": "System Settings",
+    "音量设置": "System Settings",
+    "显示器设置": "System Settings",
+    "显示设置": "System Settings",
     "文件管理器": "Finder",
     "文件浏览器": "Finder",
     "notes": "Notes",
@@ -3378,7 +3390,7 @@ def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:
         if not split:
             continue
         raw_app, followup = split
-        followup = _strip_app_foreground_followup_prefix(_strip_query(followup))
+        followup = _strip_known_app_followup_prefix(followup)
         if raw_app and followup:
             return raw_app, app_name, followup
     return None
@@ -3510,6 +3522,18 @@ def _looks_like_possible_app_followup(value: str) -> bool:
         or re.match(
             r"^(?:type|enter|input|fill|search|find|click|press|tap|send|submit|"
             r"save|copy|paste|undo|redo|scroll|new)\b",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:看看|看一下|看下|查看|看|读取|观察|检查)\s*[^。！？!?]*$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            r"(?:蓝牙|bluetooth|wi-?fi|无线网络|网络|声音|音量|显示器|显示|屏幕|"
+            r"电池|键盘|鼠标|触控板|trackpad|通知|隐私|安全性|隐私与安全性|"
+            r"辅助功能|壁纸|桌面与程序坞|通用|icloud|apple\s*id)(?:设置|偏好)?",
             followup,
             flags=re.IGNORECASE,
         )
@@ -3850,9 +3874,9 @@ def _app_show_name(text: str) -> str:
         return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示|还原一下|还原|恢复|取消隐藏)",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|还原一下|还原|恢复|取消隐藏)",
         r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏)",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:显示|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:显示(?!器)|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
         r"\b(?:show|unhide|restore)\s+(?P<app>[^.!?]+)",
         r"\bbring\s+back\s+(?P<app>[^.!?]+)",
     )
@@ -4096,16 +4120,17 @@ def _permission_settings_open_name(text: str) -> str:
     lowered = text.lower()
     if re.search(
         r"(?:打开|启动|开启|拉起).{0,8}"
-        r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面)",
+        r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面|"
+        r"屏幕录制权限|辅助功能权限|自动化权限|隐私与安全性|隐私.*安全)",
         text,
     ):
-        return "隐私与安全性"
+        return "System Settings"
     if re.search(
         r"\b(?:open|launch|show)\s+(?:desktop|missing|required|permission|permissions)"
         r".{0,24}(?:settings|page|pane)\b",
         lowered,
     ):
-        return "Privacy & Security"
+        return "System Settings"
     return ""
 
 
