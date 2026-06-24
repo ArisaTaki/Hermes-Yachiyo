@@ -1172,6 +1172,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"text": "文件传输助手"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开备忘录新建笔记输入 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Word 新建文档输入 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Microsoft Word", "action": "new_document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开浏览器搜索 yachiyo", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1785,6 +1809,47 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"key": "return", "modifiers": []},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开微信点搜索输入文件传输助手并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 点击搜索框输入 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("Chrome 搜索框输入 yachiyo 并搜索", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2248,6 +2313,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("打开 Finder 并打开下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开访达下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},

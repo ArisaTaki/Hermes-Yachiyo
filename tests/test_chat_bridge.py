@@ -439,6 +439,88 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: new note",
+            "data": {
+                "shortcut_action": action,
+                "shortcut_label": "new note",
+            },
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开备忘录新建笔记输入 hello",
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("open", "Notes"),
+        ("focus", "Notes"),
+        ("shortcut", "new_note"),
+        ("type", "hello"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 Notes 并新建笔记。 已向前台输入文字（5 个字符）。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    assert result["_task_timeline"]["tool_calls"][-2]["tool_name"] == "app.open_and_safe_shortcut"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_opens_word_and_creates_document_without_model(
     tmp_path,
     monkeypatch,
@@ -1494,6 +1576,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
     )
     runtime.agent_runtime_service = service
     open_calls: list[str] = []
+    focus_calls: list[str] = []
     click_calls: list[tuple[str, str, int, int]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
@@ -1519,6 +1602,15 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
             "data": {"app_name": app_name},
         }
 
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
     def fake_click_ui_element(
         target: str,
         *,
@@ -1535,6 +1627,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.click_ui_element",
         fake_click_ui_element,
@@ -1556,6 +1649,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
 
         assert result["ok"] is True
         assert open_calls == []
+        assert focus_calls == []
         assert click_calls == []
         assert waiting_task["status"] == "waiting_approval"
         assert waiting_task["needs_user_action"] is True
@@ -1580,7 +1674,149 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         ]
 
         assert open_calls == ["Slack"]
+        assert focus_calls == ["Slack"]
         assert click_calls == [("搜索", "", 80, 1)]
+        assert approved.status == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_chat_bridge_quick_message_continues_after_app_open_ui_click_approval(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-app-open-ui-click-then-type.db",
+        workspace_dir=tmp_path / "runtime-app-open-ui-click-then-type",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    focus_calls: list[str] = []
+    click_calls: list[tuple[str, str, int, int]] = []
+    typed_text: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher app open UI click then type should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+        click_count: int = 1,
+    ) -> dict:
+        click_calls.append((target, role_filter, limit, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": f"Clicked {target}",
+            "data": {"target": target, "role_filter": role_filter},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        typed_text.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.click_ui_element",
+        fake_click_ui_element,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开 Slack 点搜索输入 yachiyo",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        task_id = result["task_id"]
+        waiting_task = result["agent_task"]
+        link = service.get_task_run_link(task_id)
+        waiting_run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert open_calls == []
+        assert focus_calls == []
+        assert click_calls == []
+        assert typed_text == []
+        assert waiting_task["status"] == "waiting_approval"
+        assert waiting_task["needs_user_action"] is True
+        assert waiting_task["pending_approvals"][0]["tool_name"] == (
+            "app.open_and_click_ui_element"
+        )
+        assert waiting_task["pending_approvals"][0]["input_preview"] == {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        }
+        assert waiting_run["status"] == "approval_required"
+        assert waiting_run["pending_approval"]["tool"] == "app.open_and_click_ui_element"
+
+        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert open_calls == ["Slack"]
+        assert focus_calls == ["Slack"]
+        assert click_calls == [("搜索", "", 80, 1)]
+        assert typed_text == ["yachiyo"]
         assert approved.status == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_approval_required" in event_types

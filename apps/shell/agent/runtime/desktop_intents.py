@@ -246,6 +246,12 @@ def daily_desktop_intent_tool_requests(
     app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
+    shortcut_type_sequence = _app_open_or_focus_shortcut_type_tool_requests(context)
+    if shortcut_type_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_type_sequence):
+        return shortcut_type_sequence
+    click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
+    if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
+        return click_type_sequence
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
@@ -2482,7 +2488,12 @@ def _looks_like_app_status_request(text: str) -> bool:
 
 
 def _desktop_open_path(text: str) -> str:
-    text = _strip_finder_path_prefix(text)
+    original_text = str(text or "").strip()
+    text = _strip_finder_path_prefix(original_text)
+    if text != original_text:
+        path = _normalize_reveal_path(text)
+        if path:
+            return path
     if re.search(r"\bin\s+(?:the\s+)?finder\b", text, flags=re.IGNORECASE):
         return ""
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
@@ -2549,7 +2560,7 @@ def _strip_finder_path_prefix(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)|"
         r"(?:open|launch|start)\s+(?:the\s+)?(?:finder|file\s+manager|file\s+browser))\s*"
-        r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))\s*",
+        r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))?\s*",
         "",
         text,
         flags=re.IGNORECASE,
@@ -2629,6 +2640,48 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
         ),
         _request("desktop.safe_type_text", {"text": query}),
     ]
+
+
+def _app_open_or_focus_shortcut_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    parsed = _safe_shortcut_then_type(followup)
+    if not parsed:
+        return []
+    shortcut_action, typed_text, submit_return = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": shortcut_action},
+        ),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if submit_return:
+        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    return requests
+
+
+def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    parsed = _click_ui_element_then_type(followup)
+    if not parsed:
+        return []
+    click_payload, typed_text, submit_return = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_click_ui_element",
+            {"app_name": app_name, **click_payload},
+        ),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if submit_return:
+        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    return requests
 
 
 def _app_foreground_action_match(
@@ -2866,6 +2919,104 @@ def _looks_like_possible_app_followup(value: str) -> bool:
             r"^(?:type|enter|input|fill|search|find|click|press|tap|send|submit|"
             r"save|copy|paste|undo|redo|scroll|new)\b",
             followup,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
+    action_pattern = (
+        r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
+        r"新建窗口|新窗口|打开新窗口|开新窗口|开一个新窗口|"
+        r"新建文档|新文档|新建文件|新文件|开新文档|开一个新文档|开新文件|开一个新文件|"
+        r"新建表格|新表格|新建工作簿|新工作簿|"
+        r"新建演示文稿|新演示文稿|新建幻灯片|新幻灯片|新建ppt|新ppt|"
+        r"新建笔记|新笔记|新建备忘录|新备忘录|"
+        r"new\s+tab|new\s+window|new\s+document|new\s+file|new\s+note|"
+        r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
+        r"make\s+a\s+new\s+file|create\s+a\s+new\s+file|"
+        r"make\s+a\s+new\s+note|create\s+a\s+new\s+note"
+    )
+    pattern = (
+        rf"^(?P<action>{action_pattern})\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|and|then)\s*)?"
+        r"(?:输入|打字|键入|敲入|打入|打上|写入|写|打|type|enter text)\s*"
+        r"(?P<text>[^。！？!?]+)$"
+    )
+    match = re.search(pattern, str(value or "").strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    action = _desktop_safe_shortcut_action(match.group("action"))
+    raw_text = match.group("text")
+    typed_text = _strip_typed_text(raw_text)
+    if not action or not typed_text:
+        return None
+    return action, typed_text, _typed_text_has_return_followup(raw_text, "")
+
+
+def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] | None:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
+        r"(?P<label>[^。！？!?，,]+?)(?:里|中|内|上)?\s*"
+        r"(?:输入|填写|键入|打入|填入|写入|写|打字|打上|打)\s*"
+        r"(?P<text>[^。！？!?]+)$",
+        r"^(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
+        r"(?:the\s+)?(?P<label_en>[^.!?]+?)\s+"
+        r"(?:and\s+)?(?:type|enter|input|fill)\s+(?P<text_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, str(value or "").strip(), flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_label = groups.get("label") or groups.get("label_en") or ""
+        raw_text = groups.get("text") or groups.get("text_en") or ""
+        target = _strip_desktop_ui_element_label(raw_label) or _strip_desktop_ui_input_target(raw_label)
+        typed_text = _strip_typed_text(raw_text)
+        if not target or not typed_text:
+            continue
+        return (
+            {
+                "target": target,
+                "role_filter": _desktop_ui_element_role_filter(raw_label),
+                "limit": 80,
+                "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
+            },
+            typed_text,
+            _typed_text_has_return_followup(raw_text, raw_label),
+        )
+    return None
+
+
+def _typed_text_has_return_followup(raw_text: str, target: str) -> bool:
+    text = str(raw_text or "").strip()
+    if not text:
+        return False
+    if re.search(
+        r"(?:然后|并且|并|再|接着)\s*(?:按|执行|开始)?(?:回车|确认|确定)$",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"(?:and\s+then|then|and)\s*(?:press\s+)?(?:enter|return)$",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    target_text = str(target or "")
+    if not re.search(r"(?:搜索|查找|检索|search|find|query)", target_text, flags=re.IGNORECASE):
+        return False
+    return bool(
+        re.search(
+            r"(?:然后|并且|并|再|接着)\s*(?:按|执行|开始)?(?:搜索|查找|检索)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:press\s+)?(?:search|find|go)$",
+            text,
             flags=re.IGNORECASE,
         )
     )
@@ -4211,10 +4362,15 @@ def _desktop_type_text(text: str) -> str:
 def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
+    bare_target_pattern = (
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search\s+field|search\s+box|search\s+bar|message\s+field|message\s+box|"
+        r"chat\s+box|address\s+bar|text\s+field|textbox|input|field)"
+    )
     target_pattern = (
-        r"[^。！？!?，,]+?(?:输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
+        rf"(?:{bare_target_pattern}|[^。！？!?，,]+?(?:输入框|文本框|输入栏|搜索框|搜索栏|消息框|聊天框|地址栏|"
         r"text\s+field|textbox|input|field|search\s+field|search\s+box|search\s+bar|"
-        r"message\s+field|message\s+box|chat\s+box|address\s+bar)"
+        r"message\s+field|message\s+box|chat\s+box|address\s+bar))"
     )
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
