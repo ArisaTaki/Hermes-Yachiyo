@@ -978,6 +978,14 @@ class RuntimeCustomApiAgentLoop:
         error = str(result.get("error") or result_summary or "工具返回失败").strip()
         permission_targets = result.get("permission_targets")
         fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
+        if tool_name == "app.open" and str(result.get("error_code") or "") == "app_not_found":
+            app_name = _payload_text(result, planned_input, "app_name")
+            target = _display_target_name(app_name)
+            diagnostics = _permission_diagnostics(result)
+            return _append_recovery_action_summary(
+                f"已尝试启动{target}，但 macOS 没找到这个应用。{diagnostics}".strip(),
+                result,
+            )
         if tool_name in {"browser.open_url_and_extract_text", "browser.open_url_and_screenshot"}:
             opened = fallback.get("open") if isinstance(fallback.get("open"), dict) else {}
             if opened.get("ok"):

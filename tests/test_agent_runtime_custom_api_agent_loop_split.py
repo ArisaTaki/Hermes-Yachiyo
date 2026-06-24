@@ -5260,6 +5260,22 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "error": "Application not found.",
             "error_code": "app_not_found",
             "recovery_hints": ["确认应用已安装，或换用精确应用名。"],
+            "recovery_actions": [
+                {
+                    "label": "打开应用程序文件夹",
+                    "tool": "desktop.open_path",
+                    "input": {"path": "/Applications"},
+                    "permission_target": "app_not_found",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "打开 App Store",
+                    "tool": "app.open",
+                    "input": {"app_name": "App Store"},
+                    "permission_target": "app_not_found",
+                    "risk_level": "low",
+                },
+            ],
         },
     )
     app_quit = RuntimeCustomApiAgentLoop._daily_desktop_summary(
@@ -5642,7 +5658,11 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert submit_foreground == "已确认发送前台内容。"
     assert terminal_run == "已运行命令：printf ok。\n输出：ok"
     assert terminal_failed == "命令执行失败：false。 退出码：1。 stderr：failed"
-    assert app_not_found == "桌面操作未完成：Application not found. 你可以这样处理：确认应用已安装，或换用精确应用名。"
+    assert app_not_found == (
+        "已尝试启动 Missing App，但 macOS 没找到这个应用。 "
+        "你可以这样处理：确认应用已安装，或换用精确应用名。"
+        "可直接打开：打开应用程序文件夹、打开 App Store。"
+    )
 
 
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:

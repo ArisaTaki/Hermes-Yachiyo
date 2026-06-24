@@ -2064,6 +2064,22 @@ def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
     assert result["fallback_used"] is False
     assert result["error_code"] == "app_not_found"
     assert "确认应用已安装" in result["recovery_hints"][0]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开应用程序文件夹",
+            "tool": "desktop.open_path",
+            "input": {"path": "/Applications"},
+            "permission_target": "app_not_found",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开 App Store",
+            "tool": "app.open",
+            "input": {"app_name": "App Store"},
+            "permission_target": "app_not_found",
+            "risk_level": "low",
+        },
+    ]
 
 
 def test_app_open_success_records_launch_verification(monkeypatch) -> None:

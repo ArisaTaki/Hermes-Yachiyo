@@ -3008,6 +3008,22 @@ def _app_open_failed(app_name: str, result: subprocess.CompletedProcess[str]) ->
                 "Google Chrome、Safari、Music、Visual Studio Code。"
             )
         ]
+        payload["recovery_actions"] = [
+            {
+                "label": "打开应用程序文件夹",
+                "tool": "desktop.open_path",
+                "input": {"path": "/Applications"},
+                "permission_target": "app_not_found",
+                "risk_level": "low",
+            },
+            {
+                "label": "打开 App Store",
+                "tool": "app.open",
+                "input": {"app_name": "App Store"},
+                "permission_target": "app_not_found",
+                "risk_level": "low",
+            },
+        ]
     return payload
 
 

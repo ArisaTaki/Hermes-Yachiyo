@@ -3649,6 +3649,74 @@ def test_chat_bridge_quick_message_surfaces_browser_cdp_recovery(
     assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
 
 
+def test_chat_bridge_quick_message_surfaces_app_open_recovery(
+    tmp_path,
+    monkeypatch,
+):
+    def fake_app_open(app_name: str) -> dict:
+        return {
+            "ok": False,
+            "action": "app.open",
+            "summary": "app.open failed",
+            "error": "Application not found.",
+            "error_code": "app_not_found",
+            "data": {"app_name": app_name},
+            "permission_error": False,
+            "fallback_used": False,
+            "recovery_hints": ["确认应用已安装，或换用精确应用名。"],
+            "recovery_actions": [
+                {
+                    "label": "打开应用程序文件夹",
+                    "tool": "desktop.open_path",
+                    "input": {"path": "/Applications"},
+                    "permission_target": "app_not_found",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "打开 App Store",
+                    "tool": "app.open",
+                    "input": {"app_name": "App Store"},
+                    "permission_target": "app_not_found",
+                    "risk_level": "low",
+                },
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 MissingTool",
+    )
+    timeline = result["_task_timeline"]
+    recovery_event = next(
+        event
+        for event in timeline["events"]
+        if event["event_type"] == "agent.desktop.permission_recovery"
+    )
+
+    assert agent_task["status"] == "completed"
+    assert "已尝试启动 MissingTool，但 macOS 没找到这个应用。" in agent_task["summary"]
+    assert "可直接打开：打开应用程序文件夹、打开 App Store。" in agent_task["summary"]
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+    assert agent_task["tool_calls"][-1]["status"] == "failed"
+    assert agent_task["tool_calls"][-1]["output_preview"]["error_code"] == "app_not_found"
+    assert agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"][0] == {
+        "label": "打开应用程序文件夹",
+        "tool": "desktop.open_path",
+        "input": {"path": "/Applications"},
+        "permission_target": "app_not_found",
+        "risk_level": "low",
+    }
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.permission_recovery" in event_types
+    assert "model.request.started" not in event_types
+    assert recovery_event["payload"]["permission_targets"] == []
+    assert recovery_event["payload"]["affected_tools"] == ["app.open"]
+    assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
+
+
 def test_chat_bridge_quick_message_executes_structured_recovery_action_without_model(
     tmp_path,
     monkeypatch,
