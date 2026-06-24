@@ -2655,6 +2655,44 @@ def clipboard_write(text: str) -> dict[str, Any]:
     }
 
 
+def clipboard_read(max_chars: Any = 2000) -> dict[str, Any]:
+    command = _clipboard_read_command()
+    if not command:
+        return _unsupported("clipboard.read")
+    try:
+        clean_max_chars = _clean_clipboard_read_limit(max_chars)
+    except ValueError as exc:
+        return _error("clipboard.read", exc)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("clipboard.read", exc)
+    if result.returncode != 0:
+        return _failed("clipboard.read", result)
+    text = str(result.stdout or "")
+    preview = text[:clean_max_chars]
+    return {
+        "ok": True,
+        "action": "clipboard.read",
+        "summary": f"Read {len(text)} characters from clipboard",
+        "data": {
+            "text": preview,
+            "text_length": len(text),
+            "truncated": len(text) > clean_max_chars,
+            "max_chars": clean_max_chars,
+            "platform": _desktop_platform(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def notes_create(body: str, *, title: str = "", folder_name: str = "") -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("notes.create")
@@ -3526,6 +3564,35 @@ def _clipboard_write_command() -> list[str]:
             if shutil.which(command[0]):
                 return command
     return []
+
+
+def _clipboard_read_command() -> list[str]:
+    platform_name = _desktop_platform()
+    if platform_name == "macos":
+        return ["pbpaste"]
+    if platform_name == "windows":
+        return ["powershell", "-NoProfile", "-Command", "Get-Clipboard"]
+    if platform_name == "linux":
+        for command in (
+            ["wl-paste", "--no-newline"],
+            ["xclip", "-selection", "clipboard", "-out"],
+            ["xsel", "--clipboard", "--output"],
+        ):
+            if shutil.which(command[0]):
+                return command
+    return []
+
+
+def _clean_clipboard_read_limit(value: Any) -> int:
+    if value in (None, ""):
+        return 2000
+    if isinstance(value, bool):
+        raise ValueError("max_chars must be an integer from 1 to 12000")
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_chars must be an integer from 1 to 12000") from exc
+    return max(1, min(12000, limit))
 
 
 def _parse_system_volume(value: Any) -> tuple[int, bool]:

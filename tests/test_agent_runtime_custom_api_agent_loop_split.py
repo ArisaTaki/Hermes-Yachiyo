@@ -642,6 +642,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "clipboard.read",
         "notes.create",
         "reminders.create",
         "calendar.create_event",
@@ -3398,6 +3399,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello world"},
     }
+    assert daily_desktop_intent_tool_request("剪贴板里是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.read",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("read clipboard", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.read",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("读取剪贴板", ["clipboard.write"]) is None
     assert daily_desktop_intent_tool_request("截个图看看", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "screen.capture",
@@ -4980,6 +4992,30 @@ def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_tex
 
     assert result == "已复制 8 个字符到剪贴板。"
     assert "047e43ac" not in result
+
+
+def test_main_chat_desktop_intent_summarizes_clipboard_read_preview() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "clipboard.read",
+        {},
+        {
+            "ok": True,
+            "summary": "Read 11 characters from clipboard",
+            "data": {"text": "hello world", "text_length": 11, "truncated": False},
+        },
+    )
+    empty = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "clipboard.read",
+        {},
+        {
+            "ok": True,
+            "summary": "Read 0 characters from clipboard",
+            "data": {"text": "", "text_length": 0, "truncated": False},
+        },
+    )
+
+    assert result == "剪贴板内容：hello world"
+    assert empty == "剪贴板是空的。"
 
 
 def test_main_chat_desktop_intent_summarizes_native_content_creation() -> None:

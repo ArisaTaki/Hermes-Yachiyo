@@ -2333,6 +2333,75 @@ def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch
         store.close()
 
 
+def test_send_message_executes_direct_clipboard_read_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    read_calls: list[int] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct clipboard read task should not call model")
+        ),
+    )
+
+    def fake_clipboard_read(*, max_chars=2000) -> dict:
+        read_calls.append(max_chars)
+        return {
+            "ok": True,
+            "action": "clipboard.read",
+            "summary": "Read 11 characters from clipboard",
+            "data": {
+                "text": "hello world",
+                "text_length": 11,
+                "truncated": False,
+                "max_chars": max_chars,
+                "platform": "macos",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_read", fake_clipboard_read)
+    try:
+        result = api.send_message("剪贴板里是什么")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "剪贴板内容：hello world"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "clipboard.read"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "剪贴板内容：hello world"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "剪贴板内容：hello world"
+        assert read_calls == [2000]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

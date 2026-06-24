@@ -66,6 +66,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
+    "clipboard.read": "读取剪贴板",
     "notes.create": "创建备忘录",
     "reminders.create": "创建提醒事项",
     "calendar.create_event": "创建日历事件",

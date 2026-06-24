@@ -819,6 +819,9 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def clipboard_read(self, *, max_chars: Any = 2000) -> dict[str, Any]:
+        return desktop.clipboard_read(max_chars=max_chars)
+
     def notes_create(
         self,
         body: str,

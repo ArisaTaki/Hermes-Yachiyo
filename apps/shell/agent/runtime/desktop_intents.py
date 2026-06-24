@@ -501,6 +501,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "browser.type_text",
     "calendar.create_event",
     "clipboard.write",
+    "clipboard.read",
     "notes.create",
     "desktop.active_window",
     "desktop.click",
@@ -1151,6 +1152,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     volume_payload = _system_volume_request(text)
     if volume_payload is not None:
         candidates.append(_request("system.volume", volume_payload))
+
+    if _clipboard_read_request(text):
+        candidates.append(_request("clipboard.read", {}))
 
     clipboard_text = _clipboard_write_text(text)
     if clipboard_text:
@@ -2215,6 +2219,34 @@ def _clipboard_write_text(text: str) -> str:
         if cleaned:
             return cleaned
     return ""
+
+
+def _clipboard_read_request(text: str) -> bool:
+    if _clipboard_write_text(text):
+        return False
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:读取|查看|看看|看一下|看下|显示|告诉我).{0,8}"
+            r"(?:系统)?(?:剪贴板|粘贴板).{0,8}(?:内容|里|里面|是什么|有啥|有什么)?",
+            text,
+        )
+        or re.search(
+            r"(?:系统)?(?:剪贴板|粘贴板).{0,8}"
+            r"(?:内容|里|里面|是什么|有啥|有什么|读取|查看|看看|看一下|看下|显示)",
+            text,
+        )
+        or re.search(
+            r"\b(?:read|show|display|check|tell\s+me)\s+(?:the\s+)?"
+            r"(?:system\s+)?clipboard(?:\s+contents?)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:what(?:'s| is)|what)\s+(?:is\s+)?(?:on|in)\s+(?:the\s+)?"
+            r"(?:system\s+)?clipboard\b",
+            lowered,
+        )
+    )
 
 
 def _normalize_clipboard_text(value: str) -> str:

@@ -65,6 +65,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "clipboard.read": "clipboard_read",
     "notes.create": "notes_create",
     "reminders.create": "reminders_create",
     "calendar.create_event": "calendar_create_event",
@@ -154,6 +155,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "system.volume",
     "clipboard.write",
+    "clipboard.read",
     "notes.create",
     "reminders.create",
     "calendar.create_event",
@@ -1517,6 +1519,22 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("text",),
+    ),
+    "clipboard.read": ToolDescriptor(
+        name="clipboard.read",
+        description=(
+            "Read a bounded preview of the system clipboard only when the user explicitly asks "
+            "what is currently on the clipboard."
+        ),
+        properties={
+            "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12000,
+                "description": "Maximum clipboard characters to include in the returned preview.",
+            }
+        },
+        required=(),
     ),
     "notes.create": ToolDescriptor(
         name="notes.create",

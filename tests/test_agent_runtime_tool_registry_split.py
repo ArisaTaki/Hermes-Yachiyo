@@ -303,6 +303,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "clipboard_read",
         "notes_create",
         "reminders_create",
         "calendar_create_event",
@@ -732,6 +733,11 @@ def test_clipboard_write_schema_requires_text() -> None:
 
     with pytest.raises(AgentRuntimeError, match="clipboard.write 参数 text 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": ""})
+
+
+def test_clipboard_read_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("clipboard.read", {})
+    ToolDescriptorRegistry.validate_payload("clipboard.read", {"max_chars": 120})
 
 
 def test_notes_create_schema_requires_body() -> None:
@@ -4385,6 +4391,61 @@ def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch)
     ]
     assert "hello world" not in result["summary"]
     assert "hello world" not in str(result["data"])
+
+
+def test_clipboard_read_uses_system_clipboard_with_bounded_preview(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, *, capture_output=None, text=None, timeout=None, check=None):
+        calls.append(
+            {
+                "command": command,
+                "capture_output": capture_output,
+                "text": text,
+                "timeout": timeout,
+                "check": check,
+            }
+        )
+        return subprocess.CompletedProcess(command, 0, "hello world", "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.clipboard_read(max_chars=5)
+
+    assert result == {
+        "ok": True,
+        "action": "clipboard.read",
+        "summary": "Read 11 characters from clipboard",
+        "data": {
+            "text": "hello",
+            "text_length": 11,
+            "truncated": True,
+            "max_chars": 5,
+            "platform": "macos",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [
+        {
+            "command": ["pbpaste"],
+            "capture_output": True,
+            "text": True,
+            "timeout": 5,
+            "check": False,
+        }
+    ]
+
+
+def test_clipboard_read_rejects_invalid_preview_limit(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+
+    result = desktop_mod.clipboard_read(max_chars=True)
+
+    assert result["ok"] is False
+    assert result["action"] == "clipboard.read"
+    assert "max_chars must be an integer" in result["error"]
 
 
 def test_apple_music_control_permission_failure_returns_music_and_automation_targets(
