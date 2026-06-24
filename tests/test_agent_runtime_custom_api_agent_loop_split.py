@@ -697,7 +697,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开网页 github.com", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("打开 127.0.0.1:5173", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "http://127.0.0.1:5173"},
+    }
+    assert daily_desktop_intent_tool_request("打开本地 127.0.0.1:5173", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "http://127.0.0.1:5173"},

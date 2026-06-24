@@ -3330,6 +3330,8 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
 
     local_url_cases = (
         ("打开 127.0.0.1:5173", "bubble", "http://127.0.0.1:5173"),
+        ("打开本地 127.0.0.1:5173", "bubble", "http://127.0.0.1:5173"),
+        ("打开网页 github.com", "live2d", "https://github.com"),
         ("open 192.168.1.10:8000/status", "live2d", "http://192.168.1.10:8000/status"),
     )
     for prompt, launcher_mode, url in local_url_cases:
@@ -3367,6 +3369,8 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
     assert opened_urls == [
         "https://github.com",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5173",
+        "https://github.com",
         "http://192.168.1.10:8000/status",
         "https://www.baidu.com/s?wd=open+hanako",
         "https://www.baidu.com/s?wd=open+hanako",

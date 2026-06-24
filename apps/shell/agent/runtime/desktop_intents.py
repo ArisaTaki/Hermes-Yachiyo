@@ -1606,9 +1606,11 @@ def _browser_open_url(text: str) -> str:
     )
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        rf"(?:打开|访问|浏览|前往|去)\s*(?P<url>{url_token})",
+        rf"(?:打开|访问|浏览|前往|去)\s*"
+        rf"(?:网页|网站|网址|链接|本地|local)?\s*(?P<url>{url_token})",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-        rf"(?P<url>{url_token})\s*(?:打开|访问|浏览|前往|打开一下|访问一下|浏览一下)",
+        rf"(?:网页|网站|网址|链接|本地|local)?\s*(?P<url>{url_token})"
+        rf"\s*(?:打开|访问|浏览|前往|打开一下|访问一下|浏览一下)",
         rf"(?:open|visit|browse|go to)\s+(?P<url>{url_token})",
         rf"^(?P<url>{url_token})$",
     )
