@@ -226,6 +226,90 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         store.close()
 
 
+def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    open_and_play_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("main chat desktop task should not call model")
+        ),
+    )
+
+    def fake_apple_music_open_and_play() -> dict:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
+        return {
+            "ok": True,
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
+            "data": {
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
+        fake_apple_music_open_and_play,
+    )
+    try:
+        result = api.send_message(
+            "能否帮我播放apple Music?",
+            runnable_id=MAIN_CHAT_AGENT_ID,
+            metadata={"runnable_kind": "main"},
+        )
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["run_id"] == run["run_id"]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert user.metadata["runnable_kind"] == "main"
+        assert user.metadata["daily_desktop_intent"] is True
+        assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert open_and_play_calls == 1
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
@@ -4058,7 +4142,7 @@ def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
     try:
         result = api.send_runnable_message_in_session(
             "s1",
-            "打开 Apple Music",
+            "聊聊今天的计划",
             runnable_id=MAIN_CHAT_AGENT_ID,
             client_message_id="main-chat-entry-1",
             metadata={

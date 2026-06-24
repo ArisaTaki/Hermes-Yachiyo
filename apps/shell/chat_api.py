@@ -1117,10 +1117,8 @@ class ChatAPI:
                 list(DAILY_DESKTOP_TOOL_NAMES),
                 metadata=metadata,
             )
-            main_chat_runnable_entry = str(runnable_id or "").strip() == MAIN_CHAT_AGENT_ID
             direct_daily_desktop_intent = (
-                not main_chat_runnable_entry
-                and not raw_attachments
+                not raw_attachments
                 and current_context.get("conversation_kind") != "group"
                 and bool(daily_desktop_requests)
             )
