@@ -816,6 +816,14 @@ class ToolBroker:
     ) -> dict[str, Any]:
         return desktop.system_volume(action, level=level, step=step)
 
+    def system_brightness(
+        self,
+        action: str,
+        *,
+        step: Any = None,
+    ) -> dict[str, Any]:
+        return desktop.system_brightness(action, step=step)
+
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 

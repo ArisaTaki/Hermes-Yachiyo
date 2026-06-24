@@ -7277,6 +7277,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["system.volume"]["risk_level"] == "low"
     assert tools["system.volume"]["input_schema"]["required"] == ["action"]
     assert any("volume" in note for note in tools["system.volume"]["fallback_notes"])
+    assert tools["system.brightness"]["capability_id"] == "desktop_execution"
+    assert tools["system.brightness"]["risk_level"] == "low"
+    assert tools["system.brightness"]["input_schema"]["required"] == ["action"]
+    assert any("brightness key events" in note for note in tools["system.brightness"]["fallback_notes"])
     assert tools["clipboard.write"]["capability_id"] == "desktop_execution"
     assert tools["clipboard.write"]["risk_level"] == "low"
     assert tools["clipboard.write"]["input_schema"]["required"] == ["text"]

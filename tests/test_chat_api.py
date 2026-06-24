@@ -2943,6 +2943,59 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_executes_direct_system_brightness_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    brightness_calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct brightness task should not call model")
+        ),
+    )
+
+    def fake_system_brightness(action: str, *, step=None) -> dict:
+        brightness_calls.append((action, step))
+        return {
+            "ok": True,
+            "action": "system.brightness",
+            "summary": "Display brightness increased",
+            "data": {
+                "requested_action": action,
+                "step": step,
+                "key_code": 145,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
+    try:
+        result = api.send_message("屏幕亮一点")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已调高屏幕亮度（2 格）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.brightness"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已调高屏幕亮度（2 格）。"
+        assert brightness_calls == [("up", 2)]
+        assert run["status"] == "completed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

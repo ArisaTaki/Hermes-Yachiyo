@@ -343,9 +343,7 @@ def daily_desktop_intent_tool_requests(
     """Return structured desktop tool requests for clear daily Chat intents."""
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
-    address_bar_url = _browser_address_bar_url(context)
-    if address_bar_url and "browser.open_url" in allowed:
-        return [_request("browser.open_url", {"url": address_bar_url})]
+    sequence = daily_desktop_intent_sequence_candidates(context)
     selected_text_read_sequence = _selected_text_read_tool_requests(context)
     if selected_text_read_sequence and all(
         str(request.get("tool") or "") in allowed for request in selected_text_read_sequence
@@ -361,6 +359,15 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    if (
+        sequence
+        and _should_prioritize_foreground_sequence(sequence)
+        and all(str(request.get("tool") or "") in allowed for request in sequence)
+    ):
+        return sequence
+    address_bar_url = _browser_address_bar_url(context)
+    if address_bar_url and "browser.open_url" in allowed:
+        return [_request("browser.open_url", {"url": address_bar_url})]
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
         str(request.get("tool") or "") in allowed for request in foreground_find_sequence
@@ -388,6 +395,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in reminders_create_type_sequence
     ):
         return reminders_create_type_sequence
+    app_type_into_ui_element_sequence = _app_open_or_focus_type_into_ui_element_tool_requests(context)
+    if app_type_into_ui_element_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_type_into_ui_element_sequence
+    ):
+        return app_type_into_ui_element_sequence
     app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
     if app_browser_action_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
@@ -440,10 +452,29 @@ def daily_desktop_intent_tool_requests(
     app_screen_capture_sequence = _app_open_or_focus_screen_capture_tool_requests(context)
     if app_screen_capture_sequence and all(str(request.get("tool") or "") in allowed for request in app_screen_capture_sequence):
         return app_screen_capture_sequence
+    foreground_type_into_ui_element = (
+        None
+        if _app_scoped_type_into_ui_element_request(context)
+        else _desktop_type_into_ui_element(context)
+    )
+    if foreground_type_into_ui_element and "desktop.type_into_ui_element" in allowed:
+        foreground_type_sequence = [_request("desktop.type_into_ui_element", foreground_type_into_ui_element)]
+        if _typed_text_has_return_followup(
+            context,
+            str(foreground_type_into_ui_element.get("target") or ""),
+        ):
+            foreground_type_sequence.append(
+                _request("desktop.hotkey", {"key": "return", "modifiers": []})
+            )
+        elif _typed_text_has_submit_followup(context):
+            foreground_type_sequence.append(
+                _request("desktop.submit_foreground", {"action": "send"})
+            )
+        if all(str(request.get("tool") or "") in allowed for request in foreground_type_sequence):
+            return foreground_type_sequence
     foreground_search_type_sequence = _foreground_search_type_tool_requests(context)
     if foreground_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_search_type_sequence):
         return foreground_search_type_sequence
-    sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
     app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
@@ -543,6 +574,127 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
     return requests
 
 
+def _should_prioritize_foreground_sequence(requests: list[dict[str, Any]]) -> bool:
+    if (
+        _is_browser_url_safe_type_sequence(requests)
+        or _is_browser_address_bar_type_sequence(requests)
+        or _is_foreground_address_bar_type_sequence(requests)
+        or _is_foreground_url_safe_type_sequence(requests)
+        or _is_inline_click_type_sequence(requests)
+    ):
+        return False
+    tools = {str(request.get("tool") or "") for request in requests}
+    priority_tools = {
+        "desktop.hotkey",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }
+    return bool(tools & priority_tools)
+
+
+def _is_browser_url_safe_type_sequence(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 2:
+        return False
+    first, second = requests
+    first_tool = str(first.get("tool") or "")
+    if first_tool not in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"}:
+        return False
+    first_input = first.get("input") if isinstance(first.get("input"), dict) else {}
+    app_name = str(first_input.get("app_name") or "").strip()
+    typed_text = str(first_input.get("text") or "").strip()
+    if app_name not in _BROWSER_APP_NAMES or not _browser_address_bar_target_url(typed_text):
+        return False
+    second_tool = str(second.get("tool") or "")
+    second_input = second.get("input") if isinstance(second.get("input"), dict) else {}
+    return second_tool == "desktop.hotkey" and second_input == {"key": "return", "modifiers": []}
+
+
+def _is_browser_address_bar_type_sequence(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 1:
+        return False
+    request = requests[0]
+    tool = str(request.get("tool") or "")
+    if tool not in {"app.open_and_type_into_ui_element", "app.focus_and_type_into_ui_element"}:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    target = str(payload.get("target") or "").strip()
+    typed_text = str(payload.get("text") or "").strip()
+    return (
+        app_name in _BROWSER_APP_NAMES
+        and bool(re.search(r"(?:地址|address)", target, flags=re.IGNORECASE))
+        and bool(_browser_address_bar_target_url(typed_text))
+    )
+
+
+def _is_foreground_address_bar_type_sequence(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) not in {1, 2}:
+        return False
+    first = requests[0]
+    if str(first.get("tool") or "") != "desktop.type_into_ui_element":
+        return False
+    payload = first.get("input") if isinstance(first.get("input"), dict) else {}
+    target = str(payload.get("target") or "").strip()
+    typed_text = str(payload.get("text") or "").strip()
+    if not (
+        re.search(r"(?:地址|address)", target, flags=re.IGNORECASE)
+        and _browser_address_bar_target_url(typed_text)
+    ):
+        return False
+    if len(requests) == 1:
+        return True
+    second = requests[1]
+    second_input = second.get("input") if isinstance(second.get("input"), dict) else {}
+    return str(second.get("tool") or "") == "desktop.hotkey" and second_input == {
+        "key": "return",
+        "modifiers": [],
+    }
+
+
+def _is_foreground_url_safe_type_sequence(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 2:
+        return False
+    first, second = requests
+    if str(first.get("tool") or "") != "desktop.safe_type_text":
+        return False
+    first_input = first.get("input") if isinstance(first.get("input"), dict) else {}
+    typed_text = str(first_input.get("text") or "").strip()
+    if not typed_text or not _browser_address_bar_url(f"type {typed_text}"):
+        return False
+    second_input = second.get("input") if isinstance(second.get("input"), dict) else {}
+    return str(second.get("tool") or "") == "desktop.hotkey" and second_input == {
+        "key": "return",
+        "modifiers": [],
+    }
+
+
+def _is_inline_click_type_sequence(requests: list[dict[str, Any]]) -> bool:
+    click_tools = {
+        "desktop.click_ui_element",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+    }
+    for request in requests:
+        if str(request.get("tool") or "") not in click_tools:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        target = str(payload.get("target") or "").strip()
+        if re.search(
+            r"(?:输入|填写|键入|打入|填入|写入|写|打字|打上|打).+|"
+            r"\b(?:type|enter|input|fill)\b.+",
+            target,
+            flags=re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
 _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "app.focus",
     "app.focus_window",
@@ -608,6 +760,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "notes.create",
     "reminders.create",
     "screen.capture",
+    "system.brightness",
     "system.volume",
 }
 
@@ -1253,6 +1406,8 @@ def _desktop_find_query(text: str) -> str:
 
 
 def _desktop_foreground_find_query(text: str) -> str:
+    if _desktop_type_into_ui_element(text):
+        return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在\s*)?(?:(?:当前|前台|这个|该)\s*)?"
@@ -1381,6 +1536,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     volume_payload = _system_volume_request(text)
     if volume_payload is not None:
         candidates.append(_request("system.volume", volume_payload))
+
+    brightness_payload = _system_brightness_request(text)
+    if brightness_payload is not None:
+        candidates.append(_request("system.brightness", brightness_payload))
 
     if _clipboard_read_request(text):
         candidates.append(_request("clipboard.read", {}))
@@ -2583,6 +2742,62 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ):
         return {"action": "status"}
     return None
+
+
+def _system_brightness_request(text: str) -> dict[str, Any] | None:
+    lowered = text.lower()
+    count = r"(?P<count>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
+    suffix = r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$"
+    exact_or_settings = r"(?:设置|设为|设成|调到|调至|百分之|\d+\s*%|亮度设置|显示器设置)"
+    if re.search(exact_or_settings, text, flags=re.IGNORECASE):
+        return None
+    up_patterns = (
+        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调高|提高|调亮|变亮|亮一点|亮点|亮一些|亮些|亮一点点)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:调高|提高|调亮|增大|加大).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:屏幕|显示器)?(?:太暗|有点暗|太黑|看不清)",
+        rf"\b(?:brightness\s+up|increase\s+(?:the\s+)?brightness|brighten\s+(?:the\s+)?(?:screen|display)|make\s+(?:the\s+)?(?:screen|display)\s+brighter)\b",
+    )
+    down_patterns = (
+        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调低|降低|调暗|变暗|暗一点|暗点|暗一些|暗些|暗一点点)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:调低|降低|调暗|减小).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:屏幕|显示器)?(?:太亮|有点亮|刺眼|晃眼)",
+        rf"\b(?:brightness\s+down|decrease\s+(?:the\s+)?brightness|dim\s+(?:the\s+)?(?:screen|display)|make\s+(?:the\s+)?(?:screen|display)\s+dimmer)\b",
+    )
+    for pattern in up_patterns:
+        match = re.search(pattern + suffix, text, flags=re.IGNORECASE) or re.search(
+            pattern,
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return {"action": "up", "step": _brightness_step_count(match)}
+    for pattern in down_patterns:
+        match = re.search(pattern + suffix, text, flags=re.IGNORECASE) or re.search(
+            pattern,
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return {"action": "down", "step": _brightness_step_count(match)}
+    return None
+
+
+def _brightness_step_count(match: re.Match[str]) -> int:
+    groups = match.groupdict() if hasattr(match, "groupdict") else {}
+    raw_count = str(groups.get("count") or "").strip().lower()
+    if raw_count:
+        if raw_count.isdigit():
+            count = int(raw_count)
+        else:
+            count = _SCROLL_PAGE_COUNTS.get(raw_count, 0)
+        if 1 <= count <= 10:
+            return count
+    value = str(match.group(0) or "")
+    if re.search(r"(?:一点点|稍微|slightly|a little)", value, flags=re.IGNORECASE):
+        return 1
+    if re.search(r"(?:一些|多一点|多点|很多|大幅|明显|much|lot)", value, flags=re.IGNORECASE):
+        return 4
+    return 2
 
 
 def _clipboard_write_text(text: str) -> str:
@@ -4079,6 +4294,29 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
     ]
 
 
+def _app_open_or_focus_type_into_ui_element_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    if _click_ui_element_then_type(followup):
+        return []
+    payload = _desktop_type_into_ui_element(followup)
+    if not payload:
+        return []
+    requests = [
+        _request(
+            f"app.{mode}_and_type_into_ui_element",
+            {"app_name": app_name, **payload},
+        )
+    ]
+    if _typed_text_has_return_followup(followup, str(payload.get("target") or "")):
+        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    elif _typed_text_has_submit_followup(followup):
+        requests.append(_request("desktop.submit_foreground", {"action": "send"}))
+    return requests
+
+
 def _foreground_find_text_tool_requests(text: str) -> list[dict[str, Any]]:
     query = _desktop_foreground_find_query(text)
     if not query:
@@ -5339,6 +5577,22 @@ def _typed_text_has_return_followup(raw_text: str, target: str) -> bool:
         )
         or re.search(
             r"(?:and\s+then|then|and)\s*(?:press\s+)?(?:search|find|go)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _typed_text_has_submit_followup(raw_text: str) -> bool:
+    text = str(raw_text or "").strip()
+    return bool(
+        re.search(
+            r"(?:然后|并且|并|再|接着)\s*(?:发送|发出|提交)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:send|submit)$",
             text,
             flags=re.IGNORECASE,
         )

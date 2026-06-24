@@ -153,6 +153,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
   if (tool === 'system.volume') return systemVolumeRetryPrompt(action, input);
+  if (tool === 'system.brightness') return systemBrightnessRetryPrompt(action);
   if (tool === 'clipboard.write' && typeof input.text === 'string') return `复制${input.text}到剪贴板`;
   return '';
 }
@@ -172,6 +173,12 @@ function systemVolumeRetryPrompt(action: string, input: Record<string, unknown>)
   if (action === 'unmute') return '取消静音';
   const level = typeof input.level === 'number' ? input.level : Number(input.level);
   if (action === 'set' && Number.isFinite(level)) return `把音量调到 ${level}%`;
+  return '';
+}
+
+function systemBrightnessRetryPrompt(action: string): string {
+  if (action === 'up') return '屏幕亮一点';
+  if (action === 'down') return '屏幕暗一点';
   return '';
 }
 

@@ -641,6 +641,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "system.volume",
+        "system.brightness",
         "clipboard.write",
         "clipboard.read",
         "notes.create",
@@ -1343,59 +1344,39 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "find"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "yachiyo"},
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
         },
     ]
     assert daily_desktop_intent_tool_requests("type yachiyo into search field", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "find"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "yachiyo"},
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
         },
     ]
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "find"},
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "yachiyo"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并确认", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "find"},
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "yachiyo"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("type yachiyo into search field then enter", allowed_tools) == [
@@ -2075,13 +2056,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome 并点击登录按钮", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "browser.click",
-            "input": {"selector": "text=登录", "click_count": 1},
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "登录",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
         },
     ]
     assert daily_desktop_intent_tool_request("切到 Slack 并点击 Send 按钮", allowed_tools) == {
@@ -2283,13 +2265,14 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome，然后点击登录按钮", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "browser.click",
-            "input": {"selector": "text=登录", "click_count": 1},
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "登录",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
         }
     ]
     assert daily_desktop_intent_tool_requests("打开 Slack 然后点击搜索", allowed_tools) == [
@@ -2350,15 +2333,35 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 github.com，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "browser.open_url",
-            "input": {"url": "https://github.com"},
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "github.com"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 yachiyo，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "browser.open_url",
-            "input": {"url": "https://www.google.com/search?q=yachiyo"},
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("全选，再复制", allowed_tools) == [
@@ -2748,42 +2751,37 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome 并在搜索框输入 yachiyo 并搜索", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "browser.type_text",
+            "tool": "app.open_and_type_into_ui_element",
             "input": {
-                "selector": (
-                    'input[type="search"], input[name="q"], textarea[name="q"], '
-                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
-                    'input[aria-label*="search" i], input[placeholder*="search" i]'
-                ),
+                "app_name": "Google Chrome",
+                "target": "搜索",
                 "text": "yachiyo",
+                "role_filter": "text",
+                "limit": 80,
             },
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "find"},
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "文件传输助手"},
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
         },
     ]
     assert daily_desktop_intent_tool_requests("在微信搜索文件传输助手", allowed_tools) == [
@@ -4388,6 +4386,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "unmute"},
     }
+    assert daily_desktop_intent_tool_request("屏幕亮一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("亮度调高三下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 3},
+    }
+    assert daily_desktop_intent_tool_request("屏幕太暗了", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("屏幕暗一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "down", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("dim the screen", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "down", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("亮度调到 50%", allowed_tools) is None
     assert daily_desktop_intent_tool_request("把 047e43ac 复制到剪贴板", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "clipboard.write",
@@ -6426,6 +6450,30 @@ def test_main_chat_desktop_intent_summarizes_system_volume() -> None:
     assert set_level == "已把系统音量调到 35%。"
     assert increased == "已把系统音量从 40% 调高到 50%。"
     assert muted == "已将系统音量静音。"
+
+
+def test_main_chat_desktop_intent_summarizes_system_brightness() -> None:
+    increased = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.brightness",
+        {"action": "up"},
+        {
+            "ok": True,
+            "summary": "Display brightness increased",
+            "data": {"requested_action": "up", "step": 2},
+        },
+    )
+    decreased = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.brightness",
+        {"action": "down", "step": 1},
+        {
+            "ok": True,
+            "summary": "Display brightness decreased",
+            "data": {"requested_action": "down", "step": 1},
+        },
+    )
+
+    assert increased == "已调高屏幕亮度（2 格）。"
+    assert decreased == "已调低屏幕亮度。"
 
 
 def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_text() -> None:

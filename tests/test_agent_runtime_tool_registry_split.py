@@ -302,6 +302,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_open_and_play",
         "media_apple_music_control",
         "system_volume",
+        "system_brightness",
         "clipboard_write",
         "clipboard_read",
         "notes_create",
@@ -736,6 +737,18 @@ def test_system_volume_schema_accepts_safe_volume_actions() -> None:
         ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set"})
     with pytest.raises(AgentRuntimeError, match="system.volume 参数 level"):
         ToolDescriptorRegistry.validate_payload("system.volume", {"action": "set", "level": 150})
+
+
+def test_system_brightness_schema_accepts_relative_brightness_actions() -> None:
+    ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "up"})
+    ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "down", "step": 3})
+
+    with pytest.raises(AgentRuntimeError, match="system.brightness 参数 action"):
+        ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "set"})
+    with pytest.raises(AgentRuntimeError, match="system.brightness 参数 step"):
+        ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "up", "step": 0})
+    with pytest.raises(AgentRuntimeError, match="system.brightness 参数 step"):
+        ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "down", "step": True})
 
 
 def test_clipboard_write_schema_requires_text() -> None:
@@ -4544,6 +4557,33 @@ def test_system_volume_executes_low_risk_volume_action(monkeypatch) -> None:
     }
     assert calls[0][1] is None
     assert calls[1][1] == ["50", "false"]
+
+
+def test_system_brightness_executes_low_risk_brightness_action(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "adjusted", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.system_brightness("up", step=3)
+
+    assert result == {
+        "ok": True,
+        "action": "system.brightness",
+        "summary": "Display brightness increased",
+        "data": {
+            "requested_action": "up",
+            "step": 3,
+            "key_code": 145,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][1] == ["145", "3"]
 
 
 def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch) -> None:

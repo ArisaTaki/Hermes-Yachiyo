@@ -2679,6 +2679,49 @@ def system_volume(action: str, *, level: Any = None, step: Any = None) -> dict[s
     }
 
 
+def system_brightness(action: str, *, step: Any = None) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("system.brightness")
+    clean_action = _clean_system_brightness_action(action)
+    clean_step = _clean_brightness_step(step)
+    key_code = 145 if clean_action == "up" else 144
+    result = _run_osascript(
+        """
+        on run argv
+            set keyCodeValue to item 1 of argv as integer
+            set repeatCount to item 2 of argv as integer
+            repeat repeatCount times
+                tell application "System Events" to key code keyCodeValue
+                delay 0.05
+            end repeat
+            return "adjusted"
+        end run
+        """,
+        [str(key_code), str(clean_step)],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "system.brightness",
+            {**result, "action": "system.brightness", "summary": "system.brightness failed"},
+        )
+    return {
+        "ok": True,
+        "action": "system.brightness",
+        "summary": (
+            "Display brightness increased"
+            if clean_action == "up"
+            else "Display brightness decreased"
+        ),
+        "data": {
+            "requested_action": clean_action,
+            "step": clean_step,
+            "key_code": key_code,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def clipboard_write(text: str) -> dict[str, Any]:
     clean_text = _clean_required(text, "text")
     command = _clipboard_write_command()
@@ -3582,6 +3625,21 @@ def _clean_system_volume_action(value: str) -> str:
     return clean
 
 
+def _clean_system_brightness_action(value: str) -> str:
+    aliases = {
+        "up": "up",
+        "increase": "up",
+        "brighter": "up",
+        "down": "down",
+        "decrease": "down",
+        "dimmer": "down",
+    }
+    clean = aliases.get(str(value or "").strip().lower())
+    if not clean:
+        raise ValueError("action must be one of up or down")
+    return clean
+
+
 def _read_system_volume() -> dict[str, Any]:
     result = _run_osascript(
         """
@@ -3847,6 +3905,20 @@ def _clean_key_repeat_count(value: Any) -> int:
         raise ValueError("repeat_count must be an integer from 1 to 20") from exc
     if count < 1 or count > 20:
         raise ValueError("repeat_count must be an integer from 1 to 20")
+    return count
+
+
+def _clean_brightness_step(value: Any) -> int:
+    if value in (None, ""):
+        return 2
+    if isinstance(value, bool):
+        raise ValueError("step must be an integer from 1 to 10")
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("step must be an integer from 1 to 10") from exc
+    if count < 1 or count > 10:
+        raise ValueError("step must be an integer from 1 to 10")
     return count
 
 
@@ -4264,6 +4336,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "system.brightness": ["accessibility"],
         "notes.create": ["automation"],
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],
@@ -4316,6 +4389,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "system.brightness": ["accessibility"],
         "notes.create": ["automation"],
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],

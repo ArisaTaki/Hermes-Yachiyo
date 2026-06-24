@@ -64,6 +64,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
+    "system.brightness": "system_brightness",
     "clipboard.write": "clipboard_write",
     "clipboard.read": "clipboard_read",
     "notes.create": "notes_create",
@@ -160,6 +161,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "system.volume",
+    "system.brightness",
     "clipboard.write",
     "clipboard.read",
     "notes.create",
@@ -472,6 +474,20 @@ class ToolDescriptor:
             step = payload.get("step")
             if step not in (None, ""):
                 _validate_percentage_number(step, "system.volume 参数 step")
+        if self.name == "system.brightness":
+            action = str(payload.get("action") or "").strip()
+            if action not in {"up", "down"}:
+                raise AgentRuntimeError("system.brightness 参数 action 必须是 up 或 down")
+            step = payload.get("step")
+            if step not in (None, ""):
+                if isinstance(step, bool):
+                    raise AgentRuntimeError("system.brightness 参数 step 必须是 1-10 的整数")
+                try:
+                    step_count = int(step)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRuntimeError("system.brightness 参数 step 必须是 1-10 的整数") from exc
+                if step_count < 1 or step_count > 10:
+                    raise AgentRuntimeError("system.brightness 参数 step 必须是 1-10 的整数")
         if self.name == "clipboard.write" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("clipboard.write 参数 text 必须是非空字符串")
         if self.name == "notes.create" and not str(payload.get("body") or "").strip():
@@ -1508,6 +1524,28 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "minimum": 0,
                 "maximum": 100,
                 "description": "Optional relative step for up/down. Defaults to 10.",
+            },
+        },
+        required=("action",),
+    ),
+    "system.brightness": ToolDescriptor(
+        name="system.brightness",
+        description=(
+            "Adjust macOS display brightness up or down with hardware brightness key events "
+            "for explicit low-risk daily desktop commands. This tool does not read or set "
+            "an exact brightness percentage."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": ["up", "down"],
+                "description": "Relative brightness action.",
+            },
+            "step": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Optional number of brightness key presses. Defaults to 2.",
             },
         },
         required=("action",),

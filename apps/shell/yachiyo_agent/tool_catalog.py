@@ -285,6 +285,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "system.volume": [
             "Uses the local system volume interface and records only volume state metadata.",
         ],
+        "system.brightness": [
+            "Uses local brightness key events for relative up/down changes; exact brightness percentages are not read or stored.",
+        ],
         "clipboard.write": [
             "Writes explicit user-provided text to the system clipboard and records only character count.",
         ],

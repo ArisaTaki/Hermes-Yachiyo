@@ -452,6 +452,17 @@ def _system_volume(
     )
 
 
+def _system_brightness(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.system_brightness(
+        str(payload.get("action") or ""),
+        step=payload.get("step"),
+    )
+
+
 def _clipboard_write(
     broker: Any,
     payload: dict[str, Any],
@@ -742,6 +753,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_open_and_play": _media_apple_music_open_and_play,
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,
+    "system.brightness": _system_brightness,
     "clipboard.write": _clipboard_write,
     "clipboard.read": _clipboard_read,
     "notes.create": _notes_create,
