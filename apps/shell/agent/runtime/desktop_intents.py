@@ -1386,6 +1386,13 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_status_name:
         candidates.append(_request("app.status", {"app_name": app_status_name}))
 
+    if _is_apple_music_open_and_play_request(text):
+        candidates.append(_request("media.apple_music_open_and_play", {}))
+
+    music_control = _music_control_action(text)
+    if music_control:
+        candidates.append(_request("media.apple_music_control", {"action": music_control}))
+
     app_show_or_open_name = _app_show_or_open_name(text)
     if app_show_or_open_name:
         candidates.append(_request("app.show", {"app_name": app_show_or_open_name}))
@@ -1427,13 +1434,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         search_url = _browser_search_url(text)
         if search_url:
             candidates.append(_request("browser.open_url", {"url": search_url}))
-
-    if _is_apple_music_open_and_play_request(text):
-        candidates.append(_request("media.apple_music_open_and_play", {}))
-
-    music_control = _music_control_action(text)
-    if music_control:
-        candidates.append(_request("media.apple_music_control", {"action": music_control}))
 
     music = _music_query(text)
     if music:
@@ -6143,15 +6143,25 @@ def _music_control_action(text: str) -> str:
         lowered,
     ):
         return "toggle"
-    if re.search(r"(?:暂停|停一下|停止播放|先停一下)(?:\s*(?:音乐|歌曲|apple\s*music|music))?", lowered) or re.search(
-        r"\bpause\s+(?:music|apple\s*music|playback)\b",
+    if re.search(
+        r"(?:暂停|停一下|停止播放|停止(?:音乐|歌曲|歌)|先停一下)"
+        r"(?:\s*(?:音乐|歌曲|歌|apple\s*music|music))?",
+        lowered,
+    ) or re.search(
+        r"\bpause\s+(?:the\s+|my\s+)?(?:music|apple\s*music|song|track|playback)\b",
         lowered,
     ):
         return "pause"
     if re.search(
-        r"(?:继续播放|恢复播放|接着播放|开始播放)(?:\s*(?:音乐|歌曲|apple\s*music|music))?",
+        r"(?:继续播放|恢复播放|接着播放|开始播放|"
+        r"(?:继续|接着|恢复|开始)(?:播放|播|放)?\s*(?:音乐|歌曲|歌|apple\s*music|music))"
+        r"(?:\s*(?:音乐|歌曲|歌|apple\s*music|music))?",
         lowered,
-    ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
+    ) or re.search(
+        r"\b(?:resume|continue|start)(?:\s+playing)?\s+"
+        r"(?:the\s+|my\s+)?(?:music|apple\s*music|song|track|playback)\b",
+        lowered,
+    ):
         return "play"
     if _music_app_generic_play_open_name(text) == "Music":
         return "play"

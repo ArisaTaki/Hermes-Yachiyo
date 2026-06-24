@@ -2007,17 +2007,25 @@ def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoin
         fake_apple_music_control,
     )
 
-    for launcher_mode in ("bubble", "live2d"):
+    cases = (
+        ("换首歌", "bubble", "next", "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"),
+        ("换首歌", "live2d", "next", "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"),
+        ("继续放歌", "bubble", "play", "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"),
+        ("恢复音乐", "live2d", "play", "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"),
+        ("pause the music", "bubble", "pause", "已暂停 Apple Music。当前：超时空辉夜姬 - Yachiyo。"),
+    )
+    for prompt, launcher_mode, expected_action, expected_summary in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
-            "换首歌",
+            prompt,
             launcher_mode=launcher_mode,
         )
 
         assert result["ok"] is True
-        assert agent_task["summary"] == "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+        assert agent_task["summary"] == expected_summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"action": expected_action}
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert result["_task_timeline"]["run_id"] == run["run_id"]
         assert result["_task_timeline"]["status"] == "completed"
@@ -2029,7 +2037,7 @@ def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoin
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert control_calls == ["next", "next"]
+    assert control_calls == ["next", "next", "play", "play", "pause"]
 
 
 def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_entrypoints(

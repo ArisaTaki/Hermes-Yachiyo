@@ -3945,6 +3945,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "pause"},
     }
+    assert daily_desktop_intent_tool_request("pause the music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "pause"},
+    }
+    assert daily_desktop_intent_tool_request("继续放歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("恢复音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("continue playing music", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("恢复音乐", ["app.show"]) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Music"},
+    }
     assert daily_desktop_intent_tool_request("下一首", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
