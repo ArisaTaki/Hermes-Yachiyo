@@ -997,21 +997,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "text": "yachiyo",
         },
     }
-    assert daily_desktop_intent_tool_request("在搜索框输入 yachiyo", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "desktop.type_into_ui_element",
-        "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
-    }
-    assert daily_desktop_intent_tool_request("type yachiyo into search field", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "desktop.type_into_ui_element",
-        "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
-    }
+    assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("type yachiyo into search field", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.type_into_ui_element",
-            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
         },
         {
             "protocol": "json_fallback",
@@ -1022,8 +1041,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并确认", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.type_into_ui_element",
-            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
         },
         {
             "protocol": "json_fallback",
@@ -1034,8 +1058,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("type yachiyo into search field then enter", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.type_into_ui_element",
-            "input": {"target": "search", "text": "yachiyo", "role_filter": "text", "limit": 80},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
         },
         {
             "protocol": "json_fallback",
@@ -1403,20 +1432,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "limit": 80,
         },
     }
-    assert daily_desktop_intent_tool_request(
+    assert daily_desktop_intent_tool_requests(
         "fill search field in Chrome with yachiyo",
         allowed_tools,
-    ) == {
-        "protocol": "json_fallback",
-        "tool": "app.focus_and_type_into_ui_element",
-        "input": {
-            "app_name": "Google Chrome",
-            "target": "search",
-            "text": "yachiyo",
-            "role_filter": "text",
-            "limit": 80,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
         },
-    }
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("在 Slack 点击发送按钮", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_click_ui_element",
@@ -1450,17 +1480,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "limit": 80,
         },
     }
-    assert daily_desktop_intent_tool_request("Chrome 搜索框输入 yachiyo", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "app.focus_and_type_into_ui_element",
-        "input": {
-            "app_name": "Google Chrome",
-            "target": "搜索",
-            "text": "yachiyo",
-            "role_filter": "text",
-            "limit": 80,
+    assert daily_desktop_intent_tool_requests("Chrome 搜索框输入 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
         },
-    }
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("微信消息框输入 hello", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_type_into_ui_element",
@@ -1777,14 +1808,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome 并在搜索框输入 yachiyo 并搜索", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_type_into_ui_element",
-            "input": {
-                "app_name": "Google Chrome",
-                "target": "搜索",
-                "text": "yachiyo",
-                "role_filter": "text",
-                "limit": 80,
-            },
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
         },
         {
             "protocol": "json_fallback",
@@ -1795,14 +1825,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_type_into_ui_element",
-            "input": {
-                "app_name": "WeChat",
-                "target": "搜索",
-                "text": "文件传输助手",
-                "role_filter": "text",
-                "limit": 80,
-            },
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
         },
         {
             "protocol": "json_fallback",
@@ -1842,14 +1871,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("Chrome 搜索框输入 yachiyo 并搜索", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_type_into_ui_element",
-            "input": {
-                "app_name": "Google Chrome",
-                "target": "搜索",
-                "text": "yachiyo",
-                "role_filter": "text",
-                "limit": 80,
-            },
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
         },
         {
             "protocol": "json_fallback",

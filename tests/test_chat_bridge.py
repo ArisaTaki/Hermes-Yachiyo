@@ -1997,7 +1997,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "打开微信在搜索框输入文件传输助手",
+            "打开微信在消息框输入文件传输助手",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "live2d",
@@ -2020,7 +2020,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         )
         assert waiting_task["pending_approvals"][0]["input_preview"] == {
             "app_name": "WeChat",
-            "target": "搜索",
+            "target": "消息",
             "text": "文件传输助手",
             "role_filter": "text",
             "limit": 80,
@@ -2037,7 +2037,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
 
         assert open_calls == ["WeChat"]
         assert focus_calls == ["WeChat"]
-        assert type_calls == [("搜索", "文件传输助手", "text", 80)]
+        assert type_calls == [("消息", "文件传输助手", "text", 80)]
         assert approved.status == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_approval_required" in event_types
@@ -2047,6 +2047,83 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
     finally:
         service.close()
         store.close()
+
+
+def test_chat_bridge_quick_message_executes_app_scoped_search_field_type_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开微信在搜索框输入文件传输助手",
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("open", "WeChat"),
+        ("focus", "WeChat"),
+        ("shortcut", "find"),
+        ("type", "文件传输助手"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 WeChat 并打开查找。 已向前台输入文字（6 个字符）。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entrypoints(

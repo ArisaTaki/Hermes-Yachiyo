@@ -243,6 +243,12 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    app_scoped_search_type_sequence = _app_scoped_search_type_tool_requests(context)
+    if app_scoped_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_scoped_search_type_sequence):
+        return app_scoped_search_type_sequence
+    app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
+    if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
+        return app_search_type_sequence
     app_ui_elements = _app_scoped_ui_elements_tool_requests(context)
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
@@ -252,6 +258,9 @@ def daily_desktop_intent_tool_requests(
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
     if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
         return click_type_sequence
+    foreground_search_type_sequence = _foreground_search_type_tool_requests(context)
+    if foreground_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_search_type_sequence):
+        return foreground_search_type_sequence
     sequence = daily_desktop_intent_sequence_candidates(context)
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
@@ -308,6 +317,14 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
         )
         if handled_input_followup:
             requests.extend(input_followup_requests)
+            continue
+        search_type_requests = (
+            _app_scoped_search_type_tool_requests(stripped_clause)
+            or _app_open_or_focus_search_type_tool_requests(stripped_clause)
+            or _foreground_search_type_tool_requests(stripped_clause)
+        )
+        if search_type_requests:
+            requests.extend(search_type_requests)
             continue
         request = _first_daily_desktop_candidate(stripped_clause)
         if request is None:
@@ -740,6 +757,12 @@ def _typed_input_followup_requests(
     text: str,
     previous_requests: list[dict[str, Any]],
 ) -> tuple[bool, list[dict[str, Any]]]:
+    search_text_request = _latest_sequence_search_text_request(previous_requests)
+    if search_text_request is not None and _is_input_return_followup(
+        text,
+        {"input": {"target": "搜索"}},
+    ):
+        return True, [_request("desktop.search_submit", {})]
     input_request = _latest_sequence_typed_input_request(previous_requests)
     if input_request is None:
         return False, []
@@ -767,6 +790,31 @@ def _latest_sequence_typed_input_request(
         if tool not in {"app.open", "app.focus"}:
             break
     return None
+
+
+def _latest_sequence_search_text_request(
+    requests: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if len(requests) < 2:
+        return None
+    text_request = requests[-1]
+    text_tool = str(text_request.get("tool") or "").strip()
+    if text_tool != "desktop.safe_type_text":
+        return None
+    shortcut_request = requests[-2]
+    shortcut_tool = str(shortcut_request.get("tool") or "").strip()
+    if shortcut_tool not in {
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
+        return None
+    shortcut_input = (
+        shortcut_request.get("input") if isinstance(shortcut_request.get("input"), dict) else {}
+    )
+    if str(shortcut_input.get("action") or "").strip() != "find":
+        return None
+    return text_request
 
 
 def _typed_input_request_targets_search(input_request: dict[str, Any]) -> bool:
@@ -2710,6 +2758,92 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
     if submit_return:
         requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
     return requests
+
+
+def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    payload = _desktop_type_into_ui_element(followup)
+    if not _is_search_text_input_payload(payload):
+        return []
+    return _search_type_requests(
+        payload,
+        followup,
+        shortcut_tool=f"app.{mode}_and_safe_shortcut",
+        shortcut_input={"app_name": app_name, "action": "find"},
+    )
+
+
+def _app_scoped_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    request = _app_scoped_ui_action_tool_request(text)
+    if not isinstance(request, dict):
+        return []
+    tool = str(request.get("tool") or "").strip()
+    if tool not in {"app.open_and_type_into_ui_element", "app.focus_and_type_into_ui_element"}:
+        return []
+    payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+    if not _is_search_text_input_payload(payload):
+        return []
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return []
+    mode = "open" if tool.startswith("app.open") else "focus"
+    return _search_type_requests(
+        payload,
+        text,
+        shortcut_tool=f"app.{mode}_and_safe_shortcut",
+        shortcut_input={"app_name": app_name, "action": "find"},
+    )
+
+
+def _foreground_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    payload = _desktop_type_into_ui_element(text)
+    if not _is_search_text_input_payload(payload):
+        return []
+    return _search_type_requests(
+        payload,
+        text,
+        shortcut_tool="desktop.safe_shortcut",
+        shortcut_input={"action": "find"},
+    )
+
+
+def _search_type_requests(
+    payload: dict[str, Any] | None,
+    source_text: str,
+    *,
+    shortcut_tool: str,
+    shortcut_input: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    typed_text = str(payload.get("text") or "").strip()
+    target = str(payload.get("target") or "").strip()
+    if not typed_text or not target:
+        return []
+    requests = [
+        _request(shortcut_tool, shortcut_input),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if _typed_text_has_return_followup(source_text, target):
+        requests.append(_request("desktop.search_submit", {}))
+    return requests
+
+
+def _is_search_text_input_payload(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    target = str(payload.get("target") or "").strip()
+    role_filter = str(payload.get("role_filter") or "").strip()
+    if not str(payload.get("text") or "").strip():
+        return False
+    if not re.search(r"(?:搜索|查找|检索|search|find|query)", target, flags=re.IGNORECASE):
+        return False
+    return not role_filter or bool(
+        re.search(r"(?:text|field|input|search|输入|文本|搜索)", role_filter, flags=re.IGNORECASE)
+    )
 
 
 def _app_foreground_action_match(
