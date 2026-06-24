@@ -3180,6 +3180,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Google Chrome"},
     }
+    for prompt in (
+        "打开网页",
+        "打开一个网页",
+        "打开空白网页",
+        "打开本地网页",
+        "打开网址",
+        "打开链接",
+        "打开网站",
+        "open a browser",
+        "open a webpage",
+        "open blank page",
+        "open local page",
+    ):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        }
+    assert daily_desktop_intent_tool_request("打开本地", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("open The Archive", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "The Archive"},
+    }
     assert daily_desktop_intent_tool_request("打开 Cursor", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

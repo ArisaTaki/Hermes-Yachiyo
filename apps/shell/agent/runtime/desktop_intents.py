@@ -5632,6 +5632,9 @@ def _app_open_name(text: str) -> str:
             continue
         if _looks_like_composite_action_target(raw_app):
             continue
+        browser_app_name = _generic_browser_open_app_name(raw_app)
+        if browser_app_name:
+            return browser_app_name
         app_name = _normalize_app_name(raw_app)
         if _looks_like_generic_app_open_target(raw_app):
             continue
@@ -5838,7 +5841,7 @@ def _normalize_app_name(value: str) -> str:
     if _normalize_url(app):
         return ""
     candidates = [app]
-    article_stripped = re.sub(r"^(?:the)\s+", "", app, flags=re.IGNORECASE).strip()
+    article_stripped = re.sub(r"^(?:a|an|the)\s+", "", app, flags=re.IGNORECASE).strip()
     if article_stripped and article_stripped != app:
         candidates.append(article_stripped)
     for candidate in candidates:
@@ -5846,6 +5849,38 @@ def _normalize_app_name(value: str) -> str:
         if compact in _APP_ALIASES:
             return _APP_ALIASES[compact]
     return app
+
+
+def _generic_browser_open_app_name(value: str) -> str:
+    app = _strip_app_name(value)
+    if not app:
+        return ""
+    compact = re.sub(r"[\s._-]+", "", app.lower())
+    if compact in {
+        "网页",
+        "一个网页",
+        "空白网页",
+        "网站",
+        "一个网站",
+        "网址",
+        "链接",
+        "本地网页",
+        "本地网站",
+        "本地页面",
+        "浏览器网页",
+        "浏览器页面",
+        "webpage",
+        "awebpage",
+        "website",
+        "awebsite",
+        "url",
+        "link",
+        "blankpage",
+        "localpage",
+        "browserpage",
+    }:
+        return "Google Chrome"
+    return ""
 
 
 def _strip_app_name(value: str) -> str:
@@ -5942,6 +5977,8 @@ def _looks_like_generic_app_open_target(value: str) -> bool:
         "帮我",
         "请",
         "麻烦",
+        "本地",
+        "local",
     }:
         return True
     lowered = app.lower()

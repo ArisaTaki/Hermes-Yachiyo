@@ -908,25 +908,33 @@ def test_chat_bridge_quick_message_opens_default_browser_without_model(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "打开默认浏览器",
-        launcher_mode="live2d",
+    cases = (
+        ("打开默认浏览器", "live2d"),
+        ("打开网页", "bubble"),
+        ("open a browser", "live2d"),
+        ("open a webpage", "bubble"),
     )
+    for prompt, launcher_mode in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert open_calls == ["Google Chrome"]
-    assert agent_task["summary"] == "已打开 Google Chrome。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Google Chrome"}
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert agent_task["summary"] == "已打开 Google Chrome。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Google Chrome"}
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert open_calls == ["Google Chrome", "Google Chrome", "Google Chrome", "Google Chrome"]
 
 
 def test_chat_bridge_quick_message_opens_explicit_desktop_client_without_model(
