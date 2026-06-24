@@ -1785,6 +1785,76 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         store.close()
 
 
+def test_send_message_executes_latest_download_open_path_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    open_path_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct latest-download task should not call model")
+        ),
+    )
+
+    def fake_open_path(path: str) -> dict:
+        open_path_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": "Opened new.pdf",
+            "data": {
+                "path": path,
+                "display_path": "~/Downloads/new.pdf",
+                "desktop_object": "latest_download",
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
+    try:
+        result = api.send_message("打开最近下载的文件")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件：~/Downloads/new.pdf。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"path": "latest_download"}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件：~/Downloads/new.pdf。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开文件：~/Downloads/new.pdf。"
+        assert open_path_calls == ["latest_download"]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_reveal_path_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

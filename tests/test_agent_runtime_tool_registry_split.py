@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -2310,6 +2311,75 @@ def test_desktop_open_path_opens_safe_existing_file(monkeypatch, tmp_path) -> No
         "suffix": ".pdf",
     }
     assert calls[0][0] == ["open", expanded]
+
+
+def test_desktop_open_path_resolves_latest_download_alias(monkeypatch, tmp_path) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    older = downloads / "older.pdf"
+    newer = downloads / "newer.pdf"
+    partial = downloads / "still-downloading.crdownload"
+    older.write_text("old", encoding="utf-8")
+    newer.write_text("new", encoding="utf-8")
+    partial.write_text("partial", encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+    os.utime(partial, (300, 300))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path("latest_download")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.open_path"
+    assert result["summary"] == "Opened newer.pdf"
+    assert result["data"] == {
+        "path": "latest_download",
+        "open_target": "system_open",
+        "desktop_object": "latest_download",
+        "source_folder": str(downloads),
+        "expanded_path": str(newer),
+        "resolved_path": str(newer),
+        "display_path": str(newer),
+        "source_exists": True,
+        "exists": True,
+        "is_dir": False,
+        "suffix": ".pdf",
+    }
+    assert calls[0][0] == ["open", str(newer)]
+
+
+def test_desktop_reveal_path_resolves_latest_download_alias(monkeypatch, tmp_path) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    target = downloads / "latest.txt"
+    target.write_text("latest", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.reveal_path("latest_download")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.reveal_path"
+    assert result["summary"] == "Revealed latest.txt in Finder"
+    assert result["data"]["desktop_object"] == "latest_download"
+    assert result["data"]["resolved_path"] == str(target)
+    assert result["data"]["is_dir"] is False
+    assert calls[0][0] == ["open", "-R", str(target)]
 
 
 def test_desktop_open_path_blocks_unsafe_file_types(monkeypatch, tmp_path) -> None:

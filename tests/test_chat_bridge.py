@@ -2815,6 +2815,45 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_latest_download_open_path_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    open_calls: list[str] = []
+
+    def fake_open_path(path: str) -> dict:
+        open_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": "Opened new.pdf",
+            "data": {
+                "path": path,
+                "display_path": "~/Downloads/new.pdf",
+                "desktop_object": "latest_download",
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开最近下载的文件",
+    )
+
+    assert open_calls == ["latest_download"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已打开文件：~/Downloads/new.pdf。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "latest_download"}
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

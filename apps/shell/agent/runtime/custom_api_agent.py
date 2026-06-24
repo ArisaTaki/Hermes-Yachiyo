@@ -905,7 +905,7 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "app.status":
                 return _app_status_summary(result, planned_input) or result_summary or "已检查应用状态。"
             if tool_name == "desktop.reveal_path":
-                path = _payload_text(result, planned_input, "path")
+                path = _desktop_path_summary_path(result, planned_input)
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
             if tool_name == "desktop.open_path":
                 return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
@@ -2128,12 +2128,26 @@ def _calendar_create_event_summary(result: dict[str, Any], planned_input: dict[s
 
 def _desktop_open_path_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
-    path = str(data.get("path") or planned_input.get("path") or "").strip()
+    path = _desktop_path_summary_path(result, planned_input)
     if not path:
         return ""
     if data.get("is_dir") is True:
         return f"已打开文件夹：{path}。"
     return f"已打开文件：{path}。"
+
+
+def _desktop_path_summary_path(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if data.get("desktop_object"):
+        return str(
+            data.get("display_path")
+            or data.get("resolved_path")
+            or data.get("expanded_path")
+            or data.get("path")
+            or planned_input.get("path")
+            or ""
+        ).strip()
+    return str(data.get("path") or planned_input.get("path") or "").strip()
 
 
 def _terminal_run_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

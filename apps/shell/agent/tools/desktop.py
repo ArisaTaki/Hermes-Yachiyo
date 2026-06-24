@@ -1097,7 +1097,11 @@ def reveal_path(path: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.reveal_path")
     clean_path = _clean_required(path, "path")
-    target = _expanded_local_path(clean_path)
+    special = _special_desktop_object_path(clean_path, "desktop.reveal_path", "finder_reveal")
+    if special and "error_payload" in special:
+        return special["error_payload"]
+    target = special["target"] if special else _expanded_local_path(clean_path)
+    data_base = special["data"] if special else {"path": clean_path, "expanded_path": str(target)}
     if not target.exists():
         return {
             "ok": False,
@@ -1106,8 +1110,7 @@ def reveal_path(path: str) -> dict[str, Any]:
             "error": f"Path not found: {clean_path}",
             "error_code": "path_not_found",
             "data": {
-                "path": clean_path,
-                "expanded_path": str(target),
+                **data_base,
                 "open_target": "finder_reveal",
                 "exists": False,
             },
@@ -1127,8 +1130,7 @@ def reveal_path(path: str) -> dict[str, Any]:
     if result.returncode != 0:
         payload = _failed("desktop.reveal_path", result)
         payload["data"] = {
-            "path": clean_path,
-            "expanded_path": str(target),
+            **data_base,
             "open_target": "finder_reveal",
             "exists": True,
             "is_dir": target.is_dir(),
@@ -1139,8 +1141,7 @@ def reveal_path(path: str) -> dict[str, Any]:
         "action": "desktop.reveal_path",
         "summary": f"Revealed {target.name or str(target)} in Finder",
         "data": {
-            "path": clean_path,
-            "expanded_path": str(target),
+            **data_base,
             "open_target": "finder_reveal",
             "exists": True,
             "is_dir": target.is_dir(),
@@ -1154,7 +1155,11 @@ def open_path(path: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.open_path")
     clean_path = _clean_required(path, "path")
-    target = _expanded_local_path(clean_path)
+    special = _special_desktop_object_path(clean_path, "desktop.open_path", "system_open")
+    if special and "error_payload" in special:
+        return special["error_payload"]
+    target = special["target"] if special else _expanded_local_path(clean_path)
+    data_base = special["data"] if special else {"path": clean_path, "expanded_path": str(target)}
     if not target.exists():
         return {
             "ok": False,
@@ -1163,8 +1168,7 @@ def open_path(path: str) -> dict[str, Any]:
             "error": f"Path not found: {clean_path}",
             "error_code": "path_not_found",
             "data": {
-                "path": clean_path,
-                "expanded_path": str(target),
+                **data_base,
                 "open_target": "system_open",
                 "exists": False,
             },
@@ -1180,8 +1184,7 @@ def open_path(path: str) -> dict[str, Any]:
             "error": safety_error,
             "error_code": "unsafe_path_type",
             "data": {
-                "path": clean_path,
-                "expanded_path": str(target),
+                **data_base,
                 "open_target": "system_open",
                 "exists": True,
                 "is_dir": target.is_dir(),
@@ -1203,8 +1206,7 @@ def open_path(path: str) -> dict[str, Any]:
     if result.returncode != 0:
         payload = _failed("desktop.open_path", result)
         payload["data"] = {
-            "path": clean_path,
-            "expanded_path": str(target),
+            **data_base,
             "open_target": "system_open",
             "exists": True,
             "is_dir": target.is_dir(),
@@ -1216,8 +1218,7 @@ def open_path(path: str) -> dict[str, Any]:
         "action": "desktop.open_path",
         "summary": f"Opened {target.name or str(target)}",
         "data": {
-            "path": clean_path,
-            "expanded_path": str(target),
+            **data_base,
             "open_target": "system_open",
             "exists": True,
             "is_dir": target.is_dir(),
@@ -1373,6 +1374,89 @@ def _expanded_local_path(value: str) -> Path:
     if not path.is_absolute():
         path = Path.cwd() / path
     return path.resolve(strict=False)
+
+
+def _special_desktop_object_path(
+    value: str,
+    action: str,
+    open_target: str,
+) -> dict[str, Any]:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    if compact not in {"latestdownload", "recentdownload"}:
+        return {}
+    downloads = Path.home() / "Downloads"
+    base_data = {
+        "path": str(value or "").strip(),
+        "open_target": open_target,
+        "desktop_object": "latest_download",
+        "source_folder": str(downloads),
+    }
+    if not downloads.exists() or not downloads.is_dir():
+        return {
+            "error_payload": {
+                "ok": False,
+                "action": action,
+                "summary": f"{action} failed",
+                "error": "Downloads folder not found",
+                "error_code": "downloads_folder_not_found",
+                "data": {
+                    **base_data,
+                    "expanded_path": str(downloads),
+                    "exists": False,
+                    "source_exists": False,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            }
+        }
+    target = _latest_download_item(downloads)
+    if target is None:
+        return {
+            "error_payload": {
+                "ok": False,
+                "action": action,
+                "summary": f"{action} failed",
+                "error": "No completed downloads found",
+                "error_code": "latest_download_not_found",
+                "data": {
+                    **base_data,
+                    "expanded_path": str(downloads),
+                    "exists": False,
+                    "source_exists": True,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            }
+        }
+    return {
+        "target": target,
+        "data": {
+            **base_data,
+            "expanded_path": str(target),
+            "resolved_path": str(target),
+            "display_path": str(target),
+            "source_exists": True,
+        },
+    }
+
+
+def _latest_download_item(downloads: Path) -> Path | None:
+    candidates: list[tuple[float, Path]] = []
+    try:
+        items = list(downloads.iterdir())
+    except OSError:
+        return None
+    for item in items:
+        name = item.name
+        if name.startswith(".") or name.lower().endswith((".download", ".crdownload", ".part")):
+            continue
+        try:
+            candidates.append((item.stat().st_mtime, item))
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def _common_folder_path(value: str) -> Path | None:

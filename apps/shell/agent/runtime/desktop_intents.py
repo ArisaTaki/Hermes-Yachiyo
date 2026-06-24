@@ -2837,7 +2837,15 @@ def _looks_like_app_status_request(text: str) -> bool:
 
 def _desktop_open_path(text: str) -> str:
     original_text = str(text or "").strip()
+    if _latest_download_reveal_path_request(original_text):
+        return ""
+    if _latest_download_open_path_request(original_text):
+        return "latest_download"
     text = _strip_finder_path_prefix(original_text)
+    if _latest_download_reveal_path_request(text):
+        return ""
+    if _latest_download_open_path_request(text):
+        return "latest_download"
     if text != original_text:
         path = _normalize_reveal_path(text)
         if path:
@@ -2869,7 +2877,12 @@ def _desktop_open_path(text: str) -> str:
 
 
 def _desktop_reveal_path(text: str) -> str:
-    text = _strip_finder_path_prefix(text)
+    original_text = str(text or "").strip()
+    if _latest_download_reveal_path_request(original_text):
+        return "latest_download"
+    text = _strip_finder_path_prefix(original_text)
+    if _latest_download_reveal_path_request(text):
+        return "latest_download"
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
@@ -2901,6 +2914,43 @@ def _desktop_reveal_path(text: str) -> str:
         if path:
             return path
     return ""
+
+
+def _latest_download_open_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:打开|开启).{0,12}(?:最近|最新|刚刚|刚才).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+"
+            r"(?:download|downloaded\s+(?:file|item))\b",
+            lowered,
+        )
+    )
+
+
+def _latest_download_reveal_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:finder|访达).{0,12}(?:显示|定位|找一下|找到|打开).{0,12}"
+            r"(?:最近|最新|刚刚|刚才).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:显示|定位|找一下|找到).{0,12}"
+            r"(?:最近|最新|刚刚|刚才).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+        )
+        or re.search(
+            r"\b(?:show|reveal|locate)\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+"
+            r"(?:download|downloaded\s+(?:file|item))(?:\s+in\s+(?:the\s+)?finder)?\b",
+            lowered,
+        )
+    )
 
 
 def _strip_finder_path_prefix(text: str) -> str:
