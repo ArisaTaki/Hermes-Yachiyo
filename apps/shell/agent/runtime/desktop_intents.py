@@ -2837,11 +2837,19 @@ def _looks_like_app_status_request(text: str) -> bool:
 
 def _desktop_open_path(text: str) -> str:
     original_text = str(text or "").strip()
+    if _finder_selection_reveal_path_request(original_text):
+        return ""
+    if _finder_selection_open_path_request(original_text):
+        return "finder_selection"
     if _latest_download_reveal_path_request(original_text):
         return ""
     if _latest_download_open_path_request(original_text):
         return "latest_download"
     text = _strip_finder_path_prefix(original_text)
+    if _finder_selection_reveal_path_request(text):
+        return ""
+    if _finder_selection_open_path_request(text):
+        return "finder_selection"
     if _latest_download_reveal_path_request(text):
         return ""
     if _latest_download_open_path_request(text):
@@ -2878,9 +2886,13 @@ def _desktop_open_path(text: str) -> str:
 
 def _desktop_reveal_path(text: str) -> str:
     original_text = str(text or "").strip()
+    if _finder_selection_reveal_path_request(original_text):
+        return "finder_selection"
     if _latest_download_reveal_path_request(original_text):
         return "latest_download"
     text = _strip_finder_path_prefix(original_text)
+    if _finder_selection_reveal_path_request(text):
+        return "finder_selection"
     if _latest_download_reveal_path_request(text):
         return "latest_download"
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
@@ -2914,6 +2926,55 @@ def _desktop_reveal_path(text: str) -> str:
         if path:
             return path
     return ""
+
+
+def _finder_selection_open_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:打开|开启).{0,10}(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            text,
+        )
+        or re.search(
+            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目).{0,10}(?:打开|开启)",
+            text,
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:currently\s+)?selected\s+(?:finder\s+)?(?:file|item)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:currently\s+)?selected\s+(?:finder\s+)?(?:file|item).{0,20}\bopen\b",
+            lowered,
+        )
+    )
+
+
+def _finder_selection_reveal_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:finder|访达).{0,12}(?:显示|定位|找一下|找到).{0,10}"
+            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:显示|定位|找一下|找到).{0,10}"
+            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目)",
+            text,
+        )
+        or re.search(
+            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目).{0,10}"
+            r"(?:显示|定位|找一下|找到)",
+            text,
+        )
+        or re.search(
+            r"\b(?:show|reveal|locate)\s+(?:the\s+)?(?:currently\s+)?selected\s+"
+            r"(?:finder\s+)?(?:file|item)(?:\s+in\s+(?:the\s+)?finder)?\b",
+            lowered,
+        )
+    )
 
 
 def _latest_download_open_path_request(text: str) -> bool:

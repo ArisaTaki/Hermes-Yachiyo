@@ -2382,6 +2382,88 @@ def test_desktop_reveal_path_resolves_latest_download_alias(monkeypatch, tmp_pat
     assert calls[0][0] == ["open", "-R", str(target)]
 
 
+def test_desktop_open_path_resolves_finder_selection_alias(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "selected.pdf"
+    target.write_text("pdf", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[0] == "osascript":
+            return subprocess.CompletedProcess(command, 0, stdout=f"{target}\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path("finder_selection")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.open_path"
+    assert result["summary"] == "Opened selected.pdf"
+    assert result["data"] == {
+        "path": "finder_selection",
+        "open_target": "system_open",
+        "desktop_object": "finder_selection",
+        "source_app": "Finder",
+        "expanded_path": str(target),
+        "resolved_path": str(target),
+        "display_path": str(target),
+        "source_exists": True,
+        "exists": True,
+        "is_dir": False,
+        "suffix": ".pdf",
+    }
+    assert calls[0][0][0] == "osascript"
+    assert calls[1][0] == ["open", str(target)]
+
+
+def test_desktop_reveal_path_resolves_finder_selection_alias(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "selected.txt"
+    target.write_text("selected", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[0] == "osascript":
+            return subprocess.CompletedProcess(command, 0, stdout=f"{target}\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.reveal_path("finder_selection")
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.reveal_path"
+    assert result["summary"] == "Revealed selected.txt in Finder"
+    assert result["data"]["desktop_object"] == "finder_selection"
+    assert result["data"]["resolved_path"] == str(target)
+    assert result["data"]["source_app"] == "Finder"
+    assert calls[0][0][0] == "osascript"
+    assert calls[1][0] == ["open", "-R", str(target)]
+
+
+def test_desktop_open_path_reports_empty_finder_selection(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path("finder_selection")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.open_path"
+    assert result["error_code"] == "finder_selection_not_found"
+    assert result["data"]["desktop_object"] == "finder_selection"
+    assert calls[0][0][0] == "osascript"
+    assert len(calls) == 1
+
+
 def test_desktop_open_path_blocks_unsafe_file_types(monkeypatch, tmp_path) -> None:
     target = tmp_path / "run.sh"
     target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")

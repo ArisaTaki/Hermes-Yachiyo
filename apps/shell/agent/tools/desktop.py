@@ -1382,6 +1382,14 @@ def _special_desktop_object_path(
     open_target: str,
 ) -> dict[str, Any]:
     compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    if compact in {
+        "finderselection",
+        "finderselecteditem",
+        "selectedfinderitem",
+        "selectedfile",
+        "selecteditem",
+    }:
+        return _finder_selection_desktop_object_path(value, action, open_target)
     if compact not in {"latestdownload", "recentdownload"}:
         return {}
     downloads = Path.home() / "Downloads"
@@ -1457,6 +1465,78 @@ def _latest_download_item(downloads: Path) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[0])[1]
+
+
+def _finder_selection_desktop_object_path(
+    value: str,
+    action: str,
+    open_target: str,
+) -> dict[str, Any]:
+    base_data = {
+        "path": str(value or "").strip(),
+        "open_target": open_target,
+        "desktop_object": "finder_selection",
+        "source_app": "Finder",
+    }
+    selected = _selected_finder_item_path()
+    if not selected.get("ok"):
+        payload = {
+            **selected,
+            "action": action,
+            "summary": f"{action} failed",
+            "data": {
+                **base_data,
+                "exists": False,
+                "source_exists": False,
+            },
+        }
+        return {"error_payload": _with_permission_metadata("osascript", payload)}
+    selected_path = str(selected.get("path") or "").strip()
+    if not selected_path:
+        return {
+            "error_payload": {
+                "ok": False,
+                "action": action,
+                "summary": f"{action} failed",
+                "error": "No Finder selection found",
+                "error_code": "finder_selection_not_found",
+                "data": {
+                    **base_data,
+                    "exists": False,
+                    "source_exists": False,
+                },
+                "permission_error": False,
+                "fallback_used": False,
+            }
+        }
+    target = Path(selected_path).expanduser().resolve(strict=False)
+    return {
+        "target": target,
+        "data": {
+            **base_data,
+            "expanded_path": str(target),
+            "resolved_path": str(target),
+            "display_path": str(target),
+            "source_exists": True,
+        },
+    }
+
+
+def _selected_finder_item_path() -> dict[str, Any]:
+    result = _run_osascript(
+        """
+        tell application "Finder"
+            if (count of selection) is 0 then
+                return ""
+            end if
+            set selectedItem to item 1 of selection
+            return POSIX path of (selectedItem as alias)
+        end tell
+        """
+    )
+    if not result.get("ok"):
+        return result
+    return {"ok": True, "path": str(result.get("stdout") or "").strip()}
 
 
 def _common_folder_path(value: str) -> Path | None:

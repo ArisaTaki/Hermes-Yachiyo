@@ -2908,6 +2908,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "latest_download"},
     }
+    assert daily_desktop_intent_tool_request("打开选中的文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "finder_selection"},
+    }
+    assert daily_desktop_intent_tool_request("open selected Finder item", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "finder_selection"},
+    }
     assert daily_desktop_intent_tool_request("把 ~/Downloads/report.pdf 打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -2947,6 +2957,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
         "input": {"path": "latest_download"},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示选中的文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "finder_selection"},
+    }
+    assert daily_desktop_intent_tool_request("reveal selected file in Finder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "finder_selection"},
     }
     assert daily_desktop_intent_tool_request("launch Finder and show Desktop folder", allowed_tools) == {
         "protocol": "json_fallback",
