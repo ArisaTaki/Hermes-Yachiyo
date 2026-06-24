@@ -2493,6 +2493,20 @@ def _is_browser_screenshot_request(text: str) -> bool:
 
 def _system_volume_request(text: str) -> dict[str, Any] | None:
     lowered = text.lower()
+    if re.search(
+        r"(?:把|将)?(?:系统)?(?:音量|声音)\s*"
+        r"(?:调|调到|调至|调成|设到|设成|设置到|到)?\s*(?:一半|半)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        text,
+    ):
+        return {"action": "set", "level": 50}
+    if re.search(
+        r"(?:把|将)?(?:系统)?(?:音量|声音)\s*"
+        r"(?:调满|调到最大|调至最大|调成最大|开到最大|拉满|最大|满格)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        text,
+    ):
+        return {"action": "set", "level": 100}
     level_patterns = (
         r"(?:设置|设定)(?:系统)?(?:音量|声音)\s*(?:为|到|成)?\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
@@ -2502,6 +2516,10 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         r"百分之\s*(?P<level>\d{1,3})",
         r"(?:系统)?(?:音量|声音)\s*(?:设成|设到|调成)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:音量|声音)\s*(?P<level>\d{1,3})\s*%",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:到|调到|调至|设为|设置到)?\s*"
+        r"(?P<level>\d{1,3})(?:\s*%|百分之)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
         r"\b(?:set|turn)\s+(?:the\s+)?(?:system\s+)?volume\s+(?:to\s+)?"
         r"(?P<level>\d{1,3})\s*%?\b",
     )
@@ -2513,18 +2531,32 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         if level is not None:
             return {"action": "set", "level": level}
     if re.search(r"(?:取消静音|解除静音|取消(?:系统)?静音|恢复声音)", text) or re.search(
-        r"\bunmute(?:\s+(?:system\s+)?volume)?\b",
+        r"(?:把|将)?(?:系统)?(?:声音|音量)\s*(?:打开|开一下|开下|开起来)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        text,
+    ) or re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|开启)"
+        r"(?:系统)?(?:声音|音量)(?!设置)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        text,
+    ) or re.search(
+        r"\bunmute(?:\s+(?:system\s+)?volume)?\b|\bturn\s+(?:the\s+)?sound\s+on\b",
         lowered,
     ):
         return {"action": "unmute"}
-    if re.search(r"(?:静音|设为静音|开启静音|关闭声音|把声音关掉|把音量关掉)", text) or re.search(
-        r"\bmute(?:\s+(?:system\s+)?volume)?\b",
+    if re.search(
+        r"(?:静音|设为静音|开启静音|关闭声音|关掉声音|把声音关掉|把音量关掉|"
+        r"把声音关了|把音量关了|声音关了|音量关了)",
+        text,
+    ) or re.search(
+        r"\bmute(?:\s+(?:system\s+)?volume)?\b|\bturn\s+(?:the\s+)?sound\s+off\b",
         lowered,
     ):
         return {"action": "mute"}
     if re.search(
         r"(?:调大|调高|加大|提高|增大|升高).{0,4}(?:音量|声音)|"
-        r"(?:音量|声音).{0,4}(?:大一点|高一点|加一点|调大|调高|提高)",
+        r"(?:音量|声音).{0,4}(?:大一点|大点|高一点|高点|加一点|加点|调大|调高|提高)|"
+        r"(?:大声一点|大声点|声音大点|声音大一点|音量大点|音量大一点)",
         text,
     ) or re.search(
         r"\b(?:turn|raise|increase)\s+(?:up\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
@@ -2535,7 +2567,8 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         return {"action": "up"}
     if re.search(
         r"(?:调小|调低|降低|减小|小声).{0,4}(?:音量|声音)|"
-        r"(?:音量|声音).{0,4}(?:小一点|低一点|减一点|调小|调低|降低)",
+        r"(?:音量|声音).{0,4}(?:小一点|小点|低一点|低点|减一点|减点|调小|调低|降低)|"
+        r"(?:小声一点|小声点|声音小点|声音小一点|音量小点|音量小一点|小点声|小一点声)",
         text,
     ) or re.search(
         r"\b(?:turn|lower|decrease)\s+(?:down\s+)?(?:the\s+)?(?:system\s+)?volume\b|"

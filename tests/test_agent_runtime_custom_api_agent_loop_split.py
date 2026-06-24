@@ -3407,6 +3407,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "System Settings"},
     }
+    assert daily_desktop_intent_tool_request("打开声音设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Settings"},
+    }
     assert daily_desktop_intent_tool_request("打开蓝牙设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -4278,7 +4283,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "set", "level": 20},
     }
+    assert daily_desktop_intent_tool_request("音量调一半", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 50},
+    }
+    assert daily_desktop_intent_tool_request("把音量调满", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 100},
+    }
+    assert daily_desktop_intent_tool_request("音量 50", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 50},
+    }
     assert daily_desktop_intent_tool_request("调大音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
+    assert daily_desktop_intent_tool_request("声音大点", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
         "input": {"action": "up"},
@@ -4298,6 +4323,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "down"},
     }
+    assert daily_desktop_intent_tool_request("太吵了小点声", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
     assert daily_desktop_intent_tool_request("turn it down", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -4313,7 +4343,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "mute"},
     }
+    assert daily_desktop_intent_tool_request("关掉声音", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "mute"},
+    }
+    assert daily_desktop_intent_tool_request("turn sound off", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "mute"},
+    }
     assert daily_desktop_intent_tool_request("取消静音", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "unmute"},
+    }
+    assert daily_desktop_intent_tool_request("把声音打开", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "unmute"},
+    }
+    assert daily_desktop_intent_tool_request("turn sound on", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
         "input": {"action": "unmute"},
