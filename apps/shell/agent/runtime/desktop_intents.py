@@ -1400,7 +1400,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if click:
         candidates.append(_request("desktop.click", click))
 
-    if _is_screen_capture_request(text):
+    if _is_screen_capture_request(text) or (
+        _is_visual_inspection_followup(text) and not _is_active_window_request(text)
+    ):
         candidates.append(_request("screen.capture", {"reason": "user asked to capture the screen"}))
 
     if _is_active_window_request(text):
@@ -4582,17 +4584,26 @@ def _is_visual_inspection_followup(value: str) -> bool:
     lowered = followup.lower()
     return bool(
         re.search(
-            r"^(?:看看|看一下|看下|查看|读取|观察|识别)\s*"
-            r"(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|应用|app)(?:内容|状态|情况)?$",
+            r"^(?:看看|看一下|看下|看一眼|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+            r"(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|桌面|应用|app)(?:上|里|中|内)?"
+            r"(?:内容|状态|情况)?$",
             followup,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"^(?:当前|这个|该)?(?:界面|画面|窗口|屏幕|应用|app)"
-            r"(?:内容|状态|情况)?.{0,4}(?:是什么|是啥|长什么样|怎么样)$",
+            r"^(?:当前|这个|该|现在)?(?:界面|画面|窗口|屏幕|桌面|应用|app)"
+            r"(?:上|里|中|内)?(?:内容|状态|情况)?.{0,4}"
+            r"(?:是什么|是啥|有什么|有啥|有哪些|看到什么|长什么样|怎么样)$",
             followup,
             flags=re.IGNORECASE,
         )
+        or re.search(
+            r"^(?:你|你现在|现在)?(?:能)?(?:看见|看到|观察到|识别到)"
+            r"(?:什么|啥|哪些内容|什么内容)?$",
+            followup,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"^(?:观察(?:一下|下)?|识别(?:一下|下)?|看一眼)$", followup, flags=re.IGNORECASE)
         or re.search(r"\b(?:look at|inspect|view|read)\s+(?:the\s+)?(?:screen|window|ui|interface)\b", lowered)
     )
 

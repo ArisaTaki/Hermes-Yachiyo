@@ -2814,6 +2814,32 @@ def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch)
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("屏幕上有什么")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_user = [
+            message for message in runtime.chat_session.get_messages() if message.role == MessageRole.USER
+        ][-1]
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已截取当前屏幕。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert second["agent_task"]["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_user.metadata["daily_desktop_tool"] == "screen.capture"
+        assert len(capture_targets) == 2
+        assert second_run["status"] == "completed"
+        assert "artifact.created" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()

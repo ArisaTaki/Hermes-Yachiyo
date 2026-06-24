@@ -2214,6 +2214,59 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"x": 120, "y": 240},
         },
     ]
+    assert daily_desktop_intent_tool_requests("观察一下屏幕", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("屏幕上有什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("你看到什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("当前界面有什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("看看", allowed_tools) == []
+    assert daily_desktop_intent_tool_requests("Chrome 观察一下", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 当前界面有什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("看一下屏幕，然后向下滚动", allowed_tools) == [
         {
             "protocol": "json_fallback",
