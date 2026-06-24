@@ -280,6 +280,9 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
+    if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
+        return foreground_click_search_type_sequence
     app_scoped_search_type_sequence = _app_scoped_search_type_tool_requests(context)
     if app_scoped_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_scoped_search_type_sequence):
         return app_scoped_search_type_sequence
@@ -298,6 +301,9 @@ def daily_desktop_intent_tool_requests(
     shortcut_sequence = _app_open_or_focus_safe_shortcut_sequence_tool_requests(context)
     if shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_sequence):
         return shortcut_sequence
+    foreground_shortcut_sequence = _foreground_safe_shortcut_sequence_tool_requests(context)
+    if foreground_shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_shortcut_sequence):
+        return foreground_shortcut_sequence
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
     if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
         return click_type_sequence
@@ -2271,6 +2277,17 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         (
             "focus",
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)\s*"
+            rf"(?:(?:并|然后|后|之后|再)\s*)?(?P<action>{shortcut_pattern})$",
+        ),
+        (
+            "focus",
+            rf"^(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+?)\s+"
+            rf"(?:and\s+)?(?P<action>{shortcut_pattern})$",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?P<app>[^。！？!?，,\s]+?)\s*(?:的|里|中|内|上)?\s*"
             rf"(?P<action>{shortcut_pattern})$",
         ),
@@ -2831,6 +2848,13 @@ def _app_open_or_focus_safe_shortcut_sequence_tool_requests(text: str) -> list[d
     ]
 
 
+def _foreground_safe_shortcut_sequence_tool_requests(text: str) -> list[dict[str, Any]]:
+    actions = _safe_shortcut_action_sequence(text)
+    if len(actions) < 2:
+        return []
+    return [_request("desktop.safe_shortcut", {"action": action}) for action in actions]
+
+
 def _app_open_or_focus_screen_capture_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -2941,6 +2965,22 @@ def _app_scoped_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
         shortcut_tool=f"app.{mode}_and_safe_shortcut",
         shortcut_input={"app_name": app_name, "action": "find"},
     )
+
+
+def _foreground_click_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _click_ui_element_then_type(text)
+    if not parsed:
+        return []
+    click_payload, typed_text, submit_return = parsed
+    if not _is_search_ui_input_click(click_payload):
+        return []
+    requests = [
+        _request("desktop.safe_shortcut", {"action": "find"}),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if submit_return:
+        requests.append(_request("desktop.search_submit", {}))
+    return requests
 
 
 def _foreground_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
@@ -3293,6 +3333,23 @@ def _safe_shortcut_action_sequence(value: str) -> list[str]:
     text = _strip_query(value)
     if not text:
         return []
+    compact = _normalize_named_hotkey_phrase(text)
+    compact_sequences = {
+        "全选复制": ["select_all", "copy"],
+        "全选并复制": ["select_all", "copy"],
+        "全选后复制": ["select_all", "copy"],
+        "全选再复制": ["select_all", "copy"],
+        "复制当前窗口": ["select_all", "copy"],
+        "复制当前窗口内容": ["select_all", "copy"],
+        "复制当前页面": ["select_all", "copy"],
+        "复制当前页面内容": ["select_all", "copy"],
+        "copycurrentwindow": ["select_all", "copy"],
+        "copycurrentwindowcontents": ["select_all", "copy"],
+        "copycurrentpage": ["select_all", "copy"],
+        "copycurrentpagecontents": ["select_all", "copy"],
+    }
+    if compact in compact_sequences:
+        return compact_sequences[compact]
     parts = re.split(
         r"(?:[，,；;。]\s*|(?:然后|接着|之后|随后|并且|并|再|后(?!退))\s*|"
         r"\s+(?:and\s+then|then|and)\s+)",
@@ -3425,6 +3482,8 @@ def _app_focus_name(text: str) -> str:
         if _looks_like_composite_action_target(raw_app):
             continue
         if _looks_like_generic_app_open_target(raw_app):
+            continue
+        if _looks_like_foreground_text_input_phrase(raw_app):
             continue
         app_name = _normalize_app_name(raw_app)
         if app_name:
@@ -3949,7 +4008,7 @@ def _strip_app_foreground_followup(value: str) -> str:
 
 def _strip_app_foreground_followup_prefix(value: str) -> str:
     return re.sub(
-        r"^(?:并且|并|然后|之后|后|再|and|then)\s+",
+        r"^(?:并且|并|然后|之后|后|再|and|then)\s*",
         "",
         str(value or "").strip(),
         flags=re.IGNORECASE,
@@ -4087,6 +4146,18 @@ def _looks_like_current_app_scope(value: str) -> bool:
         "activeapplication",
         "thisapplication",
     }
+
+
+def _looks_like_foreground_text_input_phrase(value: str) -> bool:
+    text = _strip_query(value)
+    return bool(
+        re.match(
+            r"^(?:输入|打字|键入|敲入|打入|打上|写入|写|打)(?:\s|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.match(r"^(?:type|enter|input|write)\s+", text, flags=re.IGNORECASE)
+    )
 
 
 def _looks_like_common_path_target(value: str) -> bool:
@@ -4417,7 +4488,17 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "粘贴到这里": "paste",
         "粘贴到这": "paste",
         "粘贴在这里": "paste",
+        "粘贴到当前窗口": "paste",
+        "粘贴到前台": "paste",
+        "粘贴进当前窗口": "paste",
+        "粘贴进前台": "paste",
+        "粘贴在当前窗口": "paste",
+        "粘贴在前台": "paste",
         "paste": "paste",
+        "pasteintocurrentwindow": "paste",
+        "pasteintoforeground": "paste",
+        "pasteincurrentwindow": "paste",
+        "pasteinforeground": "paste",
         "全选": "select_all",
         "selectall": "select_all",
         "撤销": "undo",

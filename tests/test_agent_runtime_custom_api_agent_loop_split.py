@@ -1700,6 +1700,44 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "copy"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开微信然后全选复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("复制当前窗口内容", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("粘贴到当前窗口", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("输入 hello 到前台", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        }
+    ]
     assert daily_desktop_intent_tool_requests("按 Tab，再按下箭头", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1820,6 +1858,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("切到 Chrome 后退", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "browser_back"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("点搜索框输入 yachiyo 然后搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("点击当前窗口搜索框输入 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
         },
         {
             "protocol": "json_fallback",

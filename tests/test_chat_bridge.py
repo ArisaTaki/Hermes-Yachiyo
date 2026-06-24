@@ -1514,6 +1514,68 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_foreground_search_type_submit_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "点搜索框输入 yachiyo 然后搜索",
+    )
+
+    assert result["ok"] is True
+    assert calls == [("shortcut", "find"), ("type", "yachiyo"), ("search_submit", "")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开查找。 已向前台输入文字（7 个字符）。 已提交前台搜索。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-3:]] == [
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ]
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert event_types.count("agent.desktop.intent_planned") == 3
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
@@ -2624,7 +2686,7 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开微信然后全选再复制",
+        "打开微信然后全选复制",
     )
 
     assert calls == [
@@ -2873,7 +2935,7 @@ def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "输入 你好八千代",
+        "输入 你好八千代 到前台",
     )
 
     assert typed_text == ["你好八千代"]
