@@ -2058,6 +2058,8 @@ def _is_browser_screenshot_request(text: str) -> bool:
 def _system_volume_request(text: str) -> dict[str, Any] | None:
     lowered = text.lower()
     level_patterns = (
+        r"(?:设置|设定)(?:系统)?(?:音量|声音)\s*(?:为|到|成)?\s*"
+        r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
@@ -2167,6 +2169,13 @@ def _is_running_apps_request(text: str) -> bool:
             text,
         )
         or re.search(
+            r"(?:现在|当前|桌面|电脑|系统|前台|后台)?.{0,8}"
+            r"(?:有哪些|有哪|什么|哪些|几个).{0,4}(?:应用|app|软件|程序).{0,8}"
+            r"(?:正在运行|在运行|运行中|打开|已打开|开着|启动着)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\b(?:what|which|list|show|read)\s+(?:apps?|applications?|programs?)\s+"
             r"(?:are\s+)?(?:running|open)\b",
             lowered,
@@ -2190,6 +2199,27 @@ def _app_status_name(text: str) -> str:
             continue
         return app_name
     return ""
+
+
+def _looks_like_schedule_creation_request(text: str) -> bool:
+    raw = str(text or "").strip()
+    lowered = raw.lower()
+    return bool(
+        re.search(r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我", raw)
+        or re.search(r"(?:新建|创建|添加|新增|设置|设定).{0,8}(?:提醒事项|提醒)", raw)
+        or re.search(r"(?:提醒事项|reminders?).{0,12}(?:新建|创建|添加|新增|设置|设定|加)", lowered)
+        or re.search(r"(?:新建|创建|添加|新增|设置|设定).{0,8}(?:日历事件|日程|日历日程)", raw)
+        or re.search(
+            r"(?:日历|calendar).{0,12}(?:新建|创建|添加|新增|设置|设定).{0,8}"
+            r"(?:日程|事件|event)",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:remind me|create (?:a )?reminder|add (?:a )?reminder|"
+            r"create (?:a )?calendar event|add (?:a )?calendar event)\b",
+            lowered,
+        )
+    )
 
 
 def _desktop_windows_request(text: str) -> dict[str, str] | None:
@@ -4029,6 +4059,7 @@ def _app_open_name(text: str) -> str:
         _looks_like_search_request(text)
         or _is_running_apps_request(text)
         or _looks_like_app_status_request(text)
+        or _looks_like_schedule_creation_request(text)
         or _desktop_safe_shortcut_action(text)
     ):
         return ""

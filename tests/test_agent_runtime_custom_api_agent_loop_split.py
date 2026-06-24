@@ -3063,6 +3063,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "set", "level": 35},
     }
+    assert daily_desktop_intent_tool_request("设置音量为 40", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 40},
+    }
     assert daily_desktop_intent_tool_request("把系统音量调到百分之 20", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -3165,6 +3170,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("现在开了哪些应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前有哪些 App 在运行", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("现在有哪些应用在运行", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.running_apps",
         "input": {},
@@ -3591,6 +3606,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None
     assert daily_desktop_intent_tool_request("别把 GitHub 打开", allowed_tools) is None
     assert daily_desktop_intent_tool_request("请运行一个会失败的命令", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("提醒我下午三点开会", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("新建一个提醒事项 买牛奶", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("打开提醒事项添加买牛奶", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("创建日历事件 明天下午三点开会", allowed_tools) is None
     assert daily_desktop_intent_tool_request("查看系统状态", allowed_tools) is None
     assert daily_desktop_intent_candidates("播放超时空辉夜姬")[0] == {
         "protocol": "json_fallback",

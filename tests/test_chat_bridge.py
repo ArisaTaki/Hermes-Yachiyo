@@ -695,7 +695,7 @@ def test_chat_bridge_quick_message_executes_running_apps_without_model(
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "现在开了哪些应用",
+        "当前有哪些 App 在运行",
     )
 
     assert result["ok"] is True
