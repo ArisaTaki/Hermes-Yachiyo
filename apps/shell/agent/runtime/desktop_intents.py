@@ -405,6 +405,20 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in reminders_create_type_sequence
     ):
         return reminders_create_type_sequence
+    app_direct_search_sequence = _app_direct_search_type_tool_requests(context)
+    if app_direct_search_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_direct_search_sequence
+    ):
+        return app_direct_search_sequence
+    foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
+    if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
+        return foreground_click_search_type_sequence
+    app_scoped_search_type_sequence = _app_scoped_search_type_tool_requests(context)
+    if app_scoped_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_scoped_search_type_sequence):
+        return app_scoped_search_type_sequence
+    app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
+    if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
+        return app_search_type_sequence
     app_type_into_ui_element_sequence = _app_open_or_focus_type_into_ui_element_tool_requests(context)
     if app_type_into_ui_element_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_type_into_ui_element_sequence
@@ -415,23 +429,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
     ):
         return app_browser_action_sequence
-    app_direct_search_sequence = _app_direct_search_type_tool_requests(context)
-    if app_direct_search_sequence and all(
-        str(request.get("tool") or "") in allowed for request in app_direct_search_sequence
-    ):
-        return app_direct_search_sequence
     desktop_path_request = _desktop_path_tool_request(context)
     if desktop_path_request and str(desktop_path_request.get("tool") or "") in allowed:
         return [desktop_path_request]
-    foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
-    if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
-        return foreground_click_search_type_sequence
-    app_scoped_search_type_sequence = _app_scoped_search_type_tool_requests(context)
-    if app_scoped_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_scoped_search_type_sequence):
-        return app_scoped_search_type_sequence
-    app_search_type_sequence = _app_open_or_focus_search_type_tool_requests(context)
-    if app_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in app_search_type_sequence):
-        return app_search_type_sequence
     shortcut_type_sequence = _app_open_or_focus_shortcut_type_tool_requests(context)
     if shortcut_type_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_type_sequence):
         return shortcut_type_sequence

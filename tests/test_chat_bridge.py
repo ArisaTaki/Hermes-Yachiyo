@@ -126,7 +126,13 @@ def _run_launcher_daily_desktop_quick_message(
         assert policy_decision_events[0]["payload"]["decision"] == "allow"
         assert policy_decision_events[0]["payload"]["policy_scope"] == "daily_desktop"
         assert policy_decision_events[0]["payload"]["tool"] == user_metadata["daily_desktop_tool"]
-        assert assistant.content == agent_task["summary"]
+        if agent_task["status"] == "waiting_approval":
+            assert assistant.content in {
+                agent_task["summary"],
+                "等待你在 Agent Studio 中审批后继续。",
+            }
+        else:
+            assert assistant.content == agent_task["summary"]
         result["_events"] = events
         result["_task_timeline"] = task_timeline
         return result, agent_task, run, event_types
@@ -604,9 +610,25 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
             },
         }
 
+    extract_calls: list[str] = []
+
+    def fake_extract_text(selector: str = "") -> dict:
+        extract_calls.append(selector)
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 29 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "Yachiyo desktop agent runtime",
+                "truncated": False,
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -645,7 +667,7 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
         launcher_mode="live2d",
     )
 
-    assert extract_calls == ["", ""]
+    assert extract_calls == [""]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
@@ -5303,7 +5325,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     ]
     assert permission_probe_calls == [True]
     assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is True
+    assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
     assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
