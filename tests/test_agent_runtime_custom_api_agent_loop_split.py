@@ -4808,6 +4808,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("open new tab", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_tab"},
+    }
     assert daily_desktop_intent_tool_request("打开新标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -4910,6 +4915,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "refresh"},
     }
+    assert daily_desktop_intent_tool_request("refresh page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("reload page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "refresh"},
+    }
     assert daily_desktop_intent_tool_request("重新打开关闭的标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -4975,7 +4990,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "browser_back"},
     }
+    assert daily_desktop_intent_tool_request("go back one page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_back"},
+    }
+    assert daily_desktop_intent_tool_request("back page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_back"},
+    }
     assert daily_desktop_intent_tool_request("go forward", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_forward"},
+    }
+    assert daily_desktop_intent_tool_request("forward page", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "browser_forward"},
