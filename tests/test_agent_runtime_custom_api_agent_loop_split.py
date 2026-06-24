@@ -1687,6 +1687,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "copy"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开微信然后全选再复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("按 Tab，再按下箭头", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1752,6 +1764,30 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_scroll",
             "input": {"direction": "down", "pages": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信然后截图", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信然后看看屏幕", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
         },
     ]
     assert daily_desktop_intent_tool_requests("截图然后双击 120 240", allowed_tools) == [

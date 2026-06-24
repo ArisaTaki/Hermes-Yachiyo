@@ -2422,6 +2422,125 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     assert "agent.desktop.intent_completed" in event_types
 
 
+def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_screen_capture(target_path) -> dict:
+        calls.append(("capture", str(target_path)))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开微信然后截图",
+    )
+
+    assert calls[0] == ("open", "WeChat")
+    assert calls[1][0] == "capture"
+    assert calls[1][1].endswith("screenshots/current-screen.png")
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 WeChat。 已截取当前屏幕。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open",
+        "screen.capture",
+    ]
+    assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+    assert run["status"] == "completed"
+    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "artifact.created" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut",
+            "data": {"shortcut_action": action},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开微信然后全选再复制",
+    )
+
+    assert calls == [
+        ("open", "WeChat"),
+        ("focus", "WeChat"),
+        ("shortcut", "select_all"),
+        ("shortcut", "copy"),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已打开 WeChat 并全选。 已复制选中内容。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+    assert run["status"] == "completed"
+    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

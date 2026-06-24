@@ -255,9 +255,15 @@ def daily_desktop_intent_tool_requests(
     shortcut_type_sequence = _app_open_or_focus_shortcut_type_tool_requests(context)
     if shortcut_type_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_type_sequence):
         return shortcut_type_sequence
+    shortcut_sequence = _app_open_or_focus_safe_shortcut_sequence_tool_requests(context)
+    if shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_sequence):
+        return shortcut_sequence
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
     if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
         return click_type_sequence
+    app_screen_capture_sequence = _app_open_or_focus_screen_capture_tool_requests(context)
+    if app_screen_capture_sequence and all(str(request.get("tool") or "") in allowed for request in app_screen_capture_sequence):
+        return app_screen_capture_sequence
     foreground_search_type_sequence = _foreground_search_type_tool_requests(context)
     if foreground_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_search_type_sequence):
         return foreground_search_type_sequence
@@ -2763,6 +2769,36 @@ def _app_open_or_focus_shortcut_type_tool_requests(text: str) -> list[dict[str, 
     return requests
 
 
+def _app_open_or_focus_safe_shortcut_sequence_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    actions = _safe_shortcut_action_sequence(followup)
+    if len(actions) < 2:
+        return []
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": actions[0]},
+        ),
+        *[_request("desktop.safe_shortcut", {"action": action}) for action in actions[1:]],
+    ]
+
+
+def _app_open_or_focus_screen_capture_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if not shorthand_match:
+        return []
+    mode, _raw_app, app_name, followup = shorthand_match
+    if not _is_screen_capture_request(followup):
+        return []
+    return [
+        _request(f"app.{mode}", {"app_name": app_name}),
+        _request("screen.capture", {"reason": "user asked to capture the screen"}),
+    ]
+
+
 def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -3092,6 +3128,8 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_hotkey(followup)
         or _desktop_safe_type_text(followup)
         or _desktop_find_query(followup)
+        or _is_screen_capture_request(followup)
+        or bool(_safe_shortcut_action_sequence(followup))
     )
 
 
@@ -3149,6 +3187,28 @@ def _safe_shortcut_then_type(value: str) -> tuple[str, str, bool] | None:
     if not action or not typed_text:
         return None
     return action, typed_text, _typed_text_has_return_followup(raw_text, "")
+
+
+def _safe_shortcut_action_sequence(value: str) -> list[str]:
+    text = _strip_query(value)
+    if not text:
+        return []
+    parts = re.split(
+        r"(?:[，,；;。]\s*|(?:然后|接着|之后|随后|并且|并|再|后(?!退))\s*|"
+        r"\s+(?:and\s+then|then|and)\s+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    actions: list[str] = []
+    for part in parts:
+        clause = _strip_sequence_clause_prefix(part)
+        if not clause:
+            continue
+        action = _desktop_safe_shortcut_action(clause)
+        if not action:
+            return []
+        actions.append(action)
+    return actions if len(actions) >= 2 else []
 
 
 def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] | None:
