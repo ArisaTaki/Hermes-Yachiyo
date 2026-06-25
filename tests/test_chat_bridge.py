@@ -5781,6 +5781,69 @@ def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_spotlight_search_sequence_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {
+                "shortcut_action": action,
+                "key": "space",
+                "modifiers": ["command"],
+            },
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    cases = (
+        ("Spotlight 搜索 yachiyo", "bubble"),
+        ("open Spotlight and search yachiyo", "live2d"),
+    )
+    for prompt, launcher_mode in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert calls[-2:] == [("shortcut", "spotlight_search"), ("type", "yachiyo")]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已打开 Spotlight。 已向前台输入文字（7 个字符）。"
+        assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert [call["status"] for call in agent_task["tool_calls"][-2:]] == [
+            "completed",
+            "completed",
+        ]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_search_submit_without_approval(
     tmp_path,
     monkeypatch,

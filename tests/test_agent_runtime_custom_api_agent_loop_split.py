@@ -786,6 +786,45 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
     ]
 
 
+def test_daily_desktop_intent_planner_routes_spotlight_search_language() -> None:
+    allowed_tools = list(DAILY_DESKTOP_TOOL_NAMES)
+    expected = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "spotlight_search"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+
+    for prompt in (
+        "Spotlight 搜索 yachiyo",
+        "打开 Spotlight 搜索 yachiyo",
+        "用 Spotlight 搜索 yachiyo",
+        "聚焦搜索 yachiyo",
+        "打开聚焦搜索 yachiyo",
+        "spotlight search yachiyo",
+        "open Spotlight and search yachiyo",
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == expected
+
+    assert daily_desktop_intent_tool_requests("打开聚焦搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "spotlight_search"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Spotlight 搜索 yachiyo",
+        ["desktop.safe_shortcut"],
+    ) == []
+
+
 def test_daily_desktop_intent_planner_routes_browser_extract_text_language() -> None:
     allowed_tools = [
         "app.focus",

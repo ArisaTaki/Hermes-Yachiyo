@@ -462,6 +462,11 @@ def daily_desktop_intent_tool_requests(
         if "system.screen_saver_start" in allowed:
             return [_request("system.screen_saver_start", {})]
         return []
+    spotlight_search_sequence = _spotlight_search_tool_requests(context)
+    if spotlight_search_sequence:
+        if all(str(request.get("tool") or "") in allowed for request in spotlight_search_sequence):
+            return spotlight_search_sequence
+        return []
     system_settings_target = _direct_system_settings_tool_target(context)
     if system_settings_target and "system.settings_open" in allowed:
         return [_request("system.settings_open", {"target": system_settings_target})]
@@ -2008,6 +2013,83 @@ def _desktop_find_query(text: str) -> str:
     return ""
 
 
+def _spotlight_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    query = _spotlight_search_query(text)
+    if not query:
+        return []
+    return [
+        _request("desktop.safe_shortcut", {"action": "spotlight_search"}),
+        _request("desktop.safe_type_text", {"text": query}),
+    ]
+
+
+def _spotlight_search_query(text: str) -> str:
+    if _looks_like_explanation_request(text):
+        return ""
+    raw = _clean_text(text)
+    if not raw:
+        return ""
+    compact = re.sub(r"\s+", "", raw).lower()
+    if compact in {
+        "聚焦搜索",
+        "打开聚焦搜索",
+        "显示聚焦搜索",
+        "spotlight",
+        "打开spotlight",
+        "显示spotlight",
+        "spotlightsearch",
+        "openspotlight",
+        "showspotlight",
+        "openspotlightsearch",
+        "showspotlightsearch",
+    }:
+        return ""
+    target = r"(?:spotlight|聚焦搜索|聚焦|系统搜索)"
+    patterns = (
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:use\s+)?(?:spotlight|system\s+search)\s+(?:to\s+)?"
+        r"(?:search|find|look\s+for)\s+(?P<query>[^.!?]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:open|launch|start|show)\s+(?:spotlight|system\s+search)\s+"
+        r"(?:and\s+)?(?:search|find|look\s+for)\s+(?P<query>[^.!?]+)$",
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:用|使用)?\s*{target}\s*"
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)?\s*(?P<query>[^。！？!?]+)$",
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|开启|显示|唤起)\s*{target}\s*"
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)?\s*(?P<query>[^。！？!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_search_query(match.group("query"))
+        query = re.sub(
+            r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索|search|find|look\s+for)\s*",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip()
+        if _valid_spotlight_search_query(query):
+            return query
+    return ""
+
+
+def _valid_spotlight_search_query(query: str) -> bool:
+    if not query:
+        return False
+    if len(query) > 160:
+        return False
+    if re.search(
+        r"(?:然后|并且|并|再|接着|之后|and\s+then|then|and)\s*"
+        r"(?:发送|提交|点击|点|打开|播放|删除|关机|重启|"
+        r"send|submit|click|open|play|delete|shutdown|restart)",
+        query,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
 def _desktop_foreground_find_query(text: str) -> str:
     if _desktop_type_into_ui_element(text):
         return ""
@@ -2064,6 +2146,8 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _looks_like_project_or_design_request(text):
         return []
+
+    candidates.extend(_spotlight_search_tool_requests(text))
 
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:

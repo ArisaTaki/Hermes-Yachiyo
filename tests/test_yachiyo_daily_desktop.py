@@ -1442,6 +1442,45 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_spotlight_search_to_shortcut_and_type() -> None:
+    expected = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "spotlight_search"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    for prompt in (
+        "Spotlight 搜索 yachiyo",
+        "打开 Spotlight 搜索 yachiyo",
+        "用 Spotlight 搜索 yachiyo",
+        "聚焦搜索 yachiyo",
+        "打开聚焦搜索 yachiyo",
+        "spotlight search yachiyo",
+        "open Spotlight and search yachiyo",
+    ):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == expected
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tools"] == [
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+
+    assert daily_desktop_entrypoint_requests("打开聚焦搜索") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "spotlight_search"},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
     cases = (
         ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
