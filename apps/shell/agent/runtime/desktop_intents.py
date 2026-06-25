@@ -8638,6 +8638,7 @@ def _app_focus_name(text: str) -> str:
         r"(?:switch back to|go back to|return to)\s+(?P<app>[^.!?]+)",
         r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+)",
         r"bring\s+(?P<app>[^.!?]+?)\s+to\s+(?:the\s+)?(?:front|foreground)",
+        r"bring\s+(?P<app>[^.!?]+?)\s+up",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -9008,6 +9009,14 @@ def _app_open_name(text: str) -> str:
         return ""
 
     patterns = (
+        r"^\s*(?:你)?(?:帮我|请|麻烦)?(?:直接)?(?:把|将)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?P<verb>打开|启动|运行|拉起来|拉起|开启|开)\s*(?:了|起来)"
+        r"(?:吧|嘛|呢)?[?？。！!]*$",
+        r"^\s*(?:你)?(?:帮我|请|麻烦)(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?P<verb>打开|启动|运行|拉起来|拉起|开启|开)\s*(?:了|起来)"
+        r"(?:吧|嘛|呢)?[?？。！!]*$",
         r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*"
         r"(?P<verb>打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开)\s*(?:一下|下)?"
@@ -12175,7 +12184,7 @@ def _strip_polite_suffix(value: str) -> str:
 def _is_screen_capture_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
-        re.search(r"(?:截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)", text)
+        re.search(r"(?:截(?:一下|下)图|截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)", text)
         or re.search(r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面).{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)", text)
         or re.search(r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏).{0,8}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)", text)
         or re.search(r"(?:拍一下|拍下|拍一张|拍个).{0,8}(?:屏幕|桌面|界面|画面)", text)

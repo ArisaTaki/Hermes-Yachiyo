@@ -2846,6 +2846,18 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert fourth_task.status == TaskStatus.COMPLETED
         assert fourth_task.result == "已打开 WeChat。"
         assert open_calls[-1] == "WeChat"
+
+        fifth = api.send_message("把微信开了")
+        fifth_task = runtime.state.get_task(fifth["task_id"])
+
+        assert fifth["ok"] is True
+        assert fifth["status"] == "completed"
+        assert fifth["agent_task"]["summary"] == "已打开 WeChat。"
+        assert fifth["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert fifth_task is not None
+        assert fifth_task.status == TaskStatus.COMPLETED
+        assert fifth_task.result == "已打开 WeChat。"
+        assert open_calls[-1] == "WeChat"
     finally:
         service.close()
         store.close()
@@ -4974,6 +4986,22 @@ def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch)
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
+
+        third = api.send_message("截一下图")
+        third_task = runtime.state.get_task(third["task_id"])
+        third_user = [
+            message for message in runtime.chat_session.get_messages() if message.role == MessageRole.USER
+        ][-1]
+
+        assert third["ok"] is True
+        assert third["status"] == "completed"
+        assert third["agent_task"]["summary"] == "已截取当前屏幕。"
+        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert third["agent_task"]["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert third_task is not None
+        assert third_task.status == TaskStatus.COMPLETED
+        assert third_user.metadata["daily_desktop_tool"] == "screen.capture"
+        assert len(capture_targets) == 3
     finally:
         service.close()
         store.close()

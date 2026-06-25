@@ -72,6 +72,7 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         ("你能帮我打开微信吗", "WeChat"),
         ("能否帮我打开微信", "WeChat"),
         ("能否帮我启动备忘录", "Notes"),
+        ("把微信开了", "WeChat"),
         ("你能启动一下备忘录吗", "Notes"),
         ("打开短信", "Messages"),
         ("把 Finder 拉起来", "Finder"),
@@ -177,6 +178,7 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
         ("能否帮我显示微信", "app.show", {"app_name": "WeChat"}),
         ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
+        ("bring calculator up", "app.focus", {"app_name": "Calculator"}),
         ("打开微信到前台", "app.show", {"app_name": "WeChat"}),
         ("把Chrome叫出来", "app.show", {"app_name": "Google Chrome"}),
     )
@@ -425,6 +427,11 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
     cases = (
         (
             "帮我截个屏",
+            "screen.capture",
+            {"reason": "user asked to capture the screen"},
+        ),
+        (
+            "截一下图",
             "screen.capture",
             {"reason": "user asked to capture the screen"},
         ),
