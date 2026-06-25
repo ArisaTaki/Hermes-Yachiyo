@@ -46,6 +46,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "system.volume",
     "system.brightness",
     "system.display_sleep",
+    "system.screen_saver_start",
     "clipboard.write",
     "clipboard.read",
     "notes.create",
@@ -148,6 +149,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "system.volume": "控制系统音量",
     "system.brightness": "调整屏幕亮度",
     "system.display_sleep": "让显示器睡眠",
+    "system.screen_saver_start": "启动屏幕保护程序",
     "clipboard.write": "写入剪贴板",
     "clipboard.read": "读取剪贴板",
     "notes.create": "创建备忘录",
@@ -982,6 +984,8 @@ class RuntimeCustomApiAgentLoop:
                 return _system_brightness_summary(result, planned_input) or result_summary or "已调整屏幕亮度。"
             if tool_name == "system.display_sleep":
                 return "已让显示器睡眠。"
+            if tool_name == "system.screen_saver_start":
+                return "已启动屏幕保护程序。"
             if tool_name == "clipboard.write":
                 return _clipboard_write_summary(result, planned_input) or result_summary or "已写入剪贴板。"
             if tool_name == "clipboard.read":
@@ -1334,12 +1338,12 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.settings_open, system.volume, system.brightness, system.display_sleep, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.show_all_apps, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.settings_open, system.volume, system.brightness, system.display_sleep, system.screen_saver_start, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.show_all_apps, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed; map generic playback requests for named non-Apple music apps to media.music_app_open_and_play; map macOS System Settings pane or permission page open requests to system.settings_open; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
-            "commands to system.volume; map explicit relative brightness up/down commands to system.brightness; map explicit display sleep or turn-off-screen commands to system.display_sleep; map explicit 'copy/write to clipboard' requests to "
+            "commands to system.volume; map explicit relative brightness up/down commands to system.brightness; map explicit display sleep or turn-off-screen commands to system.display_sleep; map explicit start-screen-saver commands to system.screen_saver_start; map explicit 'copy/write to clipboard' requests to "
             "clipboard.write without reading clipboard contents; map explicit clipboard content read/status questions to clipboard.read; map explicit selected text read requests to desktop.safe_shortcut(copy) followed by clipboard.read; map explicit create/new note requests with user-provided body text to notes.create; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
             "before answering; map running/open app list questions to desktop.running_apps; "

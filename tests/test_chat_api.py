@@ -4313,6 +4313,60 @@ def test_send_message_executes_direct_system_display_sleep_task(tmp_path, monkey
         store.close()
 
 
+def test_send_message_executes_direct_system_screen_saver_start_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    screen_saver_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct screen saver task should not call model")
+        ),
+    )
+
+    def fake_system_screen_saver_start() -> dict:
+        screen_saver_calls.append("called")
+        return {
+            "ok": True,
+            "action": "system.screen_saver_start",
+            "summary": "Screen saver start requested",
+            "data": {"requested_action": "start"},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_screen_saver_start",
+        fake_system_screen_saver_start,
+    )
+    try:
+        for index, text in enumerate(("启动屏幕保护程序", "start screen saver"), start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已启动屏幕保护程序。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.screen_saver_start"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已启动屏幕保护程序。"
+            assert screen_saver_calls == ["called"] * index
+            assert run["status"] == "completed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

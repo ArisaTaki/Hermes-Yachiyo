@@ -7134,6 +7134,7 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
     volume_calls: list[tuple[str, object, object]] = []
     brightness_calls: list[tuple[str, object]] = []
     display_sleep_calls: list[str] = []
+    screen_saver_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: _FakeNoDefaultProfileService(),
@@ -7224,6 +7225,15 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
             "data": {"requested_action": "sleep"},
         }
 
+    def fake_system_screen_saver_start() -> dict:
+        screen_saver_calls.append("called")
+        return {
+            "ok": True,
+            "action": "system.screen_saver_start",
+            "summary": "Screen saver start requested",
+            "data": {"requested_action": "start"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_apple_music_control)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_play", fake_apple_music_play)
     monkeypatch.setattr(
@@ -7239,6 +7249,10 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.system_display_sleep",
         fake_system_display_sleep,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_screen_saver_start",
+        fake_system_screen_saver_start,
     )
     bridge = ChatBridge(runtime)
     try:
@@ -7284,6 +7298,12 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
                 "system.display_sleep",
                 {},
                 "已让显示器睡眠。",
+            ),
+            (
+                "启动屏幕保护程序",
+                "system.screen_saver_start",
+                {},
+                "已启动屏幕保护程序。",
             ),
         )
         for prompt, tool_name, tool_input, expected_summary in cases:
@@ -7332,6 +7352,7 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
         assert volume_calls == [("set", 35, None)]
         assert brightness_calls == [("down", None)]
         assert display_sleep_calls == ["called"]
+        assert screen_saver_calls == ["called"]
     finally:
         service.close()
         store.close()

@@ -1007,6 +1007,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "system.volume",
         "system.brightness",
         "system.display_sleep",
+        "system.screen_saver_start",
         "clipboard.write",
         "clipboard.read",
         "notes.create",
@@ -6065,6 +6066,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("sleep my Mac", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("启动屏幕保护程序", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.screen_saver_start",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("start screen saver", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.screen_saver_start",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("open screen saver settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "屏幕保护程序"},
+    }
     assert daily_desktop_intent_tool_request("漂亮一点", allowed_tools) is None
     assert daily_desktop_intent_tool_request("亮度调到 50%", allowed_tools) is None
     assert daily_desktop_intent_tool_request("把 047e43ac 复制到剪贴板", allowed_tools) == {
@@ -8644,6 +8660,20 @@ def test_main_chat_desktop_intent_summarizes_system_display_sleep() -> None:
     )
 
     assert result == "已让显示器睡眠。"
+
+
+def test_main_chat_desktop_intent_summarizes_system_screen_saver_start() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.screen_saver_start",
+        {},
+        {
+            "ok": True,
+            "summary": "Screen saver start requested",
+            "data": {"requested_action": "start"},
+        },
+    )
+
+    assert result == "已启动屏幕保护程序。"
 
 
 def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_text() -> None:

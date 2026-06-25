@@ -69,6 +69,7 @@ TOOL_FUNCTION_NAMES = {
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
     "system.display_sleep": "system_display_sleep",
+    "system.screen_saver_start": "system_screen_saver_start",
     "clipboard.write": "clipboard_write",
     "clipboard.read": "clipboard_read",
     "notes.create": "notes_create",
@@ -181,6 +182,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "system.volume",
     "system.brightness",
     "system.display_sleep",
+    "system.screen_saver_start",
     "clipboard.write",
     "clipboard.read",
     "notes.create",
@@ -1628,6 +1630,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Put the local macOS display to sleep for explicit low-risk daily desktop commands. "
             "This does not shut down, restart, log out, or sleep the whole Mac."
+        ),
+        properties={},
+    ),
+    "system.screen_saver_start": ToolDescriptor(
+        name="system.screen_saver_start",
+        description=(
+            "Start the local macOS screen saver for explicit low-risk daily desktop commands. "
+            "This opens ScreenSaverEngine and does not change screen saver settings."
         ),
         properties={},
     ),

@@ -306,6 +306,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "system_volume",
         "system_brightness",
         "system_display_sleep",
+        "system_screen_saver_start",
         "clipboard_write",
         "clipboard_read",
         "notes_create",
@@ -787,6 +788,10 @@ def test_system_brightness_schema_accepts_relative_brightness_actions() -> None:
 
 def test_system_display_sleep_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("system.display_sleep", {})
+
+
+def test_system_screen_saver_start_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("system.screen_saver_start", {})
 
 
 def test_clipboard_write_schema_requires_text() -> None:
@@ -5074,6 +5079,44 @@ def test_system_display_sleep_executes_low_risk_display_sleep(monkeypatch) -> No
     assert calls == [
         (
             ["pmset", "displaysleepnow"],
+            {
+                "capture_output": True,
+                "text": True,
+                "timeout": 5,
+                "check": False,
+            },
+        )
+    ]
+
+
+def test_system_screen_saver_start_executes_low_risk_screen_saver_start(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.system_screen_saver_start()
+
+    target = "/System/Library/CoreServices/ScreenSaverEngine.app"
+    assert result == {
+        "ok": True,
+        "action": "system.screen_saver_start",
+        "summary": "Screen saver start requested",
+        "data": {
+            "requested_action": "start",
+            "target": target,
+            "command": f"open {target}",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [
+        (
+            ["open", target],
             {
                 "capture_output": True,
                 "text": True,

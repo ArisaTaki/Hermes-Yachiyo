@@ -489,6 +489,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.reveal_path",
         "desktop.open_path",
         "system.display_sleep",
+        "system.screen_saver_start",
         "notes.create",
         "reminders.create",
         "calendar.create_event",
@@ -3242,6 +3243,36 @@ def system_display_sleep() -> dict[str, Any]:
         "data": {
             "requested_action": "sleep",
             "command": "pmset displaysleepnow",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def system_screen_saver_start() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("system.screen_saver_start")
+    target = "/System/Library/CoreServices/ScreenSaverEngine.app"
+    try:
+        result = subprocess.run(
+            ["open", target],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("system.screen_saver_start", exc)
+    if result.returncode != 0:
+        return _failed("system.screen_saver_start", result)
+    return {
+        "ok": True,
+        "action": "system.screen_saver_start",
+        "summary": "Screen saver start requested",
+        "data": {
+            "requested_action": "start",
+            "target": target,
+            "command": f"open {target}",
         },
         "permission_error": False,
         "fallback_used": False,

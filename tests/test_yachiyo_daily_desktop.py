@@ -1681,6 +1681,27 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.display_sleep"
 
     assert daily_desktop_entrypoint_requests("sleep my Mac") == []
+
+    screen_saver_cases = ("启动屏幕保护程序", "打开屏保", "start screen saver")
+    for prompt in screen_saver_cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.screen_saver_start",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.screen_saver_start"
+
+    assert daily_desktop_entrypoint_requests("打开屏幕保护程序设置") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "屏幕保护程序"},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("漂亮一点") == []
 
 

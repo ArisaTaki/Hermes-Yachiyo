@@ -71,6 +71,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "system.volume": "控制系统音量",
     "system.brightness": "调整屏幕亮度",
     "system.display_sleep": "让显示器睡眠",
+    "system.screen_saver_start": "启动屏幕保护程序",
     "clipboard.write": "写入剪贴板",
     "clipboard.read": "读取剪贴板",
     "notes.create": "创建备忘录",

@@ -7304,6 +7304,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["system.display_sleep"]["risk_level"] == "low"
     assert tools["system.display_sleep"]["input_schema"]["required"] == []
     assert any("displaysleepnow" in note for note in tools["system.display_sleep"]["fallback_notes"])
+    assert tools["system.screen_saver_start"]["capability_id"] == "desktop_execution"
+    assert tools["system.screen_saver_start"]["risk_level"] == "low"
+    assert tools["system.screen_saver_start"]["input_schema"]["required"] == []
+    assert any("ScreenSaverEngine" in note for note in tools["system.screen_saver_start"]["fallback_notes"])
     assert tools["clipboard.write"]["capability_id"] == "desktop_execution"
     assert tools["clipboard.write"]["risk_level"] == "low"
     assert tools["clipboard.write"]["input_schema"]["required"] == ["text"]

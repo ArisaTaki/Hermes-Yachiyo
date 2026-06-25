@@ -458,6 +458,10 @@ def daily_desktop_intent_tool_requests(
     """Return structured desktop tool requests for clear daily Chat intents."""
 
     allowed = {str(tool or "").strip() for tool in allowed_tools}
+    if _system_screen_saver_start_request(context):
+        if "system.screen_saver_start" in allowed:
+            return [_request("system.screen_saver_start", {})]
+        return []
     system_settings_target = _direct_system_settings_tool_target(context)
     if system_settings_target and "system.settings_open" in allowed:
         return [_request("system.settings_open", {"target": system_settings_target})]
@@ -1014,6 +1018,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "system.settings_open",
     "system.brightness",
     "system.display_sleep",
+    "system.screen_saver_start",
     "system.volume",
 }
 
@@ -1203,6 +1208,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "screen.capture",
         "system.brightness",
         "system.display_sleep",
+        "system.screen_saver_start",
         "system.settings_open",
         "system.volume",
     }:
@@ -1291,6 +1297,8 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
             return "屏幕暗一点"
     if tool_name == "system.display_sleep":
         return "让显示器睡眠"
+    if tool_name == "system.screen_saver_start":
+        return "启动屏幕保护程序"
     if tool_name == "clipboard.read":
         return "读取剪贴板"
     if tool_name == "clipboard.write":
@@ -2156,6 +2164,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _system_display_sleep_request(text):
         candidates.append(_request("system.display_sleep", {}))
+
+    if _system_screen_saver_start_request(text):
+        candidates.append(_request("system.screen_saver_start", {}))
 
     if _clipboard_read_request(text):
         candidates.append(_request("clipboard.read", {}))
@@ -3855,6 +3866,30 @@ def _system_display_sleep_request(text: str) -> bool:
         r"\b(?:sleep|blank)\s+(?:the\s+)?(?:display|screen|monitor)\b",
         r"\bput\s+(?:the\s+)?(?:display|screen|monitor)\s+to\s+sleep\b",
         r"\bdisplay\s+sleep\b|\bscreen\s+sleep\b",
+    )
+    return any(
+        re.search(pattern + suffix, text, flags=re.IGNORECASE)
+        or re.search(pattern, lowered, flags=re.IGNORECASE)
+        for pattern in (*chinese_patterns, *english_patterns)
+    )
+
+
+def _system_screen_saver_start_request(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(
+        r"(?:设置|设定|配置|偏好|面板|页面|settings?|preferences?|pane|page)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    suffix = r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$"
+    chinese_patterns = (
+        r"(?:启动|打开|开启|运行|显示|进入)(?:一下|下)?(?:屏幕保护程序|屏幕保护|屏保)",
+        r"(?:让|把)?(?:屏幕保护程序|屏幕保护|屏保)(?:启动|打开|开启|运行|显示|出来|跑起来)",
+    )
+    english_patterns = (
+        r"\b(?:start|open|launch|turn\s+on|show|run)\s+(?:the\s+)?(?:screen\s*saver|screensaver)\b",
+        r"\b(?:screen\s*saver|screensaver)\s+(?:start|open|launch|turn\s+on|show|run)\b",
     )
     return any(
         re.search(pattern + suffix, text, flags=re.IGNORECASE)

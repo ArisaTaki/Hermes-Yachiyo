@@ -294,6 +294,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "system.display_sleep": [
             "Uses pmset displaysleepnow to sleep only the display; it does not shut down, restart, log out, or sleep the whole Mac.",
         ],
+        "system.screen_saver_start": [
+            "Opens macOS ScreenSaverEngine to start the screen saver without changing screen saver settings.",
+        ],
         "clipboard.write": [
             "Writes explicit user-provided text to the system clipboard and records only character count.",
         ],

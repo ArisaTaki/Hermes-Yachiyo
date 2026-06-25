@@ -495,6 +495,14 @@ def _system_display_sleep(
     return broker.system_display_sleep()
 
 
+def _system_screen_saver_start(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.system_screen_saver_start()
+
+
 def _clipboard_write(
     broker: Any,
     payload: dict[str, Any],
@@ -798,6 +806,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "system.volume": _system_volume,
     "system.brightness": _system_brightness,
     "system.display_sleep": _system_display_sleep,
+    "system.screen_saver_start": _system_screen_saver_start,
     "clipboard.write": _clipboard_write,
     "clipboard.read": _clipboard_read,
     "notes.create": _notes_create,
