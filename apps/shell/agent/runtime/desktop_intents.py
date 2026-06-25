@@ -6782,7 +6782,7 @@ def _app_command_palette_tool_requests(text: str) -> list[dict[str, Any]]:
         parsed = _app_command_palette_followup(app_name, followup)
         if not parsed:
             continue
-        shortcut_action, typed_text, should_submit = parsed
+        shortcut_action, typed_text, followup_requests = parsed
         requests = [
             _request(
                 f"app.{mode}_and_safe_shortcut",
@@ -6790,26 +6790,30 @@ def _app_command_palette_tool_requests(text: str) -> list[dict[str, Any]]:
             ),
             _request("desktop.safe_type_text", {"text": typed_text}),
         ]
-        if should_submit:
-            requests.append(_request("desktop.submit_foreground", {"action": "confirm"}))
+        requests.extend(followup_requests)
         return requests
     return []
 
 
-def _app_command_palette_followup(app_name: str, followup: str) -> tuple[str, str, bool] | None:
+def _app_command_palette_followup(
+    app_name: str,
+    followup: str,
+) -> tuple[str, str, list[dict[str, Any]]] | None:
     shortcut_action = _app_command_or_preferences_shortcut_action(app_name, "命令面板")
     if not shortcut_action:
         return None
-    parsed = _command_palette_followup_text_and_submit(followup)
+    parsed = _command_palette_followup_text_and_actions(followup)
     if not parsed:
         return None
-    command_text, should_submit = parsed
+    command_text, followup_requests = parsed
     if not command_text:
         return None
-    return shortcut_action, command_text, should_submit
+    return shortcut_action, command_text, followup_requests
 
 
-def _command_palette_followup_text_and_submit(value: str) -> tuple[str, bool] | None:
+def _command_palette_followup_text_and_actions(
+    value: str,
+) -> tuple[str, list[dict[str, Any]]] | None:
     text = _strip_query(value)
     if not text:
         return None
@@ -6851,10 +6855,15 @@ def _command_palette_followup_text_and_submit(value: str) -> tuple[str, bool] | 
         if not match:
             continue
         raw_text = str(match.group("text") or "").strip()
-        should_submit = default_submit or _command_palette_text_has_submit_followup(raw_text)
         command_text = _strip_command_palette_typed_text(raw_text)
         if command_text:
-            return command_text, should_submit
+            return (
+                command_text,
+                _command_palette_typed_text_followup_requests(
+                    raw_text,
+                    default_submit=default_submit,
+                ),
+            )
     return None
 
 
@@ -6875,6 +6884,55 @@ def _is_bare_command_palette_open_followup(value: str) -> bool:
 def _strip_command_palette_typed_text(value: str) -> str:
     text = _strip_typed_text(value)
     text = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:(?:按一下|按下|按|发送|触发)\s*)?"
+        r"(?:esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right|"
+        r"退出|取消|制表键|制表|向上箭头|往上箭头|朝上箭头|向下箭头|往下箭头|朝下箭头|"
+        r"向左箭头|往左箭头|朝左箭头|向右箭头|往右箭头|朝右箭头|"
+        r"上箭头|下箭头|左箭头|右箭头|上方向键|下方向键|左方向键|右方向键|"
+        r"向上键|向下键|向左键|向右键|上|下|左|右|"
+        r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
+        r"(?:\s*(?:\d+|[一二两三四五六七八九十])\s*(?:次|下))?"
+        r"(?:\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定))?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*"
+        r"(?:(?:press|hit|send)\s+)?(?:the\s+)?"
+        r"(?:esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right)"
+        r"(?:\s+\d+\s*(?:times?)?)?"
+        r"(?:\s+(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+        r"(?:enter|return|confirm|ok))?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:选择|选中|打开|点击|点一下|点按|单击|点|进入|访问|执行|确认)?\s*"
+        r"(?:搜索结果|结果|命令|指令|条目|项目)?(?:中|里|里的|的)?\s*"
+        r"(?:第?一个|第一条|首个|第1个|第1条|1)\s*"
+        r"(?:搜索结果|结果|命令|指令|条目|项目)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*"
+        r"(?:select|choose|open|click|run|execute|confirm)\s+"
+        r"(?:the\s+)?(?:first|1st)\s+(?:result|item|command|match)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
         r"\s*(?:并且|并|然后|之后|后(?!退)|再|接着)\s*"
         r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定)$",
         "",
@@ -6891,6 +6949,64 @@ def _strip_command_palette_typed_text(value: str) -> str:
     return _strip_query(text)
 
 
+def _command_palette_typed_text_followup_requests(
+    value: str,
+    *,
+    default_submit: bool,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    safe_key = _command_palette_safe_key_followup(value)
+    if safe_key:
+        requests.append(_request("desktop.safe_key", safe_key))
+    if (
+        default_submit
+        or _command_palette_text_has_submit_followup(value)
+        or _command_palette_text_selects_first_result(value)
+    ):
+        requests.append(_request("desktop.submit_foreground", {"action": "confirm"}))
+    return requests
+
+
+def _command_palette_safe_key_followup(value: str) -> dict[str, Any] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = (
+        r"(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?P<key_cn>(?:(?:按一下|按下|按|发送|触发)\s*)?"
+        r"(?:esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right|"
+        r"退出|取消|制表键|制表|向上箭头|往上箭头|朝上箭头|向下箭头|往下箭头|朝下箭头|"
+        r"向左箭头|往左箭头|朝左箭头|向右箭头|往右箭头|朝右箭头|"
+        r"上箭头|下箭头|左箭头|右箭头|上方向键|下方向键|左方向键|右方向键|"
+        r"向上键|向下键|向左键|向右键|上|下|左|右|"
+        r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
+        r"(?:\s*(?:\d+|[一二两三四五六七八九十])\s*(?:次|下))?)"
+        r"(?:\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定))?$",
+        r"(?:and\s+then|then|and)\s*"
+        r"(?P<key_en>(?:(?:press|hit|send)\s+)?(?:the\s+)?"
+        r"(?:esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right)"
+        r"(?:\s+\d+\s*(?:times?)?)?)"
+        r"(?:\s+(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+        r"(?:enter|return|confirm|ok))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        key_phrase = str(
+            match.groupdict().get("key_cn") or match.groupdict().get("key_en") or ""
+        ).strip()
+        payload = _desktop_safe_key(key_phrase)
+        if payload:
+            return payload
+    return None
+
+
 def _command_palette_text_has_submit_followup(value: str) -> bool:
     text = str(value or "").strip()
     return bool(
@@ -6903,6 +7019,28 @@ def _command_palette_text_has_submit_followup(value: str) -> bool:
         or re.search(
             r"(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
             r"(?:enter|return|confirm|ok)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _command_palette_text_selects_first_result(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        re.search(
+            r"(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+            r"(?:选择|选中|打开|点击|点一下|点按|单击|点|进入|访问|执行|确认)\s*"
+            r"(?:搜索结果|结果|命令|指令|条目|项目)?(?:中|里|里的|的)?\s*"
+            r"(?:第?一个|第一条|首个|第1个|第1条|1)\s*"
+            r"(?:搜索结果|结果|命令|指令|条目|项目)?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*"
+            r"(?:select|choose|open|click|run|execute|confirm)\s+"
+            r"(?:the\s+)?(?:first|1st)\s+(?:result|item|command|match)$",
             text,
             flags=re.IGNORECASE,
         )

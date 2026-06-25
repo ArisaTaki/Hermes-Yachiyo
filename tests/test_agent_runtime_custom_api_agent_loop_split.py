@@ -1070,6 +1070,7 @@ def test_daily_desktop_intent_planner_routes_command_palette_input_and_execution
         "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.safe_key",
         "desktop.submit_foreground",
     ]
 
@@ -1125,6 +1126,71 @@ def test_daily_desktop_intent_planner_routes_command_palette_input_and_execution
     ]
     assert daily_desktop_intent_tool_requests(
         "VS Code run command Format Document",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 VS Code 里打开命令面板输入 Format Document 然后选择第一个结果",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 VS Code 里打开命令面板输入 Format Document 后按下箭头再确认",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "VS Code command palette type Format Document then select first result",
         allowed_tools,
     ) == [
         {
