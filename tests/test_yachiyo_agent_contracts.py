@@ -1036,6 +1036,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert "paste" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_document" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_event" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert "finder_get_info" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted safe shortcuts" in note for note in focus_safe_shortcut.fallback_notes)
     assert open_safe_key.capability_id == "foreground_input"
     assert open_safe_key.risk_level == "low"

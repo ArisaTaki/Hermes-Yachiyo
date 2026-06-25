@@ -703,7 +703,14 @@ def daily_desktop_intent_tool_requests(
         if (
             finder_input.get("app_name") == "Finder"
             and finder_input.get("action")
-            in {"finder_quick_look", "new_folder", "rename_selected", "parent_folder", "copy"}
+            in {
+                "finder_quick_look",
+                "finder_get_info",
+                "new_folder",
+                "rename_selected",
+                "parent_folder",
+                "copy",
+            }
             and str(finder_safe_action.get("tool") or "") in allowed
         ):
             return [
@@ -1752,6 +1759,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "new_document": "新建文档",
         "new_folder": "新建文件夹",
         "rename_selected": "重命名 Finder 选中项",
+        "finder_get_info": "显示 Finder 选中项简介",
         "parent_folder": "打开上一级文件夹",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
@@ -1770,6 +1778,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "browser_forward": "前进一页",
         "reopen_closed_tab": "重新打开关闭的标签页",
         "finder_quick_look": "快速查看 Finder 选中项",
+        "finder_get_info": "显示 Finder 选中项简介",
     }.get(str(action or "").strip().lower(), "")
 
 
@@ -7859,6 +7868,7 @@ def _finder_safe_shortcut_action(app_name: str, followup: str) -> str:
         or _finder_new_folder_shortcut_action(app_name, followup)
         or _finder_rename_selected_shortcut_action(app_name, followup)
         or _finder_parent_folder_shortcut_action(app_name, followup)
+        or _finder_get_info_shortcut_action(app_name, followup)
         or _finder_copy_selected_shortcut_action(app_name, followup)
     )
 
@@ -7891,6 +7901,33 @@ def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:
         "快速查看选中文件",
     }:
         return "finder_quick_look"
+    return ""
+
+
+def _finder_get_info_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "显示简介",
+        "查看简介",
+        "打开简介",
+        "显示文件简介",
+        "查看文件简介",
+        "打开文件简介",
+        "显示选中文件简介",
+        "查看选中文件简介",
+        "显示选中项简介",
+        "查看选中项简介",
+        "getinfo",
+        "showinfo",
+        "fileinfo",
+        "showfileinfo",
+        "getfileinfo",
+        "getselectedinfo",
+        "showselectedinfo",
+    }:
+        return "finder_get_info"
     return ""
 
 
@@ -14498,10 +14535,18 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "全屏当前窗口": "toggle_full_screen",
         "进入全屏": "toggle_full_screen",
         "进入全屏模式": "toggle_full_screen",
+        "退出全屏": "toggle_full_screen",
+        "退出全屏模式": "toggle_full_screen",
+        "离开全屏": "toggle_full_screen",
+        "离开全屏模式": "toggle_full_screen",
         "maximizecurrentwindow": "toggle_full_screen",
         "maximizethecurrentwindow": "toggle_full_screen",
         "fullscreencurrentwindow": "toggle_full_screen",
         "enterfullscreen": "toggle_full_screen",
+        "exitfullscreen": "toggle_full_screen",
+        "leavefullscreen": "toggle_full_screen",
+        "exitfullscreenmode": "toggle_full_screen",
+        "leavefullscreenmode": "toggle_full_screen",
         "任务控制中心": "mission_control",
         "打开任务控制中心": "mission_control",
         "显示任务控制中心": "mission_control",

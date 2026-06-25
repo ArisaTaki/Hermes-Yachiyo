@@ -647,6 +647,16 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.open",
         "input": {"app_name": "Google Chrome"},
     }
+    assert daily_desktop_intent_tool_request("退出全屏", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "toggle_full_screen"},
+    }
+    assert daily_desktop_intent_tool_request("leave full screen", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "toggle_full_screen"},
+    }
     assert daily_desktop_intent_tool_request("打开 Finder 选择的文件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -696,6 +706,16 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Finder", "action": "parent_folder"},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 里显示简介", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_get_info"},
+    }
+    assert daily_desktop_intent_tool_request("Finder get info", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_get_info"},
     }
     assert daily_desktop_intent_tool_request("打开 Finder 复制选中文件", allowed_tools) == {
         "protocol": "json_fallback",

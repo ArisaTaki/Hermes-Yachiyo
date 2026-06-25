@@ -550,6 +550,10 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
     )
     ToolDescriptorRegistry.validate_payload(
         "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "finder_get_info"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
         {"app_name": "Finder", "action": "new_folder"},
     )
     ToolDescriptorRegistry.validate_payload(
@@ -607,6 +611,11 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "finder_quick_look"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "finder_get_info"},
         )
     with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
         ToolDescriptorRegistry.validate_payload(
@@ -700,6 +709,8 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_get_info"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_folder"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
@@ -4469,6 +4480,7 @@ def test_desktop_safe_shortcut_finder_item_actions_use_expected_keys(monkeypatch
 
     rename = desktop_mod.desktop_safe_shortcut("rename_selected")
     parent = desktop_mod.desktop_safe_shortcut("parent_folder")
+    get_info = desktop_mod.desktop_safe_shortcut("finder_get_info")
 
     assert rename["ok"] is True
     assert rename["summary"] == "Executed safe shortcut: rename selected Finder item"
@@ -4488,11 +4500,21 @@ def test_desktop_safe_shortcut_finder_item_actions_use_expected_keys(monkeypatch
         "shortcut_action": "parent_folder",
         "shortcut_label": "open parent folder",
     }
+    assert get_info["ok"] is True
+    assert get_info["summary"] == "Executed safe shortcut: Finder Get Info"
+    assert get_info["data"] == {
+        "key": "i",
+        "modifiers": ["command"],
+        "shortcut_action": "finder_get_info",
+        "shortcut_label": "Finder Get Info",
+    }
     assert "key code keyCodeValue" in calls[0][0][2]
     assert " using " not in calls[0][0][2]
     assert calls[0][0][-1] == "36"
     assert "key code keyCodeValue using {command down}" in calls[1][0][2]
     assert calls[1][0][-1] == "126"
+    assert "keystroke keyName using {command down}" in calls[2][0][2]
+    assert calls[2][0][-1] == "i"
 
 
 def test_desktop_safe_shortcut_new_event_uses_command_n(monkeypatch) -> None:

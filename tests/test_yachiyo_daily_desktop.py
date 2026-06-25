@@ -150,6 +150,9 @@ def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts() -> None:
         ("Finder 上一级目录", "app.focus_and_safe_shortcut", "parent_folder"),
         ("Finder 回到上级目录", "app.focus_and_safe_shortcut", "parent_folder"),
         ("Finder open parent folder", "app.focus_and_safe_shortcut", "parent_folder"),
+        ("在 Finder 里显示简介", "app.focus_and_safe_shortcut", "finder_get_info"),
+        ("Finder 显示简介", "app.focus_and_safe_shortcut", "finder_get_info"),
+        ("Finder get info", "app.focus_and_safe_shortcut", "finder_get_info"),
         ("打开 Finder 复制选中文件", "app.open_and_safe_shortcut", "copy"),
         ("Finder 复制选中文件", "app.focus_and_safe_shortcut", "copy"),
         ("Finder copy selected file", "app.focus_and_safe_shortcut", "copy"),
@@ -630,7 +633,17 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
             {"action": "toggle_full_screen"},
         ),
         (
+            "退出全屏",
+            "desktop.safe_shortcut",
+            {"action": "toggle_full_screen"},
+        ),
+        (
             "maximize the current window",
+            "desktop.safe_shortcut",
+            {"action": "toggle_full_screen"},
+        ),
+        (
+            "leave full screen",
             "desktop.safe_shortcut",
             {"action": "toggle_full_screen"},
         ),
