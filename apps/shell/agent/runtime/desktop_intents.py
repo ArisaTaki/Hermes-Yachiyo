@@ -8899,6 +8899,11 @@ def _apple_music_search_play_query(text: str) -> str:
         r"^(?:apple\s*music|music(?:\s+app)?)\s+"
         r"(?:search|find|look\s+up)\s+(?P<query3>[^.!?]+?)\s+"
         r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:apple\s*music|music(?:\s+app)?)\s+"
+        r"(?:play|start\s+playing)\s+(?P<query_app_first>[^.!?]+?)[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:play|start\s+playing)\s+(?:(?:in|on|with|using)\s+)?"
+        r"(?:apple\s*music|music)(?:\s+app)?\s+(?P<query_app_after>[^.!?]+?)[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:open|launch|start)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
         r"(?:(?:and|then)\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?"

@@ -1628,6 +1628,8 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
             ("播个超时空辉夜姬", "超时空辉夜姬"),
             ("put some jazz on Apple Music", "jazz"),
             ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
+            ("Apple Music play Taylor Swift", "Taylor Swift"),
+            ("play Apple Music Taylor Swift", "Taylor Swift"),
             ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
             ("open Apple Music and search Space Oddity and play it", "Space Oddity"),
         )
