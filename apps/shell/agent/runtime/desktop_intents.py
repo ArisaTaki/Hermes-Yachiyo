@@ -470,6 +470,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_search_sequence
     ):
         return app_browser_search_sequence
+    site_search_sequence = _browser_site_search_tool_requests(context)
+    if site_search_sequence:
+        if all(str(request.get("tool") or "") in allowed for request in site_search_sequence):
+            return site_search_sequence
+        return []
     browser_search_click_sequence = _browser_search_then_click_tool_requests(context)
     if browser_search_click_sequence and all(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
@@ -2919,6 +2924,127 @@ def _browser_search_then_click_tool_requests(text: str) -> list[dict[str, Any]]:
             {"selector": f"search-result={index}", "click_count": 1},
         ),
     ]
+
+
+def _browser_site_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _browser_site_search(text)
+    if not parsed:
+        return []
+    url, click_index = parsed
+    requests = [_request("browser.open_url", {"url": url})]
+    if click_index:
+        requests.append(
+            _request(
+                "browser.click",
+                {"selector": f"search-result={click_index}", "click_count": 1},
+            )
+        )
+    return requests
+
+
+def _browser_site_search(text: str) -> tuple[str, int] | None:
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:打开|访问|浏览|前往|去|在|用)\s*)?"
+        r"(?P<site>youtube|yt|youtube\s*music|bilibili|b站|哔哩哔哩)\s*"
+        r"(?:里|中|上|内|里面)?\s*"
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找下|找)\s*"
+        r"(?P<query>[^。！？!?，,]+?)\s*"
+        r"(?P<tail>(?:(?:并且|并|然后|之后|随后|再|后)\s*)?"
+        r"(?:播放|播(?!放)|放|打开|点击|点一下|点|进入|访问)\s*"
+        r"(?:搜索结果|结果|链接)?(?:中|里|里的|的)?\s*"
+        r"(?:第?一个|第一条|首个|第1个|第1条|1|它|这个|视频)?"
+        r"(?:搜索结果|结果|链接|视频|条目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*)?$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?(?:please\s+)?"
+        r"(?:(?:open|visit|browse|go\s+to)\s+)?"
+        r"(?P<site_en>youtube|yt|youtube\s*music|bilibili)\s+"
+        r"(?:and\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?"
+        r"(?P<query_en>[^.!?]+?)\s*"
+        r"(?P<tail_en>(?:(?:and|then)\s+)?"
+        r"(?:play|start\s+playing|open|click|visit)\s*"
+        r"(?:(?:the\s+)?(?:first|1st)\s+)?(?:result|link|video|it|this)?)?[.!?]*$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+up)\s+"
+        r"(?P<site_en_prefix>youtube|yt|youtube\s*music|bilibili)\s+"
+        r"(?:for\s+)?(?P<query_en_prefix>[^.!?]+?)\s*"
+        r"(?P<tail_en_prefix>(?:(?:and|then)\s+)?"
+        r"(?:play|start\s+playing|open|click|visit)\s*"
+        r"(?:(?:the\s+)?(?:first|1st)\s+)?(?:result|link|video|it|this)?)?[.!?]*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, _clean_text(text), flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        site = (
+            groups.get("site")
+            or groups.get("site_en")
+            or groups.get("site_en_prefix")
+            or ""
+        )
+        query = _strip_site_search_query(
+            groups.get("query")
+            or groups.get("query_en")
+            or groups.get("query_en_prefix")
+            or ""
+        )
+        url = _browser_site_search_url(site, query)
+        if not url:
+            continue
+        tail = (
+            groups.get("tail")
+            or groups.get("tail_en")
+            or groups.get("tail_en_prefix")
+            or ""
+        )
+        return url, 1 if _site_search_tail_requests_first_result(tail) else 0
+    return None
+
+
+def _browser_site_search_url(site: str, query: str) -> str:
+    clean_query = _strip_site_search_query(query)
+    if not clean_query:
+        return ""
+    base_url = _normalize_site_name(site)
+    if base_url == "https://www.youtube.com":
+        return f"https://www.youtube.com/results?search_query={quote_plus(clean_query)}"
+    if base_url == "https://music.youtube.com":
+        return f"https://music.youtube.com/search?q={quote_plus(clean_query)}"
+    if base_url == "https://www.bilibili.com":
+        return f"https://search.bilibili.com/all?keyword={quote_plus(clean_query)}"
+    return ""
+
+
+def _strip_site_search_query(value: str) -> str:
+    query = _strip_search_query(value)
+    query = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|再|后)\s*"
+        r"(?:播放|播(?!放)|放|打开|点击|点一下|点|进入|访问)\s*"
+        r"(?:搜索结果|结果|链接)?(?:中|里|里的|的)?\s*"
+        r"(?:第?一个|第一条|首个|第1个|第1条|1|它|这个|视频)?"
+        r"(?:搜索结果|结果|链接|视频|条目)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"\s+(?:and|then)\s+"
+        r"(?:play|start\s+playing|open|click|visit)\s*"
+        r"(?:(?:the\s+)?(?:first|1st)\s+)?(?:result|link|video|it|this)?$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(query)
+
+
+def _site_search_tail_requests_first_result(value: str) -> bool:
+    tail = str(value or "").strip()
+    return bool(
+        re.search(r"(?:播放|播(?!放)|放|打开|点击|点一下|点|进入|访问)", tail)
+        or re.search(r"\b(?:play|start\s+playing|open|click|visit)\b", tail, flags=re.IGNORECASE)
+    )
 
 
 def _browser_search_then_click(text: str) -> tuple[str, str, int] | None:

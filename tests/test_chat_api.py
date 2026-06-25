@@ -6386,6 +6386,84 @@ def test_send_message_routes_app_browser_search_click_to_approval_without_model(
         store.close()
 
 
+def test_send_message_routes_site_search_play_to_approval_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("site search play approval should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_open_url(url: str) -> dict:
+        open_calls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened browser page: {url}",
+            "data": {"url": url, "title": "YouTube search"},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.browser.click",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser.click should wait for approval")
+        ),
+    )
+    try:
+        result = api.send_message("打开 YouTube 搜索 lo fi 并播放")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert open_calls == ["https://www.youtube.com/results?search_query=lo+fi"]
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["tool_calls"][0]["tool_name"] == "browser.open_url"
+        assert result["agent_task"]["tool_calls"][0]["status"] == "completed"
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {
+            "selector": "search-result=1",
+            "click_count": 1,
+        }
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "browser.click"
+        assert run["pending_approval"]["input_preview"] == {
+            "selector": "search-result=1",
+            "click_count": 1,
+        }
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

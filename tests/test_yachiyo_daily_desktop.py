@@ -1005,6 +1005,37 @@ def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
             "input": {"selector": "search-result=1", "click_count": 1},
         },
     ]
+    assert daily_desktop_entrypoint_requests("打开 YouTube 搜索 lo fi 并播放") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.youtube.com/results?search_query=lo+fi"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("YouTube 搜索 lo fi") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.youtube.com/results?search_query=lo+fi"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在 B站 搜索 周杰伦 并播放") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://search.bilibili.com/all?keyword=%E5%91%A8%E6%9D%B0%E4%BC%A6"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:

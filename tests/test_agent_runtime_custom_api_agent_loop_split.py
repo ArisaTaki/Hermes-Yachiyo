@@ -1539,6 +1539,53 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"selector": "search-result=1", "click_count": 1},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开 YouTube 搜索 lo fi 并播放", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.youtube.com/results?search_query=lo+fi"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("YouTube 搜索 lo fi 并打开第一个", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.youtube.com/results?search_query=lo+fi"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("YouTube 搜索 lo fi", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.youtube.com/results?search_query=lo+fi"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在 B站 搜索 周杰伦 并播放", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://search.bilibili.com/all?keyword=%E5%91%A8%E6%9D%B0%E4%BC%A6"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "打开 YouTube 搜索 lo fi 并播放",
+        ["browser.open_url", "media.apple_music_play"],
+    ) == []
     assert daily_desktop_intent_tool_requests("在浏览器里搜索 oha yachiyo 然后点第一个", allowed_tools) == [
         {
             "protocol": "json_fallback",
