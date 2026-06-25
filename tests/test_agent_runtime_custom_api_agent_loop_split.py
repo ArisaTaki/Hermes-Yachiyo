@@ -1148,6 +1148,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "copy"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("把当前链接复制给我", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("read this page", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
