@@ -3584,6 +3584,9 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "if (tool === 'app.open' && appName) return `打开${appName}`;",
             "if (tool === 'system.settings_open' && target) return `打开${target}`;",
             "if (tool === 'desktop.open_path' && path) return `打开 ${path}`;",
+            "function isLowRiskExecutableRecoveryTool",
+            "tool === 'desktop.open_path'",
+            "tool === 'system.settings_open'",
             "return `打开${appName}`;",
             "return `打开${appName}并输入文字`;",
             "return `切到${appName}并输入文字`;",
@@ -3595,7 +3598,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "desktop_permission_recovery: true",
             "recovery_retry_tool: action.retry_tool",
             "runtimeToolRecoveryRetryContext(action, retryContext)",
-            "action.tool === 'app.open' ? 'low' : ''",
+            "isLowRiskExecutableRecoveryTool(action.tool) ? 'low' : ''",
             "prompt: String(action.prompt || label || fallbackLabel || tool).trim()",
         ],
     )

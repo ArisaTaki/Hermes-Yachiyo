@@ -6259,6 +6259,98 @@ def test_chat_bridge_quick_message_executes_structured_recovery_action_without_m
         store.close()
 
 
+def test_chat_bridge_quick_message_executes_open_path_recovery_action_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-open-path-recovery-action.db",
+        workspace_dir=tmp_path / "runtime-open-path-recovery-action",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    open_path_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher open-path recovery action should not call model")
+        ),
+    )
+
+    def fake_open_path(path: str) -> dict:
+        open_path_calls.append(path)
+        return {
+            "ok": True,
+            "action": "desktop.open_path",
+            "summary": f"Opened {path}",
+            "data": {
+                "path": path,
+                "display_path": path,
+                "open_target": "system_open",
+                "exists": True,
+                "is_dir": True,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.open_path", fake_open_path)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开路径",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "recovery_tool": "desktop.open_path",
+                "recovery_input": {"path": "~/Downloads"},
+                "recovery_permission_target": "file_access",
+                "recovery_risk_level": "low",
+            },
+        )
+        agent_task = result["agent_task"]
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        messages = store.load_messages("session-current", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        user_metadata = json.loads(user.metadata_json)
+
+        assert result["ok"] is True
+        assert open_path_calls == ["~/Downloads"]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已打开文件夹：~/Downloads。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "~/Downloads"}
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert user_metadata["desktop_permission_recovery"] is True
+        assert user_metadata["recovery_tool"] == "desktop.open_path"
+        assert user_metadata["recovery_input"] == {"path": "~/Downloads"}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
     tmp_path,
     monkeypatch,

@@ -6012,6 +6012,14 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.open_path",
+            "recovery_input": {"path": "~/Downloads"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开 ~/Downloads"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.click",
             "recovery_input": {"x": 120, "y": 240},
             "recovery_risk_level": "low",

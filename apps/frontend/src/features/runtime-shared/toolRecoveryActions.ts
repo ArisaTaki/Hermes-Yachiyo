@@ -21,12 +21,12 @@ export type RuntimeToolRecoveryRetryContext = Pick<
 export function runtimeToolRecoveryActionPrompt(action: RuntimeToolRecoveryAction): string {
   const tool = String(action.tool || '').trim();
   const input = objectValue(action.input);
-  const appName = String(input.app_name || '').trim();
   const prompt = String(action.prompt || '').trim();
   if (isExecutableRecoveryPrompt(prompt)) return prompt;
   const label = String(action.label || '').trim();
   if (isExecutableRecoveryPrompt(label)) return label;
-  if (tool === 'app.open' && appName) return `打开${appName}`;
+  const fallbackPrompt = runtimeToolRecoveryExecutableLabel(tool, input);
+  if (fallbackPrompt) return fallbackPrompt;
   return prompt || label || tool;
 }
 
@@ -35,7 +35,7 @@ export function runtimeToolRecoveryActionTaskMetadata(
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const riskLevel = String(action.risk_level || '').trim()
-    || (action.tool === 'app.open' ? 'low' : '');
+    || (isLowRiskExecutableRecoveryTool(action.tool) ? 'low' : '');
   return {
     daily_desktop_intent: true,
     ...(action.action_kind === 'retry_original' ? { desktop_permission_retry: true } : {}),
@@ -125,6 +125,12 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
   return '';
+}
+
+function isLowRiskExecutableRecoveryTool(tool: string): boolean {
+  return tool === 'app.open'
+    || tool === 'desktop.open_path'
+    || tool === 'system.settings_open';
 }
 
 function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unknown>): string {
