@@ -6425,8 +6425,16 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("show force quit applications", "force_quit_dialog", "已打开强制退出窗口。"),
             ("refresh the current page", "refresh", "已刷新。"),
             ("刷新当前页面", "refresh", "已刷新。"),
+            ("刷新一下这个网页", "refresh", "已刷新。"),
             ("open a new tab", "new_tab", "已新建标签页。"),
             ("新开一个标签页", "new_tab", "已新建标签页。"),
+            ("把这个网页关掉", "close_tab", "已关闭标签页。"),
+            ("close this tab", "close_tab", "已关闭标签页。"),
+            ("重新打开刚才关闭的标签页", "reopen_closed_tab", "已重新打开关闭的标签页。"),
+            ("打开一个新窗口", "new_window", "已新建窗口。"),
+            ("新建浏览器窗口", "new_window", "已新建窗口。"),
+            ("下一个标签", "next_tab", "已切到下一个标签页。"),
+            ("上一个标签", "previous_tab", "已切到上一个标签页。"),
         )
         for text, action, summary in cases:
             result = api.send_message(text)
@@ -6475,8 +6483,16 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "force_quit_dialog",
             "refresh",
             "refresh",
+            "refresh",
             "new_tab",
             "new_tab",
+            "close_tab",
+            "close_tab",
+            "reopen_closed_tab",
+            "new_window",
+            "new_window",
+            "next_tab",
+            "previous_tab",
         ]
     finally:
         service.close()
@@ -7239,6 +7255,7 @@ def test_send_message_executes_direct_minimize_current_window_task(tmp_path, mon
         cases = (
             "把当前窗口最小化",
             "当前窗口最小化",
+            "把窗口收起来",
             "隐藏当前窗口",
             "隐藏前台窗口",
             "Can you minimize the current app?",
@@ -7315,6 +7332,8 @@ def test_send_message_executes_direct_hide_current_app_task(tmp_path, monkeypatc
     try:
         cases = (
             "你可以帮我隐藏一下前台应用吗",
+            "把这个应用隐藏起来",
+            "把当前 app 藏起来",
             "Can you hide the current app?",
             "Could you hide the foreground app please?",
         )

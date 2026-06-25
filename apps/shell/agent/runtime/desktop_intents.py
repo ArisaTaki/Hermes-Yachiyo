@@ -2145,6 +2145,18 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if music_control:
         candidates.append(_request("media.apple_music_control", {"action": music_control}))
 
+    if _is_hide_current_app_request(text):
+        candidates.append(_request("desktop.hide_app", {}))
+
+    if _is_minimize_current_app_request(text):
+        candidates.append(_request("desktop.minimize_window", {}))
+
+    if _is_minimize_current_window_request(text):
+        candidates.append(_request("desktop.minimize_window", {}))
+
+    if _is_close_current_window_request(text):
+        candidates.append(_request("desktop.close_window", {}))
+
     app_show_or_open_name = _app_show_or_open_name(text)
     if app_show_or_open_name:
         candidates.append(_request("app.show", {"app_name": app_show_or_open_name}))
@@ -2168,18 +2180,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_minimize_name = _app_minimize_name(text)
     if app_minimize_name:
         candidates.append(_request("app.minimize", {"app_name": app_minimize_name}))
-
-    if _is_hide_current_app_request(text):
-        candidates.append(_request("desktop.hide_app", {}))
-
-    if _is_minimize_current_app_request(text):
-        candidates.append(_request("desktop.minimize_window", {}))
-
-    if _is_minimize_current_window_request(text):
-        candidates.append(_request("desktop.minimize_window", {}))
-
-    if _is_close_current_window_request(text):
-        candidates.append(_request("desktop.close_window", {}))
 
     if _desktop_search_submit_request(text):
         candidates.append(_request("desktop.search_submit", {}))
@@ -9080,6 +9080,12 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "刷新一下当前网页": "refresh",
         "刷新下当前网页": "refresh",
         "刷新当前网页": "refresh",
+        "刷新一下这个网页": "refresh",
+        "刷新下这个网页": "refresh",
+        "刷新这个网页": "refresh",
+        "刷新一下这个页面": "refresh",
+        "刷新下这个页面": "refresh",
+        "刷新这个页面": "refresh",
         "刷新一下网页": "refresh",
         "刷新下网页": "refresh",
         "刷新网页": "refresh",
@@ -9092,6 +9098,7 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "重新打开关闭的标签页": "reopen_closed_tab",
         "重新打开刚关闭的标签页": "reopen_closed_tab",
         "重新打开刚刚关闭的标签页": "reopen_closed_tab",
+        "重新打开刚才关闭的标签页": "reopen_closed_tab",
         "重新打开最近关闭的标签页": "reopen_closed_tab",
         "重新打开上次关闭的标签页": "reopen_closed_tab",
         "重新打开上个关闭的标签页": "reopen_closed_tab",
@@ -9099,6 +9106,7 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "恢复关闭的标签页": "reopen_closed_tab",
         "恢复刚关闭的标签页": "reopen_closed_tab",
         "恢复刚刚关闭的标签页": "reopen_closed_tab",
+        "恢复刚才关闭的标签页": "reopen_closed_tab",
         "恢复最近关闭的标签页": "reopen_closed_tab",
         "恢复上次关闭的标签页": "reopen_closed_tab",
         "恢复上个关闭的标签页": "reopen_closed_tab",
@@ -9106,27 +9114,49 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "reopenclosedtab": "reopen_closed_tab",
         "reopentheclosedtab": "reopen_closed_tab",
         "reopenlastclosedtab": "reopen_closed_tab",
+        "reopenjustclosedtab": "reopen_closed_tab",
         "restoreclosedtab": "reopen_closed_tab",
+        "restorejustclosedtab": "reopen_closed_tab",
         "关闭标签页": "close_tab",
         "关闭当前标签页": "close_tab",
         "关闭浏览器标签页": "close_tab",
         "关闭这个标签页": "close_tab",
+        "关闭这个网页": "close_tab",
+        "关闭当前网页": "close_tab",
+        "关闭这个页面": "close_tab",
+        "关闭当前页面": "close_tab",
+        "把这个网页关掉": "close_tab",
+        "把当前网页关掉": "close_tab",
+        "把这个页面关掉": "close_tab",
+        "把当前页面关掉": "close_tab",
+        "把这个标签页关掉": "close_tab",
+        "把当前标签页关掉": "close_tab",
         "关掉标签页": "close_tab",
         "关掉当前标签页": "close_tab",
         "关掉浏览器标签页": "close_tab",
         "关掉这个标签页": "close_tab",
+        "关掉这个网页": "close_tab",
+        "关掉当前网页": "close_tab",
+        "关掉这个页面": "close_tab",
+        "关掉当前页面": "close_tab",
         "closetab": "close_tab",
         "closecurrenttab": "close_tab",
         "closethecurrenttab": "close_tab",
+        "closethistab": "close_tab",
+        "closethispage": "close_tab",
         "下一个标签页": "next_tab",
+        "下一个标签": "next_tab",
         "下个标签页": "next_tab",
+        "下个标签": "next_tab",
         "下一标签页": "next_tab",
         "切到下一个标签页": "next_tab",
         "切换到下一个标签页": "next_tab",
         "nexttab": "next_tab",
         "switchtonexttab": "next_tab",
         "上一个标签页": "previous_tab",
+        "上一个标签": "previous_tab",
         "上个标签页": "previous_tab",
+        "上个标签": "previous_tab",
         "上一标签页": "previous_tab",
         "切到上一个标签页": "previous_tab",
         "切换到上一个标签页": "previous_tab",
@@ -9267,8 +9297,13 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新建窗口": "new_window",
         "新窗口": "new_window",
         "打开新窗口": "new_window",
+        "打开一个新窗口": "new_window",
         "开新窗口": "new_window",
         "开一个新窗口": "new_window",
+        "新建一个窗口": "new_window",
+        "新建浏览器窗口": "new_window",
+        "打开浏览器新窗口": "new_window",
+        "打开一个浏览器窗口": "new_window",
         "newwindow": "new_window",
         "新建文档": "new_document",
         "新文档": "new_document",
@@ -10283,22 +10318,23 @@ def _desktop_ui_element_role_filter(value: str) -> str:
 
 def _is_close_current_window_request(text: str) -> bool:
     lowered = text.lower()
+    close_verb = r"(?:关闭|关掉|关上|关(?:一下|下|了)?)(?:一下|下|掉|了)?"
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            rf"{close_verb}\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:关闭|关掉|关上|关(?:一下|下|了)?)",
+            rf"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*{close_verb}",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:关闭|关掉|关上|关(?:一下|下|了)?)",
+            rf"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*{close_verb}",
             text,
             flags=re.IGNORECASE,
         )
@@ -10312,22 +10348,23 @@ def _is_close_current_window_request(text: str) -> bool:
 def _is_minimize_current_window_request(text: str) -> bool:
     text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
+    minimize_verb = r"(?:最小化|收起|收起来|隐藏)(?:一下|下)?"
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:最小化|收起|隐藏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            rf"{minimize_verb}\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起|隐藏)",
+            rf"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*{minimize_verb}",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:最小化|收起|隐藏)(?:一下|下)?",
+            rf"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*{minimize_verb}",
             text,
             flags=re.IGNORECASE,
         )
@@ -10341,22 +10378,23 @@ def _is_minimize_current_window_request(text: str) -> bool:
 def _is_hide_current_app_request(text: str) -> bool:
     text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
+    hide_verb = r"(?:隐藏|收起|藏起|藏起来)(?:一下|下|起来)?"
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:隐藏|收起)(?:一下|下)?\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            rf"{hide_verb}\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)(?:一下|下)?",
+            rf"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*{hide_verb}",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起)(?:一下|下)?",
+            rf"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*{hide_verb}",
             text,
             flags=re.IGNORECASE,
         )
@@ -10371,22 +10409,23 @@ def _is_hide_current_app_request(text: str) -> bool:
 def _is_minimize_current_app_request(text: str) -> bool:
     text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
+    minimize_verb = r"(?:最小化|收起|收起来)(?:一下|下)?"
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:最小化|收起)(?:一下|下)?\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            rf"{minimize_verb}\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:最小化|收起)(?:一下|下)?",
+            rf"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*{minimize_verb}",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*(?:最小化|收起)(?:一下|下)?",
+            rf"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*{minimize_verb}",
             text,
             flags=re.IGNORECASE,
         )

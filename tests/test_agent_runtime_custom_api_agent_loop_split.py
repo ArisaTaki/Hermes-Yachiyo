@@ -3179,6 +3179,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "paste"},
         }
     ]
+    safe_shortcut_cases = (
+        ("把这个网页关掉", "close_tab"),
+        ("close this tab", "close_tab"),
+        ("重新打开刚才关闭的标签页", "reopen_closed_tab"),
+        ("刷新一下这个网页", "refresh"),
+        ("打开一个新窗口", "new_window"),
+        ("新建浏览器窗口", "new_window"),
+        ("下一个标签", "next_tab"),
+        ("上一个标签", "previous_tab"),
+    )
+    for prompt, action in safe_shortcut_cases:
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": action},
+        }
     assert daily_desktop_intent_tool_requests("输入 hello 到前台", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -3982,8 +3998,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.minimize_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("把窗口收起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("最小化 Slack", ["desktop.minimize_window"]) is None
     assert daily_desktop_intent_tool_request("关闭当前窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.close_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("关闭一下当前窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
         "input": {},
@@ -4019,6 +4045,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("把当前应用隐藏一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("把这个应用隐藏起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hide_app",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("把当前 app 藏起来", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hide_app",
         "input": {},
