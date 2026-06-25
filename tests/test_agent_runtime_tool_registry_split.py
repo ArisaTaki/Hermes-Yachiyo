@@ -659,6 +659,14 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_reminder"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_event"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "focus_address_bar"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_private_window"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "bookmark_page"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "show_history"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "open_devtools"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "zoom_in"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "zoom_out"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "reset_zoom"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_back"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "reopen_closed_tab"})
@@ -4337,6 +4345,37 @@ def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeyp
     assert previous_tab["data"]["key"] == "["
     assert previous_tab["data"]["modifiers"] == ["command", "shift"]
     assert len(calls) == 3
+
+
+def test_desktop_safe_shortcut_browser_utilities_use_whitelisted_shortcuts(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    expected = (
+        ("focus_address_bar", "l", ["command"], "focus address bar"),
+        ("new_private_window", "n", ["command", "shift"], "new private window"),
+        ("bookmark_page", "d", ["command"], "bookmark current page"),
+        ("show_history", "y", ["command"], "show history"),
+        ("open_devtools", "i", ["command", "option"], "open developer tools"),
+        ("zoom_in", "+", ["command"], "zoom in"),
+        ("zoom_out", "-", ["command"], "zoom out"),
+        ("reset_zoom", "0", ["command"], "reset zoom"),
+    )
+
+    for action, key, modifiers, label in expected:
+        result = desktop_mod.desktop_safe_shortcut(action)
+        assert result["summary"] == f"Executed safe shortcut: {label}"
+        assert result["data"]["shortcut_action"] == action
+        assert result["data"]["key"] == key
+        assert result["data"]["modifiers"] == modifiers
+
+    assert len(calls) == len(expected)
 
 
 def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:

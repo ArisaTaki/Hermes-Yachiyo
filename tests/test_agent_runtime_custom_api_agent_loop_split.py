@@ -2250,8 +2250,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开 Chrome 并按 Command L", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open_and_hotkey",
-        "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
     }
     assert daily_desktop_intent_tool_request("打开浏览器新建标签页", allowed_tools) == {
         "protocol": "json_fallback",
@@ -3529,8 +3529,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Notes，然后按 Command+L，再复制", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_hotkey",
-            "input": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "focus_address_bar"},
         },
         {
             "protocol": "json_fallback",
@@ -3541,8 +3541,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("open Chrome and press command l", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_hotkey",
-            "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
         },
     ]
     assert daily_desktop_intent_tool_requests(
@@ -3558,8 +3558,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 github.com，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
         },
         {
             "protocol": "json_fallback",
@@ -3575,8 +3575,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("按 Command+L，再输入 yachiyo，再按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
         },
         {
             "protocol": "json_fallback",
@@ -6913,8 +6913,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     ]
     assert daily_desktop_intent_tool_request("按 Command+L", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "desktop.hotkey",
-        "input": {"key": "l", "modifiers": ["command"]},
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "focus_address_bar"},
     }
     assert daily_desktop_intent_tool_request("按 Command V", allowed_tools) == {
         "protocol": "json_fallback",
@@ -10377,7 +10377,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
     order: list[str] = []
     tool_runs: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
-    messages = [{"role": "user", "content": "按 Command+L"}]
+    messages = [{"role": "user", "content": "按 Command+Option+P"}]
 
     def run_tool_requests(
         tool_requests,
@@ -10405,7 +10405,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
                 "role": "user",
                 "content": (
                     'Tool result for desktop.hotkey: {"ok": true, '
-                    '"data": {"key": "l", "modifiers": ["command"]}}'
+                    '"data": {"key": "p", "modifiers": ["command", "option"]}}'
                 ),
             }
         )
@@ -10413,7 +10413,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
     def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
         order.append("model")
         assert "Tool result for desktop.hotkey" in model_messages[-1]["content"]
-        return {"role": "assistant", "content": "已发送 Command+L。"}
+        return {"role": "assistant", "content": "已发送 Command+Option+P。"}
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {
@@ -10459,13 +10459,13 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
         run_id="run-hotkey",
     )
 
-    assert str(result) == "已发送 Command+L。"
+    assert str(result) == "已发送 Command+Option+P。"
     assert order == ["tool", "model"]
     assert tool_runs[0]["tool_requests"] == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
+            "input": {"key": "p", "modifiers": ["command", "option"]},
         }
     ]
     assert tool_runs[0]["allowed_tools"] == ["desktop.hotkey"]
@@ -10478,7 +10478,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
         "status": "planned",
         "source": "daily_desktop_intent",
         "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {"key": "l", "modifiers": ["command"]},
+        "input_preview": {"key": "p", "modifiers": ["command", "option"]},
     }
 
 
@@ -10487,7 +10487,7 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
     order: list[str] = []
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []
-    messages = [{"role": "user", "content": "按 Command+L"}]
+    messages = [{"role": "user", "content": "按 Command+Option+P"}]
 
     def run_tool_requests(
         tool_requests,
@@ -10503,7 +10503,7 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
         result = {
             "ok": True,
             "action": "desktop.hotkey",
-            "data": {"key": "l", "modifiers": ["command"]},
+            "data": {"key": "p", "modifiers": ["command", "option"]},
         }
         timeline_arg.append(
             _timeline(
@@ -10562,27 +10562,27 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
         run_id="run-hotkey-direct",
     )
 
-    assert str(result) == "已发送快捷键：Command+L。"
+    assert str(result) == "已发送快捷键：Command+Option+P。"
     assert order == ["tool"]
     assert [event["event"] for event in timeline] == [
         "agent.desktop.intent_planned",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert timeline[-1]["summary"] == "已发送快捷键：Command+L。"
+    assert timeline[-1]["summary"] == "已发送快捷键：Command+Option+P。"
     assert appended_events[-1] == {
         "run_id": "run-hotkey-direct",
         "event_type": "agent.desktop.intent_completed",
         "payload": {
             "tool": "desktop.hotkey",
             "source": "daily_desktop_intent",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "result": {
                 "ok": True,
                 "action": "desktop.hotkey",
-                "data": {"key": "l", "modifiers": ["command"]},
+                "data": {"key": "p", "modifiers": ["command", "option"]},
             },
-            "summary": "已发送快捷键：Command+L。",
+            "summary": "已发送快捷键：Command+Option+P。",
         },
     }
 
@@ -10597,7 +10597,7 @@ def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanni
             "status": "planned",
             "source": "daily_desktop_intent",
             "planning_reason": "clear_daily_desktop_intent",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
         },
         {
             "event": "agent.desktop.intent_approval_required",
@@ -10606,16 +10606,16 @@ def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanni
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
         },
         {
             "event": "agent.tool.call",
             "detail": "desktop.hotkey",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "result": {
                 "ok": True,
                 "action": "desktop.hotkey",
-                "data": {"key": "l", "modifiers": ["command"]},
+                "data": {"key": "p", "modifiers": ["command", "option"]},
             },
         },
     ]
@@ -10665,7 +10665,7 @@ def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanni
         timeline=timeline,
         artifacts=[],
         messages=[
-            {"role": "user", "content": "按 Command+L"},
+            {"role": "user", "content": "按 Command+Option+P"},
             {"role": "user", "content": "Tool result for desktop.hotkey: ok"},
         ],
         start_iteration=0,
@@ -10673,7 +10673,7 @@ def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanni
         budget=budget,
     )
 
-    assert str(result) == "已发送快捷键：Command+L。"
+    assert str(result) == "已发送快捷键：Command+Option+P。"
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"
 
@@ -10688,7 +10688,7 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
             "status": "planned",
             "source": "daily_desktop_intent",
             "planning_reason": "clear_daily_desktop_intent",
-            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
+            "input_preview": {"app_name": "Notes", "key": "p", "modifiers": ["command", "option"]},
         },
         {
             "event": "agent.desktop.intent_planned",
@@ -10706,16 +10706,16 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
+            "input_preview": {"app_name": "Notes", "key": "p", "modifiers": ["command", "option"]},
         },
         {
             "event": "agent.tool.call",
             "detail": "app.open_and_hotkey",
-            "input_preview": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
+            "input_preview": {"app_name": "Notes", "key": "p", "modifiers": ["command", "option"]},
             "result": {
                 "ok": True,
                 "action": "app.open_and_hotkey",
-                "data": {"app_name": "Notes", "key": "l", "modifiers": ["command"]},
+                "data": {"app_name": "Notes", "key": "p", "modifiers": ["command", "option"]},
             },
         },
         {
@@ -10780,7 +10780,7 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
         timeline=timeline,
         artifacts=[],
         messages=[
-            {"role": "user", "content": "打开 Notes，然后按 Command+L，再复制"},
+            {"role": "user", "content": "打开 Notes，然后按 Command+Option+P，再复制"},
             {"role": "user", "content": "Tool result for app.open_and_hotkey: ok"},
         ],
         start_iteration=0,
@@ -10788,7 +10788,7 @@ def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools
         budget=budget,
     )
 
-    assert str(result) == "已打开 Notes 并发送快捷键：Command+L。 已复制选中内容。"
+    assert str(result) == "已打开 Notes 并发送快捷键：Command+Option+P。 已复制选中内容。"
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
     assert timeline[-1]["tools"] == ["app.open_and_hotkey", "desktop.safe_shortcut"]
     assert [step["tool"] for step in timeline[-1]["steps"]] == [
@@ -10803,14 +10803,14 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []
-    messages = [{"role": "user", "content": "按 Command+L"}]
+    messages = [{"role": "user", "content": "按 Command+Option+P"}]
 
     def run_tool_requests(*_args, **_kwargs):
         raise AgentApprovalRequired(
             {
                 "approval_id": "approval-hotkey",
                 "tool": "desktop.hotkey",
-                "input_preview": {"key": "l", "modifiers": ["command"]},
+                "input_preview": {"key": "p", "modifiers": ["command", "option"]},
                 "risk_level": "medium",
                 "policy_reason": "前台快捷键需要确认。",
             }
@@ -10877,7 +10877,7 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
         "status": "approval_required",
         "source": "daily_desktop_intent",
         "reason": "tool_policy_requires_approval",
-        "input_preview": {"key": "l", "modifiers": ["command"]},
+        "input_preview": {"key": "p", "modifiers": ["command", "option"]},
         "approval_id": "approval-hotkey",
         "risk_level": "medium",
         "policy_reason": "前台快捷键需要确认。",
@@ -10890,7 +10890,7 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "approval_id": "approval-hotkey",
             "risk_level": "medium",
             "policy_reason": "前台快捷键需要确认。",

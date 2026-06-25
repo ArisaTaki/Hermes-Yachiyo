@@ -462,6 +462,9 @@ def daily_desktop_intent_tool_requests(
         if "system.screen_saver_start" in allowed:
             return [_request("system.screen_saver_start", {})]
         return []
+    direct_safe_shortcut = _desktop_safe_shortcut_action(context)
+    if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
+        return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
     spotlight_search_sequence = _spotlight_search_tool_requests(context)
     if spotlight_search_sequence:
         if all(str(request.get("tool") or "") in allowed for request in spotlight_search_sequence):
@@ -543,9 +546,6 @@ def daily_desktop_intent_tool_requests(
         if "clipboard.write" in allowed:
             return [_request("clipboard.write", {"text": direct_clipboard_text})]
         return []
-    direct_safe_shortcut = _desktop_safe_shortcut_action(context)
-    if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
-        return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
     if _is_quit_current_app_request(context) and "desktop.quit_app" in allowed:
         return [_request("desktop.quit_app", {})]
     system_hotkey = _system_desktop_hotkey_request(context)
@@ -1505,7 +1505,9 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "undo": "撤销",
         "redo": "重做",
         "find": "打开查找",
+        "focus_address_bar": "聚焦地址栏",
         "new_tab": "新建标签页",
+        "new_private_window": "新建私密窗口",
         "close_tab": "关闭标签页",
         "next_tab": "切到下一个标签页",
         "previous_tab": "切到上一个标签页",
@@ -1527,6 +1529,12 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "new_reminder": "新建提醒事项",
         "new_event": "新建日程",
         "refresh": "刷新",
+        "bookmark_page": "加入书签",
+        "show_history": "打开历史记录",
+        "open_devtools": "打开开发者工具",
+        "zoom_in": "放大页面",
+        "zoom_out": "缩小页面",
+        "reset_zoom": "重置页面缩放",
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",
         "reopen_closed_tab": "重新打开关闭的标签页",
@@ -2293,6 +2301,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _looks_like_project_or_design_request(text):
         return []
 
+    safe_shortcut_action = _desktop_safe_shortcut_action(text)
+    if safe_shortcut_action:
+        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
+
     candidates.extend(_spotlight_search_tool_requests(text))
 
     volume_payload = _system_volume_request(text)
@@ -2334,10 +2346,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_prefix_window_management = _app_prefix_window_management_tool_request(text)
     if app_prefix_window_management:
         candidates.append(app_prefix_window_management)
-
-    safe_shortcut_action = _desktop_safe_shortcut_action(text)
-    if safe_shortcut_action:
-        candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
     safe_scroll = _desktop_safe_scroll(text)
     if safe_scroll:
@@ -11288,6 +11296,18 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "pagefind": "find",
         "openfind": "find",
         "openfindbox": "find",
+        "地址栏": "focus_address_bar",
+        "聚焦地址栏": "focus_address_bar",
+        "打开地址栏": "focus_address_bar",
+        "选中地址栏": "focus_address_bar",
+        "选择地址栏": "focus_address_bar",
+        "浏览器地址栏": "focus_address_bar",
+        "聚焦浏览器地址栏": "focus_address_bar",
+        "focusaddressbar": "focus_address_bar",
+        "selectaddressbar": "focus_address_bar",
+        "openaddressbar": "focus_address_bar",
+        "locationbar": "focus_address_bar",
+        "focuslocationbar": "focus_address_bar",
         "新建标签": "new_tab",
         "新建标签页": "new_tab",
         "新标签页": "new_tab",
@@ -11299,6 +11319,25 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "newtab": "new_tab",
         "opennewtab": "new_tab",
         "openanewtab": "new_tab",
+        "新建无痕窗口": "new_private_window",
+        "打开无痕窗口": "new_private_window",
+        "新建隐身窗口": "new_private_window",
+        "打开隐身窗口": "new_private_window",
+        "新建隐私窗口": "new_private_window",
+        "打开隐私窗口": "new_private_window",
+        "新建私密窗口": "new_private_window",
+        "打开私密窗口": "new_private_window",
+        "新建浏览器无痕窗口": "new_private_window",
+        "打开浏览器无痕窗口": "new_private_window",
+        "无痕窗口": "new_private_window",
+        "隐身窗口": "new_private_window",
+        "隐私窗口": "new_private_window",
+        "私密窗口": "new_private_window",
+        "newprivatewindow": "new_private_window",
+        "openprivatewindow": "new_private_window",
+        "newincognitowindow": "new_private_window",
+        "openincognitowindow": "new_private_window",
+        "incognitowindow": "new_private_window",
         "新建窗口": "new_window",
         "新窗口": "new_window",
         "打开新窗口": "new_window",
@@ -11416,6 +11455,69 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "createanewcalendarevent": "new_event",
         "makenewcalendarevent": "new_event",
         "createnewcalendarevent": "new_event",
+        "加入书签": "bookmark_page",
+        "添加书签": "bookmark_page",
+        "收藏当前网页": "bookmark_page",
+        "收藏当前页面": "bookmark_page",
+        "把当前网页加入书签": "bookmark_page",
+        "把当前页面加入书签": "bookmark_page",
+        "将当前网页加入书签": "bookmark_page",
+        "将当前页面加入书签": "bookmark_page",
+        "bookmarkthispage": "bookmark_page",
+        "bookmarkcurrentpage": "bookmark_page",
+        "addbookmark": "bookmark_page",
+        "addcurrentpagetobookmarks": "bookmark_page",
+        "打开历史记录": "show_history",
+        "显示历史记录": "show_history",
+        "浏览器历史记录": "show_history",
+        "打开浏览器历史记录": "show_history",
+        "显示浏览器历史记录": "show_history",
+        "历史记录": "show_history",
+        "showhistory": "show_history",
+        "openhistory": "show_history",
+        "showbrowsinghistory": "show_history",
+        "openbrowsinghistory": "show_history",
+        "browsinghistory": "show_history",
+        "打开开发者工具": "open_devtools",
+        "显示开发者工具": "open_devtools",
+        "开发者工具": "open_devtools",
+        "打开开发工具": "open_devtools",
+        "显示开发工具": "open_devtools",
+        "开发工具": "open_devtools",
+        "opendevtools": "open_devtools",
+        "showdevtools": "open_devtools",
+        "opendevelopertools": "open_devtools",
+        "showdevelopertools": "open_devtools",
+        "developertools": "open_devtools",
+        "网页放大": "zoom_in",
+        "页面放大": "zoom_in",
+        "放大网页": "zoom_in",
+        "放大页面": "zoom_in",
+        "放大当前网页": "zoom_in",
+        "放大当前页面": "zoom_in",
+        "zoomin": "zoom_in",
+        "zoominpage": "zoom_in",
+        "zoominthispage": "zoom_in",
+        "increasezoom": "zoom_in",
+        "网页缩小": "zoom_out",
+        "页面缩小": "zoom_out",
+        "缩小网页": "zoom_out",
+        "缩小页面": "zoom_out",
+        "缩小当前网页": "zoom_out",
+        "缩小当前页面": "zoom_out",
+        "zoomout": "zoom_out",
+        "zoomoutpage": "zoom_out",
+        "zoomoutthispage": "zoom_out",
+        "decreasezoom": "zoom_out",
+        "实际大小": "reset_zoom",
+        "重置缩放": "reset_zoom",
+        "重置页面缩放": "reset_zoom",
+        "网页缩放重置": "reset_zoom",
+        "页面缩放重置": "reset_zoom",
+        "恢复实际大小": "reset_zoom",
+        "resetzoom": "reset_zoom",
+        "resetpagezoom": "reset_zoom",
+        "actualsize": "reset_zoom",
     }
     return mapping.get(phrase, "")
 
@@ -11474,7 +11576,7 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
     phrase = _strip_foreground_action_target(_strip_desktop_action_request_shell(text))
     phrase = re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:按一下|按下|按|执行|触发|发送|敲一下|敲下|敲)?\s*",
+        r"(?:(?:按一下|按下|按|执行|触发|发送|敲一下|敲下|敲)|(?:press|hit|tap|send|trigger))?\s*",
         "",
         phrase,
         flags=re.IGNORECASE,
@@ -11498,13 +11600,19 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
         ("z", frozenset({"command"})): "undo",
         ("z", frozenset({"command", "shift"})): "redo",
         ("f", frozenset({"command"})): "find",
+        ("l", frozenset({"command"})): "focus_address_bar",
         ("t", frozenset({"command"})): "new_tab",
         ("t", frozenset({"command", "shift"})): "reopen_closed_tab",
+        ("n", frozenset({"command", "shift"})): "new_private_window",
         ("`", frozenset({"command"})): "next_window",
         ("`", frozenset({"command", "shift"})): "previous_window",
         ("w", frozenset({"command"})): "close_tab",
         ("n", frozenset({"command"})): "new_window",
         ("r", frozenset({"command"})): "refresh",
+        ("d", frozenset({"command"})): "bookmark_page",
+        ("y", frozenset({"command"})): "show_history",
+        ("i", frozenset({"command", "option"})): "open_devtools",
+        ("0", frozenset({"command"})): "reset_zoom",
         ("h", frozenset({"command", "option"})): "hide_other_apps",
     }
     return mapping.get((key, modifiers), "")

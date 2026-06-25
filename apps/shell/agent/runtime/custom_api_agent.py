@@ -1366,7 +1366,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/new tab/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/focus address bar/new tab/new private window/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/bookmark page/history/DevTools/page zoom/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
@@ -2277,7 +2277,9 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "undo": "撤销",
         "redo": "重做",
         "find": "打开查找",
+        "focus_address_bar": "聚焦地址栏",
         "new_tab": "新建标签页",
+        "new_private_window": "新建私密窗口",
         "close_tab": "关闭标签页",
         "next_tab": "切到下一个标签页",
         "previous_tab": "切到上一个标签页",
@@ -2299,6 +2301,12 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "new_reminder": "新建提醒事项",
         "new_event": "新建日程",
         "refresh": "刷新",
+        "bookmark_page": "加入书签",
+        "show_history": "打开历史记录",
+        "open_devtools": "打开开发者工具",
+        "zoom_in": "放大页面",
+        "zoom_out": "缩小页面",
+        "reset_zoom": "重置页面缩放",
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",
         "reopen_closed_tab": "重新打开关闭的标签页",

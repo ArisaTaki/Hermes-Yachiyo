@@ -147,6 +147,28 @@ def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None:
+    cases = (
+        ("打开 Chrome 新建无痕窗口", "app.open_and_safe_shortcut", "new_private_window"),
+        ("Chrome 新建无痕窗口", "app.focus_and_safe_shortcut", "new_private_window"),
+        ("Chrome open incognito window", "app.focus_and_safe_shortcut", "new_private_window"),
+        ("打开 Chrome 开发者工具", "app.open_and_safe_shortcut", "open_devtools"),
+        ("Chrome 打开历史记录", "app.focus_and_safe_shortcut", "show_history"),
+        ("Chrome 聚焦地址栏", "app.focus_and_safe_shortcut", "focus_address_bar"),
+    )
+
+    for prompt, tool_name, action in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Google Chrome", "action": action},
+            }
+        ]
+
+
 def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut() -> None:
     cases = (
         ("Chrome 最大化", "app.focus_and_safe_shortcut", "Google Chrome"),
@@ -1757,13 +1779,23 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("close this tab", "desktop.safe_shortcut", {"action": "close_tab"}),
         ("重新打开刚才关闭的标签页", "desktop.safe_shortcut", {"action": "reopen_closed_tab"}),
         ("刷新一下这个网页", "desktop.safe_shortcut", {"action": "refresh"}),
+        ("聚焦地址栏", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
+        ("打开地址栏", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
         ("新建标签", "desktop.safe_shortcut", {"action": "new_tab"}),
+        ("新建无痕窗口", "desktop.safe_shortcut", {"action": "new_private_window"}),
+        ("打开私密窗口", "desktop.safe_shortcut", {"action": "new_private_window"}),
         ("打开一个新窗口", "desktop.safe_shortcut", {"action": "new_window"}),
         ("新建浏览器窗口", "desktop.safe_shortcut", {"action": "new_window"}),
         ("创建备忘录", "desktop.safe_shortcut", {"action": "new_note"}),
         ("创建一个提醒", "desktop.safe_shortcut", {"action": "new_reminder"}),
         ("创建一个日程", "desktop.safe_shortcut", {"action": "new_event"}),
         ("前进下一页", "desktop.safe_shortcut", {"action": "browser_forward"}),
+        ("把当前网页加入书签", "desktop.safe_shortcut", {"action": "bookmark_page"}),
+        ("打开浏览器历史记录", "desktop.safe_shortcut", {"action": "show_history"}),
+        ("打开开发者工具", "desktop.safe_shortcut", {"action": "open_devtools"}),
+        ("网页放大", "desktop.safe_shortcut", {"action": "zoom_in"}),
+        ("网页缩小", "desktop.safe_shortcut", {"action": "zoom_out"}),
+        ("实际大小", "desktop.safe_shortcut", {"action": "reset_zoom"}),
         ("下一个标签", "desktop.safe_shortcut", {"action": "next_tab"}),
         ("上一个标签", "desktop.safe_shortcut", {"action": "previous_tab"}),
         ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
@@ -1771,9 +1803,18 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("显示桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
         ("回到桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
         ("当前窗口按 Command V", "desktop.safe_shortcut", {"action": "paste"}),
+        ("press command l", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
         ("Can you copy?", "desktop.safe_shortcut", {"action": "copy"}),
         ("Could you paste?", "desktop.safe_shortcut", {"action": "paste"}),
         ("Would you select all please?", "desktop.safe_shortcut", {"action": "select_all"}),
+        ("focus address bar", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
+        ("open incognito window", "desktop.safe_shortcut", {"action": "new_private_window"}),
+        ("bookmark this page", "desktop.safe_shortcut", {"action": "bookmark_page"}),
+        ("show browsing history", "desktop.safe_shortcut", {"action": "show_history"}),
+        ("open devtools", "desktop.safe_shortcut", {"action": "open_devtools"}),
+        ("zoom in page", "desktop.safe_shortcut", {"action": "zoom_in"}),
+        ("zoom out page", "desktop.safe_shortcut", {"action": "zoom_out"}),
+        ("reset zoom", "desktop.safe_shortcut", {"action": "reset_zoom"}),
         ("switch to next window", "desktop.safe_shortcut", {"action": "next_window"}),
         ("switch to previous window", "desktop.safe_shortcut", {"action": "previous_window"}),
         ("切换到上一个应用", "desktop.safe_shortcut", {"action": "switch_previous_app"}),
@@ -1816,8 +1857,6 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("前台按回车", {"key": "return", "modifiers": []}),
         ("press enter in current window", {"key": "return", "modifiers": []}),
         ("空格一下", {"key": "space", "modifiers": []}),
-        ("退出当前应用", {"key": "q", "modifiers": ["command"]}),
-        ("关闭当前 app", {"key": "q", "modifiers": ["command"]}),
     )
     for prompt, tool_input in hotkey_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
@@ -1831,18 +1870,30 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.hotkey"
 
-    approval_cases = (
-        ("按 Command+L", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
-        ("你能帮我按Command L吗", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
-        ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+    for prompt in ("退出当前应用", "关闭当前 app"):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.quit_app",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.quit_app"
+
+    safe_hotkey_cases = (
+        ("按 Command+L", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
+        ("你能帮我按Command L吗", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
+        ("Can you press Command L?", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
         (
             "Could you open Chrome and press Command L?",
-            "app.open_and_hotkey",
-            {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            "app.open_and_safe_shortcut",
+            {"app_name": "Google Chrome", "action": "focus_address_bar"},
         ),
     )
 
-    for prompt, tool_name, tool_input in approval_cases:
+    for prompt, tool_name, tool_input in safe_hotkey_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
 
         assert requests == [

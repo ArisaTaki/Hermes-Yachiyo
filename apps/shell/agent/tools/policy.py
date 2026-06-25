@@ -114,7 +114,9 @@ SAFE_SHORTCUT_ACTIONS = (
     "undo",
     "redo",
     "find",
+    "focus_address_bar",
     "new_tab",
+    "new_private_window",
     "close_tab",
     "next_tab",
     "previous_tab",
@@ -136,6 +138,12 @@ SAFE_SHORTCUT_ACTIONS = (
     "new_reminder",
     "new_event",
     "refresh",
+    "bookmark_page",
+    "show_history",
+    "open_devtools",
+    "zoom_in",
+    "zoom_out",
+    "reset_zoom",
     "browser_back",
     "browser_forward",
     "reopen_closed_tab",
@@ -1822,10 +1830,10 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.safe_shortcut",
         description=(
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
-            "select all, undo, redo, find, new tab, close tab, next tab, previous tab, "
+            "select all, undo, redo, find, focus address bar, new tab, new private window, close tab, next tab, previous tab, "
             "next window, previous window, app switching, hide other apps, toggle full screen, "
             "Mission Control, Application Windows, Spotlight, Emoji picker, Lock Screen, Force Quit dialog, new window, new note, new reminder, "
-            "new calendar event, copy current page link, refresh, "
+            "new calendar event, copy current page link, refresh, bookmark current page, history, DevTools, page zoom, "
             "browser back, or browser forward. Unlike desktop.hotkey, this tool does not "
             "accept arbitrary keys."
         ),
