@@ -29,8 +29,14 @@ _COMMON_FOLDER_TARGETS = {
     "文稿文件夹": "Documents",
     "home": "",
     "homefolder": "",
+    "homedirectory": "",
+    "userfolder": "",
+    "userdirectory": "",
     "主目录": "",
     "用户文件夹": "",
+    "用户目录": "",
+    "个人文件夹": "",
+    "个人目录": "",
 }
 
 _SAFE_OPEN_PATH_SUFFIXES = {

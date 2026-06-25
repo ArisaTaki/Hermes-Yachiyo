@@ -4290,6 +4290,8 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
         ("打开影片文件夹", "live2d", "~/Movies"),
         ("打开音乐目录", "bubble", "~/Music"),
         ("打开 Music 文件夹", "live2d", "~/Music"),
+        ("打开用户目录", "bubble", "~"),
+        ("open user directory", "live2d", "~"),
     )
     for prompt, launcher_mode, expected_path in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(

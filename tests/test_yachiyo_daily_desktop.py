@@ -355,6 +355,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~/Desktop"},
         ),
         (
+            "打开用户目录",
+            "desktop.open_path",
+            {"path": "~"},
+        ),
+        (
+            "open user directory",
+            "desktop.open_path",
+            {"path": "~"},
+        ),
+        (
             "click the first search result",
             "browser.click",
             {"selector": "search-result=1", "click_count": 1},
