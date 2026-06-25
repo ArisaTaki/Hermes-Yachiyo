@@ -129,14 +129,24 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(String(input.action || '').trim());
   if (tool === 'system.volume') return systemVolumeRetryPrompt(String(input.action || '').trim(), input);
   if (tool === 'system.brightness') return systemBrightnessRetryPrompt(String(input.action || '').trim());
+  if (tool === 'clipboard.read') return '读取剪贴板';
+  if (tool === 'clipboard.write' && typeof input.text === 'string') return `复制${input.text}到剪贴板`;
+  if (tool === 'screen.capture') return '截图当前屏幕';
+  if (tool === 'desktop.permissions') return '检查桌面权限';
+  if (tool === 'desktop.active_window') return '查看当前窗口';
   return '';
 }
 
 function isLowRiskExecutableRecoveryTool(tool: string): boolean {
   return tool === 'app.open'
     || tool === 'browser.open_url'
+    || tool === 'clipboard.read'
+    || tool === 'clipboard.write'
+    || tool === 'desktop.active_window'
     || tool === 'desktop.open_path'
+    || tool === 'desktop.permissions'
     || tool === 'media.apple_music_control'
+    || tool === 'screen.capture'
     || tool === 'system.brightness'
     || tool === 'system.settings_open'
     || tool === 'system.volume';

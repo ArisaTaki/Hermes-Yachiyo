@@ -4000,6 +4000,183 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
         store.close()
 
 
+def test_send_message_executes_structured_diagnostic_recovery_actions_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    clipboard_writes: list[str] = []
+    clipboard_reads: list[int] = []
+    screen_targets: list[str] = []
+    permission_calls: list[bool] = []
+    active_window_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("structured diagnostic recovery should not call model")
+        ),
+    )
+
+    def fake_clipboard_write(text: str) -> dict:
+        clipboard_writes.append(text)
+        return {
+            "ok": True,
+            "action": "clipboard.write",
+            "summary": "Copied 5 characters to clipboard",
+            "data": {"text_length": len(text), "platform": "macos"},
+        }
+
+    def fake_clipboard_read(*, max_chars=2000) -> dict:
+        clipboard_reads.append(max_chars)
+        return {
+            "ok": True,
+            "action": "clipboard.read",
+            "summary": "Read 11 characters from clipboard",
+            "data": {
+                "text": "hello world",
+                "text_length": 11,
+                "truncated": False,
+                "max_chars": max_chars,
+                "platform": "macos",
+            },
+        }
+
+    def fake_screen_capture(target_path) -> dict:
+        screen_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    def fake_permissions() -> dict:
+        permission_calls.append(True)
+        return {
+            "ok": True,
+            "action": "desktop.permissions",
+            "summary": "Desktop permissions ready",
+            "data": {"permission_targets": [], "affected_tools": []},
+        }
+
+    def fake_active_window() -> dict:
+        nonlocal active_window_calls
+        active_window_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Foreground window: Google Chrome - ChatGPT",
+            "data": {"app_name": "Google Chrome", "title": "ChatGPT", "pid": 202},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_write", fake_clipboard_write)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_read", fake_clipboard_read)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.permissions", fake_permissions)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    try:
+        cases = (
+            (
+                "写入剪贴板",
+                "clipboard.write",
+                {"text": "hello"},
+                "已复制 5 个字符到剪贴板。",
+            ),
+            (
+                "读取剪贴板",
+                "clipboard.read",
+                {},
+                "剪贴板内容：hello world",
+            ),
+            (
+                "截图当前屏幕",
+                "screen.capture",
+                {"reason": "structured recovery"},
+                "已截取当前屏幕。",
+            ),
+            (
+                "检查桌面权限",
+                "desktop.permissions",
+                {},
+                "桌面执行权限已就绪。",
+            ),
+            (
+                "查看当前窗口",
+                "desktop.active_window",
+                {},
+                "当前前台窗口是 Google Chrome：ChatGPT。",
+            ),
+        )
+        for prompt, tool_name, tool_input, expected_summary in cases:
+            result = api.send_message(
+                prompt,
+                metadata={
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                    "desktop_permission_recovery": True,
+                    "recovery_tool": tool_name,
+                    "recovery_input": tool_input,
+                    "recovery_permission_target": "desktop_diagnostic",
+                    "recovery_risk_level": "low",
+                },
+            )
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == expected_summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == tool_input
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == expected_summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == expected_summary
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert clipboard_writes == ["hello"]
+        assert clipboard_reads == [2000]
+        assert screen_targets and screen_targets[0].endswith("screenshots/current-screen.png")
+        assert permission_calls == [True]
+        assert active_window_calls == 1
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

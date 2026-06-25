@@ -6052,6 +6052,46 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "clipboard.read",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "读取剪贴板"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "clipboard.write",
+            "recovery_input": {"text": "hello"},
+            "recovery_risk_level": "low",
+        }
+    ) == "复制hello到剪贴板"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "screen.capture",
+            "recovery_input": {"reason": "user asked"},
+            "recovery_risk_level": "low",
+        }
+    ) == "截图当前屏幕"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.permissions",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "检查桌面权限"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.active_window",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "查看当前窗口"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.click",
             "recovery_input": {"x": 120, "y": 240},
             "recovery_risk_level": "low",

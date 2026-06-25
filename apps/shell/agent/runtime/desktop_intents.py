@@ -929,8 +929,13 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if recovery_tool not in {
         "app.open",
         "browser.open_url",
+        "clipboard.read",
+        "clipboard.write",
+        "desktop.active_window",
         "desktop.open_path",
+        "desktop.permissions",
         "media.apple_music_control",
+        "screen.capture",
         "system.brightness",
         "system.settings_open",
         "system.volume",
@@ -986,6 +991,17 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
             return "屏幕亮一点"
         if action == "down":
             return "屏幕暗一点"
+    if tool_name == "clipboard.read":
+        return "读取剪贴板"
+    if tool_name == "clipboard.write":
+        text = str(recovery_input.get("text") or "").strip()
+        return f"复制{text}到剪贴板" if text else ""
+    if tool_name == "screen.capture":
+        return "截图当前屏幕"
+    if tool_name == "desktop.permissions":
+        return "检查桌面权限"
+    if tool_name == "desktop.active_window":
+        return "查看当前窗口"
     return ""
 
 
