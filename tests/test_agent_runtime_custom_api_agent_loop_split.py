@@ -4039,6 +4039,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.show",
         "input": {"app_name": "Slack"},
     }
+    assert daily_desktop_intent_tool_request("打开微信到前台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "WeChat"},
+    }
     assert daily_desktop_intent_tool_request("切到 Slack，如果没打开就打开", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
@@ -6100,6 +6105,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("列出正在运行的应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.running_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("列一下打开的应用", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.running_apps",
         "input": {},

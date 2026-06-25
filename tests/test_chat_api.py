@@ -2679,6 +2679,7 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
         cases = [
             ("Slack 显示出来", "app.show", "已显示 Slack。", "Slack"),
             ("打开 Slack 并切到前台", "app.show", "已显示 Slack。", "Slack"),
+            ("打开微信到前台", "app.show", "已显示 WeChat。", "WeChat"),
             ("隐藏 Slack", "app.hide", "已隐藏 Slack。", "Slack"),
             ("Chrome 隐藏一下", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
             ("Chrome 收起来", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
@@ -2720,7 +2721,7 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
 
-        assert show_calls == ["Slack", "Slack"]
+        assert show_calls == ["Slack", "Slack", "WeChat"]
         assert hide_calls == ["Slack", "Google Chrome", "Google Chrome"]
         assert minimize_calls == ["Slack", "Google Chrome"]
         assert focus_window_calls == [("Slack", "general")]
@@ -7197,6 +7198,35 @@ def test_send_message_executes_direct_running_apps_task(tmp_path, monkeypatch):
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        result = api.send_message("列一下打开的应用")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == (
+            "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        )
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "正在运行的应用：Finder, Google Chrome, Music。前台是 Google Chrome。"
+        assert running_calls == 2
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
     finally:

@@ -124,6 +124,7 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         ("你可以帮我聚焦Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
         ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
         ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
+        ("打开微信到前台", "app.show", {"app_name": "WeChat"}),
     )
 
     for prompt, tool_name, tool_input in cases:
@@ -299,6 +300,20 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
             "input": {},
         }
     ]
+
+
+def test_daily_desktop_entrypoint_routes_running_apps_language() -> None:
+    for prompt in ("现在开了哪些应用", "列一下打开的应用"):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.running_apps",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.running_apps"
 
 
 def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
