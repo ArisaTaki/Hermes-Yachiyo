@@ -570,6 +570,14 @@ def daily_desktop_intent_tool_requests(
         ):
             return dynamic_source_open_sequence
         return []
+    dynamic_source_paste_sequence = _dynamic_source_paste_tool_requests(context)
+    if dynamic_source_paste_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_paste_sequence
+        ):
+            return dynamic_source_paste_sequence
+        return []
     clipboard_to_note_sequence = _clipboard_to_note_tool_requests(context)
     if clipboard_to_note_sequence and all(
         str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
@@ -4975,6 +4983,284 @@ def _browser_dynamic_source_open_tool_requests(text: str) -> list[dict[str, Any]
         ]
     )
     return requests
+
+
+def _dynamic_source_paste_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _dynamic_source_paste_request(text)
+    if not parsed:
+        return []
+    source, shortcut_tool, shortcut_input, should_submit = parsed
+    requests: list[dict[str, Any]] = []
+    if source == "selected_text":
+        requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    elif source == "current_page_link":
+        requests.append(
+            _request("desktop.safe_shortcut", {"action": "copy_current_page_link"})
+        )
+    requests.append(_request(shortcut_tool, shortcut_input))
+    if should_submit:
+        requests.append(_request("desktop.submit_foreground", {"action": "send"}))
+    return requests
+
+
+def _dynamic_source_paste_request(
+    text: str,
+) -> tuple[str, str, dict[str, Any], bool] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    return _dynamic_source_paste_request_for_app_scope(
+        clean
+    ) or _dynamic_source_paste_request_for_foreground_scope(clean)
+
+
+def _dynamic_source_paste_request_for_app_scope(
+    text: str,
+) -> tuple[str, str, dict[str, Any], bool] | None:
+    clean = _strip_query(text)
+    app_followup = _dynamic_source_paste_app_followup_request(clean)
+    if app_followup:
+        mode, app_name, source, should_submit = app_followup
+        return (
+            source,
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "paste"},
+            should_submit,
+        )
+    prefix_match = _app_open_or_focus_known_app_followup_match(clean)
+    if prefix_match:
+        mode, _raw_app, app_name, followup = prefix_match
+        parsed = _dynamic_source_paste_followup_source(followup)
+        if parsed:
+            source, should_submit = parsed
+            return (
+                source,
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": "paste"},
+                should_submit,
+            )
+    split = _known_app_prefix_split(clean)
+    if split:
+        _raw_app, app_name, followup = split
+        parsed = _dynamic_source_paste_followup_source(followup)
+        if parsed:
+            source, should_submit = parsed
+            return (
+                source,
+                "app.focus_and_safe_shortcut",
+                {"app_name": app_name, "action": "paste"},
+                should_submit,
+            )
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<source>.+?)\s*(?:复制|拷贝)?\s*"
+        r"(?:(?:并|然后|再)\s*)?(?:粘贴|贴上|贴入)\s*(?:到|进|在)?\s*"
+        r"(?P<target>[^。！？!?，,\n]+?)(?P<tail>(?:\s*(?:并|然后|再)\s*(?:发送|发出|提交))?)$",
+        r"^(?:paste|copy)\s+(?:the\s+)?(?P<source>.+?)\s+"
+        r"(?:into|to|in|on)\s+(?:the\s+)?(?P<target>[^.!?\n]+?)"
+        r"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+        r"^(?:copy\s+)?(?:the\s+)?(?P<source>.+?)\s+"
+        r"(?:and\s+then\s+|and\s+)?paste\s+"
+        r"(?:into|to|in|on)\s+(?:the\s+)?(?P<target>[^.!?\n]+?)"
+        r"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_paste_source_kind(match.group("source"))
+        app_name = _dynamic_paste_target_app_name(match.group("target"))
+        if not source or not app_name:
+            continue
+        return (
+            source,
+            "app.focus_and_safe_shortcut",
+            {"app_name": app_name, "action": "paste"},
+            _dynamic_paste_has_submit_intent(match.group("tail")),
+        )
+    return None
+
+
+def _dynamic_source_paste_app_followup_request(
+    text: str,
+) -> tuple[str, str, str, bool] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+
+    mode = "focus"
+    body = stripped
+    prefix_patterns: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "open",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+                r"^(?:please\s+)?(?:open|launch|start)\s+",
+            ),
+        ),
+        (
+            "focus",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:切换到|切到|切回|回到|聚焦|激活|置前|在|用|通过|到)\s*",
+                r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up|in|on|with|using)\s+",
+            ),
+        ),
+    )
+    for candidate_mode, patterns in prefix_patterns:
+        for pattern in patterns:
+            match = re.search(pattern, stripped, flags=re.IGNORECASE)
+            if not match:
+                continue
+            mode = candidate_mode
+            body = stripped[match.end() :].strip()
+            break
+        else:
+            continue
+        break
+
+    split = _known_app_prefix_split(body)
+    if not split:
+        return None
+    _raw_app, app_name, followup = split
+    parsed = _dynamic_source_paste_followup_source(followup)
+    if not parsed:
+        return None
+    source, should_submit = parsed
+    return mode, app_name, source, should_submit
+
+
+def _dynamic_source_paste_request_for_foreground_scope(
+    text: str,
+) -> tuple[str, str, dict[str, Any], bool] | None:
+    clean = _strip_query(text)
+    target = _dynamic_paste_foreground_target_pattern()
+    patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        rf"(?P<source>.+?)\s*(?:复制|拷贝)?\s*"
+        rf"(?:(?:并|然后|再)\s*)?(?:粘贴|贴上|贴入)"
+        rf"(?:\s*(?:到|进|在)\s*(?P<target>{target}))?"
+        rf"(?P<tail>\s*(?:(?:并|然后|再)\s*(?:发送|发出|提交))?)$",
+        rf"^(?:paste|copy)\s+(?:the\s+)?(?P<source>.+?)\s+"
+        rf"(?:into|to|in|on)\s+(?:the\s+)?(?P<target>{target})"
+        rf"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+        rf"^(?:paste|copy)\s+(?:the\s+)?(?P<source>.+?)\s+(?P<target>{target})"
+        rf"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+        rf"^(?:copy\s+)?(?:the\s+)?(?P<source>.+?)\s+"
+        rf"(?:and\s+then\s+|and\s+)?paste\s+(?P<target>{target})"
+        rf"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_paste_source_kind(match.group("source"))
+        if not source:
+            continue
+        raw_target = str(match.groupdict().get("target") or "").strip()
+        if raw_target and not _dynamic_paste_target_is_foreground(raw_target):
+            continue
+        return (
+            source,
+            "desktop.safe_shortcut",
+            {"action": "paste"},
+            _dynamic_paste_has_submit_intent(match.group("tail")),
+        )
+    return None
+
+
+def _dynamic_source_paste_followup_source(value: str) -> tuple[str, bool] | None:
+    clean = _strip_query(value)
+    patterns = (
+        r"^(?:把|将)?\s*(?P<source>.+?)\s*(?:复制|拷贝)?\s*"
+        r"(?:(?:并|然后|再)\s*)?(?:粘贴|贴上|贴入)"
+        r"(?P<tail>\s*(?:(?:并|然后|再)\s*(?:发送|发出|提交))?)$",
+        r"^(?:粘贴|贴上|贴入)\s*(?P<source>.+?)"
+        r"(?P<tail>\s*(?:(?:并|然后|再)\s*(?:发送|发出|提交))?)$",
+        r"^(?:paste|copy)\s+(?:the\s+)?(?P<source>.+?)"
+        r"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+        r"^(?:copy\s+)?(?:the\s+)?(?P<source>.+?)\s+"
+        r"(?:and\s+then\s+|and\s+)?paste"
+        r"(?P<tail>(?:\s+(?:and\s+then|then|and)\s*(?:send|submit|post))?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_paste_source_kind(match.group("source"))
+        if source:
+            return source, _dynamic_paste_has_submit_intent(match.group("tail"))
+    return None
+
+
+def _dynamic_paste_source_kind(value: str) -> str:
+    clean = _strip_query(value)
+    selected_text_source = _selected_text_source_pattern()
+    clipboard_source = _clipboard_source_pattern()
+    current_page_link_source = _communication_current_page_link_source_pattern()
+    if re.fullmatch(rf"(?:{selected_text_source})", clean, flags=re.IGNORECASE):
+        return "selected_text"
+    if re.fullmatch(rf"(?:{clipboard_source})", clean, flags=re.IGNORECASE):
+        return "clipboard"
+    if re.fullmatch(rf"(?:{current_page_link_source})", clean, flags=re.IGNORECASE):
+        return "current_page_link"
+    return ""
+
+
+def _dynamic_paste_target_app_name(value: str) -> str:
+    target = _strip_query(value)
+    target = re.sub(
+        r"\s*(?:当前|这个)?(?:输入框|文本框|输入栏|窗口|应用|app)$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    target = re.sub(
+        r"\s*(?:current|active|this)?\s*(?:input|text\s*field|textbox|field|window|app|application)$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not target or _dynamic_paste_target_is_foreground(target):
+        return ""
+    if not _is_known_app_reference(target):
+        return ""
+    return _normalize_app_name(target)
+
+
+def _dynamic_paste_target_is_foreground(value: str) -> bool:
+    clean = _strip_query(value)
+    if not clean:
+        return False
+    return bool(
+        re.fullmatch(
+            rf"(?:{_dynamic_paste_foreground_target_pattern()})",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _dynamic_paste_foreground_target_pattern() -> str:
+    return (
+        r"(?:这(?:里)?|当前|前台|当前输入框|输入框|当前文本框|文本框|"
+        r"当前输入栏|输入栏|当前窗口|前台窗口|"
+        r"here|current\s+input|input|current\s+text\s*field|text\s*field|"
+        r"textbox|current\s+field|field|current\s+window|foreground|frontmost)"
+    )
+
+
+def _dynamic_paste_has_submit_intent(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        re.search(r"(?:并|然后|再)\s*(?:发送|发出|提交)$", text, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:send|submit|post)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _dynamic_source_find_tool_requests(text: str) -> list[dict[str, Any]]:

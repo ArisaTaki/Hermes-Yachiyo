@@ -8086,6 +8086,106 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "send"},
         },
     ]
+    selected_paste_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容粘贴到当前输入框",
+        "把当前选中文字粘贴到这里",
+        "copy selected text and paste here",
+        "paste selected text into current input",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_paste_requests
+        )
+    assert daily_desktop_intent_tool_requests("把选中文本粘贴并发送", allowed_tools) == [
+        *selected_paste_requests,
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把选中的内容粘贴到当前输入框",
+            ["desktop.submit_foreground"],
+        )
+        == []
+    )
+    for prompt, app_name in (
+        ("把选中的内容粘贴到 Slack", "Slack"),
+        ("把选中的内容粘贴到 Slack 当前输入框", "Slack"),
+        ("把选中的内容粘贴到微信", "WeChat"),
+        ("copy selection into Slack", "Slack"),
+        ("paste selected text in Slack", "Slack"),
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == [
+            selected_paste_requests[0],
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": app_name, "action": "paste"},
+            },
+        ]
+    for prompt in ("打开 Slack 粘贴选中内容", "open Slack paste selected text"):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == [
+            selected_paste_requests[0],
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+            },
+        ]
+    current_page_link_paste_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        selected_paste_requests[1],
+    ]
+    for prompt in (
+        "把当前网页链接粘贴到当前输入框",
+        "paste current page link here",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == current_page_link_paste_requests
+        )
+    assert daily_desktop_intent_tool_requests("把当前网页链接粘贴到 Slack", allowed_tools) == [
+        current_page_link_paste_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "paste"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 粘贴当前网页链接", allowed_tools) == [
+        current_page_link_paste_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "paste"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("把剪贴板内容粘贴到 Slack", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "paste"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开微信粘贴后发送", allowed_tools) == [
         {
             "protocol": "json_fallback",
