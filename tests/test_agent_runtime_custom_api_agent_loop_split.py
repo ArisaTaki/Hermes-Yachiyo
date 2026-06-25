@@ -1124,6 +1124,118 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
     ) == []
 
 
+def test_daily_desktop_intent_planner_routes_click_then_submit_sequences() -> None:
+    allowed_tools = [
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.submit_foreground",
+    ]
+
+    assert daily_desktop_intent_tool_requests("Slack 点击确认按钮然后确认", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "确认",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Linear 点击创建按钮然后确认", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "创建",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack click Confirm button then confirm",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "Confirm",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Linear click Create button then press enter",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "Create",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Slack click Send button then send", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "Send",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "Slack click Confirm button then confirm",
+            ["app.focus_and_click_ui_element"],
+        )
+        == []
+    )
+
+
 def test_daily_desktop_intent_planner_routes_click_type_submit_sequences() -> None:
     allowed_tools = [
         "app.open_and_click_ui_element",

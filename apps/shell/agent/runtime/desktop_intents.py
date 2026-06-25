@@ -744,6 +744,13 @@ def daily_desktop_intent_tool_requests(
         ):
             return app_prefix_click_type_sequence
         return []
+    app_click_submit_sequence = _app_open_or_focus_click_submit_tool_requests(context)
+    if app_click_submit_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed for request in app_click_submit_sequence
+        ):
+            return app_click_submit_sequence
+        return []
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -7284,6 +7291,89 @@ def _app_prefix_click_ui_element_tool_request(text: str) -> dict[str, Any] | Non
         "app.focus_and_click_ui_element",
         {"app_name": app_name, **click_payload},
     )
+
+
+def _app_open_or_focus_click_submit_tool_requests(text: str) -> list[dict[str, Any]]:
+    matches: list[tuple[str, str, str, str]] = []
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        matches.append(shorthand_match)
+    direct_split = _known_app_prefix_split(text)
+    if direct_split:
+        raw_app, app_name, followup = direct_split
+        matches.append(("focus", raw_app, app_name, followup))
+    scoped_split = _known_app_prefix_split(_strip_app_search_scope_prefix(text))
+    if scoped_split:
+        raw_app, app_name, followup = scoped_split
+        matches.append(("focus", raw_app, app_name, followup))
+    for mode, raw_app, app_name, followup in matches:
+        if (
+            not app_name
+            or app_name in _BROWSER_APP_NAMES
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+        ):
+            continue
+        parsed = _click_ui_element_followup_and_submit_action(followup)
+        if not parsed:
+            continue
+        clean_followup, submit_action = parsed
+        click_payload = _desktop_click_ui_element(clean_followup, require_context=False)
+        if not click_payload:
+            continue
+        return [
+            _request(
+                f"app.{mode}_and_click_ui_element",
+                {"app_name": app_name, **click_payload},
+            ),
+            _request("desktop.submit_foreground", {"action": submit_action}),
+        ]
+    return []
+
+
+def _click_ui_element_followup_and_submit_action(value: str) -> tuple[str, str] | None:
+    text = _strip_query(value)
+    if not text:
+        return None
+    patterns = (
+        r"^(?P<body>.+?)\s*(?:然后|并且|并|之后|随后|再|接着)\s*"
+        r"(?P<submit>(?:(?:按|按下|敲|敲下)\s*)?(?:回车|enter|return)(?:键)?"
+        r"(?:\s*(?:确认|确定|提交|发送|发出))?|确认|确定|发送|发出|提交)$",
+        r"^(?P<body_en>.+?)\s+(?:and\s+then|then|and)\s*"
+        r"(?P<submit_en>(?:(?:press|hit)\s*)?(?:enter|return)"
+        r"(?:\s+to\s+(?:confirm|ok|submit|send|post))?|confirm|ok|send|submit|post)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        body = str(match.groupdict().get("body") or match.groupdict().get("body_en") or "").strip()
+        submit_text = str(
+            match.groupdict().get("submit") or match.groupdict().get("submit_en") or ""
+        ).strip()
+        submit_action = _desktop_submit_foreground_action(submit_text)
+        if not submit_action and _looks_like_bare_return_submit_phrase(submit_text):
+            submit_action = "confirm"
+        if body and submit_action:
+            return _strip_query(body), submit_action
+    return None
+
+
+def _looks_like_bare_return_submit_phrase(value: str) -> bool:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    return compact in {
+        "回车",
+        "按回车",
+        "按下回车",
+        "敲回车",
+        "敲下回车",
+        "enter",
+        "return",
+        "pressenter",
+        "hitenter",
+        "pressreturn",
+        "hitreturn",
+    }
 
 
 def _app_prefix_safe_type_text_tool_request(text: str) -> dict[str, Any] | None:
