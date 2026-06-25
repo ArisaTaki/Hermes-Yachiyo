@@ -386,6 +386,28 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}}
     ]
 
+    app_submit_requests = daily_desktop_entrypoint_requests("微信按回车发送")
+
+    assert app_submit_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(app_submit_requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "daily_desktop_intent",
+        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+        "daily_desktop_tool": "app.focus",
+        "daily_desktop_tools": ["app.focus", "desktop.submit_foreground"],
+    }
+
     copy_link_requests = daily_desktop_entrypoint_requests("复制当前网页链接")
 
     assert copy_link_requests == [

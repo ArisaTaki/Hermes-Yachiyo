@@ -784,6 +784,8 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
 
 def test_daily_desktop_intent_planner_routes_app_search_field_typing_language() -> None:
     allowed_tools = [
+        "app.open",
+        "app.focus",
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
         "desktop.hotkey",
@@ -803,6 +805,92 @@ def test_daily_desktop_intent_planner_routes_app_search_field_typing_language() 
             "protocol": "json_fallback",
             "tool": "desktop.safe_type_text",
             "input": {"text": "文件传输助手"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信搜索文件传输助手并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信点击搜索框输入文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+    ]
+
+
+def test_daily_desktop_intent_planner_routes_app_scoped_submit_language() -> None:
+    allowed_tools = [
+        "app.open",
+        "app.focus",
+        "desktop.submit_foreground",
+    ]
+
+    assert daily_desktop_intent_tool_requests("打开微信发送当前消息", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信按回车发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信提交当前内容", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "submit"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome press return to send", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
         },
     ]
 

@@ -8924,6 +8924,15 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             AssertionError("hotkey should wait for approval")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        },
+    )
     bridge = ChatBridge(runtime)
     try:
         cases = [
@@ -8973,6 +8982,8 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             ("send current message", "desktop.submit_foreground", {"action": "send"}),
             ("发送当前内容", "desktop.submit_foreground", {"action": "send"}),
             ("按回车提交", "desktop.submit_foreground", {"action": "submit"}),
+            ("微信按回车发送", "desktop.submit_foreground", {"action": "send"}),
+            ("Chrome press return to send", "desktop.submit_foreground", {"action": "send"}),
             ("按 Command+L", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             ("敲一下回车", "desktop.hotkey", {"key": "return", "modifiers": []}),

@@ -5897,6 +5897,7 @@ def test_send_message_routes_return_submit_to_approval_without_model(tmp_path, m
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
+    focus_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -5917,30 +5918,48 @@ def test_send_message_routes_return_submit_to_approval_without_model(tmp_path, m
         ),
     )
 
-    try:
-        result = api.send_message("按回车提交")
-        run = service.get_run(result["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
 
-        assert result["ok"] is True
-        assert result["status"] == "waiting_approval"
-        assert result["agent_task"]["status"] == "waiting_approval"
-        assert result["agent_task"]["needs_user_action"] is True
-        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
-        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {"action": "submit"}
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.submit_foreground"
-        assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
-        assert run["status"] == "approval_required"
-        assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
-        assert run["pending_approval"]["input_preview"] == {"action": "submit"}
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.desktop.intent_approval_required" in event_types
-        assert "agent.tool.approval_required" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+
+    try:
+        cases = (
+            ("按回车提交", {"action": "submit"}, []),
+            ("微信按回车发送", {"action": "send"}, ["WeChat"]),
+        )
+        for prompt, input_preview, expected_focus_calls in cases:
+            focus_calls.clear()
+            result = api.send_message(prompt)
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert result["status"] == "waiting_approval"
+            assert focus_calls == expected_focus_calls
+            assert result["agent_task"]["status"] == "waiting_approval"
+            assert result["agent_task"]["needs_user_action"] is True
+            assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.submit_foreground"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
+            assert run["pending_approval"]["input_preview"] == input_preview
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.tool.approval_required" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()

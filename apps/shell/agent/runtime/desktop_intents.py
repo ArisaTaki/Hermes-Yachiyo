@@ -486,6 +486,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_direct_search_sequence
     ):
         return app_direct_search_sequence
+    app_submit_foreground_sequence = _app_open_or_focus_submit_foreground_tool_requests(context)
+    if app_submit_foreground_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_submit_foreground_sequence
+    ):
+        return app_submit_foreground_sequence
     foreground_click_search_type_sequence = _foreground_click_search_type_tool_requests(context)
     if foreground_click_search_type_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_click_search_type_sequence):
         return foreground_click_search_type_sequence
@@ -510,6 +515,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_prefix_browser_action_sequence
     ):
         return app_prefix_browser_action_sequence
+    app_prefix_click_type_sequence = _app_prefix_click_type_tool_requests(context)
+    if app_prefix_click_type_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
+    ):
+        return app_prefix_click_type_sequence
     app_prefix_foreground_action = _app_prefix_foreground_action_tool_request(context)
     if app_prefix_foreground_action and str(app_prefix_foreground_action.get("tool") or "") in allowed:
         return [app_prefix_foreground_action]
@@ -5123,6 +5133,20 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
     mode, _raw_app, app_name, followup = shorthand_match
     if _desktop_type_into_ui_element(followup):
         return []
+    if app_name not in _BROWSER_APP_NAMES:
+        parsed = _app_search_query_from_followup(followup)
+        if parsed is not None:
+            query, submit_return = parsed
+            requests = [
+                _request(
+                    f"app.{mode}_and_safe_shortcut",
+                    {"app_name": app_name, "action": "find"},
+                ),
+                _request("desktop.safe_type_text", {"text": query}),
+            ]
+            if submit_return:
+                requests.append(_request("desktop.search_submit", {}))
+            return requests
     query = (
         _desktop_foreground_find_query(followup)
         if app_name in _BROWSER_APP_NAMES
@@ -5354,6 +5378,27 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
     return requests
 
 
+def _app_open_or_focus_submit_foreground_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, _raw_app, app_name, followup = shorthand_match
+    else:
+        split = _known_app_prefix_split(text)
+        if not split:
+            return []
+        _raw_app, app_name, followup = split
+        mode = "focus"
+    if not app_name:
+        return []
+    submit_action = _desktop_submit_foreground_action(followup)
+    if not submit_action:
+        return []
+    return [
+        _request(f"app.{mode}", {"app_name": app_name}),
+        _request("desktop.submit_foreground", {"action": submit_action}),
+    ]
+
+
 def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -5405,6 +5450,44 @@ def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
     ]
     if submit_return:
         requests.append(_request("desktop.search_submit", {}))
+    return requests
+
+
+def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return []
+    raw_app, app_name, followup = split
+    if (
+        not app_name
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return []
+    parsed = _click_ui_element_then_type(followup)
+    if not parsed:
+        return []
+    click_payload, typed_text, submit_return = parsed
+    if _is_search_ui_input_click(click_payload):
+        requests = [
+            _request(
+                "app.focus_and_safe_shortcut",
+                {"app_name": app_name, "action": "find"},
+            ),
+            _request("desktop.safe_type_text", {"text": typed_text}),
+        ]
+        if submit_return:
+            requests.append(_request("desktop.search_submit", {}))
+        return requests
+    requests = [
+        _request(
+            "app.focus_and_click_ui_element",
+            {"app_name": app_name, **click_payload},
+        ),
+        _request("desktop.safe_type_text", {"text": typed_text}),
+    ]
+    if submit_return:
+        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
     return requests
 
 
@@ -6238,6 +6321,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_type_into_ui_element(followup)
         or _desktop_safe_key(followup)
         or _desktop_hotkey(followup)
+        or _desktop_submit_foreground_action(followup)
         or _app_followup_safe_type_text(followup)
         or _app_search_query_from_followup(followup) is not None
         or _desktop_find_query(followup)
