@@ -708,6 +708,33 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
     ]
 
 
+def test_daily_desktop_intent_planner_routes_browser_extract_text_language() -> None:
+    allowed_tools = [
+        "app.focus",
+        "browser.extract_text",
+    ]
+
+    for prompt in ("read current webpage", "extract current page text"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+        }
+
+    assert daily_desktop_intent_tool_requests("focus Chrome and extract page text", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+        },
+    ]
+
+
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",

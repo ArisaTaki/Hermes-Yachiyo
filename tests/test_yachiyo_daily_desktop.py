@@ -394,6 +394,26 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {},
         }
     ]
+    for prompt in ("read current webpage", "extract current page text"):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.extract_text",
+                "input": {},
+            }
+        ]
+    assert daily_desktop_entrypoint_requests("focus Chrome and extract page text") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+        },
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> None:

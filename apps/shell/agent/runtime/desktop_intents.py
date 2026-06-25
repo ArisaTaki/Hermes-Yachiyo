@@ -3231,8 +3231,20 @@ def _is_browser_extract_text_request(text: str) -> bool:
         )
         or "extract text from the current page" in lowered
         or "extract text from this page" in lowered
+        or re.search(
+            r"\bextract\s+(?:the\s+)?(?:current\s+|this\s+)?"
+            r"(?:page|webpage|web\s+page)(?:\s+(?:text|content|body))?\b",
+            lowered,
+        )
+        or re.search(
+            r"\bextract\s+(?:the\s+)?(?:page|webpage|web\s+page)\s+"
+            r"(?:text|content|body)\b",
+            lowered,
+        )
         or "read the current page" in lowered
         or "read current page" in lowered
+        or "read current webpage" in lowered
+        or "read the current webpage" in lowered
         or "read current web page" in lowered
         or "read the current web page" in lowered
         or "read this page" in lowered

@@ -5096,6 +5096,34 @@ def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_en
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    for prompt, launcher_mode in (
+        ("read current webpage", "bubble"),
+        ("extract current page text", "live2d"),
+    ):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "Yachiyo desktop agent runtime"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+    assert extract_calls == ["", "", ""]
+
 
 def test_chat_bridge_quick_message_opens_browser_then_extracts_current_page_without_model(
     tmp_path,
@@ -5112,6 +5140,15 @@ def test_chat_bridge_quick_message_opens_browser_then_extracts_current_page_with
             "data": {"app_name": app_name, "launch_verified": True},
         }
 
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
     def fake_extract_text(selector: str = "") -> dict:
         calls.append(("extract", selector))
         return {
@@ -5126,6 +5163,7 @@ def test_chat_bridge_quick_message_opens_browser_then_extracts_current_page_with
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -5140,6 +5178,30 @@ def test_chat_bridge_quick_message_opens_browser_then_extracts_current_page_with
     assert agent_task["summary"] == "已打开 Google Chrome。 Yachiyo desktop agent runtime。"
     assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
         "app.open",
+        "browser.extract_text",
+    ]
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "focus Chrome and extract page text",
+        launcher_mode="live2d",
+    )
+
+    assert calls[-2:] == [("focus", "Google Chrome"), ("extract", "")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已切换到 Google Chrome。 Yachiyo desktop agent runtime。"
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.focus",
         "browser.extract_text",
     ]
     assert run["status"] == "completed"

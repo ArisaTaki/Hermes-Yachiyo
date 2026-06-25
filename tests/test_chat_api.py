@@ -3900,6 +3900,33 @@ def test_send_message_executes_direct_browser_extract_text_task(tmp_path, monkey
         assert "agent.desktop.intent_approval_required" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("read current webpage")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "Yachiyo desktop agent runtime"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.extract_text"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "Yachiyo desktop agent runtime"
+        assert extract_calls == ["", ""]
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
