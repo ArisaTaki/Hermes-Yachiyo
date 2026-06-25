@@ -4567,6 +4567,26 @@ def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    for prompt, launcher_mode in (
+        ("显示当前选中的 Finder 文件", "bubble"),
+        ("显示当前选中文件", "live2d"),
+    ):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert reveal_calls[-1] == "finder_selection"
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已在 Finder 中显示：finder_selection。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "finder_selection"}
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
     tmp_path,

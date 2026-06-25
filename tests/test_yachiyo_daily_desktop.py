@@ -387,6 +387,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "finder_selection"},
         ),
         (
+            "显示当前选中的 Finder 文件",
+            "desktop.reveal_path",
+            {"path": "finder_selection"},
+        ),
+        (
+            "显示当前选中文件",
+            "desktop.reveal_path",
+            {"path": "finder_selection"},
+        ),
+        (
             "打开桌面文件夹",
             "desktop.open_path",
             {"path": "~/Desktop"},

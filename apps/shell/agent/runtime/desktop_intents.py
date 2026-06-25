@@ -4786,13 +4786,15 @@ def _finder_selection_reveal_path_request(text: str) -> bool:
         )
         or re.search(
             r"(?:显示|定位|找一下|找到).{0,10}"
-            r"(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目)",
+            r"(?:当前)?(?:选中|选定|选择)的?.{0,12}(?:finder|访达)?\s*(?:文件|项目|条目)",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:当前)?(?:选中|选定)的?.{0,6}(?:文件|项目|条目).{0,10}"
+            r"(?:当前)?(?:选中|选定)的?.{0,12}(?:finder|访达)?\s*(?:文件|项目|条目).{0,10}"
             r"(?:显示|定位|找一下|找到)",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:show|reveal|locate)\s+(?:the\s+)?(?:currently\s+)?selected\s+"
