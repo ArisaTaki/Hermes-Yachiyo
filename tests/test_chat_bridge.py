@@ -977,10 +977,11 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         assert "model.requested" not in event_types
 
     music_cases = (
-        ("打开 Spotify 播放周杰伦", "bubble", "Spotify"),
-        ("用 Spotify 播放音乐", "live2d", "Spotify"),
+        ("打开 Spotify 播放周杰伦", "bubble", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
+        ("用 Spotify 播放音乐", "live2d", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
+        ("打开网易云并播放", "bubble", "网易云音乐", "已打开网易云音乐，并用媒体键尝试开始播放。"),
     )
-    for prompt, launcher_mode, app_name in music_cases:
+    for prompt, launcher_mode, app_name, expected_summary in music_cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
@@ -989,7 +990,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         )
 
         assert result["ok"] is True
-        assert agent_task["summary"] == f"已打开 {app_name}，并用媒体键尝试开始播放。"
+        assert agent_task["summary"] == expected_summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
         assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
         assert agent_task["tool_calls"][-1]["status"] == "completed"
@@ -1000,7 +1001,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert music_calls == ["Spotify", "Spotify"]
+    assert music_calls == ["Spotify", "Spotify", "网易云音乐"]
 
     assert open_calls == ["WeChat", "WeChat"]
 

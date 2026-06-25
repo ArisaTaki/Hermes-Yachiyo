@@ -41,6 +41,25 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
+def test_daily_desktop_entrypoint_routes_netease_music_short_name_to_generic_music_app() -> None:
+    requests = daily_desktop_entrypoint_requests("打开网易云并播放")
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "网易云音乐"},
+        }
+    ]
+    assert daily_desktop_user_metadata(requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "daily_desktop_intent",
+        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+        "daily_desktop_tool": "media.music_app_open_and_play",
+        "daily_desktop_tools": ["media.music_app_open_and_play"],
+    }
+
+
 def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_request() -> None:
     metadata = {
         "desktop_permission_recovery": True,
