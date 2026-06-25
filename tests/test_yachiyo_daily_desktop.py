@@ -751,6 +751,39 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.submit_foreground",
     ]
 
+    comm_paste_requests = daily_desktop_entrypoint_requests("微信给文件传输助手粘贴并发送")
+
+    assert comm_paste_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(comm_paste_requests)["daily_desktop_tools"] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+
     open_comm_requests = daily_desktop_entrypoint_requests("打开微信发消息给张三你好")
 
     assert open_comm_requests[0] == {

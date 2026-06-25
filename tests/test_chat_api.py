@@ -9696,9 +9696,29 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
             "data": {"shortcut_action": action},
         }
 
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
     try:
         cases = (
             (
@@ -9710,6 +9730,17 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
                 "打开微信粘贴后发送",
                 [("open", "WeChat"), ("focus", "WeChat"), ("shortcut", "paste")],
                 "app.open_and_safe_shortcut",
+            ),
+            (
+                "微信给文件传输助手粘贴并发送",
+                [
+                    ("focus", "WeChat"),
+                    ("shortcut", "find"),
+                    ("type", "文件传输助手"),
+                    ("search_submit", ""),
+                    ("shortcut", "paste"),
+                ],
+                "app.focus_and_safe_shortcut",
             ),
         )
         for prompt, expected_calls, first_tool in cases:

@@ -488,6 +488,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in selected_text_read_sequence
     ):
         return selected_text_read_sequence
+    communication_paste_sequence = _communication_paste_tool_requests(context)
+    if communication_paste_sequence and all(
+        str(request.get("tool") or "") in allowed for request in communication_paste_sequence
+    ):
+        return communication_paste_sequence
     communication_compose_sequence = _communication_compose_tool_requests(context)
     if communication_compose_sequence and all(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
@@ -5955,6 +5960,140 @@ def _safe_type_text_followup_has_send_intent(value: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.match(r"^(?:send|say)\s+\S+", text, flags=re.IGNORECASE)
+    )
+
+
+def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _communication_paste_request(text)
+    if not parsed:
+        return []
+    mode, app_name, recipient, should_submit = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": recipient}),
+        _request("desktop.search_submit", {}),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+    ]
+    if should_submit:
+        requests.append(_request("desktop.submit_foreground", {"action": "send"}))
+    return requests
+
+
+def _communication_paste_request(text: str) -> tuple[str, str, str, bool] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+
+    mode = "focus"
+    body = stripped
+    prefix_patterns: tuple[tuple[str, str], ...] = (
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+        ),
+        (
+            "open",
+            r"^(?:please\s+)?(?:open|launch|start)\s+",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过|到)\s*",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:in|on|with|using)\s+",
+        ),
+    )
+    for candidate_mode, pattern in prefix_patterns:
+        match = re.search(pattern, stripped, flags=re.IGNORECASE)
+        if match:
+            mode = candidate_mode
+            body = stripped[match.end() :].strip()
+            break
+
+    split = _known_app_prefix_split(body)
+    if not split:
+        return None
+    _raw_app, app_name, followup = split
+    if app_name not in _COMMUNICATION_APP_NAMES:
+        return None
+
+    parsed = _communication_paste_recipient(followup)
+    if not parsed:
+        return None
+    recipient, should_submit = parsed
+    return mode, app_name, recipient, should_submit
+
+
+def _communication_paste_recipient(text: str) -> tuple[str, bool] | None:
+    followup = _strip_query(text)
+    if not followup or _looks_like_explicit_text_input_target(followup):
+        return None
+    patterns = (
+        r"^(?:搜索|搜一下|搜|查找|查一下|检索|找一下|找)\s*"
+        r"(?P<recipient_search>.+?)\s*"
+        r"(?:(?:然后|并且|并|之后|后|再|接着)\s*)?"
+        r"(?:把|将)?(?:剪贴板|粘贴板)?(?:内容)?\s*(?:粘贴|贴上)(?P<tail_search>.*)$",
+        r"^(?:给|向)\s*(?P<recipient_to>.+?)\s*"
+        r"(?:把|将)?(?:剪贴板|粘贴板)?(?:内容)?\s*(?:粘贴|贴上)(?P<tail_to>.*)$",
+        r"^(?:发给|发送给)\s*(?P<recipient_send_to>.+?)\s*"
+        r"(?:剪贴板|粘贴板)(?:内容)?(?P<tail_send_to>.*)$",
+        r"^(?:发送|发出|发)\s*(?:剪贴板|粘贴板)(?:内容)?\s*(?:给|向)\s*"
+        r"(?P<recipient_send_clipboard>.+)$",
+        r"^(?:把|将)?(?:剪贴板|粘贴板)(?:内容)?\s*(?:发送|发出|发)\s*(?:给|向)\s*"
+        r"(?P<recipient_clipboard_send>.+)$",
+        r"^(?:find|search(?:\s+for)?)\s+(?P<recipient_find>.+?)\s+"
+        r"(?:paste(?:\s+(?:the\s+)?clipboard(?:\s+contents?)?)?)(?P<tail_find>.*)$",
+        r"^(?:send|message)\s+(?:the\s+)?clipboard(?:\s+contents?)?\s+to\s+"
+        r"(?P<recipient_clipboard_to>.+)$",
+        r"^(?:send|message)\s+(?P<recipient_with_clipboard>.+?)\s+"
+        r"(?:with\s+)?(?:the\s+)?clipboard(?:\s+contents?)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _strip_communication_piece(
+            groups.get("recipient_search")
+            or groups.get("recipient_to")
+            or groups.get("recipient_send_to")
+            or groups.get("recipient_send_clipboard")
+            or groups.get("recipient_clipboard_send")
+            or groups.get("recipient_find")
+            or groups.get("recipient_clipboard_to")
+            or groups.get("recipient_with_clipboard")
+            or ""
+        )
+        if not recipient:
+            continue
+        should_submit = _communication_paste_has_submit_intent(followup)
+        return recipient, should_submit
+    return None
+
+
+def _communication_paste_has_submit_intent(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        re.search(r"(?:发送|发出|发|提交)$", text, flags=re.IGNORECASE)
+        or re.search(r"(?:并且|并|然后|之后|后|再|接着)\s*(?:发送|发出|发|提交)$", text)
+        or re.search(r"(?:and\s+then|then|and)\s*(?:send|submit|post)$", text, flags=re.IGNORECASE)
+        or re.search(r"^(?:发给|发送给|发送|发出|发)", text)
+        or re.search(r"^(?:send|message)\s+", text, flags=re.IGNORECASE)
     )
 
 
