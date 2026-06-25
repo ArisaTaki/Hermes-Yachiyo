@@ -606,6 +606,9 @@ def daily_desktop_intent_tool_requests(
     music_app_control = _music_app_control_request(context)
     if music_app_control and str(music_app_control.get("tool") or "") in allowed:
         return [music_app_control]
+    system_media_control = _system_media_control_request(context)
+    if system_media_control and str(system_media_control.get("tool") or "") in allowed:
+        return [system_media_control]
     if _is_apple_music_open_and_play_request(context):
         if "media.apple_music_open_and_play" in allowed:
             return [_request("media.apple_music_open_and_play", {})]
@@ -1066,6 +1069,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "media.apple_music_status",
     "media.music_app_control",
     "media.music_app_open_and_play",
+    "media.system_control",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
     "notes.create",
@@ -1262,6 +1266,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "media.apple_music_play",
         "media.music_app_control",
         "media.music_app_open_and_play",
+        "media.system_control",
         "screen.capture",
         "system.brightness",
         "system.display_sleep",
@@ -1336,6 +1341,15 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
             "toggle": "播放暂停",
         }.get(action, "")
         return f"{app_name}{label}" if app_name and label else ""
+    if tool_name == "media.system_control":
+        action = str(recovery_input.get("action") or "").strip()
+        return {
+            "play": "继续播放当前媒体",
+            "pause": "暂停当前媒体",
+            "next": "下一首",
+            "previous": "上一首",
+            "toggle": "播放暂停",
+        }.get(action, "")
     if tool_name == "media.apple_music_control":
         return {
             "play": "播放音乐",
@@ -2432,6 +2446,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     music_app_control = _music_app_control_request(text)
     if music_app_control:
         candidates.append(music_app_control)
+
+    system_media_control = _system_media_control_request(text)
+    if system_media_control:
+        candidates.append(system_media_control)
 
     if _is_apple_music_open_and_play_request(text):
         candidates.append(_request("media.apple_music_open_and_play", {}))
@@ -10291,6 +10309,44 @@ def _music_app_control_request(text: str) -> dict[str, Any] | None:
     if not action:
         return None
     return _request("media.music_app_control", {"app_name": music_app, "action": action})
+
+
+def _system_media_control_request(text: str) -> dict[str, Any] | None:
+    if _music_app_control_request(text):
+        return None
+    split = _known_app_prefix_split(text)
+    if split:
+        raw_app, app_name, _followup = split
+        if (_known_music_app_name(raw_app) or _known_music_app_name(app_name)) == "Music":
+            return None
+    if re.search(r"(?:apple\s*music|苹果音乐)", str(text or ""), flags=re.IGNORECASE):
+        return None
+    action = _system_media_control_action(text)
+    if not action:
+        return None
+    return _request("media.system_control", {"action": action})
+
+
+def _system_media_control_action(text: str) -> str:
+    lowered = str(text or "").strip().lower()
+    if re.search(r"\b(?:pause|stop)\s+(?:the\s+)?(?:current\s+)?(?:media|playback)\b", lowered):
+        return "pause"
+    if re.search(r"\b(?:resume|continue)\s+(?:the\s+)?(?:current\s+)?(?:media|playback)\b", lowered):
+        return "play"
+    if re.search(r"\b(?:next|skip)\s+(?:media\s+)?(?:track|song)\b|\bnext\s+media\b", lowered):
+        return "next"
+    if re.search(r"\b(?:previous|prev|back)\s+(?:media\s+)?(?:track|song)\b|\bprevious\s+media\b", lowered):
+        return "previous"
+    action = _music_control_action(text)
+    if not action:
+        return ""
+    if action == "play" and not re.search(
+        r"(?:继续|恢复|接着|当前|现在|正在播放|媒体|播放中|resume|continue|current\s+media|playback)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    return action
 
 
 def _music_control_action(text: str) -> str:

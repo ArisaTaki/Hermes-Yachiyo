@@ -996,6 +996,7 @@ class ChatAPI:
                 "media.apple_music_control",
                 "media.music_app_open_and_play",
                 "media.music_app_control",
+                "media.system_control",
             }:
                 return True
             if tool in {"app.open", "app.focus", "app.show"} and str(payload.get("app_name") or "") == "Music":

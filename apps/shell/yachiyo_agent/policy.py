@@ -56,6 +56,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_control",
         "media.music_app_open_and_play",
         "media.music_app_control",
+        "media.system_control",
         "system.settings_open",
         "system.volume",
         "system.brightness",
@@ -251,6 +252,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "media.music_app_open_and_play",
         "media.music_app_control",
+        "media.system_control",
     ),
     "system_settings": ("system.settings_open",),
     "control_system_volume": ("system.volume",),
@@ -444,6 +446,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "media.music_app_open_and_play",
         "media.music_app_control",
+        "media.system_control",
         "system.settings_open",
         "system.volume",
         "system.brightness",
@@ -503,6 +506,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "media.music_app_open_and_play",
         "media.music_app_control",
+        "media.system_control",
     ),
     "foreground_input": (
         "app.open_and_safe_type_text",
@@ -581,6 +585,7 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "media.apple_music_control": ("automation",),
     "media.music_app_open_and_play": ("accessibility",),
     "media.music_app_control": ("accessibility",),
+    "media.system_control": ("accessibility",),
     "system.brightness": ("accessibility",),
 }
 
@@ -909,7 +914,7 @@ def _tool_missing_permissions(
         )
     elif tool in {"app.hide", "app.minimize"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-    elif tool in {"media.music_app_open_and_play", "media.music_app_control"}:
+    elif tool in {"media.music_app_open_and_play", "media.music_app_control", "media.system_control"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
         if tool == "media.music_app_open_and_play":
             values.extend(

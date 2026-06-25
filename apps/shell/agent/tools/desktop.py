@@ -496,6 +496,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "calendar.create_event",
     ),
     "media_control": (
+        "media.system_control",
         "media.apple_music_play",
         "media.apple_music_status",
         "media.apple_music_open_and_play",
@@ -2919,6 +2920,50 @@ def _system_media_key_press(action_name: str, control: str) -> dict[str, Any]:
     }
 
 
+def system_media_control(action: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.system_control")
+    clean_action = _clean_music_control_action(action)
+    media_key_control = "toggle" if clean_action in {"play", "pause"} else clean_action
+    media_key_result = _system_media_key_press("media.system_control", media_key_control)
+    media_key_data = (
+        media_key_result.get("data") if isinstance(media_key_result.get("data"), dict) else {}
+    )
+    data = {
+        "control": clean_action,
+        "media_key_control": media_key_control,
+        "player_state": "unknown",
+        "playback_state_unverified": True,
+    }
+    if media_key_data.get("media_key"):
+        data["media_key"] = media_key_data.get("media_key") or ""
+    if media_key_data.get("media_control"):
+        data["fallback_control"] = media_key_data.get("media_control") or ""
+    if media_key_result.get("ok"):
+        return {
+            "ok": True,
+            "action": "media.system_control",
+            "summary": f"Sent {clean_action} media key control to current media",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
+            "fallback_result": {"media_key": media_key_result},
+        }
+
+    payload = {
+        "ok": False,
+        "action": "media.system_control",
+        "summary": f"Could not send {clean_action} media key control to current media",
+        "error": str(media_key_result.get("error") or "system media control failed"),
+        "data": data,
+        "permission_error": bool(media_key_result.get("permission_error")),
+        "fallback_used": False,
+        "fallback_result": {"media_key": media_key_result},
+    }
+    return _with_permission_metadata("media.system_control", payload)
+
+
 def apple_music_open_and_play() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("media.apple_music_open_and_play")
@@ -5087,6 +5132,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "media.apple_music_status": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "media.system_control": ["accessibility"],
         "media.music_app_open_and_play": ["accessibility", "open_command"],
         "media.music_app_control": ["accessibility"],
         "system.brightness": ["accessibility"],
@@ -5144,6 +5190,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "media.apple_music_status": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "media.system_control": ["accessibility"],
         "media.music_app_control": ["accessibility"],
         "system.brightness": ["accessibility"],
         "notes.create": ["automation"],

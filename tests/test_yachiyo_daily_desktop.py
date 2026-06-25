@@ -1890,7 +1890,11 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
         ("播放继续", {"action": "play"}),
         ("跳过这首", {"action": "next"}),
         ("skip this song", {"action": "next"}),
+        ("next media track", {"action": "next"}),
+        ("previous media track", {"action": "previous"}),
         ("别放了", {"action": "pause"}),
+        ("pause current media", {"action": "pause"}),
+        ("resume playback", {"action": "play"}),
         ("关掉音乐", {"action": "pause"}),
     )
 
@@ -1900,12 +1904,12 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
         assert requests == [
             {
                 "protocol": "json_fallback",
-                "tool": "media.apple_music_control",
+                "tool": "media.system_control",
                 "input": tool_input,
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == (
-            "media.apple_music_control"
+            "media.system_control"
         )
 
     assert daily_desktop_entrypoint_requests("Apple Music 暂停") == [

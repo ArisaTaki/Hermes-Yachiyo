@@ -467,6 +467,14 @@ def _media_music_app_control(
     )
 
 
+def _media_system_control(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.media_system_control(str(payload.get("action") or ""))
+
+
 def _system_settings_open(
     broker: Any,
     payload: dict[str, Any],
@@ -814,6 +822,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_control": _media_apple_music_control,
     "media.music_app_open_and_play": _media_music_app_open_and_play,
     "media.music_app_control": _media_music_app_control,
+    "media.system_control": _media_system_control,
     "system.settings_open": _system_settings_open,
     "system.volume": _system_volume,
     "system.brightness": _system_brightness,

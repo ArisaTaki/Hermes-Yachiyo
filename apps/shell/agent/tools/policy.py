@@ -66,6 +66,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "media.music_app_open_and_play": "media_music_app_open_and_play",
     "media.music_app_control": "media_music_app_control",
+    "media.system_control": "media_system_control",
     "system.settings_open": "system_settings_open",
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
@@ -181,6 +182,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_control",
     "media.music_app_open_and_play",
     "media.music_app_control",
+    "media.system_control",
     "system.settings_open",
     "system.volume",
     "system.brightness",
@@ -504,6 +506,12 @@ class ToolDescriptor:
             if action not in {"toggle", "play", "pause", "next", "previous"}:
                 raise AgentRuntimeError(
                     "media.music_app_control 参数 action 必须是 toggle、play、pause、next 或 previous"
+                )
+        if self.name == "media.system_control":
+            action = str(payload.get("action") or "").strip()
+            if action not in {"toggle", "play", "pause", "next", "previous"}:
+                raise AgentRuntimeError(
+                    "media.system_control 参数 action 必须是 toggle、play、pause、next 或 previous"
                 )
         if self.name == "system.volume":
             action = str(payload.get("action") or "").strip()
@@ -1592,6 +1600,21 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("app_name", "action"),
+    ),
+    "media.system_control": ToolDescriptor(
+        name="media.system_control",
+        description=(
+            "Send a safe system media key to the current media session for explicit low-risk "
+            "playback controls. This does not verify which app receives the key."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": ["toggle", "play", "pause", "next", "previous"],
+                "description": "Playback control action to attempt with the system media key.",
+            }
+        },
+        required=("action",),
     ),
     "system.settings_open": ToolDescriptor(
         name="system.settings_open",

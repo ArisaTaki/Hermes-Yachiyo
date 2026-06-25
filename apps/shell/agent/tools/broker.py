@@ -816,6 +816,9 @@ class ToolBroker:
     def media_music_app_control(self, app_name: str, action: str) -> dict[str, Any]:
         return desktop.music_app_control(app_name, action)
 
+    def media_system_control(self, action: str) -> dict[str, Any]:
+        return desktop.system_media_control(action)
+
     def system_settings_open(self, target: str) -> dict[str, Any]:
         return desktop.system_settings_open(target)
 

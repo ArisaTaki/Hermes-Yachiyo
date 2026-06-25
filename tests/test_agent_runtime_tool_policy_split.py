@@ -100,6 +100,15 @@ def test_music_app_control_tool_is_low_risk_and_validates_payload() -> None:
         )
 
 
+def test_system_media_control_tool_is_low_risk_and_validates_payload() -> None:
+    assert "media.system_control" in LOW_RISK_DESKTOP_TOOL_NAMES
+    assert TOOL_FUNCTION_NAMES["media.system_control"] == "media_system_control"
+
+    ToolDescriptorRegistry.validate_payload("media.system_control", {"action": "pause"})
+    with pytest.raises(AgentRuntimeError, match="action"):
+        ToolDescriptorRegistry.validate_payload("media.system_control", {"action": "shuffle"})
+
+
 def test_write_patch_payload_validation_requires_patch_and_matching_hash_aliases() -> None:
     with pytest.raises(AgentRuntimeError, match="patch"):
         ToolDescriptorRegistry.validate_payload("workspace.write_patch", {"path": "a.txt"})
