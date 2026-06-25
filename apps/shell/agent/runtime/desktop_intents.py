@@ -4437,6 +4437,7 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     lowered = text.lower()
     if not (
         _is_current_ui_text_request(text)
+        or _is_ui_elements_location_request(text)
         or re.search(
             r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|识别)"
             r".{0,12}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
@@ -4487,6 +4488,43 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     elif re.search(r"(?:复选框|checkbox)", text, flags=re.IGNORECASE):
         role_filter = "checkbox"
     return {"role_filter": role_filter, "limit": 80}
+
+
+def _is_ui_elements_location_request(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(
+        r"(?:双击|点击|点一下|点按|单击|按一下|按下|"
+        r"\b(?:double\s+click|click|press|tap)\b)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    ui_kind = (
+        r"按钮|控件|输入框|文本框|输入栏|元素|选项|菜单项|菜单|复选框|"
+        r"button|control|ui element|text field|textbox|input|menu item|menu|checkbox"
+    )
+    return bool(
+        re.search(
+            rf"(?:{ui_kind}).{{0,16}}(?:在哪|在哪里|哪儿|哪里|位置|坐标|可见|看得到|能看到|有吗|有没有)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"(?:在哪|在哪里|哪儿|哪里|位置|坐标|可见|看得到|能看到|有哪些|有什么|哪些).{{0,16}}(?:{ui_kind})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bwhere\s+(?:is|are)\b.{0,32}\b"
+            r"(?:button|control|ui element|text field|textbox|input|menu item|menu|checkbox)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:can|could)\s+you\s+(?:see|find|locate)\b.{0,32}\b"
+            r"(?:button|control|ui element|text field|textbox|input|menu item|menu|checkbox)\b",
+            lowered,
+        )
+    )
 
 
 def _is_current_ui_text_request(text: str) -> bool:
@@ -11616,6 +11654,8 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
     if _has_browser_page_context(text):
         return None
     text = _strip_query(text)
+    if _is_ui_elements_location_request(text):
+        return None
     if _desktop_submit_foreground_action(text):
         return None
     patterns = (

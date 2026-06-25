@@ -8142,6 +8142,30 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         assert "model.request.started" not in visible_event_types
         assert "model.requested" not in visible_event_types
 
+        button_location = api.send_message("登录按钮在哪")
+        button_location_run = service.get_run(button_location["run_id"])
+        button_location_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(button_location_run["run_id"])["events"]
+        ]
+
+        assert button_location["ok"] is True
+        assert button_location["status"] == "completed"
+        assert button_location["agent_task"]["status"] == "completed"
+        assert button_location["agent_task"]["needs_user_action"] is False
+        assert button_location["agent_task"]["summary"] == "当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        assert button_location["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert button_location["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "button",
+            "limit": 80,
+        }
+        assert ui_calls[-1] == ("button", 80)
+        assert button_location_run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in button_location_event_types
+        assert "agent.desktop.intent_approval_required" not in button_location_event_types
+        assert "model.request.started" not in button_location_event_types
+        assert "model.requested" not in button_location_event_types
+
         page_buttons = api.send_message("当前页面有哪些按钮")
         page_task = runtime.state.get_task(page_buttons["task_id"])
         page_run = service.get_run(page_buttons["run_id"])

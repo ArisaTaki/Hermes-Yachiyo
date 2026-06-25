@@ -6786,6 +6786,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.ui_elements",
         "input": {"role_filter": "button", "limit": 80},
     }
+    assert daily_desktop_intent_tool_request("登录按钮在哪", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "button", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("能看到哪些按钮", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "button", "limit": 80},
+    }
+    assert daily_desktop_intent_tool_request("where is the login button", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "button", "limit": 80},
+    }
     assert daily_desktop_intent_tool_requests("what buttons are visible in Slack", allowed_tools) == [
         {
             "protocol": "json_fallback",

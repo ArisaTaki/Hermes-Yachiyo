@@ -434,6 +434,21 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"role_filter": "button", "limit": 80},
         ),
         (
+            "登录按钮在哪",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "能看到哪些按钮",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "where is the login button",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
             "Can you list the visible buttons?",
             "desktop.ui_elements",
             {"role_filter": "button", "limit": 80},

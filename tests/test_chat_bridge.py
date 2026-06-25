@@ -1468,6 +1468,26 @@ def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_fo
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
+        "where is the login button",
+    )
+
+    assert calls[-1] == ("ui", "button", 80)
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["summary"] == "当前 Google Chrome 界面控件：Button Send（640, 720）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "model.request.started" not in event_types
+
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
         "读一下当前界面文字",
     )
 
