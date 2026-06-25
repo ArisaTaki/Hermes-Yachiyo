@@ -722,6 +722,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "/Users/Shared"},
         ),
         (
+            "把下载文件夹在 Finder 里显示出来",
+            "desktop.reveal_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "show Downloads folder in Finder",
+            "desktop.reveal_path",
+            {"path": "~/Downloads"},
+        ),
+        (
             "打开当前工作区",
             "desktop.open_path",
             {"path": "."},
