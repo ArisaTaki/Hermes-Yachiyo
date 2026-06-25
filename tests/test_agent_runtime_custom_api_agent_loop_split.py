@@ -4361,6 +4361,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"role_filter": "button", "limit": 80},
         },
     ]
+    assert daily_desktop_intent_tool_requests("当前页面有哪些按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开微信窗口列表", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -6848,11 +6855,12 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.click",
         "input": {"selector": "text=发送", "click_count": 1},
     }
-    assert daily_desktop_intent_tool_request("向下滚动", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "desktop.safe_scroll",
-        "input": {"direction": "down", "pages": 1},
-    }
+    for prompt in ("向下滚动", "向下滚动一点", "当前窗口向下滚动一点"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_scroll",
+            "input": {"direction": "down", "pages": 1},
+        }
     for prompt in ("滚动一下", "页面滚动一下", "scroll", "scroll a little"):
         assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
             "protocol": "json_fallback",
@@ -6876,6 +6884,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_scroll",
         "input": {"direction": "up", "pages": 2},
     }
+    assert daily_desktop_intent_tool_request("向上滚动一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_scroll",
+        "input": {"direction": "up", "pages": 1},
+    }
     assert daily_desktop_intent_tool_request("翻到下一页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_scroll",
@@ -6894,6 +6907,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 Chrome 翻到下一页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_scroll",
+        "input": {"app_name": "Google Chrome", "direction": "down", "pages": 1},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 向下滚动一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_scroll",
         "input": {"app_name": "Google Chrome", "direction": "down", "pages": 1},
     }
     assert daily_desktop_intent_tool_request("scroll down 3 pages", allowed_tools) == {

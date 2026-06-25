@@ -3409,6 +3409,13 @@ def _is_browser_current_page_request(text: str) -> bool:
         return False
     if re.search(r"(?:总结|摘要|概括|summari[sz]e|summary)", text, flags=re.IGNORECASE):
         return False
+    if re.search(
+        r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作|"
+        r"buttons?|controls?|ui elements?|text fields?|inputs?)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
     return bool(
         re.search(
             r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|页|浏览器|标签页).{0,8}"
@@ -4835,6 +4842,8 @@ def _looks_like_generic_ui_scope(value: str) -> bool:
         "当前界面",
         "当前窗口",
         "当前屏幕",
+        "当前页面",
+        "当前网页",
         "当前应用有哪些",
         "当前app有哪些",
         "当前应用界面",
@@ -4842,12 +4851,18 @@ def _looks_like_generic_ui_scope(value: str) -> bool:
         "前台app",
         "前台界面",
         "前台窗口",
+        "前台页面",
+        "前台网页",
         "这个应用",
         "这个app",
         "这个界面",
         "这个窗口",
+        "这个页面",
+        "这个网页",
         "该应用",
         "该app",
+        "该页面",
+        "该网页",
         "thecurrent",
         "thecurrentapp",
         "currentapplication",
@@ -4883,14 +4898,22 @@ def _looks_like_generic_ui_scope(value: str) -> bool:
                 "当前应用",
                 "当前app",
                 "当前界面",
+                "当前页面",
+                "当前网页",
                 "前台应用",
                 "前台app",
                 "前台界面",
+                "前台页面",
+                "前台网页",
                 "这个应用",
                 "这个app",
                 "这个界面",
+                "这个页面",
+                "这个网页",
                 "该应用",
                 "该app",
+                "该页面",
+                "该网页",
             )
         )
         and any(marker in compact for marker in ("有哪些", "有什么", "有啥", "有哪个", "有哪几个"))
@@ -9974,7 +9997,7 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
             + r"(?P<direction>向下|往下|朝下|下|向上|往上|朝上|上)"
             + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)"
             + rf"(?:\s*{page_count.format(name='count')}\s*(?:页|屏|次))?"
-            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+            + r"(?:一点|点|一些|一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
         ),
         (
             zh_prefix

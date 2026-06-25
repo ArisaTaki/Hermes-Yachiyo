@@ -7295,6 +7295,34 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         assert "model.request.started" not in visible_event_types
         assert "model.requested" not in visible_event_types
 
+        page_buttons = api.send_message("当前页面有哪些按钮")
+        page_task = runtime.state.get_task(page_buttons["task_id"])
+        page_run = service.get_run(page_buttons["run_id"])
+        page_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(page_run["run_id"])["events"]
+        ]
+
+        assert page_buttons["ok"] is True
+        assert page_buttons["status"] == "completed"
+        assert page_buttons["agent_task"]["status"] == "completed"
+        assert page_buttons["agent_task"]["needs_user_action"] is False
+        assert page_buttons["agent_task"]["summary"] == "当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        assert page_buttons["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert page_buttons["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "button",
+            "limit": 80,
+        }
+        assert page_task is not None
+        assert page_task.status == TaskStatus.COMPLETED
+        assert ui_calls[-1] == ("button", 80)
+        assert page_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in page_event_types
+        assert "agent.tool.call" in page_event_types
+        assert "agent.desktop.intent_completed" in page_event_types
+        assert "model.request.started" not in page_event_types
+        assert "model.requested" not in page_event_types
+
         text_read = api.send_message("读取当前窗口内容")
         text_task = runtime.state.get_task(text_read["task_id"])
         text_run = service.get_run(text_read["run_id"])
@@ -8330,7 +8358,7 @@ def test_send_message_executes_direct_safe_scroll_page_task(tmp_path, monkeypatc
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
     try:
-        result = api.send_message("滚动到下面一点")
+        result = api.send_message("当前窗口向下滚动一点")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]
@@ -8407,7 +8435,7 @@ def test_send_message_executes_app_prefix_safe_scroll_without_model(tmp_path, mo
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
     try:
-        result = api.send_message("Chrome 向下滚动一下")
+        result = api.send_message("Chrome 向下滚动一点")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]

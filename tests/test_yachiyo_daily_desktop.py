@@ -337,6 +337,11 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"role_filter": "button", "limit": 80},
         ),
         (
+            "当前页面有哪些按钮",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
             "Can you list the visible buttons?",
             "desktop.ui_elements",
             {"role_filter": "button", "limit": 80},
@@ -1120,6 +1125,9 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
 
 def test_daily_desktop_entrypoint_routes_colloquial_safe_scroll_language() -> None:
     cases = (
+        ("向下滚动一点", {"direction": "down", "pages": 1}),
+        ("当前窗口向下滚动一点", {"direction": "down", "pages": 1}),
+        ("向上滚动一点", {"direction": "up", "pages": 1}),
         ("滚动到下面一点", {"direction": "down", "pages": 1}),
         ("滑到下方一点", {"direction": "down", "pages": 1}),
         ("滚动到上面一点", {"direction": "up", "pages": 1}),
