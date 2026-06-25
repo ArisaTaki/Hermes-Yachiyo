@@ -1155,11 +1155,15 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "terminal.run",
     ]
     today_1500 = f"{date.today().isoformat()}T15:00"
+    today_2000 = f"{date.today().isoformat()}T20:00"
     tomorrow = date.today() + timedelta(days=1)
+    after_tomorrow = date.today() + timedelta(days=2)
+    tomorrow_0900 = f"{tomorrow.isoformat()}T09:00"
     tomorrow_1000 = f"{tomorrow.isoformat()}T10:00"
     tomorrow_1100 = f"{tomorrow.isoformat()}T11:00"
     tomorrow_1500 = f"{tomorrow.isoformat()}T15:00"
     tomorrow_1600 = f"{tomorrow.isoformat()}T16:00"
+    after_tomorrow_0900 = f"{after_tomorrow.isoformat()}T09:00"
 
     assert daily_desktop_intent_tool_request("打开 https://example.com/docs", allowed_tools) == {
         "protocol": "json_fallback",
@@ -2906,6 +2910,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"body": "hello"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在备忘录里新建 明天买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "明天买牛奶"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在备忘录里创建一条笔记 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "hello"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("记一下 hello", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -2947,6 +2965,34 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "买牛奶"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("提醒我明天买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("新建提醒事项 明天买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("创建提醒事项 后天买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶", "due_at": after_tomorrow_0900},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("提醒我今晚买牛奶", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶", "due_at": today_2000},
         },
     ]
     assert daily_desktop_intent_tool_requests("提醒我明天下午三点开会", allowed_tools) == [

@@ -8313,6 +8313,9 @@ def _extract_reminder_date_only_datetime_and_title(value: str) -> tuple[datetime
     if not text:
         return None
     patterns = (
+        r"^(?P<day_cn>今天|今日|今晚|明天|明日|明晚|后天)\s*"
+        r"(?:要|去|做|进行|参加|记得|提醒我)?\s*(?P<title_after_cn>[^。！？!?]+)$",
+        r"^(?P<title_before_cn>[^。！？!?]+?)\s*(?P<day_cn_tail>今天|今日|今晚|明天|明日|明晚|后天)$",
         r"^(?P<day>today|tomorrow|tonight)\b\s*(?:to\s+)?(?P<title_after>[^.!?]+)$",
         r"^(?P<title_before>[^.!?]+?)\s+\b(?P<day>today|tomorrow|tonight)\b$",
     )
@@ -8321,13 +8324,30 @@ def _extract_reminder_date_only_datetime_and_title(value: str) -> tuple[datetime
         if not match:
             continue
         groups = match.groupdict()
-        title = _strip_schedule_title(groups.get("title_after") or groups.get("title_before") or "")
+        title = _strip_schedule_title(
+            groups.get("title_after_cn")
+            or groups.get("title_before_cn")
+            or groups.get("title_after")
+            or groups.get("title_before")
+            or ""
+        )
         if not title:
             continue
+        day_cn = groups.get("day_cn") or groups.get("day_cn_tail")
+        if day_cn:
+            return _datetime_for_chinese_day_marker(day_cn), title
         day = str(groups.get("day") or "").lower()
         hour = 20 if day == "tonight" else 9
         return _datetime_for_english_day_marker(day, hour, 0), title
     return None
+
+
+def _datetime_for_chinese_day_marker(day: str) -> datetime:
+    marker = str(day or "")
+    day_offset = 2 if marker == "后天" else 1 if marker in {"明天", "明日", "明晚"} else 0
+    hour = 20 if marker in {"今晚", "明晚"} else 9
+    target_date = date.today() + timedelta(days=day_offset)
+    return datetime.combine(target_date, time(hour=hour, minute=0))
 
 
 def _datetime_for_english_day_marker(day: str, hour: int, minute: int) -> datetime:
@@ -8457,6 +8477,10 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
         r"(?:备忘录|笔记|note)\s*[:：]\s*(?P<text_short_colon>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|到)?\s*(?:备忘录|笔记|note)(?:里|中|上)?\s*"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)?\s*(?P<text_note_create_in_app>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
         r"(?:备忘录|笔记|note)\s+"
         r"(?!(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)(?:\s|$))"
@@ -8501,6 +8525,7 @@ def _notes_create_and_type_text(value: str) -> str:
             or groups.get("text_short_colon")
             or groups.get("text_short")
             or groups.get("text_short_inline")
+            or groups.get("text_note_create_in_app")
             or groups.get("text_note_prefixed")
             or groups.get("text_memory")
             or groups.get("text_content")

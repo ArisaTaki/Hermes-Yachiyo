@@ -1834,9 +1834,11 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
 
 
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
+    today_2000 = f"{date.today().isoformat()}T20:00"
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
+    after_tomorrow_0900 = f"{(date.today() + timedelta(days=2)).isoformat()}T09:00"
 
     assert daily_desktop_entrypoint_requests("帮我新建备忘录：明天买牛奶") == [
         {
@@ -1851,6 +1853,8 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
         ("新建备忘录内容是 hello", "hello"),
         ("新建备忘录正文为 hello", "hello"),
         ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
+        ("在备忘录里新建 明天买牛奶", "明天买牛奶"),
+        ("在备忘录里创建一条笔记 hello", "hello"),
         ("add a note buy milk", "buy milk"),
         ("make a note to buy milk", "buy milk"),
     ):
@@ -1868,6 +1872,19 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             "input": {"action": "new_note"},
         }
     ]
+    for prompt, title, due_at in (
+        ("提醒我明天买牛奶", "买牛奶", tomorrow_0900),
+        ("新建提醒事项 明天买牛奶", "买牛奶", tomorrow_0900),
+        ("创建提醒事项 后天买牛奶", "买牛奶", after_tomorrow_0900),
+        ("提醒我今晚买牛奶", "买牛奶", today_2000),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "reminders.create",
+                "input": {"title": title, "due_at": due_at},
+            }
+        ]
     assert daily_desktop_entrypoint_requests("明天上午九点提醒我开会") == [
         {
             "protocol": "json_fallback",
