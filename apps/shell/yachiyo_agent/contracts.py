@@ -18,6 +18,7 @@ GroupMode = Literal["moderated", "round_robin", "debate", "pipeline", "parallel"
 MemoryScope = Literal["shared", "per_agent", "hybrid"]
 ApprovalStatus = Literal["pending", "approved", "rejected", "cancelled", "expired"]
 DesktopExecutionRisk = Literal["low", "medium", "high"]
+RecoveryActionKind = Literal["permission_recovery", "retry_original"]
 
 
 class _PublicSnapshot(BaseModel):
@@ -54,6 +55,24 @@ class DesktopActionRiskSnapshot(_PublicSnapshot):
     description: str = ""
     tools: list[str] = Field(default_factory=list)
     requires_approval: bool = False
+
+
+class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
+    daily_desktop_intent: bool = True
+    desktop_permission_recovery: bool = True
+    desktop_permission_retry: bool | None = None
+    recovery_action_kind: RecoveryActionKind | None = None
+    recovery_tool: str
+    recovery_input: dict[str, Any] = Field(default_factory=dict)
+    recovery_permission_target: str = ""
+    recovery_risk_level: DesktopExecutionRisk | str | None = None
+    recovery_retry_tool: str | None = None
+    recovery_retry_input: dict[str, Any] = Field(default_factory=dict)
+    recovery_retry_prompt: str | None = None
+    recovery_retry_source_event_type: str | None = None
+    recovery_retry_source_tool_call_id: str | None = None
+    source_task_id: str | None = None
+    source_task_title: str | None = None
 
 
 class ToolCatalogItemSnapshot(_PublicSnapshot):

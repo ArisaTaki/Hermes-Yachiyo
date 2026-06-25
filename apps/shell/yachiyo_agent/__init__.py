@@ -19,6 +19,7 @@ from .contracts import (
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
     DesktopExecutionRisk,
+    DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -29,6 +30,7 @@ from .contracts import (
     ReadinessSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
+    RecoveryActionKind,
     RerunRunRequest,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
@@ -83,7 +85,9 @@ from .policy import (
     task_requires_user_action,
 )
 from .recovery_actions import (
+    RECOVERY_ACTION_TASK_METADATA_KEYS,
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
+    recovery_action_metadata_snapshot,
     recovery_retry_context_payload,
 )
 from .service import YachiyoAgentService
@@ -123,6 +127,7 @@ __all__ = [
     "DesktopActionRiskSnapshot",
     "DesktopExecutionCapabilitySnapshot",
     "DesktopExecutionRisk",
+    "DesktopRecoveryActionMetadataSnapshot",
     "DESKTOP_TOOL_RISK_LEVELS",
     "desktop_tool_risk_level",
     "FutureTaskSnapshot",
@@ -137,10 +142,13 @@ __all__ = [
     "MemoryTraceSnapshot",
     "PublicRunEvent",
     "ReadinessSnapshot",
+    "RECOVERY_ACTION_TASK_METADATA_KEYS",
     "RECOVERY_RETRY_CONTEXT_EVENT_TYPE",
+    "recovery_action_metadata_snapshot",
     "recovery_retry_context_payload",
     "RestrictedPluginToolSnapshot",
     "RestrictedToolPluginSnapshot",
+    "RecoveryActionKind",
     "RerunRunRequest",
     "RunEventPageSnapshot",
     "RunTimelineChildSnapshot",

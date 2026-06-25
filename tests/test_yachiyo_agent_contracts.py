@@ -32,6 +32,7 @@ from apps.shell.yachiyo_agent import (
     ChatRunnableSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
+    DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -346,6 +347,51 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         DesktopExecutionCapabilitySnapshot(
             available=True,
             platform="macos",
+            unknown=True,
+        )
+
+
+def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:
+    snapshot = DesktopRecoveryActionMetadataSnapshot(
+        recovery_tool="system.settings_open",
+        recovery_input={"target": "屏幕录制权限"},
+        recovery_permission_target="screen_recording",
+        recovery_risk_level="low",
+        recovery_retry_tool="screen.capture",
+        recovery_retry_input={"display_id": "main"},
+        recovery_retry_prompt="截图当前屏幕",
+        recovery_retry_source_event_type="agent.desktop.permission_recovery",
+        recovery_retry_source_tool_call_id="tool-call-1",
+        source_task_id="task-source-screen",
+        source_task_title="截图当前桌面",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "daily_desktop_intent",
+        "desktop_permission_recovery",
+        "desktop_permission_retry",
+        "recovery_action_kind",
+        "recovery_tool",
+        "recovery_input",
+        "recovery_permission_target",
+        "recovery_risk_level",
+        "recovery_retry_tool",
+        "recovery_retry_input",
+        "recovery_retry_prompt",
+        "recovery_retry_source_event_type",
+        "recovery_retry_source_tool_call_id",
+        "source_task_id",
+        "source_task_title",
+    ]
+    assert payload["daily_desktop_intent"] is True
+    assert payload["desktop_permission_recovery"] is True
+    assert payload["recovery_tool"] == "system.settings_open"
+    assert payload["recovery_retry_tool"] == "screen.capture"
+    with pytest.raises(ValidationError):
+        DesktopRecoveryActionMetadataSnapshot(
+            recovery_tool="system.settings_open",
             unknown=True,
         )
 

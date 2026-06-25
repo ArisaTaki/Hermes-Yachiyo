@@ -18,6 +18,40 @@ export type RuntimeToolRecoveryRetryContext = Pick<
   'retry_input' | 'retry_prompt' | 'retry_source_event_type' | 'retry_source_tool_call_id' | 'retry_tool'
 >;
 
+export type RuntimeToolRecoveryActionTaskMetadata = {
+  daily_desktop_intent: true;
+  desktop_permission_recovery: true;
+  desktop_permission_retry?: true;
+  recovery_action_kind?: RuntimeToolRecoveryAction['action_kind'];
+  recovery_input: Record<string, unknown>;
+  recovery_permission_target: string;
+  recovery_risk_level?: string;
+  recovery_retry_input?: Record<string, unknown>;
+  recovery_retry_prompt?: string;
+  recovery_retry_source_event_type?: string;
+  recovery_retry_source_tool_call_id?: string;
+  recovery_retry_tool?: string;
+  recovery_tool: string;
+} & Record<string, unknown>;
+
+export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
+  'daily_desktop_intent',
+  'desktop_permission_recovery',
+  'desktop_permission_retry',
+  'recovery_action_kind',
+  'recovery_tool',
+  'recovery_input',
+  'recovery_permission_target',
+  'recovery_risk_level',
+  'recovery_retry_tool',
+  'recovery_retry_input',
+  'recovery_retry_prompt',
+  'recovery_retry_source_event_type',
+  'recovery_retry_source_tool_call_id',
+  'source_task_id',
+  'source_task_title',
+] as const;
+
 export function runtimeToolRecoveryActionPrompt(action: RuntimeToolRecoveryAction): string {
   const tool = String(action.tool || '').trim();
   const input = objectValue(action.input);
@@ -33,7 +67,7 @@ export function runtimeToolRecoveryActionPrompt(action: RuntimeToolRecoveryActio
 export function runtimeToolRecoveryActionTaskMetadata(
   action: RuntimeToolRecoveryAction,
   extra: Record<string, unknown> = {},
-): Record<string, unknown> {
+): RuntimeToolRecoveryActionTaskMetadata {
   const riskLevel = String(action.risk_level || '').trim()
     || (isLowRiskExecutableRecoveryTool(action.tool) ? 'low' : '');
   return {
