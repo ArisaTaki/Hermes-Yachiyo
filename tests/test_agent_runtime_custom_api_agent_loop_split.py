@@ -5292,6 +5292,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "latest_download"},
     }
+    assert daily_desktop_intent_tool_request("打开最后下载的文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_download"},
+    }
+    assert daily_desktop_intent_tool_request("打开上一个下载的文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "latest_download"},
+    }
     assert daily_desktop_intent_tool_request("open latest downloaded file", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -5405,6 +5415,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("open Finder then show Downloads folder", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载列表", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载记录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载页面", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载文件夹并排序", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("open downloads page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
     assert daily_desktop_intent_tool_request("在 Finder 中显示最近下载的文件", allowed_tools) == {
@@ -6388,6 +6423,15 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "unmute"},
     }
+    for prompt in (
+        "静音当前标签页",
+        "把当前标签页静音",
+        "取消静音当前标签页",
+        "mute current tab",
+        "mute this tab",
+        "unmute current tab",
+    ):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) is None
     assert daily_desktop_intent_tool_request("屏幕亮一点", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.brightness",

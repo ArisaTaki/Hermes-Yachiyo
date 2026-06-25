@@ -1112,6 +1112,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "latest_download"},
         ),
         (
+            "打开最后下载的文件",
+            "desktop.open_path",
+            {"path": "latest_download"},
+        ),
+        (
+            "打开上一个下载的文件",
+            "desktop.open_path",
+            {"path": "latest_download"},
+        ),
+        (
             "打开当前选中的 Finder 文件",
             "desktop.open_path",
             {"path": "finder_selection"},
@@ -1148,6 +1158,31 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
         ),
         (
             "打开下载目录给我看",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "打开下载列表",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "打开下载记录",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "打开下载页面",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "打开下载文件夹并排序",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "open downloads page",
             "desktop.open_path",
             {"path": "~/Downloads"},
         ),
@@ -2197,6 +2232,24 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.volume"
+
+    for prompt in (
+        "静音当前标签页",
+        "把当前标签页静音",
+        "取消静音当前标签页",
+        "mute current tab",
+        "mute this tab",
+        "unmute current tab",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == []
+
+    assert daily_desktop_entrypoint_requests("当前标签页是什么") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
 
     brightness_cases = (
         ("亮一点", {"action": "up", "step": 2}),

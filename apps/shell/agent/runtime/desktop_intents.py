@@ -248,6 +248,9 @@ _COMMON_REVEAL_PATHS = {
     "downloadsfolder": "~/Downloads",
     "downloadsdirectory": "~/Downloads",
     "下载": "~/Downloads",
+    "下载列表": "~/Downloads",
+    "下载记录": "~/Downloads",
+    "下载页面": "~/Downloads",
     "下载文件夹": "~/Downloads",
     "下载目录": "~/Downloads",
     "我的下载": "~/Downloads",
@@ -3789,6 +3792,8 @@ def _is_browser_current_page_link_copy_request(text: str) -> bool:
 
 def _is_browser_current_page_request(text: str) -> bool:
     lowered = text.lower()
+    if _looks_like_browser_tab_audio_request(text):
+        return False
     if _is_browser_current_page_link_copy_request(text):
         return False
     if re.search(r"(?:刷新|重新加载|reload|refresh)", text, flags=re.IGNORECASE):
@@ -3973,6 +3978,8 @@ def _is_browser_screenshot_request(text: str) -> bool:
 
 def _system_volume_request(text: str) -> dict[str, Any] | None:
     lowered = text.lower()
+    if _looks_like_browser_tab_audio_request(text):
+        return None
     if re.search(
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*"
         r"(?:调|调到|调至|调成|设到|设成|设置到|到)?\s*(?:一半|半)"
@@ -4081,6 +4088,32 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ):
         return {"action": "status"}
     return None
+
+
+def _looks_like_browser_tab_audio_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"(?:标签页|页签|浏览器标签|当前标签|这个标签).{0,8}"
+            r"(?:静音|取消静音|解除静音|声音|音量)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:静音|取消静音|解除静音|关闭声音|打开声音).{0,8}"
+            r"(?:标签页|页签|浏览器标签|当前标签|这个标签)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:mute|unmute)\s+(?:the\s+)?(?:current\s+|this\s+)?tab\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:current\s+|this\s+)?tab\s+(?:audio|sound|volume)\b",
+            lowered,
+        )
+    )
 
 
 def _system_brightness_request(text: str) -> dict[str, Any] | None:
@@ -5705,6 +5738,8 @@ def _looks_like_app_status_request(text: str) -> bool:
 
 def _desktop_open_path(text: str) -> str:
     original_text = str(text or "").strip()
+    if _downloads_folder_open_path_request(original_text):
+        return "~/Downloads"
     if _finder_selection_reveal_path_request(original_text):
         return ""
     if _finder_selection_open_path_request(original_text):
@@ -5722,6 +5757,8 @@ def _desktop_open_path(text: str) -> str:
     if _latest_download_open_path_request(original_text):
         return "latest_download"
     text = _strip_finder_path_prefix(original_text)
+    if _downloads_folder_open_path_request(text):
+        return "~/Downloads"
     if _finder_selection_reveal_path_request(text):
         return ""
     if _finder_selection_open_path_request(text):
@@ -5973,17 +6010,43 @@ def _latest_download_open_path_request(text: str) -> bool:
     lowered = str(text or "").strip().lower()
     return bool(
         re.search(
-            r"(?:打开|开启).{0,12}(?:最近|最新|刚刚|刚才).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
+            r"(?:打开|开启).{0,12}(?:最近|最新|刚刚|刚才|最后|最后一个|上一个).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
             text,
         )
         or re.search(
             r"(?:打开|开启).{0,12}(?:下载|下载目录|下载文件夹).{0,8}"
-            r"(?:最近|最新|刚刚|刚才).{0,8}(?:文件|项目|内容|东西)?",
+            r"(?:最近|最新|刚刚|刚才|最后|最后一个|上一个).{0,8}(?:文件|项目|内容|东西)?",
             text,
         )
         or re.search(
             r"\bopen\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+"
             r"(?:download|downloaded\s+(?:file|item))\b",
+            lowered,
+        )
+    )
+
+
+def _downloads_folder_open_path_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if re.search(r"(?:finder|访达)", text, flags=re.IGNORECASE) and re.search(
+        r"(?:显示出来|显示|定位|找一下|找到|show|reveal|locate)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|开启|查看|看看|进入)\s*"
+            r"(?:下载|下载列表|下载记录|下载页面|下载文件夹|下载目录|我的下载)"
+            r"(?:文件夹|目录|列表|记录|页面)?"
+            r"(?:\s*(?:并|然后|后|之后|再)\s*(?:排序|排列|看看|查看))?"
+            r"(?:一下|下|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+            text,
+        )
+        or re.search(
+            r"\b(?:open|view)\s+(?:the\s+)?downloads"
+            r"(?:\s+(?:folder|directory|list|page))?\b",
             lowered,
         )
     )
