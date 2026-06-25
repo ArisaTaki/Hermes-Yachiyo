@@ -140,6 +140,27 @@ _SAFE_KEYS: dict[str, tuple[int, str]] = {
     "show_desktop": (103, "Show Desktop"),
 }
 
+_HOTKEY_KEY_CODES: dict[str, int] = {
+    "return": 36,
+    "enter": 36,
+    "tab": 48,
+    "space": 49,
+    "escape": 53,
+    "esc": 53,
+    "delete": 51,
+    "backspace": 51,
+    "home": 115,
+    "end": 119,
+    "page_up": 116,
+    "pageup": 116,
+    "page_down": 121,
+    "pagedown": 121,
+    "left": 123,
+    "right": 124,
+    "down": 125,
+    "up": 126,
+}
+
 _APPLE_MUSIC_MEDIA_KEY_FALLBACKS: dict[str, tuple[int, str, str]] = {
     "toggle": (100, "Play/Pause", "toggle"),
     "play": (100, "Play/Pause", "toggle"),
@@ -3611,26 +3632,42 @@ def _send_desktop_keystroke(
     modifier_clause = ""
     if clean_modifiers:
         modifier_clause = " using {" + ", ".join(f"{item} down" for item in clean_modifiers) + "}"
-    result = _run_osascript(
-        f"""
-        on run argv
-            set keyName to item 1 of argv
-            tell application "System Events" to keystroke keyName{modifier_clause}
-            return "hotkey"
-        end run
-        """,
-        [clean_key],
-    )
+    key_code = _HOTKEY_KEY_CODES.get(clean_key.lower())
+    if key_code is None:
+        result = _run_osascript(
+            f"""
+            on run argv
+                set keyName to item 1 of argv
+                tell application "System Events" to keystroke keyName{modifier_clause}
+                return "hotkey"
+            end run
+            """,
+            [clean_key],
+        )
+    else:
+        result = _run_osascript(
+            f"""
+            on run argv
+                set keyCodeValue to item 1 of argv as integer
+                tell application "System Events" to key code keyCodeValue{modifier_clause}
+                return "hotkey"
+            end run
+            """,
+            [str(key_code)],
+        )
     if not result["ok"]:
         return _with_permission_metadata(
             action_name,
             {**result, "action": action_name, "summary": f"{action_name} failed"},
         )
+    data = {"key": clean_key, "modifiers": clean_modifiers}
+    if key_code is not None:
+        data["key_code"] = key_code
     return {
         "ok": True,
         "action": action_name,
         "summary": f"Pressed hotkey { '+'.join([*clean_modifiers, clean_key]) }",
-        "data": {"key": clean_key, "modifiers": clean_modifiers},
+        "data": data,
         "permission_error": False,
         "fallback_used": False,
     }

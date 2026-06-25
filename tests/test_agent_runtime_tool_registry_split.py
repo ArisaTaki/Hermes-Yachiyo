@@ -4241,6 +4241,30 @@ def test_desktop_safe_key_uses_shift_modifier_for_shift_tab(monkeypatch) -> None
     assert calls[0][0][-2:] == ["48", "1"]
 
 
+def test_desktop_hotkey_uses_key_code_for_special_keys(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_hotkey("tab", ["command"])
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.hotkey",
+        "summary": "Pressed hotkey command+tab",
+        "data": {"key": "tab", "modifiers": ["command"], "key_code": 48},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "key code keyCodeValue using {command down}" in calls[0][0][2]
+    assert calls[0][0][-1] == "48"
+
+
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(

@@ -8014,6 +8014,12 @@ def test_chat_bridge_quick_message_routes_system_hotkeys_to_approval_and_complet
                 ("tab", ["command"]),
                 "已发送快捷键：Command+tab。",
             ),
+            (
+                "switch to next app",
+                {"key": "tab", "modifiers": ["command"]},
+                ("tab", ["command"]),
+                "已发送快捷键：Command+tab。",
+            ),
         )
         for text, input_preview, expected_call, summary in cases:
             result = bridge.send_quick_message(
@@ -8057,6 +8063,7 @@ def test_chat_bridge_quick_message_routes_system_hotkeys_to_approval_and_complet
 
         assert hotkey_calls == [
             ("f", ["control", "command"]),
+            ("tab", ["command"]),
             ("tab", ["command"]),
         ]
     finally:

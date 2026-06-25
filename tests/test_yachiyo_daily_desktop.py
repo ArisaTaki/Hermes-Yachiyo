@@ -134,6 +134,16 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
             "desktop.hotkey",
             {"key": "tab", "modifiers": ["command"]},
         ),
+        (
+            "切到下一个应用",
+            "desktop.hotkey",
+            {"key": "tab", "modifiers": ["command"]},
+        ),
+        (
+            "switch to next app",
+            "desktop.hotkey",
+            {"key": "tab", "modifiers": ["command"]},
+        ),
         ("打开启动台", "app.open", {"app_name": "Launchpad"}),
         ("open launchpad", "app.open", {"app_name": "Launchpad"}),
         ("打开控制中心", "app.open", {"app_name": "Control Center"}),

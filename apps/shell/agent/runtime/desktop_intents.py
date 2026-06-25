@@ -1805,6 +1805,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if _looks_like_project_or_design_request(text):
         return []
 
+    system_hotkey = _system_desktop_hotkey_request(text)
+    if system_hotkey:
+        candidates.append(_request("desktop.hotkey", system_hotkey))
+
     app_foreground_payload = _app_open_or_focus_foreground_action_request(text)
     if app_foreground_payload:
         candidates.append(
@@ -1939,10 +1943,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_settings_target = _direct_system_settings_tool_target(text)
     if system_settings_target:
         candidates.append(_request("system.settings_open", {"target": system_settings_target}))
-
-    system_hotkey = _system_desktop_hotkey_request(text)
-    if system_hotkey:
-        candidates.append(_request("desktop.hotkey", system_hotkey))
 
     apple_music_search_play = _apple_music_search_play_query(text)
     if apple_music_search_play:
@@ -7776,6 +7776,8 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
 def _system_desktop_hotkey_request(text: str) -> dict[str, Any] | None:
     if _is_maximize_current_window_request(text):
         return {"key": "f", "modifiers": ["control", "command"]}
+    if _is_next_app_switch_request(text):
+        return {"key": "tab", "modifiers": ["command"]}
     if _is_previous_app_switch_request(text):
         return {"key": "tab", "modifiers": ["command"]}
     return None
@@ -7827,6 +7829,24 @@ def _is_previous_app_switch_request(text: str) -> bool:
             lowered,
         )
         or re.search(r"\b(?:switch|go)\s+to\s+(?:the\s+)?previous\s+app\b", lowered)
+    )
+
+
+def _is_next_app_switch_request(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:切换到|切换|切到|切去|跳到|转到)\s*"
+            r"(?:下一个|下个|后一个|后个)\s*(?:应用|app|程序|软件)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:switch|go|move)\s+(?:to\s+)?(?:the\s+)?next\s+"
+            r"(?:app|application)\b",
+            lowered,
+        )
     )
 
 

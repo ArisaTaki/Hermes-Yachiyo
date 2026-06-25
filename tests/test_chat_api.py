@@ -5496,6 +5496,16 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
                 {"key": "tab", "modifiers": ["command"]},
             ),
             (
+                "切到下一个应用",
+                "desktop.hotkey",
+                {"key": "tab", "modifiers": ["command"]},
+            ),
+            (
+                "switch to next app",
+                "desktop.hotkey",
+                {"key": "tab", "modifiers": ["command"]},
+            ),
+            (
                 "Could you open Chrome and press Command L?",
                 "app.open_and_hotkey",
                 {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
