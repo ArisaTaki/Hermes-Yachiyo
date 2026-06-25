@@ -2217,6 +2217,35 @@ def test_daily_desktop_entrypoint_routes_dynamic_sources_to_reminders() -> None:
         "把剪贴板内容加入提醒事项",
         allowed_tools=("clipboard.read", "reminders.create"),
     ) == []
+    current_page_link_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接创建成提醒事项",
+        "把当前网页链接加入提醒事项",
+        "用当前网页链接新建提醒",
+        "create a reminder from current page link",
+        "add current page link to reminders",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_page_link_reminder_requests
+    assert daily_desktop_entrypoint_requests(
+        "把当前网页链接加入提醒事项",
+        allowed_tools=("browser.current_page", "reminders.create"),
+    ) == []
     assert daily_desktop_entrypoint_requests("新建提醒事项：买牛奶") == [
         {
             "protocol": "json_fallback",
@@ -2285,6 +2314,35 @@ def test_daily_desktop_entrypoint_routes_dynamic_sources_to_calendar() -> None:
     assert daily_desktop_entrypoint_requests(
         "把剪贴板内容加入日历",
         allowed_tools=("clipboard.read", "calendar.create_event"),
+    ) == []
+    current_page_link_calendar_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接创建成日历事件",
+        "把当前网页链接加入日历",
+        "用当前网页链接新建日程",
+        "create a calendar event from current page link",
+        "add current page link to calendar",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_page_link_calendar_requests
+    assert daily_desktop_entrypoint_requests(
+        "把当前网页链接加入日历",
+        allowed_tools=("browser.current_page", "calendar.create_event"),
     ) == []
 
 

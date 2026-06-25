@@ -4601,6 +4601,10 @@ def _dynamic_source_to_reminder_tool_requests(text: str) -> list[dict[str, Any]]
     requests: list[dict[str, Any]] = []
     if source == "selected_text":
         requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    elif source == "current_page_link":
+        requests.append(
+            _request("desktop.safe_shortcut", {"action": "copy_current_page_link"})
+        )
     requests.extend(
         [
             _request(
@@ -4621,6 +4625,8 @@ def _dynamic_source_to_reminder_request(text: str) -> str:
         return "selected_text"
     if _clipboard_to_reminder_request(clean):
         return "clipboard"
+    if _current_page_link_to_reminder_request(clean):
+        return "current_page_link"
     return ""
 
 
@@ -4708,6 +4714,48 @@ def _clipboard_to_reminder_request(text: str) -> bool:
     )
 
 
+def _current_page_link_to_reminder_request(text: str) -> bool:
+    current_page_link_source = _communication_current_page_link_source_pattern()
+    reminder_target = _reminder_target_pattern()
+    return bool(
+        re.search(
+            rf"^(?:把|将)?\s*(?:{current_page_link_source})\s*"
+            rf"(?:新建成|创建成|设成|设置成|加入|加到|添加到|新增到|放到|放进|"
+            rf"保存到|存到)\s*(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*(?:{current_page_link_source})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*(?:{reminder_target})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*(?:{current_page_link_source})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add|set)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+            r"(?:from|with|using)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:add|save|put)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)\s+"
+            r"(?:to|into|in)\s+reminders?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _reminder_target_pattern() -> str:
     return r"(?:提醒事项|提醒|reminder|reminders)"
 
@@ -4719,6 +4767,10 @@ def _dynamic_source_to_calendar_tool_requests(text: str) -> list[dict[str, Any]]
     requests: list[dict[str, Any]] = []
     if source == "selected_text":
         requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    elif source == "current_page_link":
+        requests.append(
+            _request("desktop.safe_shortcut", {"action": "copy_current_page_link"})
+        )
     requests.extend(
         [
             _request(
@@ -4739,6 +4791,8 @@ def _dynamic_source_to_calendar_request(text: str) -> str:
         return "selected_text"
     if _clipboard_to_calendar_request(clean):
         return "clipboard"
+    if _current_page_link_to_calendar_request(clean):
+        return "current_page_link"
     return ""
 
 
@@ -4819,6 +4873,49 @@ def _clipboard_to_calendar_request(text: str) -> bool:
         or re.search(
             r"^(?:add|save|put)\s+(?:the\s+)?"
             r"(?:clipboard(?:\s+contents?)?|the\s+clipboard(?:\s+contents?)?)\s+"
+            r"(?:to|into|in)\s+(?:the\s+)?calendar$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _current_page_link_to_calendar_request(text: str) -> bool:
+    current_page_link_source = _communication_current_page_link_source_pattern()
+    calendar_target = _calendar_target_pattern()
+    return bool(
+        re.search(
+            rf"^(?:把|将)?\s*(?:{current_page_link_source})\s*"
+            rf"(?:新建成|创建成|设成|设置成|加入|加到|添加到|新增到|放到|放进|"
+            rf"保存到|存到)\s*(?:{calendar_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*(?:{current_page_link_source})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:{calendar_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*(?:{calendar_target})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*(?:{current_page_link_source})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add|set)\s+(?:a\s+)?(?:new\s+)?"
+            r"(?:calendar\s+event|event)\s+(?:from|with|using)\s+(?:the\s+)?"
+            r"(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:add|save|put)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)\s+"
             r"(?:to|into|in)\s+(?:the\s+)?calendar$",
             text,
             flags=re.IGNORECASE,

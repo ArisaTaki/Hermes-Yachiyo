@@ -3201,6 +3201,41 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         )
         == []
     )
+    current_page_link_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接创建成提醒事项",
+        "把当前网页链接加入提醒事项",
+        "用当前网页链接新建提醒",
+        "create a reminder from current page link",
+        "add current page link to reminders",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == current_page_link_reminder_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把当前网页链接加入提醒事项",
+            ["browser.current_page", "reminders.create"],
+        )
+        == []
+    )
     assert daily_desktop_intent_tool_requests("打开提醒事项添加买牛奶", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -3323,6 +3358,41 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         daily_desktop_intent_tool_requests(
             "把剪贴板内容加入日历",
             ["clipboard.read", "calendar.create_event"],
+        )
+        == []
+    )
+    current_page_link_calendar_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接创建成日历事件",
+        "把当前网页链接加入日历",
+        "用当前网页链接新建日程",
+        "create a calendar event from current page link",
+        "add current page link to calendar",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == current_page_link_calendar_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把当前网页链接加入日历",
+            ["browser.current_page", "calendar.create_event"],
         )
         == []
     )
