@@ -732,6 +732,18 @@ def daily_desktop_intent_tool_requests(
         ):
             return app_find_open_first_sequence
         return []
+    click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
+    if click_type_sequence:
+        if all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
+            return click_type_sequence
+        return []
+    app_prefix_click_type_sequence = _app_prefix_click_type_tool_requests(context)
+    if app_prefix_click_type_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
+        ):
+            return app_prefix_click_type_sequence
+        return []
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -844,13 +856,17 @@ def daily_desktop_intent_tool_requests(
     ):
         return app_type_into_ui_element_sequence
     click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
-    if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
-        return click_type_sequence
+    if click_type_sequence:
+        if all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
+            return click_type_sequence
+        return []
     app_prefix_click_type_sequence = _app_prefix_click_type_tool_requests(context)
-    if app_prefix_click_type_sequence and all(
-        str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
-    ):
-        return app_prefix_click_type_sequence
+    if app_prefix_click_type_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
+        ):
+            return app_prefix_click_type_sequence
+        return []
     app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
     if app_browser_action_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
@@ -939,7 +955,11 @@ def daily_desktop_intent_tool_requests(
         return app_screen_capture_sequence
     foreground_type_into_ui_element = (
         None
-        if _app_scoped_type_into_ui_element_request(context)
+        if (
+            _app_scoped_type_into_ui_element_request(context)
+            or _app_open_or_focus_click_type_tool_requests(context)
+            or _app_prefix_click_type_tool_requests(context)
+        )
         else _desktop_type_into_ui_element(context)
     )
     if foreground_type_into_ui_element and "desktop.type_into_ui_element" in allowed:
@@ -10200,7 +10220,7 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
     parsed = _click_ui_element_then_type(followup)
     if not parsed:
         return []
-    click_payload, typed_text, submit_return = parsed
+    click_payload, typed_text, submit_action = parsed
     if _is_search_ui_input_click(click_payload):
         requests = [
             _request(
@@ -10209,7 +10229,7 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
             ),
             _request("desktop.safe_type_text", {"text": typed_text}),
         ]
-        if submit_return:
+        if submit_action:
             requests.append(_request("desktop.search_submit", {}))
         return requests
     requests = [
@@ -10219,8 +10239,8 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
         ),
         _request("desktop.safe_type_text", {"text": typed_text}),
     ]
-    if submit_return:
-        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    if submit_action:
+        requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
     return requests
 
 
@@ -10439,6 +10459,8 @@ def _music_app_search_play_query_from_followup(value: str) -> str:
 def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
     split = _known_app_prefix_split(text)
     if not split:
+        split = _known_app_prefix_split(_strip_app_search_scope_prefix(text))
+    if not split:
         return []
     raw_app, app_name, followup = split
     if (
@@ -10450,7 +10472,7 @@ def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
     parsed = _click_ui_element_then_type(followup)
     if not parsed:
         return []
-    click_payload, typed_text, submit_return = parsed
+    click_payload, typed_text, submit_action = parsed
     if _is_search_ui_input_click(click_payload):
         requests = [
             _request(
@@ -10459,7 +10481,7 @@ def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
             ),
             _request("desktop.safe_type_text", {"text": typed_text}),
         ]
-        if submit_return:
+        if submit_action:
             requests.append(_request("desktop.search_submit", {}))
         return requests
     requests = [
@@ -10469,8 +10491,8 @@ def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:
         ),
         _request("desktop.safe_type_text", {"text": typed_text}),
     ]
-    if submit_return:
-        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    if submit_action:
+        requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
     return requests
 
 
@@ -10673,14 +10695,14 @@ def _foreground_click_search_type_tool_requests(text: str) -> list[dict[str, Any
     parsed = _click_ui_element_then_type(text)
     if not parsed:
         return []
-    click_payload, typed_text, submit_return = parsed
+    click_payload, typed_text, submit_action = parsed
     if not _is_search_ui_input_click(click_payload):
         return []
     requests = [
         _request("desktop.safe_shortcut", {"action": "find"}),
         _request("desktop.safe_type_text", {"text": typed_text}),
     ]
-    if submit_return:
+    if submit_action:
         requests.append(_request("desktop.search_submit", {}))
     return requests
 
@@ -11851,7 +11873,7 @@ def _safe_shortcut_action_sequence(value: str) -> list[str]:
     return actions if len(actions) >= 2 else []
 
 
-def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] | None:
+def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, str] | None:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
@@ -11881,9 +11903,19 @@ def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] 
                 "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
             },
             typed_text,
-            _typed_text_has_return_followup(raw_text, raw_label),
+            _click_type_submit_action(raw_text, raw_label),
         )
     return None
+
+
+def _click_type_submit_action(raw_text: str, target: str) -> str:
+    if _typed_text_has_submit_followup(raw_text) or _safe_type_text_followup_has_send_intent(raw_text):
+        return "send"
+    if not _typed_text_has_return_followup(raw_text, target):
+        return ""
+    if re.search(r"(?:搜索|查找|检索|search|find|query)", str(target or ""), flags=re.IGNORECASE):
+        return "search"
+    return "confirm"
 
 
 def _is_search_ui_input_click(payload: dict[str, Any]) -> bool:

@@ -2570,6 +2570,91 @@ def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
     )
 
 
+def test_daily_desktop_entrypoint_routes_click_type_submit_sequences() -> None:
+    assert daily_desktop_entrypoint_requests("Slack 点击消息框输入 hello 并发送") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Slack 点击消息框输入 hello 并发送") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack click message field and type hello then send") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "message",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack 点击搜索框输入 Alice 并回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_app_scoped_safe_keys_and_scroll() -> None:
     assert daily_desktop_entrypoint_requests("在 Slack 里按 Tab") == [
         {

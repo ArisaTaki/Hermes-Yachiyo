@@ -1124,6 +1124,113 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
     ) == []
 
 
+def test_daily_desktop_intent_planner_routes_click_type_submit_sequences() -> None:
+    allowed_tools = [
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    assert daily_desktop_intent_tool_requests("Slack 点击消息框输入 hello 并发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "打开 Slack 点击消息框输入 hello 并发送",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack click message field and type hello then send",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "message",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Slack 点击搜索框输入 Alice 并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "Slack click message field and type hello then send",
+            ["app.focus_and_click_ui_element", "desktop.safe_type_text", "desktop.hotkey"],
+        )
+        == []
+    )
+
+
 def test_daily_desktop_intent_planner_routes_app_command_palette_and_preferences() -> None:
     allowed_tools = [
         "app.open_and_safe_shortcut",
