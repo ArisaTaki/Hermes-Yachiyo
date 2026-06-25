@@ -68,6 +68,7 @@ TOOL_FUNCTION_NAMES = {
     "system.settings_open": "system_settings_open",
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
+    "system.display_sleep": "system_display_sleep",
     "clipboard.write": "clipboard_write",
     "clipboard.read": "clipboard_read",
     "notes.create": "notes_create",
@@ -179,6 +180,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "system.settings_open",
     "system.volume",
     "system.brightness",
+    "system.display_sleep",
     "clipboard.write",
     "clipboard.read",
     "notes.create",
@@ -1620,6 +1622,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("action",),
+    ),
+    "system.display_sleep": ToolDescriptor(
+        name="system.display_sleep",
+        description=(
+            "Put the local macOS display to sleep for explicit low-risk daily desktop commands. "
+            "This does not shut down, restart, log out, or sleep the whole Mac."
+        ),
+        properties={},
     ),
     "clipboard.write": ToolDescriptor(
         name="clipboard.write",

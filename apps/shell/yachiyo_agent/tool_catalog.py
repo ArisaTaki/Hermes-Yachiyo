@@ -291,6 +291,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "system.brightness": [
             "Uses local brightness key events for relative up/down changes; exact brightness percentages are not read or stored.",
         ],
+        "system.display_sleep": [
+            "Uses pmset displaysleepnow to sleep only the display; it does not shut down, restart, log out, or sleep the whole Mac.",
+        ],
         "clipboard.write": [
             "Writes explicit user-provided text to the system clipboard and records only character count.",
         ],

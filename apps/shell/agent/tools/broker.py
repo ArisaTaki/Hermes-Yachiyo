@@ -833,6 +833,9 @@ class ToolBroker:
     ) -> dict[str, Any]:
         return desktop.system_brightness(action, step=step)
 
+    def system_display_sleep(self) -> dict[str, Any]:
+        return desktop.system_display_sleep()
+
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 

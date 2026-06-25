@@ -487,6 +487,14 @@ def _system_brightness(
     )
 
 
+def _system_display_sleep(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.system_display_sleep()
+
+
 def _clipboard_write(
     broker: Any,
     payload: dict[str, Any],
@@ -789,6 +797,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "system.settings_open": _system_settings_open,
     "system.volume": _system_volume,
     "system.brightness": _system_brightness,
+    "system.display_sleep": _system_display_sleep,
     "clipboard.write": _clipboard_write,
     "clipboard.read": _clipboard_read,
     "notes.create": _notes_create,

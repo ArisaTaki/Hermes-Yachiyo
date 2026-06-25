@@ -7300,6 +7300,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["system.brightness"]["risk_level"] == "low"
     assert tools["system.brightness"]["input_schema"]["required"] == ["action"]
     assert any("brightness key events" in note for note in tools["system.brightness"]["fallback_notes"])
+    assert tools["system.display_sleep"]["capability_id"] == "desktop_execution"
+    assert tools["system.display_sleep"]["risk_level"] == "low"
+    assert tools["system.display_sleep"]["input_schema"]["required"] == []
+    assert any("displaysleepnow" in note for note in tools["system.display_sleep"]["fallback_notes"])
     assert tools["clipboard.write"]["capability_id"] == "desktop_execution"
     assert tools["clipboard.write"]["risk_level"] == "low"
     assert tools["clipboard.write"]["input_schema"]["required"] == ["text"]

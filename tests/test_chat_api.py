@@ -4259,6 +4259,60 @@ def test_send_message_executes_direct_system_brightness_task(tmp_path, monkeypat
         store.close()
 
 
+def test_send_message_executes_direct_system_display_sleep_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    display_sleep_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct display sleep task should not call model")
+        ),
+    )
+
+    def fake_system_display_sleep() -> dict:
+        display_sleep_calls.append("called")
+        return {
+            "ok": True,
+            "action": "system.display_sleep",
+            "summary": "Display sleep requested",
+            "data": {"requested_action": "sleep"},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_display_sleep",
+        fake_system_display_sleep,
+    )
+    try:
+        for index, text in enumerate(("关闭屏幕", "turn off the display"), start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已让显示器睡眠。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.display_sleep"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已让显示器睡眠。"
+            assert display_sleep_calls == ["called"] * index
+            assert run["status"] == "completed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

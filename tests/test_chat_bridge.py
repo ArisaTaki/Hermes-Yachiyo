@@ -7133,6 +7133,7 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
     music_app_calls: list[str] = []
     volume_calls: list[tuple[str, object, object]] = []
     brightness_calls: list[tuple[str, object]] = []
+    display_sleep_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: _FakeNoDefaultProfileService(),
@@ -7214,6 +7215,15 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
             },
         }
 
+    def fake_system_display_sleep() -> dict:
+        display_sleep_calls.append("called")
+        return {
+            "ok": True,
+            "action": "system.display_sleep",
+            "summary": "Display sleep requested",
+            "data": {"requested_action": "sleep"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_apple_music_control)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_play", fake_apple_music_play)
     monkeypatch.setattr(
@@ -7226,6 +7236,10 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
     )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_display_sleep",
+        fake_system_display_sleep,
+    )
     bridge = ChatBridge(runtime)
     try:
         cases = (
@@ -7264,6 +7278,12 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
                 "system.brightness",
                 {"action": "down"},
                 "已调低屏幕亮度（2 格）。",
+            ),
+            (
+                "关闭屏幕",
+                "system.display_sleep",
+                {},
+                "已让显示器睡眠。",
             ),
         )
         for prompt, tool_name, tool_input, expected_summary in cases:
@@ -7311,6 +7331,7 @@ def test_chat_bridge_quick_message_executes_control_recovery_actions_without_mod
         assert music_app_calls == ["Spotify"]
         assert volume_calls == [("set", 35, None)]
         assert brightness_calls == [("down", None)]
+        assert display_sleep_calls == ["called"]
     finally:
         service.close()
         store.close()

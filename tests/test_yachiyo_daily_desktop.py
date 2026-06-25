@@ -1667,6 +1667,20 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.brightness"
 
+    display_sleep_cases = ("关闭屏幕", "让显示器睡眠", "息屏一下", "turn off the display")
+    for prompt in display_sleep_cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.display_sleep",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.display_sleep"
+
+    assert daily_desktop_entrypoint_requests("sleep my Mac") == []
     assert daily_desktop_entrypoint_requests("漂亮一点") == []
 
 

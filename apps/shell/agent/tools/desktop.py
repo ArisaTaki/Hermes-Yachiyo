@@ -488,6 +488,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
+        "system.display_sleep",
         "notes.create",
         "reminders.create",
         "calendar.create_event",
@@ -3213,6 +3214,34 @@ def system_brightness(action: str, *, step: Any = None) -> dict[str, Any]:
             "requested_action": clean_action,
             "step": clean_step,
             "key_code": key_code,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def system_display_sleep() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("system.display_sleep")
+    try:
+        result = subprocess.run(
+            ["pmset", "displaysleepnow"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("system.display_sleep", exc)
+    if result.returncode != 0:
+        return _failed("system.display_sleep", result)
+    return {
+        "ok": True,
+        "action": "system.display_sleep",
+        "summary": "Display sleep requested",
+        "data": {
+            "requested_action": "sleep",
+            "command": "pmset displaysleepnow",
         },
         "permission_error": False,
         "fallback_used": False,

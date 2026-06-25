@@ -1006,6 +1006,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "system.settings_open",
         "system.volume",
         "system.brightness",
+        "system.display_sleep",
         "clipboard.write",
         "clipboard.read",
         "notes.create",
@@ -6053,6 +6054,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.brightness",
         "input": {"action": "down", "step": 2},
     }
+    assert daily_desktop_intent_tool_request("关闭屏幕", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.display_sleep",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("turn off the display", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.display_sleep",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("sleep my Mac", allowed_tools) is None
     assert daily_desktop_intent_tool_request("漂亮一点", allowed_tools) is None
     assert daily_desktop_intent_tool_request("亮度调到 50%", allowed_tools) is None
     assert daily_desktop_intent_tool_request("把 047e43ac 复制到剪贴板", allowed_tools) == {
@@ -8618,6 +8630,20 @@ def test_main_chat_desktop_intent_summarizes_system_brightness() -> None:
 
     assert increased == "已调高屏幕亮度（2 格）。"
     assert decreased == "已调低屏幕亮度。"
+
+
+def test_main_chat_desktop_intent_summarizes_system_display_sleep() -> None:
+    result = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "system.display_sleep",
+        {},
+        {
+            "ok": True,
+            "summary": "Display sleep requested",
+            "data": {"requested_action": "sleep"},
+        },
+    )
+
+    assert result == "已让显示器睡眠。"
 
 
 def test_main_chat_desktop_intent_summarizes_clipboard_write_without_echoing_text() -> None:

@@ -670,6 +670,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("system.settings_open") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("system.brightness") == "low"
+    assert desktop_tool_risk_level("system.display_sleep") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
     assert desktop_tool_risk_level("notes.create") == "low"
     assert desktop_tool_risk_level("reminders.create") == "low"
@@ -687,6 +688,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("create_calendar_event") == "low"
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("control_system_brightness") == "low"
+    assert desktop_action_risk_level("control_display_sleep") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
     assert desktop_action_risk_level("show_app") == "low"
     assert desktop_action_risk_level("focus_app_window") == "low"
@@ -714,7 +716,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:28] == [
+    assert list(catalog)[:29] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -734,6 +736,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "play_or_pause_media",
         "control_system_volume",
         "control_system_brightness",
+        "control_display_sleep",
         "write_clipboard",
         "create_note",
         "create_reminder",
@@ -779,6 +782,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["system_settings"].tools == ["system.settings_open"]
     assert catalog["control_system_volume"].tools == ["system.volume"]
     assert catalog["control_system_brightness"].tools == ["system.brightness"]
+    assert catalog["control_display_sleep"].tools == ["system.display_sleep"]
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
     assert catalog["create_note"].tools == ["notes.create"]
     assert catalog["create_reminder"].tools == ["reminders.create"]
@@ -912,6 +916,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     music_app = tools["media.music_app_open_and_play"]
     settings = tools["system.settings_open"]
     brightness = tools["system.brightness"]
+    display_sleep = tools["system.display_sleep"]
     permissions = tools["desktop.permissions"]
     quit_app = tools["app.quit"]
     named_show_app = tools["app.show"]
@@ -969,6 +974,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert brightness.risk_level == "low"
     assert brightness.input_schema["required"] == ["action"]
     assert any("brightness key events" in note for note in brightness.fallback_notes)
+    assert display_sleep.capability_id == "desktop_execution"
+    assert display_sleep.risk_level == "low"
+    assert display_sleep.input_schema["required"] == []
+    assert any("displaysleepnow" in note for note in display_sleep.fallback_notes)
     assert permissions.capability_id == "desktop_execution"
     assert permissions.risk_level == "low"
     assert any("missing desktop permission" in note for note in permissions.fallback_notes)

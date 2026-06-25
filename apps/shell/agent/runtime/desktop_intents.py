@@ -1013,6 +1013,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "screen.capture",
     "system.settings_open",
     "system.brightness",
+    "system.display_sleep",
     "system.volume",
 }
 
@@ -1201,6 +1202,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "media.music_app_open_and_play",
         "screen.capture",
         "system.brightness",
+        "system.display_sleep",
         "system.settings_open",
         "system.volume",
     }:
@@ -1287,6 +1289,8 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
             return "屏幕亮一点"
         if action == "down":
             return "屏幕暗一点"
+    if tool_name == "system.display_sleep":
+        return "让显示器睡眠"
     if tool_name == "clipboard.read":
         return "读取剪贴板"
     if tool_name == "clipboard.write":
@@ -2149,6 +2153,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     brightness_payload = _system_brightness_request(text)
     if brightness_payload is not None:
         candidates.append(_request("system.brightness", brightness_payload))
+
+    if _system_display_sleep_request(text):
+        candidates.append(_request("system.display_sleep", {}))
 
     if _clipboard_read_request(text):
         candidates.append(_request("clipboard.read", {}))
@@ -3825,6 +3832,35 @@ def _brightness_step_count(match: re.Match[str]) -> int:
     if re.search(r"(?:一些|多一点|多点|很多|大幅|明显|much|lot)", value, flags=re.IGNORECASE):
         return 4
     return 2
+
+
+def _system_display_sleep_request(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(
+        r"(?:电脑|主机|mac|macbook|机器|整机).{0,6}(?:睡眠|休眠|关机|重启)|"
+        r"\b(?:sleep|shut\s*down|restart|reboot)\s+(?:my\s+|the\s+)?(?:mac|macbook|computer|machine)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    suffix = r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$"
+    chinese_patterns = (
+        r"(?:把|将|让)?(?:屏幕|显示器|显示屏)\s*(?:睡眠|休眠|息屏|黑屏|关闭|关掉|关了|熄灭|灭掉)",
+        r"(?:关闭|关掉|关了|睡眠|休眠|息屏|熄灭|灭掉)(?:一下|下)?(?:屏幕|显示器|显示屏)",
+        r"(?:屏幕|显示器|显示屏)(?:关一下|关下|睡一下|休眠一下|息屏一下|黑一下)",
+        r"(?:息屏|熄屏|黑屏)(?:一下|下)?",
+    )
+    english_patterns = (
+        r"\b(?:turn|switch)\s+off\s+(?:the\s+)?(?:display|screen|monitor)\b",
+        r"\b(?:sleep|blank)\s+(?:the\s+)?(?:display|screen|monitor)\b",
+        r"\bput\s+(?:the\s+)?(?:display|screen|monitor)\s+to\s+sleep\b",
+        r"\bdisplay\s+sleep\b|\bscreen\s+sleep\b",
+    )
+    return any(
+        re.search(pattern + suffix, text, flags=re.IGNORECASE)
+        or re.search(pattern, lowered, flags=re.IGNORECASE)
+        for pattern in (*chinese_patterns, *english_patterns)
+    )
 
 
 def _clipboard_write_text(text: str) -> str:

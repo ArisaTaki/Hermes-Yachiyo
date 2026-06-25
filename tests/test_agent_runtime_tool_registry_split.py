@@ -305,6 +305,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "system_settings_open",
         "system_volume",
         "system_brightness",
+        "system_display_sleep",
         "clipboard_write",
         "clipboard_read",
         "notes_create",
@@ -782,6 +783,10 @@ def test_system_brightness_schema_accepts_relative_brightness_actions() -> None:
         ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "up", "step": 0})
     with pytest.raises(AgentRuntimeError, match="system.brightness 参数 step"):
         ToolDescriptorRegistry.validate_payload("system.brightness", {"action": "down", "step": True})
+
+
+def test_system_display_sleep_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("system.display_sleep", {})
 
 
 def test_clipboard_write_schema_requires_text() -> None:
@@ -5041,6 +5046,42 @@ def test_system_brightness_executes_low_risk_brightness_action(monkeypatch) -> N
         "fallback_used": False,
     }
     assert calls[0][1] == ["145", "3"]
+
+
+def test_system_display_sleep_executes_low_risk_display_sleep(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.system_display_sleep()
+
+    assert result == {
+        "ok": True,
+        "action": "system.display_sleep",
+        "summary": "Display sleep requested",
+        "data": {
+            "requested_action": "sleep",
+            "command": "pmset displaysleepnow",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls == [
+        (
+            ["pmset", "displaysleepnow"],
+            {
+                "capture_output": True,
+                "text": True,
+                "timeout": 5,
+                "check": False,
+            },
+        )
+    ]
 
 
 def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch) -> None:
