@@ -5325,6 +5325,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
+    assert daily_desktop_intent_tool_request("播放继续", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
     assert daily_desktop_intent_tool_request("继续当前音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -5365,11 +5370,33 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "next"},
     }
+    assert daily_desktop_intent_tool_request("跳过这首", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "next"},
+    }
+    assert daily_desktop_intent_tool_request("skip this song", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "next"},
+    }
     assert daily_desktop_intent_tool_request("上一首", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "previous"},
     }
+    assert daily_desktop_intent_tool_request("别放了", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "pause"},
+    }
+    assert daily_desktop_intent_tool_request("关掉音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "pause"},
+    }
+    for prompt in ("现在播放什么", "当前在播什么", "Apple Music 正在播什么", "查看播放状态"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) is None
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",

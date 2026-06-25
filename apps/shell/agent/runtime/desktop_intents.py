@@ -8534,6 +8534,20 @@ def _is_specific_music_query(query: str) -> bool:
         "音乐软件",
         "音乐播放器",
         "播放器",
+        "什么",
+        "啥",
+        "状态",
+        "播放状态",
+        "当前播放状态",
+        "正在播放什么",
+        "正在播什么",
+        "播放什么",
+        "在播什么",
+        "nowplaying",
+        "whatisplaying",
+        "whatplaying",
+        "playbackstatus",
+        "playingstatus",
         "歌",
         "点歌",
         "点儿歌",
@@ -8571,8 +8585,12 @@ def _is_specific_music_query(query: str) -> bool:
 
 def _music_control_action(text: str) -> str:
     lowered = text.lower()
-    if re.search(r"(?:下一首|下一曲|下首|切下一首|跳下一首|下一首歌|切歌|换一首|换首歌|换歌)", text) or re.search(
-        r"\b(?:next|skip)\s+(?:song|track)\b",
+    if re.search(
+        r"(?:下一首|下一曲|下首|切下一首|跳下一首|跳过这首|跳过当前(?:这)?首|"
+        r"跳过当前歌曲|跳过这首歌|下一首歌|切歌|换一首|换首歌|换歌)",
+        text,
+    ) or re.search(
+        r"\b(?:next|skip)\s+(?:this\s+|the\s+|current\s+)?(?:song|track)\b",
         lowered,
     ):
         return "next"
@@ -8591,12 +8609,19 @@ def _music_control_action(text: str) -> str:
         r"(?:\s*(?:音乐|歌曲|歌|apple\s*music|music))?",
         lowered,
     ) or re.search(
+        r"(?:别|不要|不用|先别)\s*(?:播放|播|放)(?:了|啦)?",
+        lowered,
+    ) or re.search(
+        r"(?:关掉|关了|停掉|停了)\s*(?:音乐|歌曲|歌|apple\s*music|music)",
+        lowered,
+    ) or re.search(
         r"\bpause\s+(?:the\s+|my\s+)?(?:music|apple\s*music|song|track|playback)\b",
         lowered,
     ):
         return "pause"
     if re.search(
         r"(?:继续播放|恢复播放|接着播放|开始播放|"
+        r"播放继续|"
         r"(?:继续|接着|恢复|开始)(?:播放|播|放)\s*|"
         r"(?:继续|接着|恢复|开始)(?:播放|播|放)?\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))"
         r"(?:\s*(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|apple\s*music|music))?",

@@ -1150,6 +1150,33 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         }
 
 
+def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
+    cases = (
+        ("播放继续", {"action": "play"}),
+        ("跳过这首", {"action": "next"}),
+        ("skip this song", {"action": "next"}),
+        ("别放了", {"action": "pause"}),
+        ("关掉音乐", {"action": "pause"}),
+    )
+
+    for prompt, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.apple_music_control",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == (
+            "media.apple_music_control"
+        )
+
+    assert daily_desktop_entrypoint_requests("现在播放什么") == []
+    assert daily_desktop_entrypoint_requests("查看播放状态") == []
+
+
 def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> None:
     requests = daily_desktop_entrypoint_requests("打开 Spotify 搜索 Taylor Swift 并播放")
 
