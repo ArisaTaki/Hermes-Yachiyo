@@ -1902,78 +1902,137 @@ def _normalize_submit_foreground_phrase(text: str) -> str:
 
 
 def _submit_foreground_action_for_phrase(phrase: str) -> str:
-    return_key_action = _submit_foreground_action_from_return_key_phrase(phrase)
-    if return_key_action:
-        return return_key_action
-    if phrase in {
-        "发送",
-        "发出",
-        "发送当前内容",
-        "发送当前输入",
-        "发送当前文本",
-        "发送当前消息",
-        "发送消息",
-        "把消息发出",
-        "当前内容发送",
-        "当前输入发送",
-        "当前文本发送",
-        "当前消息发送",
-        "消息发送",
-        "确认发送",
-        "send",
-        "sendcurrentcontent",
-        "sendthecurrentcontent",
-        "sendcurrentinput",
-        "sendcurrenttext",
-        "sendmessage",
-        "sendcurrentmessage",
-        "sendthecurrentmessage",
-        "sendcurrentchatmessage",
-        "post",
-    }:
-        return "send"
-    if phrase in {
-        "提交",
-        "提交当前内容",
-        "提交当前输入",
-        "提交当前文本",
-        "提交当前表单",
-        "提交表单",
-        "当前内容提交",
-        "当前输入提交",
-        "当前文本提交",
-        "当前表单提交",
-        "表单提交",
-        "submit",
-        "submitcurrentcontent",
-        "submitthecurrentcontent",
-        "submitcurrentinput",
-        "submitcurrenttext",
-        "submitcurrentform",
-        "submitthecurrentform",
-        "submitform",
-    }:
-        return "submit"
-    if phrase in {
-        "确认当前内容",
-        "确认当前输入",
-        "确认当前文本",
-        "确认当前对话框",
-        "确认当前弹窗",
-        "确认当前操作",
-        "确认操作",
-        "确认",
-        "确定",
-        "confirm",
-        "confirmcurrentcontent",
-        "confirmthecurrentcontent",
-        "confirmcurrentinput",
-        "confirmcurrenttext",
-        "confirmcurrentdialog",
-        "confirmthecurrentdialog",
-    }:
-        return "confirm"
+    for candidate in _submit_foreground_phrase_candidates(phrase):
+        return_key_action = _submit_foreground_action_from_return_key_phrase(candidate)
+        if return_key_action:
+            return return_key_action
+        if candidate in {
+            "发送",
+            "发出",
+            "发送当前内容",
+            "发送当前输入",
+            "发送当前文本",
+            "发送当前消息",
+            "发送消息",
+            "把消息发出",
+            "当前内容发送",
+            "当前输入发送",
+            "当前文本发送",
+            "当前消息发送",
+            "消息发送",
+            "确认发送",
+            "send",
+            "sendcurrentcontent",
+            "sendthecurrentcontent",
+            "sendcurrentinput",
+            "sendcurrenttext",
+            "sendmessage",
+            "sendcurrentmessage",
+            "sendthecurrentmessage",
+            "sendcurrentchatmessage",
+            "post",
+        }:
+            return "send"
+        if candidate in {
+            "提交",
+            "提交当前内容",
+            "提交当前输入",
+            "提交当前文本",
+            "提交当前表单",
+            "提交表单",
+            "当前内容提交",
+            "当前输入提交",
+            "当前文本提交",
+            "当前表单提交",
+            "表单提交",
+            "submit",
+            "submitcurrentcontent",
+            "submitthecurrentcontent",
+            "submitcurrentinput",
+            "submitcurrenttext",
+            "submitcurrentform",
+            "submitthecurrentform",
+            "submitform",
+        }:
+            return "submit"
+        if candidate in {
+            "确认当前内容",
+            "确认当前输入",
+            "确认当前文本",
+            "确认当前对话框",
+            "确认当前弹窗",
+            "确认当前操作",
+            "确认操作",
+            "确认",
+            "确定",
+            "confirm",
+            "confirmcurrentcontent",
+            "confirmthecurrentcontent",
+            "confirmcurrentinput",
+            "confirmcurrenttext",
+            "confirmcurrentdialog",
+            "confirmthecurrentdialog",
+        }:
+            return "confirm"
     return ""
+
+
+def _submit_foreground_phrase_candidates(phrase: str) -> list[str]:
+    compact = str(phrase or "").strip()
+    if not compact:
+        return []
+    candidates = [compact]
+    scopes = (
+        "当前输入框",
+        "当前文本框",
+        "当前输入栏",
+        "当前消息框",
+        "当前聊天框",
+        "前台输入框",
+        "前台文本框",
+        "前台输入栏",
+        "前台消息框",
+        "前台聊天框",
+        "当前内容",
+        "当前输入",
+        "当前文本",
+        "当前消息",
+        "当前表单",
+        "前台内容",
+        "前台输入",
+        "前台文本",
+        "前台消息",
+        "前台表单",
+        "前台",
+        "currentinput",
+        "currentfield",
+        "currenttextfield",
+        "currenttextbox",
+        "currentcontent",
+        "currenttext",
+        "currentmessage",
+        "currentchatmessage",
+        "currentform",
+        "foregroundinput",
+        "foregroundfield",
+        "foregroundtextfield",
+        "foregroundtextbox",
+        "foregroundcontent",
+        "foregroundtext",
+        "foregroundmessage",
+        "foregroundchatmessage",
+        "foregroundform",
+        "activeinput",
+        "activefield",
+        "activetextfield",
+        "activetextbox",
+    )
+    for scope in scopes:
+        if compact.startswith(scope):
+            candidates.append(compact[len(scope) :])
+        if compact.endswith(scope):
+            candidates.append(compact[: -len(scope)])
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
 def _submit_foreground_action_from_return_key_phrase(phrase: str) -> str:
@@ -10959,6 +11018,8 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
 
 def _desktop_type_text(text: str) -> str:
     if _browser_type_text_request(text) or _desktop_type_into_ui_element(text):
+        return ""
+    if _desktop_submit_foreground_action(text):
         return ""
     if _is_next_foreground_focus_request(text) or _is_previous_foreground_focus_request(text):
         return ""

@@ -6725,7 +6725,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "send"},
     }
+    assert daily_desktop_intent_tool_request("当前输入框发送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("前台发送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("发送前台内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("当前消息发出", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
     assert daily_desktop_intent_tool_request("按回车发送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "send"},
+    }
+    assert daily_desktop_intent_tool_request("当前输入框按回车发送", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
         "input": {"action": "send"},
@@ -6751,7 +6776,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.submit_foreground",
         "input": {"action": "submit"},
     }
+    assert daily_desktop_intent_tool_request("当前输入框提交", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
+    assert daily_desktop_intent_tool_request("前台提交", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
+    assert daily_desktop_intent_tool_request("提交前台内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
     assert daily_desktop_intent_tool_request("按回车提交", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "submit"},
+    }
+    assert daily_desktop_intent_tool_request("当前输入框按回车提交", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
         "input": {"action": "submit"},
@@ -6767,6 +6812,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "submit"},
     }
     assert daily_desktop_intent_tool_request("确认当前内容", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "confirm"},
+    }
+    assert daily_desktop_intent_tool_request("前台确认", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.submit_foreground",
+        "input": {"action": "confirm"},
+    }
+    assert daily_desktop_intent_tool_request("确认前台内容", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.submit_foreground",
         "input": {"action": "confirm"},

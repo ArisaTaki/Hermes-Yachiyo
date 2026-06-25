@@ -634,6 +634,26 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}}
     ]
 
+    foreground_submit_requests = daily_desktop_entrypoint_requests("当前输入框发送")
+
+    assert foreground_submit_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        }
+    ]
+    assert daily_desktop_user_metadata(foreground_submit_requests)["daily_desktop_tools"] == [
+        "desktop.submit_foreground"
+    ]
+    assert daily_desktop_entrypoint_requests("前台提交") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "submit"},
+        }
+    ]
+
     app_submit_requests = daily_desktop_entrypoint_requests("微信按回车发送")
 
     assert app_submit_requests == [

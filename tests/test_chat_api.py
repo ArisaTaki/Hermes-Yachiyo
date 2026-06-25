@@ -7532,6 +7532,11 @@ def test_send_message_routes_return_submit_to_approval_without_model(tmp_path, m
     try:
         cases = (
             ("按回车提交", {"action": "submit"}, []),
+            ("当前输入框发送", {"action": "send"}, []),
+            ("前台发送", {"action": "send"}, []),
+            ("发送前台内容", {"action": "send"}, []),
+            ("当前输入框提交", {"action": "submit"}, []),
+            ("前台提交", {"action": "submit"}, []),
             ("微信按回车发送", {"action": "send"}, ["WeChat"]),
         )
         for prompt, input_preview, expected_focus_calls in cases:
