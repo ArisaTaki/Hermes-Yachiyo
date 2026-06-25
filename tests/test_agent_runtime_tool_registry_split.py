@@ -322,6 +322,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_hide_app",
         "desktop_minimize_window",
         "desktop_close_window",
+        "desktop_quit_app",
         "desktop_hotkey",
         "desktop_submit_foreground",
         "desktop_type_text",
@@ -855,6 +856,10 @@ def test_desktop_close_window_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.close_window", {})
 
 
+def test_desktop_quit_app_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.quit_app", {})
+
+
 def test_desktop_minimize_window_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.minimize_window", {})
 
@@ -1128,6 +1133,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         broker,
         "desktop_close_window",
         lambda: calls.append(("close_window",)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "desktop_quit_app",
+        lambda: calls.append(("quit_app",)) or {"ok": True},
     )
     monkeypatch.setattr(
         broker,
@@ -1488,6 +1498,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     }
     assert dispatch_tool_call(broker, "desktop.minimize_window", {}) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.close_window", {}) == {"ok": True}
+    assert dispatch_tool_call(broker, "desktop.quit_app", {}) == {"ok": True}
     assert dispatch_tool_call(
         broker,
         "desktop.reveal_path",
@@ -1558,6 +1569,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("minimize_named_app", "Slack"),
         ("minimize_window",),
         ("close_window",),
+        ("quit_app",),
         ("reveal", "~/Downloads/report.pdf"),
         ("settings_open", "辅助功能权限"),
         ("permissions",),
@@ -3846,6 +3858,30 @@ def test_desktop_close_window_uses_standard_foreground_shortcut(monkeypatch) -> 
         "fallback_used": False,
     }
     assert "keystroke \"w\" using {command down}" in calls[0][0]
+    assert calls[0][1] is None
+
+
+def test_desktop_quit_app_uses_standard_foreground_shortcut(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "quit_foreground_app", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.desktop_quit_app()
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.quit_app",
+        "summary": "Sent quit request to the foreground app",
+        "data": {"key": "q", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "keystroke \"q\" using {command down}" in calls[0][0]
     assert calls[0][1] is None
 
 

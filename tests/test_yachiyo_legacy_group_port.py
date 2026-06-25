@@ -208,6 +208,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
         "app.open_and_hotkey": True,
         "app.focus_and_hotkey": True,
         "desktop.close_window": True,
+        "desktop.quit_app": True,
         "desktop.hotkey": True,
         "desktop.submit_foreground": True,
         "desktop.type_text": True,

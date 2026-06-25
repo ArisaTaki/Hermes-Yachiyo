@@ -262,6 +262,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'app.hide' && appName) return `隐藏${appName}`;
   if (tool === 'app.minimize' && appName) return `最小化${appName}`;
   if (tool === 'app.quit' && appName) return `退出${appName}`;
+  if (tool === 'desktop.quit_app') return '退出当前应用';
   if (tool === 'app.status' && appName) return `检查${appName}是否打开`;
   if (tool === 'browser.open_url' && url) return `打开 ${url}`;
   if (tool === 'browser.open_url_and_extract_text' && url) return `打开并读取 ${url}`;

@@ -7976,6 +7976,12 @@ def test_send_message_routes_app_scoped_close_window_to_approval_without_model(
             AssertionError("close_window should wait for approval")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_quit_app",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("quit_app should wait for approval")
+        ),
+    )
 
     def fake_app_focus(app_name: str) -> dict:
         focus_calls.append(app_name)
@@ -8009,6 +8015,30 @@ def test_send_message_routes_app_scoped_close_window_to_approval_without_model(
         assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {}
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == "desktop.close_window"
+        assert run["pending_approval"]["input_preview"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        result = api.send_message("退出当前应用")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.quit_app"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.quit_app"
+        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {}
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "desktop.quit_app"
         assert run["pending_approval"]["input_preview"] == {}
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_approval_required" in event_types

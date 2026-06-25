@@ -6028,6 +6028,12 @@ async def test_yachiyo_task_route_approves_browser_interaction_intent_without_mo
             "apps.shell.agent.tools.desktop.app_quit",
         ),
         (
+            "退出当前应用",
+            "desktop.quit_app",
+            {},
+            "apps.shell.agent.tools.desktop.desktop_quit_app",
+        ),
+        (
             "双击 120 240",
             "desktop.click",
             {"x": 120, "y": 240, "click_count": 2},
@@ -7490,6 +7496,10 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["app.quit"]["risk_level"] == "medium"
     assert tools["app.quit"]["input_schema"]["required"] == ["app_name"]
     assert any("approval" in note for note in tools["app.quit"]["fallback_notes"])
+    assert tools["desktop.quit_app"]["capability_id"] == "app_control"
+    assert tools["desktop.quit_app"]["risk_level"] == "medium"
+    assert tools["desktop.quit_app"]["input_schema"]["properties"] == {}
+    assert any("foreground app" in note for note in tools["desktop.quit_app"]["fallback_notes"])
     assert tools["desktop.hide_app"]["capability_id"] == "foreground_input"
     assert tools["desktop.hide_app"]["risk_level"] == "low"
     assert tools["desktop.hide_app"]["input_schema"]["properties"] == {}

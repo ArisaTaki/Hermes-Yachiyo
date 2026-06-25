@@ -240,6 +240,10 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         ("Could you minimize Chrome please?", "app.minimize", {"app_name": "Google Chrome"}),
         ("关闭一下当前窗口", "desktop.close_window", {}),
         ("Can you close the current window?", "desktop.close_window", {}),
+        ("退出当前应用", "desktop.quit_app", {}),
+        ("关掉这个应用", "desktop.quit_app", {}),
+        ("close the current app", "desktop.quit_app", {}),
+        ("quit the foreground application", "desktop.quit_app", {}),
         ("Could you quit Slack please?", "app.quit", {"app_name": "Slack"}),
     )
 

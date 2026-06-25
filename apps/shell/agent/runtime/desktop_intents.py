@@ -546,6 +546,8 @@ def daily_desktop_intent_tool_requests(
     direct_safe_shortcut = _desktop_safe_shortcut_action(context)
     if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
         return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
+    if _is_quit_current_app_request(context) and "desktop.quit_app" in allowed:
+        return [_request("desktop.quit_app", {})]
     system_hotkey = _system_desktop_hotkey_request(context)
     if system_hotkey and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", system_hotkey)]
@@ -1047,6 +1049,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.close_window",
+    "desktop.quit_app",
     "desktop.hide_app",
     "desktop.show_all_apps",
     "desktop.hotkey",
@@ -1159,6 +1162,7 @@ _FOREGROUND_ACTION_TOOLS = {
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.close_window",
+    "desktop.quit_app",
     "desktop.hotkey",
     "desktop.submit_foreground",
     "desktop.safe_click",
@@ -2292,6 +2296,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     volume_payload = _system_volume_request(text)
     if volume_payload is not None:
         candidates.append(_request("system.volume", volume_payload))
+
+    if _is_quit_current_app_request(text):
+        candidates.append(_request("desktop.quit_app", {}))
 
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:
@@ -12380,6 +12387,37 @@ def _is_close_current_window_request(text: str) -> bool:
         )
         or re.search(
             r"\b(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
+            lowered,
+        )
+    )
+
+
+def _is_quit_current_app_request(text: str) -> bool:
+    text = _strip_desktop_action_request_shell(text)
+    lowered = text.lower()
+    quit_verb = r"(?:退出|关闭|关掉|结束|终止|关(?:一下|下|了)?)(?:一下|下|掉|了)?"
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"{quit_verb}\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            rf"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*{quit_verb}",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*{quit_verb}",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:quit|close|exit|terminate)\s+(?:the\s+)?"
+            r"(?:current|foreground|active|this)\s+(?:app|application)\b",
             lowered,
         )
     )

@@ -3838,6 +3838,36 @@ def desktop_close_window() -> dict[str, Any]:
     }
 
 
+def desktop_quit_app() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.quit_app")
+    result = _run_osascript(
+        """
+        on run argv
+            tell application "System Events" to keystroke "q" using {command down}
+            return "quit_foreground_app"
+        end run
+        """,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.quit_app",
+            {
+                **result,
+                "action": "desktop.quit_app",
+                "summary": "desktop.quit_app failed",
+            },
+        )
+    return {
+        "ok": True,
+        "action": "desktop.quit_app",
+        "summary": "Sent quit request to the foreground app",
+        "data": {"key": "q", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_safe_key(action: str, *, repeat_count: Any = 1) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.safe_key")
@@ -5147,6 +5177,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.show_all_apps": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
+        "desktop.quit_app": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
         "desktop.search_submit": ["accessibility"],
@@ -5204,6 +5235,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.show_all_apps": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
+        "desktop.quit_app": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
         "desktop.safe_key": ["accessibility"],
         "desktop.search_submit": ["accessibility"],

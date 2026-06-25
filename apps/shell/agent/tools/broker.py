@@ -932,6 +932,12 @@ class ToolBroker:
             desktop.desktop_close_window,
         )
 
+    def desktop_quit_app(self) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.quit_app",
+            desktop.desktop_quit_app,
+        )
+
     def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hotkey",

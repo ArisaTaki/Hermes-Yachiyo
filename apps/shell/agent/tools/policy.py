@@ -87,6 +87,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.show_all_apps": "desktop_show_all_apps",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
+    "desktop.quit_app": "desktop_quit_app",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.submit_foreground": "desktop_submit_foreground",
     "desktop.type_text": "desktop_type_text",
@@ -216,6 +217,7 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.open_and_hotkey",
     "app.focus_and_hotkey",
     "desktop.close_window",
+    "desktop.quit_app",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.hotkey",
@@ -1882,6 +1884,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Close the current foreground window using the standard system shortcut. "
             "Requires approval because unsaved work in that window may be affected."
+        ),
+        properties={},
+    ),
+    "desktop.quit_app": ToolDescriptor(
+        name="desktop.quit_app",
+        description=(
+            "Quit the current foreground app using the standard system shortcut. "
+            "Requires approval because unsaved work in that app may be affected."
         ),
         properties={},
     ),

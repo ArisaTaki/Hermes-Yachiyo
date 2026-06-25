@@ -444,6 +444,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "app.hide",
             "app.minimize",
             "app.quit",
+            "desktop.quit_app",
             "media.apple_music_play",
             "media.apple_music_open_and_play",
             "media.apple_music_control",
@@ -651,6 +652,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("app.hide") == "low"
     assert desktop_tool_risk_level("app.minimize") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
+    assert desktop_tool_risk_level("desktop.quit_app") == "medium"
     assert desktop_tool_risk_level("desktop.hide_app") == "low"
     assert desktop_tool_risk_level("desktop.minimize_window") == "low"
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
@@ -771,7 +773,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["minimize_app"].risk_level == "low"
     assert catalog["minimize_app"].tools == ["app.minimize"]
     assert catalog["quit_app"].risk_level == "medium"
-    assert catalog["quit_app"].tools == ["app.quit"]
+    assert catalog["quit_app"].tools == ["app.quit", "desktop.quit_app"]
     assert catalog["reveal_path"].risk_level == "low"
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["open_path"].risk_level == "low"
@@ -781,6 +783,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
+        "media.system_control",
     ]
     assert catalog["system_settings"].tools == ["system.settings_open"]
     assert catalog["control_system_volume"].tools == ["system.volume"]
@@ -995,6 +999,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert quit_app.approval_required is False
     assert quit_app.input_schema["required"] == ["app_name"]
     assert any("approval" in note for note in quit_app.fallback_notes)
+    foreground_quit_app = tools["desktop.quit_app"]
+    assert foreground_quit_app.capability_id == "app_control"
+    assert foreground_quit_app.risk_level == "medium"
+    assert foreground_quit_app.input_schema["properties"] == {}
+    assert any("foreground app" in note for note in foreground_quit_app.fallback_notes)
     assert named_show_app.capability_id == "app_control"
     assert named_show_app.risk_level == "low"
     assert named_show_app.input_schema["required"] == ["app_name"]

@@ -201,6 +201,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "app.open_and_hotkey": True,
         "app.focus_and_hotkey": True,
         "desktop.close_window": True,
+        "desktop.quit_app": True,
         "desktop.hotkey": True,
         "desktop.submit_foreground": True,
         "desktop.type_text": True,

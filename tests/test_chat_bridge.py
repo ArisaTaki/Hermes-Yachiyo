@@ -9482,6 +9482,12 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
         ),
     )
     monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_quit_app",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("quit_app should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_hotkey",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("hotkey should wait for approval")
@@ -9502,6 +9508,9 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             ("关闭当前窗口", "desktop.close_window", {}),
             ("把当前窗口关了", "desktop.close_window", {}),
             ("当前窗口关一下", "desktop.close_window", {}),
+            ("退出当前应用", "desktop.quit_app", {}),
+            ("关掉这个应用", "desktop.quit_app", {}),
+            ("close the current app", "desktop.quit_app", {}),
             (
                 "click the search field",
                 "desktop.click_ui_element",

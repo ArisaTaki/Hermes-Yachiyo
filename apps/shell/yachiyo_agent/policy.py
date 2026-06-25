@@ -80,6 +80,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
     {
         "app.quit",
+        "desktop.quit_app",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
         "app.open_and_type_into_ui_element",
@@ -243,7 +244,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "show_app": ("app.show",),
     "hide_app": ("app.hide",),
     "minimize_app": ("app.minimize",),
-    "quit_app": ("app.quit",),
+    "quit_app": ("app.quit", "desktop.quit_app"),
     "reveal_path": ("desktop.reveal_path",),
     "open_path": ("desktop.open_path",),
     "play_or_pause_media": (
@@ -439,6 +440,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.hide",
         "app.minimize",
         "app.quit",
+        "desktop.quit_app",
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
@@ -496,6 +498,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.hide",
         "app.minimize",
         "app.quit",
+        "desktop.quit_app",
         "notes.create",
         "reminders.create",
         "calendar.create_event",

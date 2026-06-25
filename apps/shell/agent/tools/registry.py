@@ -591,6 +591,14 @@ def _desktop_close_window(
     return broker.desktop_close_window()
 
 
+def _desktop_quit_app(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_quit_app()
+
+
 def _desktop_minimize_window(
     broker: Any,
     _payload: dict[str, Any],
@@ -838,6 +846,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.show_all_apps": _desktop_show_all_apps,
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,
+    "desktop.quit_app": _desktop_quit_app,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.submit_foreground": _desktop_submit_foreground,
     "desktop.search_submit": _desktop_search_submit,

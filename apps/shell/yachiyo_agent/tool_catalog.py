@@ -420,6 +420,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "app.quit": [
             "Requires approval because quitting an app can discard unsaved work; Automation failures are surfaced as tool results.",
         ],
+        "desktop.quit_app": [
+            "Requires approval and Accessibility permission because it quits the current foreground app.",
+        ],
         "desktop.reveal_path": [
             "Reveals a local file or folder in Finder without opening or executing it.",
         ],
