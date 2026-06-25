@@ -1268,6 +1268,100 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
     ]
 
 
+def test_daily_desktop_entrypoint_routes_dynamic_source_browser_open() -> None:
+    selected_open_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "打开选中的链接",
+        "打开当前选中的网址",
+        "用浏览器打开选中的链接",
+        "open selected link",
+        "open selected URL",
+        "open the current selection in browser",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == selected_open_requests
+    assert daily_desktop_user_metadata(selected_open_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
+    ]
+    assert daily_desktop_entrypoint_requests("用 Safari 打开选中的链接") == [
+        selected_open_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_open_requests[2],
+        selected_open_requests[3],
+    ]
+    assert daily_desktop_entrypoint_requests("open selected link in Safari") == [
+        selected_open_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_open_requests[2],
+        selected_open_requests[3],
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "open selected URL",
+        allowed_tools=("browser.open_url", "app.open"),
+    ) == []
+
+    clipboard_open_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "打开剪贴板里的链接",
+        "打开剪贴板内容里的网址",
+        "用浏览器打开剪贴板内容",
+        "open clipboard link",
+        "open the clipboard URL",
+        "open clipboard contents",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == clipboard_open_requests
+    assert daily_desktop_entrypoint_requests(
+        "打开剪贴板里的链接",
+        allowed_tools=("clipboard.read", "browser.open_url"),
+    ) == []
+    assert daily_desktop_entrypoint_requests("打开当前网页链接") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> None:
     cases = (
         (

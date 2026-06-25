@@ -546,6 +546,14 @@ def daily_desktop_intent_tool_requests(
         ):
             return dynamic_source_search_sequence
         return []
+    dynamic_source_open_sequence = _browser_dynamic_source_open_tool_requests(context)
+    if dynamic_source_open_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_open_sequence
+        ):
+            return dynamic_source_open_sequence
+        return []
     clipboard_to_note_sequence = _clipboard_to_note_tool_requests(context)
     if clipboard_to_note_sequence and all(
         str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
@@ -4591,6 +4599,130 @@ def _browser_dynamic_source_search_tool_requests(text: str) -> list[dict[str, An
     return requests
 
 
+def _browser_dynamic_source_open_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _browser_dynamic_source_open_request(text)
+    if not parsed:
+        return []
+    source, app_name = parsed
+    requests: list[dict[str, Any]] = []
+    if source == "selected_text":
+        requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    requests.extend(
+        [
+            _request(
+                "app.open_and_safe_shortcut",
+                {"app_name": app_name, "action": "focus_address_bar"},
+            ),
+            _request("desktop.safe_shortcut", {"action": "paste"}),
+            _request("desktop.search_submit", {}),
+        ]
+    )
+    return requests
+
+
+def _browser_dynamic_source_open_request(text: str) -> tuple[str, str] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    app_name = _browser_dynamic_open_app_name(clean)
+    if _selected_text_browser_open_request(clean):
+        return "selected_text", app_name
+    if _clipboard_browser_open_request(clean):
+        return "clipboard", app_name
+    return None
+
+
+def _browser_dynamic_open_app_name(text: str) -> str:
+    app_name = _browser_dynamic_search_app_name(text)
+    if app_name != "Google Chrome":
+        return app_name
+    match = re.search(
+        r"\b(?:in|with|using|via)\s+"
+        r"(?P<app>chrome|google|google\s*chrome|safari|firefox|edge|arc|brave)\b",
+        _strip_query(text),
+        flags=re.IGNORECASE,
+    )
+    if match:
+        normalized = _normalize_app_name(match.group("app"))
+        if normalized in _BROWSER_APP_NAMES:
+            return normalized
+    return app_name
+
+
+def _selected_text_browser_open_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    selected_url_source = _selected_url_source_pattern()
+    browser_app_pattern = _browser_app_reference_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:(?:用|在|通过)\s*{browser_app_pattern}\s*(?:里|中|上|内|里面)?\s*)?"
+            rf"(?:打开|访问|浏览|跳转到|进入)\s*(?:{selected_url_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:把|将)?\s*(?:{selected_url_source})\s*"
+            rf"(?:用|在|通过)?\s*(?:{browser_app_pattern})?\s*"
+            rf"(?:打开|访问|浏览|跳转到|进入)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:open|visit|go\s+to|browse)\s+(?:the\s+)?"
+            rf"(?:{selected_url_source})(?:\s+(?:in|with|using|via)\s+"
+            rf"{browser_app_pattern})?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:open|visit|go\s+to|browse)\s+(?:{browser_app_pattern})\s+"
+            rf"(?:with\s+)?(?:the\s+)?(?:{selected_url_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clipboard_browser_open_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    clipboard_url_source = _clipboard_url_source_pattern()
+    browser_app_pattern = _browser_app_reference_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:(?:用|在|通过)\s*{browser_app_pattern}\s*(?:里|中|上|内|里面)?\s*)?"
+            rf"(?:打开|访问|浏览|跳转到|进入)\s*(?:{clipboard_url_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:把|将)?\s*(?:{clipboard_url_source})\s*"
+            rf"(?:用|在|通过)?\s*(?:{browser_app_pattern})?\s*"
+            rf"(?:打开|访问|浏览|跳转到|进入)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:open|visit|go\s+to|browse)\s+(?:the\s+)?"
+            rf"(?:{clipboard_url_source})(?:\s+(?:in|with|using|via)\s+"
+            rf"{browser_app_pattern})?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:open|visit|go\s+to|browse)\s+(?:{browser_app_pattern})\s+"
+            rf"(?:with\s+)?(?:the\s+)?(?:{clipboard_url_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _browser_dynamic_source_search_request(text: str) -> tuple[str, str] | None:
     clean = _strip_query(text)
     if not clean:
@@ -4707,6 +4839,30 @@ def _clipboard_source_pattern() -> str:
     return (
         r"(?:当前|系统|这个|这份|我的)?(?:剪贴板|粘贴板)(?:内容)?|"
         r"(?:the\s+)?clipboard\s+contents?|the\s+clipboard"
+    )
+
+
+def _selected_url_source_pattern() -> str:
+    return (
+        r"(?:当前|现在|这个|这段)?(?:选中|选择|高亮)(?:的)?"
+        r"(?:链接|网址|url|URL|地址|内容|文字|文本)|"
+        r"(?:selected|highlighted)\s+(?:link|url|URL|address|text)|"
+        r"current\s+selection"
+    )
+
+
+def _clipboard_url_source_pattern() -> str:
+    return (
+        r"(?:当前|系统|这个|这份|我的)?(?:剪贴板|粘贴板)"
+        r"(?:里|里面|内容里|内容里的|里的)?(?:的)?(?:链接|网址|url|URL|地址|内容)|"
+        r"(?:the\s+)?clipboard\s+(?:link|url|URL|address|contents?)"
+    )
+
+
+def _browser_app_reference_pattern() -> str:
+    return (
+        r"(?:浏览器|browser|chrome|google|google\s*chrome|谷歌|谷歌浏览器|百度|"
+        r"safari|firefox|edge|arc|brave)"
     )
 
 

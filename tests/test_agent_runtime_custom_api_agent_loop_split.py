@@ -1669,6 +1669,102 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://www.google.com/search?q=clipboard"},
     }
+    selected_open_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "打开选中的链接",
+        "打开当前选中的网址",
+        "用浏览器打开选中的链接",
+        "open selected link",
+        "open selected URL",
+        "open the current selection in browser",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_open_requests
+        )
+    assert daily_desktop_intent_tool_requests("用 Safari 打开选中的链接", allowed_tools) == [
+        selected_open_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_open_requests[2],
+        selected_open_requests[3],
+    ]
+    assert daily_desktop_intent_tool_requests("open selected link in Safari", allowed_tools) == [
+        selected_open_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_open_requests[2],
+        selected_open_requests[3],
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "open selected URL",
+            ["browser.open_url", "app.open"],
+        )
+        == []
+    )
+    clipboard_open_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "打开剪贴板里的链接",
+        "打开剪贴板内容里的网址",
+        "用浏览器打开剪贴板内容",
+        "open clipboard link",
+        "open the clipboard URL",
+        "open clipboard contents",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == clipboard_open_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "打开剪贴板里的链接",
+            ["clipboard.read", "browser.open_url"],
+        )
+        == []
+    )
+    assert daily_desktop_intent_tool_requests("打开当前网页链接", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
     assert daily_desktop_intent_tool_request("搜索 oha yachiyo 并读一下结果", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
