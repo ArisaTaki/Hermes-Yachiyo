@@ -296,6 +296,59 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
+    app_window_sequence = daily_desktop_entrypoint_requests("打开微信然后隐藏")
+
+    assert app_window_sequence == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_user_metadata(app_window_sequence)["daily_desktop_tools"] == [
+        "app.open",
+        "app.hide",
+    ]
+
+    focus_window_sequence = daily_desktop_entrypoint_requests("切到微信然后隐藏")
+
+    assert focus_window_sequence == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_user_metadata(focus_window_sequence)["daily_desktop_tools"] == [
+        "app.focus",
+        "app.hide",
+    ]
+
+    minimize_window_sequence = daily_desktop_entrypoint_requests("打开 Chrome 然后最小化")
+
+    assert minimize_window_sequence == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.minimize",
+            "input": {"app_name": "Google Chrome"},
+        },
+    ]
+
 
 def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_tools() -> None:
     cases = (

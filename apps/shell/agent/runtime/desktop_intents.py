@@ -585,6 +585,14 @@ def daily_desktop_intent_tool_requests(
         if all(str(request.get("tool") or "") in allowed for request in app_close_window_sequence):
             return app_close_window_sequence
         return []
+    app_window_management_sequence = _app_open_or_focus_window_management_tool_requests(context)
+    if app_window_management_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in app_window_management_sequence
+        ):
+            return app_window_management_sequence
+        return []
     app_find_open_first_sequence = _app_open_or_focus_find_open_first_tool_requests(context)
     if app_find_open_first_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_find_open_first_sequence
@@ -4944,6 +4952,100 @@ def _app_prefix_window_management_tool_request(text: str) -> dict[str, Any] | No
     if _is_app_prefix_minimize_followup(followup):
         return _request("app.minimize", {"app_name": app_name})
     return None
+
+
+def _app_open_or_focus_window_management_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _app_open_or_focus_window_management_request(text)
+    if not parsed:
+        return []
+    mode, app_name, action = parsed
+    action_tool = {
+        "hide": "app.hide",
+        "minimize": "app.minimize",
+        "show": "app.show",
+    }.get(action)
+    if not action_tool:
+        return []
+    if action == "show":
+        return [_request(action_tool, {"app_name": app_name})]
+    return [
+        _request(f"app.{mode}", {"app_name": app_name}),
+        _request(action_tool, {"app_name": app_name}),
+    ]
+
+
+def _app_open_or_focus_window_management_request(text: str) -> tuple[str, str, str] | None:
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?"
+            r"(?P<app>[^。！？!?，,]+?)\s*(?:起来)?\s*"
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*"
+            r"(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+        ),
+        (
+            "open",
+            r"^(?:please\s+)?(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+"
+            r"(?:(?:and\s+then|and|then)\s+)(?P<followup>.+)$",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+"
+            r"(?P<app>[^.!?]+?)\s+(?:(?:and\s+then|and|then)\s+)(?P<followup>.+)$",
+        ),
+    )
+    for mode, pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        followup = _strip_known_app_followup_prefix(match.group("followup"))
+        if (
+            not raw_app
+            or not followup
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+            or _looks_like_current_app_scope(raw_app)
+            or _looks_like_generic_app_open_target(raw_app)
+        ):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        action = _app_window_management_followup_action(followup)
+        if app_name and action:
+            return mode, app_name, action
+    return None
+
+
+def _app_window_management_followup_action(value: str) -> str:
+    if _is_app_prefix_hide_followup(value):
+        return "hide"
+    if _is_app_prefix_minimize_followup(value):
+        return "minimize"
+    if _is_app_prefix_show_followup(value):
+        return "show"
+    return ""
+
+
+def _is_app_prefix_show_followup(value: str) -> bool:
+    text = _strip_query(value)
+    if not text:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:显示|显示一下|显示出来|调出来|叫出来|还原|恢复|取消隐藏|"
+            r"show(?:\s+(?:it|this\s+app))?|restore(?:\s+(?:it|this\s+app))?|"
+            r"unhide(?:\s+(?:it|this\s+app))?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_open_or_focus_close_window_tool_requests(text: str) -> list[dict[str, Any]]:

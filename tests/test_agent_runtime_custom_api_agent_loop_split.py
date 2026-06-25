@@ -4636,9 +4636,64 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.minimize",
         "input": {"app_name": "Finder"},
     }
+    assert daily_desktop_intent_tool_requests("打开微信然后隐藏", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("切到微信然后隐藏", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 然后最小化", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.minimize",
+            "input": {"app_name": "Google Chrome"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("focus Slack and then hide", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "Slack"},
+        },
+    ]
+    assert daily_desktop_intent_tool_request("切到微信然后显示", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "WeChat"},
+    }
     safe_window_tools = ["app.hide", "app.minimize", "app.show"]
     assert daily_desktop_intent_tool_requests("Chrome 退出一下", safe_window_tools) == []
     assert daily_desktop_intent_tool_requests("Chrome 关闭一下", safe_window_tools) == []
+    assert daily_desktop_intent_tool_requests("打开微信然后隐藏", ["app.open"]) == []
+    assert daily_desktop_intent_tool_requests("切到微信然后隐藏", ["app.focus"]) == []
     assert daily_desktop_intent_tool_request("最小化当前窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.minimize_window",
