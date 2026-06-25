@@ -91,6 +91,8 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         ("Can you hide the current app?", "desktop.hide_app", {}),
         ("Could you hide the foreground app please?", "desktop.hide_app", {}),
         ("你能帮我收起一下当前应用吗", "desktop.hide_app", {}),
+        ("隐藏当前窗口", "desktop.minimize_window", {}),
+        ("隐藏前台窗口", "desktop.minimize_window", {}),
         ("Can you minimize the current app?", "desktop.minimize_window", {}),
         ("Could you minimize the foreground application please?", "desktop.minimize_window", {}),
         ("Can you hide Chrome?", "app.hide", {"app_name": "Google Chrome"}),
@@ -110,6 +112,14 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("当前窗口是什么") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps() -> None:

@@ -1672,6 +1672,8 @@ def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
     )
     cases = (
         ("最小化当前窗口", "bubble"),
+        ("隐藏当前窗口", "bubble"),
+        ("隐藏前台窗口", "live2d"),
         ("Can you minimize the current app?", "live2d"),
         ("Could you minimize the foreground application please?", "bubble"),
     )

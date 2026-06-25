@@ -7983,6 +7983,7 @@ def _looks_like_window_management_action(text: str) -> bool:
     lowered = value.lower()
     return bool(
         _is_maximize_current_window_request(value)
+        or _is_minimize_current_window_request(value)
         or re.search(
             r"(?:最大化|放大|全屏|进入全屏|分屏|贴靠|平铺|放左边|放右边|靠左|靠右)",
             value,
@@ -9362,19 +9363,19 @@ def _is_minimize_current_window_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:最小化|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            r"(?:最小化|收起|隐藏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起)",
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起|隐藏)",
             text,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:最小化|收起)(?:一下|下)?",
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)\s*(?:最小化|收起|隐藏)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )

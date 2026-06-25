@@ -6273,6 +6273,8 @@ def test_send_message_executes_direct_minimize_current_window_task(tmp_path, mon
         cases = (
             "把当前窗口最小化",
             "当前窗口最小化",
+            "隐藏当前窗口",
+            "隐藏前台窗口",
             "Can you minimize the current app?",
             "Could you minimize the foreground application please?",
         )
