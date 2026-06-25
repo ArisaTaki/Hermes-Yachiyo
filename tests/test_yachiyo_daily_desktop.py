@@ -68,6 +68,26 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
 
 
+def test_daily_desktop_entrypoint_routes_finder_quick_look_to_app_safe_shortcut() -> None:
+    cases = (
+        ("打开Finder然后按空格", "app.open_and_safe_shortcut"),
+        ("Finder按空格", "app.focus_and_safe_shortcut"),
+        ("Finder快速查看选中项", "app.focus_and_safe_shortcut"),
+    )
+
+    for prompt, tool_name in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Finder", "action": "finder_quick_look"},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     cases = (
         ("打开备忘录新建", "app.open_and_safe_shortcut", "Notes", "new_note"),

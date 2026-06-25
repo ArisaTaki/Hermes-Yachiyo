@@ -652,6 +652,21 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "desktop.open_path",
         "input": {"path": "finder_selection"},
     }
+    assert daily_desktop_intent_tool_request("打开Finder然后按空格", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_quick_look"},
+    }
+    assert daily_desktop_intent_tool_request("Finder按空格", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_quick_look"},
+    }
+    assert daily_desktop_intent_tool_request("Slack按空格", allowed_tools) != {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "finder_quick_look"},
+    }
     assert daily_desktop_intent_tool_request("打开系统活动监视器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

@@ -513,6 +513,26 @@ def daily_desktop_intent_tool_requests(
     direct_hotkey = _desktop_hotkey(context)
     if direct_hotkey and not _desktop_safe_key(context) and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", direct_hotkey)]
+    finder_quick_look = _app_open_or_focus_foreground_action_request(context)
+    if (
+        finder_quick_look
+        and str(finder_quick_look.get("tool") or "") in {
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+        }
+    ):
+        finder_input = finder_quick_look.get("input") if isinstance(finder_quick_look.get("input"), dict) else {}
+        if (
+            finder_input.get("app_name") == "Finder"
+            and finder_input.get("action") == "finder_quick_look"
+            and str(finder_quick_look.get("tool") or "") in allowed
+        ):
+            return [
+                _request(
+                    str(finder_quick_look.get("tool") or ""),
+                    dict(finder_input),
+                )
+            ]
     app_close_window_sequence = _app_open_or_focus_close_window_tool_requests(context)
     if app_close_window_sequence:
         if all(str(request.get("tool") or "") in allowed for request in app_close_window_sequence):
@@ -1396,6 +1416,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",
         "reopen_closed_tab": "重新打开关闭的标签页",
+        "finder_quick_look": "快速查看 Finder 选中项",
     }.get(str(action or "").strip().lower(), "")
 
 
@@ -4558,9 +4579,17 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     postposed_open = _app_postposed_open_followup_match(text)
     if postposed_open:
         mode, _raw_app, app_name, followup = postposed_open
-        action = _desktop_safe_shortcut_action(followup)
+        action = _finder_quick_look_shortcut_action(app_name, followup) or _desktop_safe_shortcut_action(followup)
         if action:
             return {"mode": mode, "app_name": app_name, "action": action}
+
+    prefix_split = _known_app_prefix_split(text)
+    if prefix_split:
+        raw_app, app_name, followup = prefix_split
+        if not _looks_like_window_target(raw_app) and not _looks_like_common_path_target(raw_app):
+            action = _finder_quick_look_shortcut_action(app_name, followup)
+            if action:
+                return {"mode": "focus", "app_name": app_name, "action": action}
 
     shortcut_pattern = (
         r"(?:复制(?:一下|下)?(?:选中(?:的)?(?:内容|文字))?|"
@@ -4658,10 +4687,41 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             compact = re.sub(r"[\s._-]+", "", _strip_app_name(raw_app).lower())
             if compact in _APP_ALIASES:
                 app_name = _normalize_app_name(raw_app)
-        action = _desktop_safe_shortcut_action(match.group("action"))
+        action = _finder_quick_look_shortcut_action(app_name, match.group("action")) or _desktop_safe_shortcut_action(match.group("action"))
         if app_name and action:
             return {"mode": mode, "app_name": app_name, "action": action}
     return None
+
+
+def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "空格",
+        "空格键",
+        "按空格",
+        "按空格键",
+        "按一下空格",
+        "按一下空格键",
+        "按下空格",
+        "敲空格",
+        "敲一下空格",
+        "space",
+        "pressspace",
+        "hitspace",
+        "quicklook",
+        "preview",
+        "快速查看",
+        "快速预览",
+        "预览",
+        "预览选中项",
+        "预览选中文件",
+        "快速查看选中项",
+        "快速查看选中文件",
+    }:
+        return "finder_quick_look"
+    return ""
 
 
 def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
@@ -7045,6 +7105,12 @@ def _app_foreground_action_request(
     app_name: str,
     followup: str,
 ) -> dict[str, Any] | None:
+    finder_quick_look_action = _finder_quick_look_shortcut_action(app_name, followup)
+    if finder_quick_look_action:
+        return {
+            "tool": f"app.{mode}_and_safe_shortcut",
+            "input": {"app_name": app_name, "action": finder_quick_look_action},
+        }
     shortcut_action = _app_default_new_shortcut_action(
         app_name,
         followup,

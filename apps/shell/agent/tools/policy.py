@@ -129,6 +129,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "browser_forward",
     "reopen_closed_tab",
 )
+APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + ("finder_quick_look",)
 SAFE_KEY_ACTIONS = (
     "escape",
     "tab",
@@ -571,9 +572,14 @@ class ToolDescriptor:
             raise AgentRuntimeError(f"{self.name} 参数 text 必须是非空字符串")
         if self.name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
             action = str(payload.get("action") or "").strip().lower()
-            if action not in SAFE_SHORTCUT_ACTIONS:
+            if action not in APP_SAFE_SHORTCUT_ACTIONS:
                 raise AgentRuntimeError(
-                    f"{self.name} 参数 action 必须是 " + "、".join(SAFE_SHORTCUT_ACTIONS)
+                    f"{self.name} 参数 action 必须是 " + "、".join(APP_SAFE_SHORTCUT_ACTIONS)
+                )
+            app_name = str(payload.get("app_name") or "").strip()
+            if action == "finder_quick_look" and app_name != "Finder":
+                raise AgentRuntimeError(
+                    f"{self.name} 参数 action=finder_quick_look 仅支持 app_name=Finder"
                 )
         if self.name in {"app.open_and_safe_key", "app.focus_and_safe_key"}:
             action = str(payload.get("action") or "").strip().lower()
@@ -1127,7 +1133,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "app_name": {"type": "string", "description": "Application name."},
             "action": {
                 "type": "string",
-                "enum": list(SAFE_SHORTCUT_ACTIONS),
+                "enum": list(APP_SAFE_SHORTCUT_ACTIONS),
                 "description": "Whitelisted shortcut action to execute.",
             },
         },
@@ -1143,7 +1149,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "app_name": {"type": "string", "description": "Application name."},
             "action": {
                 "type": "string",
-                "enum": list(SAFE_SHORTCUT_ACTIONS),
+                "enum": list(APP_SAFE_SHORTCUT_ACTIONS),
                 "description": "Whitelisted shortcut action to execute.",
             },
         },

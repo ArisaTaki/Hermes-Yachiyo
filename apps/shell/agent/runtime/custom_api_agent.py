@@ -2240,6 +2240,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "browser_back": "返回上一页",
         "browser_forward": "前进一页",
         "reopen_closed_tab": "重新打开关闭的标签页",
+        "finder_quick_look": "快速查看选中项",
     }.get(action, "")
     return f"已{label}。" if label else ""
 

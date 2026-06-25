@@ -1179,6 +1179,132 @@ def test_send_message_executes_app_open_browser_back_without_fake_app_name(
         store.close()
 
 
+def test_send_message_executes_finder_quick_look_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Finder quick look should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: Finder Quick Look",
+            "data": {
+                "shortcut_action": action,
+                "shortcut_label": "Finder Quick Look",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    try:
+        result = api.send_message("Finder按空格")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Finder"), ("shortcut", "finder_quick_look")]
+        assert result["agent_task"]["summary"] == "已切到 Finder 并快速查看选中项。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Finder",
+            "action": "finder_quick_look",
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已切到 Finder 并快速查看选中项。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已切到 Finder 并快速查看选中项。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        calls.clear()
+        second = api.send_message("打开Finder然后按空格")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert calls == [
+            ("open", "Finder"),
+            ("focus", "Finder"),
+            ("shortcut", "finder_quick_look"),
+        ]
+        assert second["agent_task"]["summary"] == "已打开 Finder 并快速查看选中项。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
+        assert second["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Finder",
+            "action": "finder_quick_look",
+        }
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已打开 Finder 并快速查看选中项。"
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "已打开 Finder 并快速查看选中项。"
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_browser_shortcut_search_sequence_without_model(
     tmp_path,
     monkeypatch,

@@ -542,6 +542,10 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Slack", "action": "paste"},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "finder_quick_look"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
     )
@@ -583,6 +587,11 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "delete_tab"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "finder_quick_look"},
         )
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_key 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -651,6 +660,8 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "browser_forward"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "reopen_closed_tab"})
 
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "delete_tab"})
 
@@ -4159,6 +4170,7 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
     spotlight = desktop_mod.desktop_safe_shortcut("spotlight_search")
     emoji = desktop_mod.desktop_safe_shortcut("emoji_picker")
     lock_screen = desktop_mod.desktop_safe_shortcut("lock_screen")
+    finder_quick_look = desktop_mod.desktop_safe_shortcut("finder_quick_look")
 
     assert spotlight["summary"] == "Executed safe shortcut: spotlight search"
     assert spotlight["data"] == {
@@ -4183,12 +4195,23 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
         "shortcut_action": "lock_screen",
         "shortcut_label": "lock screen",
     }
+    assert finder_quick_look["summary"] == "Executed safe shortcut: Finder Quick Look"
+    assert finder_quick_look["data"] == {
+        "key": "space",
+        "modifiers": [],
+        "key_code": 49,
+        "shortcut_action": "finder_quick_look",
+        "shortcut_label": "Finder Quick Look",
+    }
     assert "key code keyCodeValue using {command down}" in calls[0][0][2]
     assert calls[0][0][-1] == "49"
     assert "key code keyCodeValue using {control down, command down}" in calls[1][0][2]
     assert calls[1][0][-1] == "49"
     assert "keystroke keyName using {control down, command down}" in calls[2][0][2]
     assert calls[2][0][-1] == "q"
+    assert "key code keyCodeValue" in calls[3][0][2]
+    assert " using " not in calls[3][0][2]
+    assert calls[3][0][-1] == "49"
 
 
 def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeypatch) -> None:
