@@ -424,6 +424,14 @@ def _media_apple_music_play(
     return broker.media_apple_music_play(str(payload.get("query") or ""))
 
 
+def _media_apple_music_status(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.media_apple_music_status()
+
+
 def _media_apple_music_open_and_play(
     broker: Any,
     _payload: dict[str, Any],
@@ -766,6 +774,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.reveal_path": _desktop_reveal_path,
     "desktop.open_path": _desktop_open_path,
     "media.apple_music_play": _media_apple_music_play,
+    "media.apple_music_status": _media_apple_music_status,
     "media.apple_music_open_and_play": _media_apple_music_open_and_play,
     "media.apple_music_control": _media_apple_music_control,
     "media.music_app_open_and_play": _media_music_app_open_and_play,

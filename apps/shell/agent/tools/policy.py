@@ -61,6 +61,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.reveal_path": "desktop_reveal_path",
     "desktop.open_path": "desktop_open_path",
     "media.apple_music_play": "media_apple_music_play",
+    "media.apple_music_status": "media_apple_music_status",
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
     "media.music_app_open_and_play": "media_music_app_open_and_play",
@@ -169,6 +170,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.reveal_path",
     "desktop.open_path",
     "media.apple_music_play",
+    "media.apple_music_status",
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "media.music_app_open_and_play",
@@ -1502,6 +1504,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         ),
         properties={"query": {"type": "string", "description": "Song, album, or artist query."}},
         required=("query",),
+    ),
+    "media.apple_music_status": ToolDescriptor(
+        name="media.apple_music_status",
+        description="Read Apple Music playback state and current track without changing playback.",
+        properties={},
+        required=(),
     ),
     "media.apple_music_open_and_play": ToolDescriptor(
         name="media.apple_music_open_and_play",

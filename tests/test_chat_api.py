@@ -537,6 +537,81 @@ def test_send_message_executes_direct_music_control_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_executes_apple_music_status_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    status_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("music status task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        lambda query: (_ for _ in ()).throw(
+            AssertionError(f"music status task should not play query: {query}")
+        ),
+    )
+
+    def fake_apple_music_status() -> dict:
+        nonlocal status_calls
+        status_calls += 1
+        return {
+            "ok": True,
+            "action": "media.apple_music_status",
+            "summary": "Read Apple Music playback status",
+            "data": {
+                "running": True,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_status",
+        fake_apple_music_status,
+    )
+    try:
+        result = api.send_message("现在播放什么歌")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        user = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "Apple Music 当前播放：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_status"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "Apple Music 当前播放：超时空辉夜姬 - Yachiyo。"
+        assert user.metadata["daily_desktop_tool"] == "media.apple_music_status"
+        assert status_calls == 1
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_main_chat_runnable_app_open_without_model(
     tmp_path,
     monkeypatch,

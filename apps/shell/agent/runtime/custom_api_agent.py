@@ -38,6 +38,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.minimize",
     "app.quit",
     "media.apple_music_play",
+    "media.apple_music_status",
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "media.music_app_open_and_play",
@@ -124,6 +125,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.focus_and_safe_key": "聚焦应用并按导航键",
     "app.open_and_hotkey": "打开应用并发送快捷键",
     "app.focus_and_hotkey": "聚焦应用并发送快捷键",
+    "media.apple_music_status": "读取 Apple Music 播放状态",
     "app.open_and_safe_scroll": "打开应用并滚动",
     "app.focus_and_safe_scroll": "聚焦应用并滚动",
     "app.open_and_safe_click": "打开应用并点击",
@@ -954,6 +956,8 @@ class RuntimeCustomApiAgentLoop:
                 if track:
                     return f"已在 Apple Music 播放：{track}{f' - {artist}' if artist else ''}。"
                 return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
+            if tool_name == "media.apple_music_status":
+                return _apple_music_status_summary(result) or result_summary or "已读取 Apple Music 播放状态。"
             if tool_name == "media.apple_music_open_and_play":
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 track = str(data.get("track") or "").strip()
@@ -2151,6 +2155,27 @@ def _apple_music_control_summary(result: dict[str, Any], planned_input: dict[str
     if data.get("playback_state_unverified"):
         return f"已用媒体键尝试{label} Apple Music。{track_text}"
     return f"已{label} Apple Music。{track_text}"
+
+
+def _apple_music_status_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if data.get("running") is False or str(data.get("player_state") or "").strip() == "not_running":
+        return "Apple Music 当前没有运行。"
+    state = str(data.get("player_state") or "").strip().lower()
+    track = str(data.get("track") or "").strip()
+    artist = str(data.get("artist") or "").strip()
+    track_text = f"{track}{f' - {artist}' if artist else ''}" if track else ""
+    if state == "playing" and track_text:
+        return f"Apple Music 当前播放：{track_text}。"
+    labels = {
+        "playing": "正在播放",
+        "paused": "已暂停",
+        "stopped": "已停止",
+    }
+    label = labels.get(state, state or "状态未知")
+    if track_text:
+        return f"Apple Music 当前{label}：{track_text}。"
+    return f"Apple Music 当前{label}，没有可读取的曲目。"
 
 
 def _music_app_open_and_play_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

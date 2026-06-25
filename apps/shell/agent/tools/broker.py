@@ -801,6 +801,9 @@ class ToolBroker:
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 
+    def media_apple_music_status(self) -> dict[str, Any]:
+        return desktop.apple_music_status()
+
     def media_apple_music_open_and_play(self) -> dict[str, Any]:
         return desktop.apple_music_open_and_play()
 

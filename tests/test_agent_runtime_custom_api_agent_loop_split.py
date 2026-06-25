@@ -959,6 +959,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.minimize",
         "app.quit",
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
@@ -4213,6 +4214,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    for prompt in ("当前播放什么", "现在播放什么歌", "Apple Music 现在在播什么", "音乐现在放的什么"):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "media.apple_music_status",
+            "input": {},
+        }
+    assert daily_desktop_intent_tool_request("现在播放什么歌", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("Can you play Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
@@ -5539,7 +5547,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "pause"},
     }
     for prompt in ("现在播放什么", "当前在播什么", "Apple Music 正在播什么", "查看播放状态"):
-        assert daily_desktop_intent_tool_request(prompt, allowed_tools) is None
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "media.apple_music_status",
+            "input": {},
+        }
     assert daily_desktop_intent_tool_request("播放超时空辉夜姬", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",

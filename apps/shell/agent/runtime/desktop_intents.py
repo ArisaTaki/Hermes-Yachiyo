@@ -521,6 +521,10 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    if _is_apple_music_status_request(context):
+        if "media.apple_music_status" in allowed:
+            return [_request("media.apple_music_status", {})]
+        return []
     apple_music_search_play = _apple_music_search_play_query(context)
     if apple_music_search_play and "media.apple_music_play" in allowed:
         return [_request("media.apple_music_play", {"query": apple_music_search_play})]
@@ -963,6 +967,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.ui_elements",
     "desktop.windows",
     "media.apple_music_control",
+    "media.apple_music_status",
     "media.music_app_open_and_play",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
@@ -1151,6 +1156,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.ui_elements",
         "desktop.windows",
         "media.apple_music_control",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_play",
         "media.music_app_open_and_play",
@@ -1206,6 +1212,8 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
     if tool_name == "media.apple_music_play":
         query = str(recovery_input.get("query") or "").strip()
         return f"播放{query}" if query else ""
+    if tool_name == "media.apple_music_status":
+        return "查看Apple Music播放状态"
     if tool_name == "media.apple_music_open_and_play":
         return "打开Apple Music并播放"
     if tool_name == "media.music_app_open_and_play":
@@ -2141,6 +2149,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_settings_target = _direct_system_settings_tool_target(text)
     if system_settings_target:
         candidates.append(_request("system.settings_open", {"target": system_settings_target}))
+
+    if _is_apple_music_status_request(text):
+        candidates.append(_request("media.apple_music_status", {}))
 
     apple_music_search_play = _apple_music_search_play_query(text)
     if apple_music_search_play:
@@ -8756,6 +8767,8 @@ def _apple_music_search_play_query(text: str) -> str:
 def _music_query(text: str) -> str:
     if _looks_like_window_management_action(text):
         return ""
+    if _is_apple_music_status_request(text):
+        return ""
     if _looks_like_app_launch_pull_up_request(text):
         return ""
     if (
@@ -8786,6 +8799,59 @@ def _music_query(text: str) -> str:
         if query and _is_specific_music_query(query):
             return query
     return ""
+
+
+def _is_apple_music_status_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    lowered = clean.lower()
+    return bool(
+        re.search(
+            r"(?:当前|现在|正在|此刻).{0,8}(?:播放|播|放).{0,8}"
+            r"(?:什么|啥|哪首|哪一首|哪首歌|歌曲|歌|曲目)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:apple\s*music|苹果音乐|音乐).{0,12}(?:当前|现在|正在|此刻).{0,8}"
+            r"(?:播放|播|放).{0,8}(?:什么|啥|哪首|哪一首|哪首歌|歌曲|歌|曲目)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|正在|此刻).{0,8}(?:apple\s*music|苹果音乐|音乐).{0,8}"
+            r"(?:播放|播|放).{0,8}(?:什么|啥|哪首|哪一首|哪首歌|歌曲|歌|曲目)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:播放|播|放).{0,4}(?:状态|情况)|(?:音乐|apple\s*music|苹果音乐).{0,8}"
+            r"(?:状态|播放状态|播放情况)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:看看|查看|查询|读一下|读下|告诉我).{0,8}"
+            r"(?:apple\s*music|苹果音乐|音乐).{0,12}(?:当前|现在|正在)?"
+            r".{0,8}(?:播放|播|放|状态)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:what(?:'s| is)|which song is|what song is)\s+"
+            r"(?:currently\s+)?playing(?:\s+(?:in|on)\s+apple\s*music)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:apple\s*music|music)\s+(?:status|playback status|now playing)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bnow\s+playing(?:\s+(?:in|on)\s+apple\s*music)?\b",
+            lowered,
+        )
+    )
 
 
 def _looks_like_app_launch_pull_up_request(text: str) -> bool:

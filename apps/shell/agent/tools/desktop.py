@@ -381,6 +381,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
     ),
     "media_control": (
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
     ),
@@ -2462,6 +2463,71 @@ def apple_music_play(query: str) -> dict[str, Any]:
         "fallback_result": fallback,
     }
     return _with_permission_metadata("media.apple_music_play", payload)
+
+
+def apple_music_status() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.apple_music_status")
+    result = _run_osascript(
+        """
+        if application "Music" is not running then
+            return "status|not_running|||"
+        end if
+        tell application "Music"
+            try
+                set stateText to player state as text
+                try
+                    set trackName to name of current track
+                    set artistName to artist of current track
+                on error
+                    set trackName to ""
+                    set artistName to ""
+                end try
+                return "status|" & stateText & "|" & trackName & "|" & artistName
+            on error errMsg number errNum
+                return "error|" & errNum & "|" & errMsg & "|"
+            end try
+        end tell
+        """,
+        [],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "media.apple_music_status",
+            {
+                **result,
+                "action": "media.apple_music_status",
+                "summary": "media.apple_music_status failed",
+            },
+        )
+    parts = str(result.get("stdout") or "").strip().split("|", 4)
+    while len(parts) < 5:
+        parts.append("")
+    status, state, track, artist, extra = parts
+    if status == "status":
+        return {
+            "ok": True,
+            "action": "media.apple_music_status",
+            "summary": "Read Apple Music playback status",
+            "data": {
+                "running": state != "not_running",
+                "player_state": state,
+                "track": track,
+                "artist": artist,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    payload = {
+        "ok": False,
+        "action": "media.apple_music_status",
+        "summary": "Could not read Apple Music playback status",
+        "error": track or state or extra or "Music did not return playback status",
+        "data": {"status": status},
+        "permission_error": status == "error" and _looks_like_permission_error(f"{state}\n{track}"),
+        "fallback_used": False,
+    }
+    return _with_permission_metadata("media.apple_music_status", payload)
 
 
 def apple_music_control(action: str) -> dict[str, Any]:
@@ -4667,6 +4733,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_status": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "media.music_app_open_and_play": ["accessibility", "open_command"],
@@ -4721,6 +4788,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "media.apple_music_status": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "system.brightness": ["accessibility"],

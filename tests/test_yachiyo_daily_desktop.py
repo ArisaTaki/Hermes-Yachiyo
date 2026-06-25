@@ -1329,8 +1329,23 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
             "media.apple_music_control"
         )
 
-    assert daily_desktop_entrypoint_requests("现在播放什么") == []
-    assert daily_desktop_entrypoint_requests("查看播放状态") == []
+    for prompt in ("当前播放什么", "现在播放什么歌", "Apple Music 现在在播什么", "音乐状态"):
+        status_requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert status_requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.apple_music_status",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(status_requests) == {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_intent",
+            "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+            "daily_desktop_tool": "media.apple_music_status",
+            "daily_desktop_tools": ["media.apple_music_status"],
+        }
 
 
 def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> None:
