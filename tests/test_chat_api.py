@@ -692,6 +692,7 @@ def test_send_message_executes_main_chat_runnable_app_open_without_model(
             ("打开启动台", "Launchpad", "已打开 Launchpad。"),
             ("open control center", "Control Center", "已打开 Control Center。"),
             ("open notification center", "Notification Center", "已打开 Notification Center。"),
+            ("把日历启动起来", "Calendar", "已打开 Calendar。"),
         )
         for text, app_name, summary in cases:
             result = api.send_message(text)

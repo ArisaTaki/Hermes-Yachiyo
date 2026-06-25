@@ -637,6 +637,11 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
             "input": {"reason": "user asked to capture the screen"},
         },
     ]
+    assert daily_desktop_intent_tool_request("把日历启动起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Calendar"},
+    }
     assert daily_desktop_intent_tool_request("打开 Finder 选择的文件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -648,6 +653,11 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "input": {"app_name": "Activity Monitor"},
     }
     assert daily_desktop_intent_tool_request("把Chrome打开然后新建标签页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("把Chrome启动起来然后新建标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "new_tab"},
