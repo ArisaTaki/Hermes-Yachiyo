@@ -164,6 +164,20 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
             "input": {},
         }
     ]
+    assert daily_desktop_entrypoint_requests("现在前台是什么") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("我正在用什么应用") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+        }
+    ]
     for prompt in (
         "现在前台是不是 Chrome",
         "前台是不是 Chrome",
@@ -268,6 +282,13 @@ def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.windows",
             "input": {"app_name": "WeChat"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("列出Chrome窗口") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {"app_name": "Google Chrome"},
         }
     ]
 
@@ -968,6 +989,13 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
             "input": {},
         },
     ]
+    assert daily_desktop_entrypoint_requests("复制选中文本") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
@@ -1050,6 +1078,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
         ("你可以帮我按Tab吗", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
         ("显示桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
+        ("回到桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
         ("当前窗口按 Command V", "desktop.safe_shortcut", {"action": "paste"}),
         ("Can you copy?", "desktop.safe_shortcut", {"action": "copy"}),
         ("Could you paste?", "desktop.safe_shortcut", {"action": "paste"}),

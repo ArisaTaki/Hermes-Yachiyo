@@ -3812,6 +3812,18 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
         return None
     if _is_current_ui_text_request(text):
         return None
+    known_no_space_match = re.search(
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取)"
+        r"(?P<app>[^。！？!?，,\s]+?)\s*(?:的)?\s*(?:窗口|windows?)$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if known_no_space_match:
+        raw_app = _strip_window_scope_app_prefix(known_no_space_match.group("app"))
+        app_name = _normalize_app_name(raw_app)
+        if app_name and _is_known_app_reference(raw_app):
+            return {"app_name": app_name}
     app_patterns = (
         r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app>[^.!?]+)",
         r"(?:what|which)\s+(?:open\s+)?windows\s+(?:are\s+)?(?:open\s+)?"
@@ -9034,14 +9046,20 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "复制选中的内容": "copy",
         "复制选中文字": "copy",
         "复制选中的文字": "copy",
+        "复制选中文本": "copy",
+        "复制选中的文本": "copy",
         "复制当前选中内容": "copy",
         "复制当前选中的内容": "copy",
         "复制当前选中文字": "copy",
         "复制当前选中的文字": "copy",
+        "复制当前选中文本": "copy",
+        "复制当前选中的文本": "copy",
         "复制一下选中内容": "copy",
         "复制一下选中的内容": "copy",
         "复制一下选中文字": "copy",
         "复制一下选中的文字": "copy",
+        "复制一下选中文本": "copy",
+        "复制一下选中的文本": "copy",
         "copy": "copy",
         "copyselection": "copy",
         "copycurrentselection": "copy",
@@ -9579,7 +9597,7 @@ def _is_show_desktop_request(text: str) -> bool:
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:显示|露出|查看|看看|看一下|切到|切换到)\s*"
+            r"(?:显示|露出|查看|看看|看一下|切到|切换到|回到|返回到|回)\s*"
             r"(?:当前|现在)?(?:桌面|desktop)"
             r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
             value,
@@ -10629,6 +10647,15 @@ def _is_active_window_request(text: str) -> bool:
             r"(?:当前|现在).{0,8}(?:用的是|正在用).{0,8}(?:哪个|什么).{0,4}(?:app|应用)",
             text,
             flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:我)?(?:当前|现在)?\s*(?:正在用|在用|用的是)\s*(?:哪个|什么).{0,4}(?:app|应用)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:(?:当前|现在)\s*)?前台\s*(?:窗口|应用|app)?\s*(?:是什么|是啥|哪个|什么)",
+            text,
         )
         or "active window" in lowered
         or "foreground window" in lowered

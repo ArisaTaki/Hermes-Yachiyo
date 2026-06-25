@@ -5848,6 +5848,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.active_window",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("现在前台是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("我正在用什么应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("当前是什么天气", allowed_tools) is None
     assert daily_desktop_intent_tool_request("what is the frontmost window", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.active_window",
@@ -5934,6 +5945,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("列出 Chrome 窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Google Chrome"},
+    }
+    assert daily_desktop_intent_tool_request("列出Chrome窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
         "input": {"app_name": "Google Chrome"},
@@ -6210,6 +6226,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "copy"},
     }
     assert daily_desktop_intent_tool_request("复制选中文字", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
+    assert daily_desktop_intent_tool_request("复制选中文本", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "copy"},
@@ -6795,6 +6816,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_key",
         "input": {"action": "escape", "repeat_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("回到桌面", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_key",
+        "input": {"action": "show_desktop", "repeat_count": 1},
     }
     assert daily_desktop_intent_tool_request("按回车", allowed_tools) == {
         "protocol": "json_fallback",

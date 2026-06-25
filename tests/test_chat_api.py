@@ -383,7 +383,6 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-
     finally:
         service.close()
         store.close()
@@ -1048,6 +1047,7 @@ def test_send_message_executes_app_open_browser_back_without_fake_app_name(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
     finally:
         service.close()
         store.close()
@@ -6486,6 +6486,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         cases = (
             ("打开新窗口", "new_window", "已新建窗口。"),
             ("Can you copy?", "copy", "已复制选中内容。"),
+            ("复制选中文本", "copy", "已复制选中内容。"),
             ("切到下一个窗口", "next_window", "已切到下一个窗口。"),
             ("switch to previous window", "previous_window", "已切到上一个窗口。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
@@ -6543,6 +6544,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
 
         assert shortcut_calls == [
             "new_window",
+            "copy",
             "copy",
             "next_window",
             "previous_window",
@@ -6932,6 +6934,8 @@ def test_send_message_executes_direct_active_window_task(tmp_path, monkeypatch):
     try:
         prompts = (
             "现在用的是哪个 App",
+            "现在前台是什么",
+            "我正在用什么应用",
             "现在前台是不是 Chrome",
             "is Chrome frontmost",
         )
@@ -7038,6 +7042,29 @@ def test_send_message_executes_direct_windows_list_task(tmp_path, monkeypatch):
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        filtered = api.send_message("列出Chrome窗口")
+        filtered_task = runtime.state.get_task(filtered["task_id"])
+        filtered_run = service.get_run(filtered["run_id"])
+        filtered_assistant = runtime.chat_session.get_assistant_message_for_task(
+            filtered["task_id"]
+        )
+
+        assert filtered["ok"] is True
+        assert filtered["status"] == "completed"
+        assert filtered["agent_task"]["summary"] == "当前窗口：Google Chrome: ChatGPT; Finder: Downloads。"
+        assert filtered["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.windows"
+        assert filtered["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome"
+        }
+        assert filtered_task is not None
+        assert filtered_task.status == TaskStatus.COMPLETED
+        assert filtered_task.result == "当前窗口：Google Chrome: ChatGPT; Finder: Downloads。"
+        assert filtered_assistant is not None
+        assert filtered_assistant.status == MessageStatus.COMPLETED
+        assert filtered_assistant.content == "当前窗口：Google Chrome: ChatGPT; Finder: Downloads。"
+        assert windows_calls == ["", "Google Chrome"]
+        assert filtered_run["status"] == "completed"
     finally:
         service.close()
         store.close()
@@ -7861,6 +7888,7 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
             ("按向下箭头三次", "arrow_down", 3, "已按下箭头（3 次）。"),
             ("Could you press Escape?", "escape", 1, "已按Escape。"),
             ("show desktop", "show_desktop", 1, "已显示桌面。"),
+            ("回到桌面", "show_desktop", 1, "已显示桌面。"),
         )
         for text, action, repeat_count, summary in cases:
             result = api.send_message(text)
@@ -7892,7 +7920,12 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
             assert "model.request.started" not in event_types
             assert pressed[-1] == (action, repeat_count)
 
-        assert pressed == [("arrow_down", 3), ("escape", 1), ("show_desktop", 1)]
+        assert pressed == [
+            ("arrow_down", 3),
+            ("escape", 1),
+            ("show_desktop", 1),
+            ("show_desktop", 1),
+        ]
     finally:
         service.close()
         store.close()
