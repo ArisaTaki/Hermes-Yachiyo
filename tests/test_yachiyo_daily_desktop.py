@@ -142,6 +142,26 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
             "input": {},
         }
     ]
+    for prompt in (
+        "现在前台是不是 Chrome",
+        "前台是不是 Chrome",
+        "当前前台是不是 Google Chrome",
+        "现在是不是在 Chrome 里",
+        "我现在是不是在微信",
+        "is Chrome frontmost",
+        "is Chrome the active app",
+        "is the active app Chrome",
+        "which app is frontmost",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+            }
+        ]
+
+    assert daily_desktop_entrypoint_requests("我现在是不是在家") == []
 
 
 def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps() -> None:

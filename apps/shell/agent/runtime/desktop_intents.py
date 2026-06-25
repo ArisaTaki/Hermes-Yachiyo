@@ -9591,6 +9591,38 @@ def _looks_like_screen_observation_target(value: str) -> bool:
     return bool(re.fullmatch(r"(?:screen|desktop|interface|ui)", lowered))
 
 
+def _is_known_app_reference(value: str) -> bool:
+    app = _strip_app_name(value)
+    compact = _compact_app_alias(app)
+    if not compact:
+        return False
+    return any(compact == _compact_app_alias(alias) for alias, _app_name in _known_app_followup_aliases())
+
+
+def _is_active_window_app_check_request(text: str) -> bool:
+    stripped = _strip_query(text)
+    if not stripped:
+        return False
+    patterns = (
+        r"^(?:当前|现在|前台|当前前台).{0,8}(?:是不是|是否是|是)\s*"
+        r"(?P<app>[^。！？!?，,]+?)(?:里|中|内|上|里面)?$",
+        r"^(?:我)?(?:现在|当前).{0,8}(?:是不是|是否是)?\s*在\s*"
+        r"(?P<app>[^。！？!?，,]+?)(?:里|中|内|上|里面)?$",
+        r"^(?P<app>[^。！？!?，,]+?)\s*(?:是不是|是否是|是)?(?:当前|现在)?"
+        r"(?:前台|当前前台)(?:应用|app)?$",
+        r"^am\s+i\s+(?:currently\s+)?(?:in|using|on)\s+(?P<app>[^.!?]+)$",
+        r"^is\s+(?P<app>[^.!?]+?)\s+(?:the\s+)?(?:active|foreground|frontmost)"
+        r"(?:\s+(?:app|application|window))?$",
+        r"^is\s+(?:the\s+)?(?:active|foreground|frontmost)\s+(?:app|application|window)"
+        r"\s+(?P<app>[^.!?]+)$",
+    )
+    return any(
+        (match := re.search(pattern, stripped, flags=re.IGNORECASE))
+        and _is_known_app_reference(match.group("app"))
+        for pattern in patterns
+    )
+
+
 def _is_active_window_request(text: str) -> bool:
     if _is_running_apps_request(text):
         return False
@@ -9625,9 +9657,12 @@ def _is_active_window_request(text: str) -> bool:
         or "foreground window" in lowered
         or "frontmost window" in lowered
         or "current window" in lowered
+        or "current app" in lowered
+        or re.search(r"\b(?:what|which)\s+(?:app|application)\s+is\s+(?:active|foreground|frontmost)\b", lowered)
         or re.search(r"\b(?:what|which)\s+(?:app|application)\s+am\s+i\s+using\b", lowered)
         or re.search(r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:active|foreground|frontmost)\s+(?:app|application)\b", lowered)
         or re.search(r"\b(?:what|which)\s+window\s+is\s+(?:active|current|foreground)\b", lowered)
+        or _is_active_window_app_check_request(text)
     )
 
 

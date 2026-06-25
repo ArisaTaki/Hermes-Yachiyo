@@ -6046,38 +6046,45 @@ def test_send_message_executes_direct_active_window_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     try:
-        result = api.send_message("现在用的是哪个 App")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        prompts = (
+            "现在用的是哪个 App",
+            "现在前台是不是 Chrome",
+            "is Chrome frontmost",
+        )
+        for prompt in prompts:
+            result = api.send_message(prompt)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.active_window"
-        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "当前前台窗口是 Google Chrome：ChatGPT。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "当前前台窗口是 Google Chrome：ChatGPT。"
-        assert active_window_calls == 1
-        assert run["status"] == "completed"
-        assert run["pending_approval"] == {}
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "agent.desktop.intent_approval_required" not in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == "当前前台窗口是 Google Chrome：ChatGPT。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.active_window"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "当前前台窗口是 Google Chrome：ChatGPT。"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "当前前台窗口是 Google Chrome：ChatGPT。"
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert active_window_calls == len(prompts)
     finally:
         service.close()
         store.close()

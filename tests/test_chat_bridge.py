@@ -1243,6 +1243,9 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
     cases = (
         ("what app am I using?", "live2d"),
         ("what is the frontmost window", "bubble"),
+        ("前台是不是 Chrome", "bubble"),
+        ("is Chrome frontmost", "live2d"),
+        ("which app is frontmost", "bubble"),
     )
     for prompt, launcher_mode in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1268,7 +1271,7 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert active_window_calls == 2
+    assert active_window_calls == len(cases)
 
 
 def test_chat_bridge_quick_message_executes_named_windows_list_without_model(
