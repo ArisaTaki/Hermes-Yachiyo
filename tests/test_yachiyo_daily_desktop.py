@@ -112,6 +112,59 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps() -> None:
+    cases = (
+        (
+            "当前窗口最大化",
+            "desktop.hotkey",
+            {"key": "f", "modifiers": ["control", "command"]},
+        ),
+        (
+            "maximize the current window",
+            "desktop.hotkey",
+            {"key": "f", "modifiers": ["control", "command"]},
+        ),
+        (
+            "切换到上一个应用",
+            "desktop.hotkey",
+            {"key": "tab", "modifiers": ["command"]},
+        ),
+        (
+            "switch to previous app",
+            "desktop.hotkey",
+            {"key": "tab", "modifiers": ["command"]},
+        ),
+        ("打开启动台", "app.open", {"app_name": "Launchpad"}),
+        ("open launchpad", "app.open", {"app_name": "Launchpad"}),
+        ("打开控制中心", "app.open", {"app_name": "Control Center"}),
+        ("open control center", "app.open", {"app_name": "Control Center"}),
+        ("打开通知中心", "app.open", {"app_name": "Notification Center"}),
+        ("open notification center", "app.open", {"app_name": "Notification Center"}),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("把当前窗口放左边") == []
+    assert daily_desktop_entrypoint_requests("tile current window left") == []
+    assert daily_desktop_entrypoint_requests("当前窗口是什么") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:
     cases = (
         (

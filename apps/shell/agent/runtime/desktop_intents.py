@@ -91,6 +91,12 @@ _APP_ALIASES = {
     "activitymonitor": "Activity Monitor",
     "活动监视器": "Activity Monitor",
     "系统活动监视器": "Activity Monitor",
+    "launchpad": "Launchpad",
+    "启动台": "Launchpad",
+    "controlcenter": "Control Center",
+    "控制中心": "Control Center",
+    "notificationcenter": "Notification Center",
+    "通知中心": "Notification Center",
     "keychainaccess": "Keychain Access",
     "钥匙串": "Keychain Access",
     "钥匙串访问": "Keychain Access",
@@ -373,6 +379,9 @@ def daily_desktop_intent_tool_requests(
     direct_safe_shortcut = _desktop_safe_shortcut_action(context)
     if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
         return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
+    system_hotkey = _system_desktop_hotkey_request(context)
+    if system_hotkey and "desktop.hotkey" in allowed:
+        return [_request("desktop.hotkey", system_hotkey)]
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -1919,6 +1928,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_settings_target = _direct_system_settings_tool_target(text)
     if system_settings_target:
         candidates.append(_request("system.settings_open", {"target": system_settings_target}))
+
+    system_hotkey = _system_desktop_hotkey_request(text)
+    if system_hotkey:
+        candidates.append(_request("desktop.hotkey", system_hotkey))
 
     apple_music_search_play = _apple_music_search_play_query(text)
     if apple_music_search_play:
@@ -6655,7 +6668,7 @@ def _app_open_name(text: str) -> str:
         r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
         r"(?P<app>[^。！？!?，,]+?)(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
         r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<verb>open|launch|start)\s+"
-        r"(?P<app>[^.!?]+?)(?=\s*(?:and|then|if|$|[.!?]))",
+        r"(?P<app>[^.!?]+?)(?=\s*(?:\b(?:and|then|if)\b|$|[.!?]))",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -7347,6 +7360,8 @@ def _apple_music_search_play_query(text: str) -> str:
 
 
 def _music_query(text: str) -> str:
+    if _looks_like_window_management_action(text):
+        return ""
     if (
         _apple_music_search_play_query(text)
         or _looks_like_generic_music_play_request(text)
@@ -7671,6 +7686,9 @@ def _looks_like_project_or_design_request(text: str) -> bool:
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
     text = _strip_desktop_action_request_shell(text)
+    system_hotkey = _system_desktop_hotkey_request(text)
+    if system_hotkey:
+        return system_hotkey
     named = _desktop_named_hotkey(text)
     if named:
         return named
@@ -7701,6 +7719,80 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
         if parsed:
             return parsed
     return None
+
+
+def _system_desktop_hotkey_request(text: str) -> dict[str, Any] | None:
+    if _is_maximize_current_window_request(text):
+        return {"key": "f", "modifiers": ["control", "command"]}
+    if _is_previous_app_switch_request(text):
+        return {"key": "tab", "modifiers": ["command"]}
+    return None
+
+
+def _is_maximize_current_window_request(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)?\s*"
+            r"(?:最大化|放大|全屏|进入全屏)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:最大化|放大|全屏|进入全屏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:maximize|fullscreen|full\s*screen|enter\s+full\s*screen)\s+"
+            r"(?:the\s+)?(?:current|active|foreground|frontmost)?\s*"
+            r"(?:window|app|application)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:make|put)\s+(?:the\s+)?(?:current|active|foreground|frontmost)\s+"
+            r"(?:window|app|application)\s+(?:full\s*screen|maximized)\b",
+            lowered,
+        )
+    )
+
+
+def _is_previous_app_switch_request(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:切换到|切换|切到|切回|回到)\s*(?:上一个|上个|前一个|前个|之前|刚才)\s*(?:应用|app|程序|软件)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:switch|go|return)\s+(?:back\s+)?to\s+(?:the\s+)?"
+            r"(?:previous|last)\s+(?:app|application)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:switch|go)\s+to\s+(?:the\s+)?previous\s+app\b", lowered)
+    )
+
+
+def _looks_like_window_management_action(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    return bool(
+        _is_maximize_current_window_request(value)
+        or re.search(
+            r"(?:最大化|放大|全屏|进入全屏|分屏|贴靠|平铺|放左边|放右边|靠左|靠右)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:maximize|fullscreen|full\s*screen|tile|snap|left\s+half|right\s+half)\b",
+            lowered,
+        )
+    )
 
 
 def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
@@ -9086,6 +9178,8 @@ def _looks_like_screen_observation_target(value: str) -> bool:
 
 def _is_active_window_request(text: str) -> bool:
     if _is_running_apps_request(text):
+        return False
+    if _looks_like_window_management_action(text):
         return False
     if re.search(r"(?:关闭|关掉|退出|结束|close|quit|exit)", text, flags=re.IGNORECASE):
         return False

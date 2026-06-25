@@ -558,6 +558,41 @@ def test_send_message_executes_main_chat_runnable_app_open_without_model(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        cases = (
+            ("打开启动台", "Launchpad", "已打开 Launchpad。"),
+            ("open control center", "Control Center", "已打开 Control Center。"),
+            ("open notification center", "Notification Center", "已打开 Notification Center。"),
+        )
+        for text, app_name, summary in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert open_calls[-1] == app_name
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()
@@ -5443,6 +5478,16 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
     try:
         cases = (
             ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+            (
+                "最大化当前窗口",
+                "desktop.hotkey",
+                {"key": "f", "modifiers": ["control", "command"]},
+            ),
+            (
+                "switch to previous app",
+                "desktop.hotkey",
+                {"key": "tab", "modifiers": ["command"]},
+            ),
             (
                 "Could you open Chrome and press Command L?",
                 "app.open_and_hotkey",
