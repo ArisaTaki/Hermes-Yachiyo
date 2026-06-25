@@ -1610,6 +1610,26 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             "input": {"body": "明天买牛奶"},
         }
     ]
+    for prompt, body in (
+        ("新建备忘录今天要买牛奶", "今天要买牛奶"),
+        ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
+        ("add a note buy milk", "buy milk"),
+        ("make a note to buy milk", "buy milk"),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "notes.create",
+                "input": {"body": body},
+            }
+        ]
+    assert daily_desktop_entrypoint_requests("创建备忘录") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_note"},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("明天上午九点提醒我开会") == [
         {
             "protocol": "json_fallback",

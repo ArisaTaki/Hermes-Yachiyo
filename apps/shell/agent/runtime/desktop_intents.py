@@ -7963,6 +7963,14 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?!(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)(?:\s|$))"
         r"(?P<text_short>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)"
+        r"(?P<text_short_inline>[^。！？!?\s][^。！？!?]*)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|到)?\s*(?:备忘录|笔记|note)(?:里|中|上)?\s*"
+        r"(?:记一下|记下|记录一下|记录|记上|写下|写入|写)\s*"
+        r"(?P<text_note_prefixed>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:记一下|记下|记录一下|记录|记上)\s*(?P<text_memory>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|开|打开)\s*(?:一个|一条|一篇|新的?)?\s*"
@@ -7973,6 +7981,10 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?P<text>[^。！？!?]+)$",
         r"^(?:please\s+)?(?:create|make|open)\s+(?:a\s+)?(?:new\s+)?note\s+"
         r"(?:and\s+)?(?:type|write|enter|record|with|saying)\s+(?P<text_en>[^.!?]+)$",
+        r"^(?:please\s+)?(?:add|make|create|take|write|record)\s+(?:a\s+)?(?:new\s+)?note"
+        r"(?:\s+(?:to|that\s+says|saying|with))?\s+(?P<text_en_direct>[^.!?]+)$",
+        r"^(?:please\s+)?(?:note\s+down|take\s+(?:a\s+)?note(?:\s+of)?)\s+"
+        r"(?P<text_en_memory>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, str(value or "").strip(), flags=re.IGNORECASE)
@@ -7984,7 +7996,11 @@ def _notes_create_and_type_text(value: str) -> str:
             or groups.get("text_en")
             or groups.get("text_short_colon")
             or groups.get("text_short")
+            or groups.get("text_short_inline")
+            or groups.get("text_note_prefixed")
             or groups.get("text_memory")
+            or groups.get("text_en_direct")
+            or groups.get("text_en_memory")
             or ""
         )
         if typed_text:

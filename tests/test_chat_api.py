@@ -7356,6 +7356,79 @@ def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatc
         store.close()
 
 
+def test_send_message_executes_direct_note_creation_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    note_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct note creation should execute before model")
+        ),
+    )
+
+    def fake_notes_create(body: str, *, title: str = "", folder_name: str = "") -> dict:
+        note_calls.append((body, title, folder_name))
+        return {
+            "ok": True,
+            "action": "notes.create",
+            "summary": "Created note: buy milk",
+            "data": {
+                "title": title or "buy milk",
+                "body_length": len(body),
+                "folder_name": folder_name,
+                "note_id": "note_fake",
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.notes_create", fake_notes_create)
+    try:
+        result = api.send_message("add a note buy milk")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_call = result["agent_task"]["tool_calls"][-1]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user_message = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert tool_call["tool_name"] == "notes.create"
+        assert tool_call["status"] == "completed"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert run["status"] == "completed"
+        assert planned_event["payload"]["tool"] == "notes.create"
+        assert planned_event["payload"]["source"] == "daily_desktop_intent"
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert user_message.metadata["daily_desktop_tool"] == "notes.create"
+        assert note_calls == [("buy milk", "", "")]
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
