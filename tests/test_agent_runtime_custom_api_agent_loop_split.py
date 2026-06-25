@@ -7145,6 +7145,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.click_ui_element",
         "input": {"target": "搜索", "role_filter": "button", "limit": 80, "click_count": 1},
     }
+    assert daily_desktop_intent_tool_request("当前界面点击登录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("前台点登录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
+    assert daily_desktop_intent_tool_request("current window click Login", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "Login", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None

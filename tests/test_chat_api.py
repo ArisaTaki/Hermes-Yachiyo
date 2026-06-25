@@ -6604,6 +6604,21 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
                 {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
             ),
             (
+                "当前界面点击登录",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "前台点登录",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "current window click Login",
+                "desktop.click_ui_element",
+                {"target": "Login", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
                 "点击确认",
                 "desktop.click_ui_element",
                 {"target": "确认", "role_filter": "button", "limit": 80, "click_count": 1},

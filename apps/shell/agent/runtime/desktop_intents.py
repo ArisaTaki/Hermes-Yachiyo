@@ -11077,37 +11077,62 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
         r"search field|search box|search bar|menu item|menu|checkbox))?"
         r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
     )
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-        groups = match.groupdict()
-        raw_label = groups.get("label") or groups.get("label_en") or ""
-        kind = groups.get("kind") or groups.get("kind_en") or ""
-        context = groups.get("context") or ""
-        label = _strip_desktop_ui_element_label(raw_label)
-        if not label:
-            label = _strip_desktop_ui_input_target(raw_label)
-        has_short_label = _desktop_ui_click_has_short_label(label, text=text)
-        if (
-            require_context
-            and not kind
-            and not _desktop_ui_click_has_context(text, context)
-            and not has_short_label
-        ):
-            continue
-        if not label or _looks_like_click_coordinate_label(label):
-            continue
-        role_filter = _desktop_ui_element_role_filter(kind or text)
-        if not role_filter and has_short_label:
-            role_filter = "button"
-        return {
-            "target": label,
-            "role_filter": role_filter,
-            "limit": 80,
-            "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
-        }
+    candidate_texts = [text]
+    scoped_text = _strip_preposed_desktop_click_scope(text)
+    if scoped_text and scoped_text not in candidate_texts:
+        candidate_texts.append(scoped_text)
+    for candidate_text in candidate_texts:
+        for pattern in patterns:
+            match = re.search(pattern, candidate_text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            groups = match.groupdict()
+            raw_label = groups.get("label") or groups.get("label_en") or ""
+            kind = groups.get("kind") or groups.get("kind_en") or ""
+            context = groups.get("context") or ""
+            label = _strip_desktop_ui_element_label(raw_label)
+            if not label:
+                label = _strip_desktop_ui_input_target(raw_label)
+            has_short_label = _desktop_ui_click_has_short_label(label, text=candidate_text)
+            if (
+                require_context
+                and not kind
+                and not _desktop_ui_click_has_context(candidate_text, context)
+                and not has_short_label
+            ):
+                continue
+            if not label or _looks_like_click_coordinate_label(label):
+                continue
+            role_filter = _desktop_ui_element_role_filter(kind or candidate_text)
+            if not role_filter and has_short_label:
+                role_filter = "button"
+            return {
+                "target": label,
+                "role_filter": role_filter,
+                "limit": 80,
+                "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
+            }
     return None
+
+
+def _strip_preposed_desktop_click_scope(text: str) -> str:
+    stripped = _strip_query(text)
+    if not stripped:
+        return ""
+    return _strip_query(
+        re.sub(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|到)?\s*"
+            r"(?:(?:当前|前台|这个|该)(?:窗口|界面|应用|app)?|"
+            r"(?:current|foreground)\s+(?:window|app|application|ui))"
+            r"(?:上|里|中|内|的|里的|中的)?\s*"
+            r"(?=(?:双击|点击|点一下|点按|单击|点|按一下|按|"
+            r"double\s+click|click|press|tap))",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _desktop_ui_click_has_context(text: str, context: str) -> bool:

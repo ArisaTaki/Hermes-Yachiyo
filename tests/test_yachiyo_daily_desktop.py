@@ -440,6 +440,21 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
         ),
         (
+            "当前界面点击登录",
+            "desktop.click_ui_element",
+            {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+        ),
+        (
+            "前台点登录",
+            "desktop.click_ui_element",
+            {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+        ),
+        (
+            "在当前界面点击登录按钮",
+            "desktop.click_ui_element",
+            {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+        ),
+        (
             "点击确认",
             "desktop.click_ui_element",
             {"target": "确认", "role_filter": "button", "limit": 80, "click_count": 1},

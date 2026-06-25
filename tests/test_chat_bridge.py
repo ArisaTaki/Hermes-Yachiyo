@@ -9148,6 +9148,21 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
                 {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
             ),
             (
+                "当前界面点击登录",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "前台点登录",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "current window click Login",
+                "desktop.click_ui_element",
+                {"target": "Login", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
                 "Can you click the login button?",
                 "desktop.click_ui_element",
                 {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},
