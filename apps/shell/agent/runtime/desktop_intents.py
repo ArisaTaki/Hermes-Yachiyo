@@ -307,6 +307,7 @@ _COMMON_REVEAL_PATHS = {
     "currentfolder": ".",
     "currentdirectory": ".",
     "workingdirectory": ".",
+    "workspace": ".",
     "currentworkspace": ".",
     "workspacefolder": ".",
     "workspacedirectory": ".",
@@ -317,6 +318,7 @@ _COMMON_REVEAL_PATHS = {
     "当前目录": ".",
     "当前文件夹": ".",
     "当前工作区": ".",
+    "工作区": ".",
     "工作区文件夹": ".",
     "工作区目录": ".",
     "当前项目文件夹": ".",
@@ -9281,6 +9283,8 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
     if _has_browser_page_context(text):
         return None
     text = _strip_query(text)
+    if _desktop_submit_foreground_action(text):
+        return None
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"

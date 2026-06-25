@@ -3786,8 +3786,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_tool_request("打开声音设置", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "app.open",
-        "input": {"app_name": "System Settings"},
+        "tool": "system.settings_open",
+        "input": {"target": "声音"},
     }
     assert daily_desktop_intent_tool_request("打开蓝牙", allowed_tools) == {
         "protocol": "json_fallback",
@@ -4337,7 +4337,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"app_name": "Finder"},
         }
     for prompt in ("打开项目文件夹", "打开工作区", "open project folder", "open workspace"):
-        assert daily_desktop_intent_tool_request(prompt, allowed_tools) is None
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "."},
+        }
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -5832,7 +5836,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
         "presentation": "summary",
     }
-    assert daily_desktop_intent_tool_request("点击搜索", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("点击搜索", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "搜索", "role_filter": "button", "limit": 80, "click_count": 1},
+    }
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None
