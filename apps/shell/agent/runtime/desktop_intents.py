@@ -383,10 +383,13 @@ _COMMON_REVEAL_PATHS = {
     "bin": "~/.Trash",
     "垃圾桶": "~/.Trash",
     "废纸篓": "~/.Trash",
+    "回收站": "~/.Trash",
     "垃圾桶文件夹": "~/.Trash",
     "废纸篓文件夹": "~/.Trash",
+    "回收站文件夹": "~/.Trash",
     "垃圾桶目录": "~/.Trash",
     "废纸篓目录": "~/.Trash",
+    "回收站目录": "~/.Trash",
 }
 _MUSIC_APP_COMPACTS = {
     "applemusic",

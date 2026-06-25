@@ -4941,6 +4941,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开回收站", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/.Trash"},
+    }
     assert daily_desktop_intent_tool_request("显示下载目录", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",

@@ -750,6 +750,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~/.Trash"},
         ),
         (
+            "打开回收站",
+            "desktop.open_path",
+            {"path": "~/.Trash"},
+        ),
+        (
             "打开临时目录",
             "desktop.open_path",
             {"path": "/tmp"},
