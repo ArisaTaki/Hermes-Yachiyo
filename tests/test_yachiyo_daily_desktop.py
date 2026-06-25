@@ -1767,6 +1767,9 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("Could you launch Spotify and play music?", "media.music_app_open_and_play", {"app_name": "Spotify"}),
         ("能帮我播放 Apple Music 吗", "media.apple_music_open_and_play", {}),
         ("能不能直接播个 Apple Music", "media.apple_music_open_and_play", {}),
+        ("你能不能帮我播放音乐", "media.apple_music_open_and_play", {}),
+        ("帮我在 Apple Music 播放点音乐", "media.apple_music_open_and_play", {}),
+        ("can you play some music?", "media.apple_music_open_and_play", {}),
         ("put on some music", "media.apple_music_open_and_play", {}),
     )
 

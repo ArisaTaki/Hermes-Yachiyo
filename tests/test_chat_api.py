@@ -299,6 +299,28 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert "agent.desktop.intent_completed" in fourth_event_types
         assert "model.request.started" not in fourth_event_types
         assert "model.requested" not in fourth_event_types
+
+        for prompt, expected_calls in (
+            ("你能不能帮我播放音乐", 5),
+            ("can you play some music?", 6),
+        ):
+            followup = api.send_message(prompt)
+            followup_task = runtime.state.get_task(followup["task_id"])
+            followup_user = [
+                message
+                for message in runtime.chat_session.get_messages()
+                if message.role == MessageRole.USER
+            ][-1]
+
+            assert followup["ok"] is True
+            assert followup["status"] == "completed"
+            assert followup["agent_task"]["status"] == "completed"
+            assert followup["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+            assert followup["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+            assert followup_task is not None
+            assert followup_task.status == TaskStatus.COMPLETED
+            assert followup_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+            assert open_and_play_calls == expected_calls
     finally:
         service.close()
         store.close()

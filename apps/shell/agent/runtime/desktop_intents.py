@@ -598,6 +598,10 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in music_app_search_play_sequence
     ):
         return music_app_search_play_sequence
+    if _is_apple_music_open_and_play_request(context):
+        if "media.apple_music_open_and_play" in allowed:
+            return [_request("media.apple_music_open_and_play", {})]
+        return []
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
         str(request.get("tool") or "") in allowed for request in foreground_find_sequence
@@ -10172,7 +10176,7 @@ def _looks_like_scoped_generic_music_play_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:你|您|我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:用|在|通过)\s*(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?"
             r"(?:里|中|上|内|里面)?\s*"
             r"(?:随便|随机)?"
@@ -10199,7 +10203,7 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:你|您|我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:随便|随机)?"
             r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
             r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:东西)|"
@@ -10212,13 +10216,14 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
             lowered,
         )
         or re.search(
-            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:你|您|我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:随便|随机)?(?:来|放|播放|播)(?:一首|首)"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             lowered,
         )
         or re.fullmatch(
-            r"(?:play|start|put\s+on)\s+(?:a\s+)?(?:song|track|music|some\s+music|something|anything)",
+            r"(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:play|start|put\s+on)\s+(?:a\s+)?(?:song|track|music|some\s+music|something|anything)[.!?]*",
             lowered,
         )
         or re.fullmatch(
