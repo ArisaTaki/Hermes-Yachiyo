@@ -1170,6 +1170,27 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         },
     ]
     for prompt in (
+        "复制当前网页内容",
+        "把当前页面内容复制到剪贴板",
+        "copy current page text",
+        "copy current window content",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_content_copy_requests
+    assert (
+        daily_desktop_entrypoint_requests(
+            "复制当前网页内容",
+            allowed_tools=("browser.current_page",),
+        )
+        == []
+    )
+    assert daily_desktop_entrypoint_requests("复制当前网页链接") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+    ]
+    for prompt in (
         "把当前窗口内容粘贴到 Slack",
         "把当前页面内容粘贴到 Slack",
         "paste current page content into Slack",
@@ -2493,6 +2514,39 @@ def test_daily_desktop_entrypoint_routes_dynamic_sources_to_reminders() -> None:
         "把当前网页链接加入提醒事项",
         allowed_tools=("browser.current_page", "reminders.create"),
     ) == []
+    current_content_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前页面内容创建成提醒事项",
+        "把当前窗口内容创建成提醒事项",
+        "create a reminder from current page content",
+        "add current window content to reminders",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_content_reminder_requests
+    assert daily_desktop_entrypoint_requests(
+        "把当前页面内容创建成提醒事项",
+        allowed_tools=("desktop.ui_elements", "reminders.create"),
+    ) == []
     assert daily_desktop_entrypoint_requests("新建提醒事项：买牛奶") == [
         {
             "protocol": "json_fallback",
@@ -2590,6 +2644,39 @@ def test_daily_desktop_entrypoint_routes_dynamic_sources_to_calendar() -> None:
     assert daily_desktop_entrypoint_requests(
         "把当前网页链接加入日历",
         allowed_tools=("browser.current_page", "calendar.create_event"),
+    ) == []
+    current_content_calendar_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前页面内容创建成日历事件",
+        "把当前窗口内容加入日历",
+        "create a calendar event from current page content",
+        "add current window content to calendar",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_content_calendar_requests
+    assert daily_desktop_entrypoint_requests(
+        "把当前页面内容创建成日历事件",
+        allowed_tools=("desktop.ui_elements", "calendar.create_event"),
     ) == []
 
 
