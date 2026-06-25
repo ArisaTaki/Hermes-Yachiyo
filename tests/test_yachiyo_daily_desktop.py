@@ -1864,6 +1864,82 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_context_sources_to_notes() -> None:
+    selected_text_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容写进备忘录",
+        "把当前选中文字保存到备忘录",
+        "把选中的文字新建成备忘录",
+        "把选中的内容加入备忘录",
+        "save selected text to a new note",
+        "create a note from selected text",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == selected_text_note_requests
+    assert daily_desktop_user_metadata(selected_text_note_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "create a note from selected text",
+        allowed_tools=("notes.create",),
+    ) == []
+
+    current_page_link_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接写进备忘录",
+        "把当前网页链接保存到备忘录",
+        "把当前网页存到备忘录",
+        "把当前网页加入备忘录",
+        "save current page link to a note",
+        "create a note from current page link",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_page_link_note_requests
+    assert daily_desktop_entrypoint_requests(
+        "create a note from current page link",
+        allowed_tools=("notes.create", "browser.current_page"),
+    ) == []
+    assert daily_desktop_entrypoint_requests("把当前网页内容写进备忘录") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
     today_2000 = f"{date.today().isoformat()}T20:00"
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"

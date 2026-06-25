@@ -6869,6 +6869,81 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         )
         == []
     )
+    selected_text_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容写进备忘录",
+        "把当前选中文字保存到备忘录",
+        "把选中的文字新建成备忘录",
+        "把选中的内容加入备忘录",
+        "save selected text to a new note",
+        "create a note from selected text",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_text_note_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests("create a note from selected text", ["notes.create"])
+        == []
+    )
+    current_page_link_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页链接写进备忘录",
+        "把当前网页链接保存到备忘录",
+        "把当前网页存到备忘录",
+        "把当前网页加入备忘录",
+        "save current page link to a note",
+        "create a note from current page link",
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == (
+            current_page_link_note_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "create a note from current page link",
+            ["notes.create", "browser.current_page"],
+        )
+        == []
+    )
+    assert daily_desktop_intent_tool_requests("把当前网页内容写进备忘录", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
     assert daily_desktop_intent_tool_request(
         "把 hello 复制一下",
         ["app.focus_and_safe_shortcut"],
