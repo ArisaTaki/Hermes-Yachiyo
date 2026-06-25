@@ -251,6 +251,23 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
     ]
 
 
+def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
+    assert daily_desktop_entrypoint_requests("显示当前窗口列表") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("显示微信窗口列表") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {"app_name": "WeChat"},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:
     cases = (
         (
@@ -666,6 +683,13 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
             "tool": "desktop.safe_type_text",
             "input": {"text": "Downloads"},
         },
+    ]
+    assert daily_desktop_entrypoint_requests("微信打开搜索") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        }
     ]
 
 

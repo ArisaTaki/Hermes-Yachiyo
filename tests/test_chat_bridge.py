@@ -723,6 +723,30 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    second, second_task, second_run, second_event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "显示微信窗口列表",
+    )
+
+    assert second["ok"] is True
+    assert windows_calls == ["Slack", "WeChat"]
+    assert second_task["status"] == "completed"
+    assert second_task["needs_user_action"] is False
+    assert second_task["pending_approvals"] == []
+    assert second_task["summary"] == "当前窗口：WeChat: general。"
+    assert second_task["tool_calls"][-1]["tool_name"] == "desktop.windows"
+    assert second_task["tool_calls"][-1]["input_preview"] == {"app_name": "WeChat"}
+    assert second_task["tool_calls"][-1]["status"] == "completed"
+    assert second_run["status"] == "completed"
+    assert second_run["pending_approval"] == {}
+    assert "agent.desktop.intent_planned" in second_event_types
+    assert "agent.tool.call" in second_event_types
+    assert "agent.desktop.intent_completed" in second_event_types
+    assert "agent.desktop.intent_approval_required" not in second_event_types
+    assert "model.request.started" not in second_event_types
+    assert "model.requested" not in second_event_types
+
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -5626,7 +5650,7 @@ def test_chat_bridge_quick_message_executes_app_prefix_find_shortcut_without_mod
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
-            "Chrome 查找一下",
+            "Chrome 打开搜索",
             launcher_mode=launcher_mode,
         )
 

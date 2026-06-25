@@ -657,6 +657,44 @@ def test_send_message_opens_explicit_desktop_client_without_model(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("Chrome 打开搜索")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_events = service.list_run_events(second_run["run_id"])["events"]
+        second_event_types = [event["event_type"] for event in second_events]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert calls == [
+            ("focus", "Google Chrome"),
+            ("shortcut", "find"),
+            ("focus", "Google Chrome"),
+            ("shortcut", "find"),
+        ]
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["needs_user_action"] is False
+        assert second["agent_task"]["pending_approvals"] == []
+        assert second["agent_task"]["summary"] == "已切到 Google Chrome 并打开查找。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_safe_shortcut"
+        assert second["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "action": "find",
+        }
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已切到 Google Chrome 并打开查找。"
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "已切到 Google Chrome 并打开查找。"
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
@@ -749,6 +787,26 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("显示当前窗口列表")
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["summary"] == "当前窗口：Google Chrome: ChatGPT; Finder: Downloads。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.windows"
+        assert second["agent_task"]["tool_calls"][-1]["input_preview"] == {}
+        assert windows_calls == ["", ""]
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()

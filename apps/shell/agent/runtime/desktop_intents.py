@@ -3745,7 +3745,7 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        raw_app = match.group("app")
+        raw_app = _strip_window_scope_app_prefix(match.group("app"))
         if _looks_like_generic_window_scope(raw_app):
             return {}
         app_name = _normalize_app_name(raw_app)
@@ -4661,8 +4661,30 @@ def _is_general_windows_request(text: str) -> bool:
     )
 
 
+def _strip_window_scope_app_prefix(value: str) -> str:
+    text = _strip_query(value)
+    stripped = re.sub(
+        r"^(?:显示|查看|看看|看一下|看下|列出|列一下|列下|读取)\s*",
+        "",
+        text,
+    ).strip()
+    stripped = re.sub(
+        r"^(?:show|list|read)\s+",
+        "",
+        stripped,
+        flags=re.IGNORECASE,
+    ).strip()
+    return stripped or text
+
+
 def _looks_like_generic_window_scope(value: str) -> bool:
     compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    compact = re.sub(
+        r"^(?:显示|查看|看看|看一下|看下|列出|列一下|列下|读取|show|list|read)",
+        "",
+        compact,
+        flags=re.IGNORECASE,
+    )
     return compact in {
         "",
         "当前",
@@ -8647,7 +8669,13 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "查找": "find",
         "打开查找": "find",
         "打开查找框": "find",
+        "打开搜索": "find",
         "打开搜索框": "find",
+        "打开搜索栏": "find",
+        "打开搜索输入框": "find",
+        "搜索框": "find",
+        "搜索栏": "find",
+        "搜索输入框": "find",
         "页面查找": "find",
         "页面内查找": "find",
         "页面里查找": "find",

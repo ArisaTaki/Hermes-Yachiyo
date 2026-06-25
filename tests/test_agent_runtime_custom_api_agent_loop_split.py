@@ -2305,6 +2305,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "find"},
     }
+    assert daily_desktop_intent_tool_request("Chrome 打开搜索", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "find"},
+    }
     assert daily_desktop_intent_tool_request("Google Chrome 查找一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
@@ -5321,6 +5326,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.windows",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("显示当前窗口列表", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("所有窗口列一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.windows",
@@ -5394,6 +5404,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.windows",
         "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("显示微信窗口列表", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.windows",
+        "input": {"app_name": "WeChat"},
     }
     assert daily_desktop_intent_tool_request("帮我看看 Slack 有哪些窗口", allowed_tools) == {
         "protocol": "json_fallback",
