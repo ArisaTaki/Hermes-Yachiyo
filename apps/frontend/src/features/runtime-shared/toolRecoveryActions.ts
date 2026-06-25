@@ -119,6 +119,7 @@ export function runtimeToolRecoveryActionsFromRecord(
 
 function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, unknown>): string {
   const appName = String(input.app_name || '').trim();
+  const query = String(input.query || '').trim();
   const url = String(input.url || '').trim();
   const target = String(input.target || '').trim();
   const path = String(input.path || '').trim();
@@ -135,7 +136,10 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'browser.screenshot') return '截取当前网页';
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'media.apple_music_play' && query) return `播放${query}`;
+  if (tool === 'media.apple_music_open_and_play') return '打开Apple Music并播放';
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(String(input.action || '').trim());
+  if (tool === 'media.music_app_open_and_play' && appName) return `打开${appName}并播放`;
   if (tool === 'system.volume') return systemVolumeRetryPrompt(String(input.action || '').trim(), input);
   if (tool === 'system.brightness') return systemBrightnessRetryPrompt(String(input.action || '').trim());
   if (tool === 'clipboard.read') return '读取剪贴板';
@@ -194,6 +198,9 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'desktop.ui_elements'
     || tool === 'desktop.windows'
     || tool === 'media.apple_music_control'
+    || tool === 'media.apple_music_open_and_play'
+    || tool === 'media.apple_music_play'
+    || tool === 'media.music_app_open_and_play'
     || tool === 'screen.capture'
     || tool === 'system.brightness'
     || tool === 'system.settings_open'
@@ -243,6 +250,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.type_into_ui_element') return desktopUiTypePrompt(input);
   if (tool === 'desktop.reveal_path' && path) return `在 Finder 中显示 ${path}`;
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
+  if (tool === 'media.apple_music_open_and_play') return '打开Apple Music并播放';
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
   if (tool === 'media.music_app_open_and_play' && appName) return `打开${appName}并播放`;
   if (tool === 'system.settings_open') return target ? `打开${target}` : '打开系统设置';

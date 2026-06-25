@@ -6145,6 +6145,30 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "media.apple_music_play",
+            "recovery_input": {"query": "超时空辉夜姬"},
+            "recovery_risk_level": "low",
+        }
+    ) == "播放超时空辉夜姬"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "media.apple_music_open_and_play",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开Apple Music并播放"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "media.music_app_open_and_play",
+            "recovery_input": {"app_name": "Spotify"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开Spotify并播放"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "system.volume",
             "recovery_input": {"action": "set", "level": 35},
             "recovery_risk_level": "low",

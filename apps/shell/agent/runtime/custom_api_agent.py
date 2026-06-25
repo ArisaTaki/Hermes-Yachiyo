@@ -1774,6 +1774,8 @@ def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -
     if tool_name == "media.apple_music_play":
         query = str(planned_input.get("query") or "").strip()
         return f"播放{query}" if query else "播放音乐"
+    if tool_name == "media.apple_music_open_and_play":
+        return "打开Apple Music并播放"
     if tool_name == "media.music_app_open_and_play":
         app_name = str(planned_input.get("app_name") or "").strip()
         return f"打开{app_name}并播放" if app_name else "播放音乐"

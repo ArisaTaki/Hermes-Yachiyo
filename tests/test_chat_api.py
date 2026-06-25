@@ -3868,7 +3868,10 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
-    music_calls: list[str] = []
+    music_control_calls: list[str] = []
+    music_play_calls: list[str] = []
+    music_open_calls: list[str] = []
+    music_app_calls: list[str] = []
     volume_calls: list[tuple[str, object, object]] = []
     brightness_calls: list[tuple[str, object]] = []
     monkeypatch.setattr(
@@ -3886,12 +3889,44 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
     )
 
     def fake_apple_music_control(action: str) -> dict:
-        music_calls.append(action)
+        music_control_calls.append(action)
         return {
             "ok": True,
             "action": "media.apple_music_control",
             "summary": f"Apple Music {action} executed",
             "data": {"control": action, "player_state": "paused"},
+        }
+
+    def fake_apple_music_play(query: str) -> dict:
+        music_play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {"query": query, "track": query, "artist": "Yachiyo"},
+        }
+
+    def fake_apple_music_open_and_play() -> dict:
+        music_open_calls.append("open")
+        return {
+            "ok": True,
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
+            "data": {
+                "app_name": "Music",
+                "playback_ok": True,
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        music_app_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and attempted playback with media key",
+            "data": {"app_name": app_name, "playback_state_unverified": True},
         }
 
     def fake_system_volume(action: str, *, level=None, step=None) -> dict:
@@ -3924,6 +3959,15 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_apple_music_control)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_play", fake_apple_music_play)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
+        fake_apple_music_open_and_play,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
     try:
@@ -3933,6 +3977,24 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
                 "media.apple_music_control",
                 {"action": "pause"},
                 "已暂停 Apple Music。",
+            ),
+            (
+                "播放歌曲",
+                "media.apple_music_play",
+                {"query": "超时空辉夜姬"},
+                "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。",
+            ),
+            (
+                "打开 Apple Music 并播放",
+                "media.apple_music_open_and_play",
+                {},
+                "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。",
+            ),
+            (
+                "打开 Spotify 并播放",
+                "media.music_app_open_and_play",
+                {"app_name": "Spotify"},
+                "已打开 Spotify，并用媒体键尝试开始播放。",
             ),
             (
                 "设置音量",
@@ -3992,7 +4054,10 @@ def test_send_message_executes_structured_control_recovery_actions_without_model
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
 
-        assert music_calls == ["pause"]
+        assert music_control_calls == ["pause"]
+        assert music_play_calls == ["超时空辉夜姬"]
+        assert music_open_calls == ["open"]
+        assert music_app_calls == ["Spotify"]
         assert volume_calls == [("set", 35, None)]
         assert brightness_calls == [("down", None)]
     finally:

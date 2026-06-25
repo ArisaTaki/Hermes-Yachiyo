@@ -968,6 +968,9 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.ui_elements",
         "desktop.windows",
         "media.apple_music_control",
+        "media.apple_music_open_and_play",
+        "media.apple_music_play",
+        "media.music_app_open_and_play",
         "screen.capture",
         "system.brightness",
         "system.settings_open",
@@ -1017,6 +1020,14 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
     app_foreground_prompt = _app_foreground_recovery_prompt(tool_name, recovery_input)
     if app_foreground_prompt:
         return app_foreground_prompt
+    if tool_name == "media.apple_music_play":
+        query = str(recovery_input.get("query") or "").strip()
+        return f"播放{query}" if query else ""
+    if tool_name == "media.apple_music_open_and_play":
+        return "打开Apple Music并播放"
+    if tool_name == "media.music_app_open_and_play":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        return f"打开{app_name}并播放" if app_name else ""
     if tool_name == "media.apple_music_control":
         return {
             "play": "播放音乐",
