@@ -432,6 +432,20 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"text": "hello"},
         }
     ]
+    assert daily_desktop_entrypoint_requests("在当前输入框输入文本 hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("输入文本 hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("type hello in current input") == [
         {
             "protocol": "json_fallback",
@@ -621,6 +635,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
         ),
         (
             "打开用户目录",
+            "desktop.open_path",
+            {"path": "~"},
+        ),
+        (
+            "打开家目录",
             "desktop.open_path",
             {"path": "~"},
         ),

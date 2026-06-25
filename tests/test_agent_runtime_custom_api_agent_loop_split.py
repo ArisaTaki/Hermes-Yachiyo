@@ -4710,6 +4710,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Music"},
     }
+    assert daily_desktop_intent_tool_request("打开家目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~"},
+    }
     assert daily_desktop_intent_tool_request("open Finder and show Downloads folder", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.reveal_path",
@@ -6527,6 +6532,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_type_text",
         "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("输入文本 你好八千代", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "你好八千代"},
+    }
+    assert daily_desktop_intent_tool_request("在当前输入框输入文本 hello", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "hello"},
     }
     assert daily_desktop_intent_tool_request("帮我打 你好八千代", allowed_tools) == {
         "protocol": "json_fallback",

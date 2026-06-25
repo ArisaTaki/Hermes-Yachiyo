@@ -2922,6 +2922,23 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         assert app_open_calls == []
         assert run["status"] == "completed"
 
+        result = api.send_message("打开家目录")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件夹：~。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件夹：~。"
+        assert open_path_calls[-1] == "~"
+        assert reveal_calls == []
+        assert app_open_calls == []
+        assert run["status"] == "completed"
+
         result = api.send_message("打开 iCloud Drive")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
@@ -7546,6 +7563,32 @@ def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch)
         assert result["agent_task"]["pending_approvals"] == []
         assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已向前台输入文字（5 个字符）。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已向前台输入文字（5 个字符）。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert typed_texts[-1] == "hello"
+
+        result = api.send_message("输入文本 hello")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"text": "hello"}
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert task.result == "已向前台输入文字（5 个字符）。"
