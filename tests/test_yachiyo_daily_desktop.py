@@ -412,6 +412,26 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~"},
         ),
         (
+            "打开当前工作区",
+            "desktop.open_path",
+            {"path": "."},
+        ),
+        (
+            "打开项目目录",
+            "desktop.open_path",
+            {"path": "."},
+        ),
+        (
+            "在 Finder 中显示当前工作区",
+            "desktop.reveal_path",
+            {"path": "."},
+        ),
+        (
+            "在 Finder 中显示项目目录",
+            "desktop.reveal_path",
+            {"path": "."},
+        ),
+        (
             "打开垃圾桶",
             "desktop.open_path",
             {"path": "~/.Trash"},
@@ -458,6 +478,7 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
     assert daily_desktop_entrypoint_requests("清空垃圾桶") == []
+    assert daily_desktop_entrypoint_requests("打开项目") == []
 
 
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
