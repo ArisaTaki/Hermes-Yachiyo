@@ -449,6 +449,11 @@ def daily_desktop_intent_tool_requests(
         if all(str(request.get("tool") or "") in allowed for request in app_close_window_sequence):
             return app_close_window_sequence
         return []
+    app_find_open_first_sequence = _app_open_or_focus_find_open_first_tool_requests(context)
+    if app_find_open_first_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_find_open_first_sequence
+    ):
+        return app_find_open_first_sequence
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -5395,6 +5400,85 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
         ),
         _request("desktop.safe_type_text", {"text": query}),
     ]
+
+
+def _app_open_or_focus_find_open_first_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, raw_app, app_name, followup = shorthand_match
+    else:
+        split = _known_app_prefix_split(text)
+        if not split:
+            return []
+        raw_app, app_name, followup = split
+        mode = "focus"
+    if (
+        not app_name
+        or app_name in _BROWSER_APP_NAMES
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return []
+    parsed = _find_then_open_first_result(followup)
+    if not parsed:
+        return []
+    query, target, click_count = parsed
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": query}),
+        _request("desktop.search_submit", {}),
+        _request(
+            "desktop.click_ui_element",
+            {
+                "target": target,
+                "role_filter": "",
+                "limit": 80,
+                "click_count": click_count,
+            },
+        ),
+    ]
+
+
+def _find_then_open_first_result(value: str) -> tuple[str, str, int] | None:
+    patterns = (
+        r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找)\s*"
+        r"(?P<query>.+?)\s*"
+        r"(?:然后|并且|并|之后|随后|再|后)\s*"
+        r"(?P<verb>打开|进入|访问|点击|点一下|点按|单击|点)\s*"
+        r"(?:搜索结果|结果|条目|文件|项目)?(?:中|里|里的|的)?\s*"
+        r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*"
+        r"(?:搜索结果|结果|条目|文件|项目)?$",
+        r"^(?:find|search)\s+(?:for\s+)?(?P<query_en>.+?)\s+"
+        r"(?:and|then)\s+(?P<verb_en>open|click|visit)\s+"
+        r"(?:the\s+)?(?P<rank_en>first|1st)\s+(?:result|item|file)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, _strip_query(value), flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        query = _strip_search_query(groups.get("query") or groups.get("query_en") or "")
+        if not query:
+            continue
+        target = _first_result_target_label(groups.get("rank") or groups.get("rank_en") or "")
+        if not target:
+            continue
+        verb = str(groups.get("verb") or groups.get("verb_en") or "").strip().lower()
+        click_count = 1 if re.search(r"^(?:点击|点一下|点按|单击|点|click)$", verb) else 2
+        return query, target, click_count
+    return None
+
+
+def _first_result_target_label(value: str) -> str:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    if compact in {"第一个", "第一条", "首个", "第1个", "第1条", "1"}:
+        return "第一个结果"
+    if compact in {"first", "1st"}:
+        return "first result"
+    return ""
 
 
 def _app_open_or_focus_type_into_ui_element_tool_requests(text: str) -> list[dict[str, Any]]:

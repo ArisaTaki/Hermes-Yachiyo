@@ -734,6 +734,34 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
             "input": {"text": "Downloads"},
         },
     ]
+    finder_open_first_requests = daily_desktop_entrypoint_requests(
+        "打开 Finder 查找 Downloads 然后打开第一个"
+    )
+
+    assert finder_open_first_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
+        },
+    ]
+    assert daily_desktop_user_metadata(finder_open_first_requests)["daily_desktop_tools"] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.click_ui_element",
+    ]
     assert daily_desktop_entrypoint_requests("微信打开搜索") == [
         {
             "protocol": "json_fallback",

@@ -668,6 +668,8 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
         "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.click_ui_element",
     ]
 
     assert daily_desktop_intent_tool_requests("打开 Finder 找下载文件", allowed_tools) == [
@@ -704,6 +706,42 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_type_text",
             "input": {"text": "Downloads"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Finder 查找 Downloads 然后打开第一个", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Finder 搜索 report 然后点击第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "report"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 1},
         },
     ]
 
