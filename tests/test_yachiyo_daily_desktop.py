@@ -1664,6 +1664,13 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
     cases = (
         ("大点声", {"action": "up"}),
         ("大一点声", {"action": "up"}),
+        ("放大音量", {"action": "up"}),
+        ("把音量放大", {"action": "up"}),
+        ("声音放大一点", {"action": "up"}),
+        ("Apple Music 放大音量", {"action": "up"}),
+        ("缩小音量", {"action": "down"}),
+        ("把音量缩小", {"action": "down"}),
+        ("Apple Music 缩小音量", {"action": "down"}),
         ("调到35音量", {"action": "set", "level": 35}),
         ("设成 35 音量", {"action": "set", "level": 35}),
         ("volume 35", {"action": "set", "level": 35}),

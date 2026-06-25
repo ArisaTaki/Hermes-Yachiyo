@@ -5969,6 +5969,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "up"},
     }
+    assert daily_desktop_intent_tool_request("放大音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
+    assert daily_desktop_intent_tool_request("把音量放大", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 放大音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "up"},
+    }
     assert daily_desktop_intent_tool_request("声音大点", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -5985,6 +6000,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "up"},
     }
     assert daily_desktop_intent_tool_request("声音小一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("缩小音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("把音量缩小", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "down"},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 缩小音量", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
         "input": {"action": "down"},

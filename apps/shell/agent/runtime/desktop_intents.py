@@ -470,6 +470,11 @@ def daily_desktop_intent_tool_requests(
     system_settings_target = _direct_system_settings_tool_target(context)
     if system_settings_target and "system.settings_open" in allowed:
         return [_request("system.settings_open", {"target": system_settings_target})]
+    direct_volume_payload = _system_volume_request(context)
+    if direct_volume_payload is not None:
+        if "system.volume" in allowed:
+            return [_request("system.volume", direct_volume_payload)]
+        return []
     sequence = _prefer_system_settings_open_sequence(
         daily_desktop_intent_sequence_candidates(context),
         allowed,
@@ -2149,6 +2154,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     candidates.extend(_spotlight_search_tool_requests(text))
 
+    volume_payload = _system_volume_request(text)
+    if volume_payload is not None:
+        candidates.append(_request("system.volume", volume_payload))
+
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:
         candidates.append(_request("desktop.hotkey", system_hotkey))
@@ -2237,10 +2246,6 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_browser_current_page_request(text):
         candidates.append(_request("browser.current_page", {}))
-
-    volume_payload = _system_volume_request(text)
-    if volume_payload is not None:
-        candidates.append(_request("system.volume", volume_payload))
 
     brightness_payload = _system_brightness_request(text)
     if brightness_payload is not None:
@@ -3825,8 +3830,8 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ):
         return {"action": "mute"}
     if re.search(
-        r"(?:调大|调高|加大|提高|增大|升高).{0,4}(?:音量|声音)|"
-        r"(?:音量|声音).{0,4}(?:大一点|大点|高一点|高点|加一点|加点|调大|调高|提高)|"
+        r"(?:调大|调高|加大|提高|增大|升高|放大).{0,4}(?:音量|声音)|"
+        r"(?:音量|声音).{0,4}(?:大一点|大点|高一点|高点|加一点|加点|调大|调高|提高|放大)|"
         r"(?:大声一点|大声点|声音大点|声音大一点|音量大点|音量大一点|大点声|大一点声)",
         text,
     ) or re.search(
@@ -3838,8 +3843,8 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ):
         return {"action": "up"}
     if re.search(
-        r"(?:调小|调低|降低|减小|小声).{0,4}(?:音量|声音)|"
-        r"(?:音量|声音).{0,4}(?:小一点|小点|低一点|低点|减一点|减点|调小|调低|降低)|"
+        r"(?:调小|调低|降低|减小|小声|缩小).{0,4}(?:音量|声音)|"
+        r"(?:音量|声音).{0,4}(?:小一点|小点|低一点|低点|减一点|减点|调小|调低|降低|缩小)|"
         r"(?:小声一点|小声点|声音小点|声音小一点|音量小点|音量小一点|小点声|小一点声)",
         text,
     ) or re.search(

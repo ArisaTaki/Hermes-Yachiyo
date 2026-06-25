@@ -4135,14 +4135,29 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
 
     def fake_system_volume(action: str, *, level=None, step=None) -> dict:
         volume_calls.append((action, level, step))
-        reported_level = 35 if action == "status" else level
+        if action == "status":
+            old_level = 35
+            reported_level = 35
+            summary = "System volume is 35%"
+        elif action == "up":
+            old_level = 40
+            reported_level = 50
+            summary = "System volume increased from 40% to 50%"
+        elif action == "down":
+            old_level = 50
+            reported_level = 40
+            summary = "System volume decreased from 50% to 40%"
+        else:
+            old_level = 20
+            reported_level = level
+            summary = "System volume set to 35%"
         return {
             "ok": True,
             "action": "system.volume",
-            "summary": "System volume is 35%" if action == "status" else "System volume set to 35%",
+            "summary": summary,
             "data": {
                 "requested_action": action,
-                "old_level": 20,
+                "old_level": old_level,
                 "old_muted": False,
                 "level": reported_level,
                 "muted": False,
@@ -4167,6 +4182,40 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
             assert task.status == TaskStatus.COMPLETED
             assert task.result == "已把系统音量调到 35%。"
             assert volume_calls == [("set", 35, None)] * index
+            assert run["status"] == "completed"
+
+        for text in ("放大音量", "把音量放大", "Apple Music 放大音量"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已把系统音量从 40% 调高到 50%。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"action": "up"}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已把系统音量从 40% 调高到 50%。"
+            assert volume_calls[-1] == ("up", None, None)
+            assert run["status"] == "completed"
+
+        for text in ("缩小音量", "把音量缩小", "Apple Music 缩小音量"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已把系统音量从 50% 调低到 40%。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"action": "down"}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已把系统音量从 50% 调低到 40%。"
+            assert volume_calls[-1] == ("down", None, None)
             assert run["status"] == "completed"
 
         for text in ("查看当前音量", "show current volume"):
