@@ -148,6 +148,7 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
         ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
         ("打开微信到前台", "app.show", {"app_name": "WeChat"}),
+        ("把Chrome叫出来", "app.show", {"app_name": "Google Chrome"}),
     )
 
     for prompt, tool_name, tool_input in cases:
@@ -177,6 +178,7 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         ("Can you minimize the current app?", "desktop.minimize_window", {}),
         ("Could you minimize the foreground application please?", "desktop.minimize_window", {}),
         ("Can you hide Chrome?", "app.hide", {"app_name": "Google Chrome"}),
+        ("把Chrome藏起来", "app.hide", {"app_name": "Google Chrome"}),
         ("Could you minimize Chrome please?", "app.minimize", {"app_name": "Google Chrome"}),
         ("关闭一下当前窗口", "desktop.close_window", {}),
         ("Can you close the current window?", "desktop.close_window", {}),

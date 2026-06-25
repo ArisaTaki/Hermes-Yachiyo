@@ -4059,6 +4059,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.show",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("把 Chrome 叫出来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.show",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("把 Slack 显示出来", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.show",
@@ -4125,6 +4130,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "app.hide",
         "input": {"app_name": "WeChat"},
+    }
+    assert daily_desktop_intent_tool_request("把 Chrome 藏起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.hide",
+        "input": {"app_name": "Google Chrome"},
     }
     assert daily_desktop_intent_tool_request("hide Slack", allowed_tools) == {
         "protocol": "json_fallback",

@@ -575,6 +575,10 @@ def daily_desktop_intent_tool_requests(
     app_status_name = _app_status_name(context)
     if app_status_name and "app.status" in allowed:
         return [_request("app.status", {"app_name": app_status_name})]
+    if _is_running_apps_request(context):
+        if "desktop.running_apps" in allowed:
+            return [_request("desktop.running_apps", {})]
+        return []
     browser_open_request = _browser_open_url_tool_request(context, allowed)
     if browser_open_request:
         return [browser_open_request]
@@ -2864,14 +2868,47 @@ def _normalize_browser_site_name(value: str) -> str:
     return aliases.get(compact, "")
 
 
+def _explicit_browser_search_url(text: str) -> str:
+    if _looks_like_explicit_text_input_target(text):
+        return ""
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:打开|启动|运行|拉起|开启|开|用|在)\s*)?"
+        r"(?P<engine>浏览器|chrome|google\s*chrome|google|谷歌|百度|baidu|safari)\s*"
+        r"(?:里|中|上|内)?\s*"
+        r"(?:搜索|搜一下|搜(?!索)|查一下|查查|查(?!看|找)|检索|谷歌一下|google\s+一下)\s*"
+        r"(?P<query>[^。！？!?]+)",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:(?:open|launch|start|use)\s+)?"
+        r"(?P<engine_en>chrome|google\s*chrome|browser|safari|firefox|edge|arc|brave|google|baidu)\s+"
+        r"(?:and\s+)?(?:search|google|look\s+up)\s+(?:for\s+)?(?P<query_en>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        query = _strip_search_query(groups.get("query") or groups.get("query_en") or "")
+        if not query:
+            continue
+        engine = str(groups.get("engine") or groups.get("engine_en") or "").strip().lower()
+        if engine in {"百度", "baidu"}:
+            return f"https://www.baidu.com/s?wd={quote_plus(query)}"
+        return f"https://www.google.com/search?q={quote_plus(query)}"
+    return ""
+
+
 def _looks_like_search_request(text: str) -> bool:
+    if _looks_like_explicit_text_input_target(text):
+        return False
     lowered = text.lower()
     return bool(
-        re.search(
+        _explicit_browser_search_url(text)
+        or re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
             r"(?:里|中|上|内)?\s*"
-            r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|百度一下|谷歌一下|google\s+一下)\s*",
+            r"(?:搜索|搜一下|搜(?!索)|查一下|查查|查(?!看|找)|检索|百度一下|谷歌一下|google\s+一下)\s*",
             text,
         )
         or re.search(r"^(?:search|google|look up)\b\s+", lowered)
@@ -2879,6 +2916,9 @@ def _looks_like_search_request(text: str) -> bool:
 
 
 def _browser_search_url(text: str) -> str:
+    explicit_url = _explicit_browser_search_url(text)
+    if explicit_url:
+        return explicit_url
     app_followup = _app_open_or_focus_known_app_followup_match(text)
     if app_followup:
         if app_followup[2] not in _BROWSER_APP_NAMES:
@@ -2906,7 +2946,7 @@ def _browser_search_url(text: str) -> str:
         return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开)?\s*"
-        r"(?P<engine>百度|baidu)\s*(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
+        r"(?P<engine>百度|baidu)\s*(?:搜索|搜一下|搜(?!索)|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
@@ -2921,7 +2961,7 @@ def _browser_search_url(text: str) -> str:
         r"(?:(?:打开|启动|运行|拉起|开启|用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
         r"(?:里|中|上|内)?\s*"
         r"(?:[，,；;。]?\s*(?:并且|并|然后|之后|后|再)?\s*)?"
-        r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*(?P<query>[^。！？!?]+)",
+        r"(?:搜索|搜一下|搜(?!索)|查一下|查查|查(?!看|找)|检索|谷歌一下|google\s+一下)\s*(?P<query>[^。！？!?]+)",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
         r"(?:search|google|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?]+)",
     )
@@ -2954,11 +2994,11 @@ def _browser_new_tab_search_url(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)?\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
         r"(?:打开|新建|开)\s*(?:一个|个)?\s*(?:新标签页?|新\s*tab|new\s+tab)\s*"
-        r"(?:并|然后|再|后)?\s*(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"(?:并|然后|再|后)?\s*(?:搜索|搜一下|搜(?!索)|查找|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)?\s*(?P<engine2>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
         r"(?:新标签页?|新\s*tab|new\s+tab)\s*"
-        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query2>[^。！？!?]+)$",
+        r"(?:搜索|搜一下|搜(?!索)|查找|查一下|查查|检索)\s*(?P<query2>[^。！？!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -3123,7 +3163,7 @@ def _browser_search_then_click(text: str) -> tuple[str, str, int] | None:
         r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:浏览器|chrome|google\s*chrome|谷歌|谷歌浏览器|safari)\s*)?"
         r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
         r"(?:里|中|上|内)?\s*"
-        r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*"
+        r"(?:搜索|搜一下|搜(?!索)|查一下|查查|查(?!看|找)|检索|谷歌一下|google\s+一下)\s*"
         r"(?P<query>.+?)\s*"
         r"(?:然后|并且|并|之后|随后|再|后)\s*"
         r"(?:点击|点一下|点按|单击|点|打开|进入|访问)\s*"
@@ -6006,7 +6046,7 @@ def _browser_shortcut_search_action_and_url(value: str) -> tuple[str, str] | Non
         rf"^(?P<action>{action_pattern})\s*"
         r"(?:(?:并且|并|然后|接着|之后|随后|后(?!退)|再|and\s+then|and|then)\s*)?"
         r"(?P<search>"
-        r"(?:百度一下|谷歌一下|google\s+一下|搜索|搜一下|搜|查一下|查查|查(?!看)|检索|"
+        r"(?:百度一下|谷歌一下|google\s+一下|搜索|搜一下|搜(?!索)|查一下|查查|查(?!看|找)|检索|"
         r"search|google|look\s+up)\s*.+)$"
     )
     match = re.search(pattern, _strip_query(value), flags=re.IGNORECASE)
@@ -7899,9 +7939,9 @@ def _app_show_name(text: str) -> str:
         return ""
     patterns = (
         r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:把|将)?\s*"
-        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|调出来|还原一下|还原|恢复|取消隐藏)",
-        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|调出来|还原|恢复|取消隐藏)",
-        r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:显示(?!器)|调出|调出来|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|调出来|叫出来|还原一下|还原|恢复|取消隐藏)",
+        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|调出来|叫出来|还原|恢复|取消隐藏)",
+        r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:显示(?!器)|调出|调出来|叫出|叫出来|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
         r"\b(?:show|unhide|restore)\s+(?P<app>[^.!?]+)",
         r"\bbring\s+back\s+(?P<app>[^.!?]+)",
     )
@@ -7941,8 +7981,8 @@ def _app_hide_name(text: str) -> str:
         return ""
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
-        r"(?P<app>[^。！？!?，,]+?)\s*(?:隐藏|收起)(?:一下|下)?",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:隐藏|收起)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:隐藏|收起|藏起来|藏起)(?:一下|下)?",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:隐藏|收起|藏起)\s*(?P<app>[^。！？!?，,]+)",
         r"\bhide\s+(?P<app>[^.!?]+)",
     )
     for pattern in patterns:

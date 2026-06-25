@@ -2842,11 +2842,13 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
     try:
         cases = [
             ("Slack 显示出来", "app.show", "已显示 Slack。", "Slack"),
+            ("把Chrome叫出来", "app.show", "已显示 Google Chrome。", "Google Chrome"),
             ("打开 Slack 并切到前台", "app.show", "已显示 Slack。", "Slack"),
             ("打开微信到前台", "app.show", "已显示 WeChat。", "WeChat"),
             ("隐藏 Slack", "app.hide", "已隐藏 Slack。", "Slack"),
             ("Chrome 隐藏一下", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
             ("Chrome 收起来", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
+            ("把Chrome藏起来", "app.hide", "已隐藏 Google Chrome。", "Google Chrome"),
             ("最小化 Slack", "app.minimize", "已最小化 Slack。", "Slack"),
             ("Chrome 最小化一下", "app.minimize", "已最小化 Google Chrome。", "Google Chrome"),
             ("切到 Slack 的 general 窗口", "app.focus_window", "已切换到 Slack 的 general 窗口。", "Slack"),
@@ -2885,8 +2887,8 @@ def test_send_message_executes_direct_named_app_control_tasks(tmp_path, monkeypa
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
 
-        assert show_calls == ["Slack", "Slack", "WeChat"]
-        assert hide_calls == ["Slack", "Google Chrome", "Google Chrome"]
+        assert show_calls == ["Slack", "Google Chrome", "Slack", "WeChat"]
+        assert hide_calls == ["Slack", "Google Chrome", "Google Chrome", "Google Chrome"]
         assert minimize_calls == ["Slack", "Google Chrome"]
         assert focus_window_calls == [("Slack", "general")]
     finally:
