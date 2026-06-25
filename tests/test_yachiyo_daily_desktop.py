@@ -874,6 +874,17 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tools": ["app.focus", "desktop.submit_foreground"],
     }
 
+    app_hotkey_requests = daily_desktop_entrypoint_requests("微信按回车")
+
+    assert app_hotkey_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {"app_name": "WeChat", "key": "return", "modifiers": []},
+        }
+    ]
+    assert daily_desktop_user_metadata(app_hotkey_requests)["daily_desktop_tool"] == "app.focus_and_hotkey"
+
     comm_requests = daily_desktop_entrypoint_requests("微信找张三并发送你好")
 
     assert comm_requests == [

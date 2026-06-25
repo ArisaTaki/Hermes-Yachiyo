@@ -8461,6 +8461,12 @@ def _app_foreground_action_request(
             "tool": f"app.{mode}_and_safe_click",
             "input": {"app_name": app_name, **safe_click},
         }
+    hotkey = _desktop_hotkey(followup)
+    if hotkey:
+        return {
+            "tool": f"app.{mode}_and_hotkey",
+            "input": {"app_name": app_name, **hotkey},
+        }
     click_ui_element = _desktop_click_ui_element(followup, require_context=False)
     if click_ui_element:
         return {
@@ -8472,12 +8478,6 @@ def _app_foreground_action_request(
         return {
             "tool": f"app.{mode}_and_type_into_ui_element",
             "input": {"app_name": app_name, **type_into_ui_element},
-        }
-    hotkey = _desktop_hotkey(followup)
-    if hotkey:
-        return {
-            "tool": f"app.{mode}_and_hotkey",
-            "input": {"app_name": app_name, **hotkey},
         }
     typed_text = _app_followup_safe_type_text(followup)
     if typed_text:

@@ -3296,6 +3296,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_key",
         "input": {"app_name": "Google Chrome", "action": "arrow_down", "repeat_count": 3},
     }
+    assert daily_desktop_intent_tool_request("打开 Chrome 并按回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_hotkey",
+        "input": {"app_name": "Google Chrome", "key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("Chrome 按回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_hotkey",
+        "input": {"app_name": "Google Chrome", "key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("Slack press Space", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_hotkey",
+        "input": {"app_name": "Slack", "key": "space", "modifiers": []},
+    }
     assert daily_desktop_intent_tool_request("打开 Chrome 并向下滚动两页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_scroll",
