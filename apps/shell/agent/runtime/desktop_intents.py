@@ -485,6 +485,18 @@ def daily_desktop_intent_tool_requests(
         if "system.volume" in allowed:
             return [_request("system.volume", direct_volume_payload)]
         return []
+    app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
+    if app_scoped_low_risk_action:
+        low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
+        if low_risk_tool in allowed:
+            return [app_scoped_low_risk_action]
+        if low_risk_tool.endswith("_and_safe_key") or low_risk_tool.endswith("_and_safe_scroll"):
+            return []
+    app_scoped_hotkey = _app_scoped_hotkey_tool_request(context)
+    if app_scoped_hotkey:
+        if str(app_scoped_hotkey.get("tool") or "") in allowed:
+            return [app_scoped_hotkey]
+        return []
     sequence = _prefer_system_settings_open_sequence(
         daily_desktop_intent_sequence_candidates(context),
         allowed,
@@ -832,6 +844,18 @@ def daily_desktop_intent_tool_requests(
     app_prefix_click_ui_element = _app_prefix_click_ui_element_tool_request(context)
     if app_prefix_click_ui_element and str(app_prefix_click_ui_element.get("tool") or "") in allowed:
         return [app_prefix_click_ui_element]
+    app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
+    if app_scoped_low_risk_action:
+        low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
+        if low_risk_tool in allowed:
+            return [app_scoped_low_risk_action]
+        if low_risk_tool.endswith("_and_safe_key") or low_risk_tool.endswith("_and_safe_scroll"):
+            return []
+    app_scoped_hotkey = _app_scoped_hotkey_tool_request(context)
+    if app_scoped_hotkey:
+        if str(app_scoped_hotkey.get("tool") or "") in allowed:
+            return [app_scoped_hotkey]
+        return []
     app_prefix_foreground_action = _app_prefix_foreground_action_tool_request(context)
     if app_prefix_foreground_action and str(app_prefix_foreground_action.get("tool") or "") in allowed:
         return [app_prefix_foreground_action]
@@ -6694,6 +6718,124 @@ def _app_scoped_ui_action_tool_request(text: str) -> dict[str, Any] | None:
     if type_payload:
         return _request("app.focus_and_type_into_ui_element", type_payload)
     return None
+
+
+def _app_scoped_low_risk_foreground_action_tool_request(text: str) -> dict[str, Any] | None:
+    for mode, raw_app, app_name, followup in _app_scoped_foreground_action_matches(text):
+        if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+            continue
+        if _known_music_app_name(raw_app) and _music_control_followup_action(followup):
+            continue
+        shortcut_action = (
+            _finder_safe_shortcut_action(app_name, followup)
+            or _app_default_new_shortcut_action(app_name, followup)
+            or _app_followup_full_screen_shortcut_action(followup)
+            or _desktop_safe_shortcut_action(followup)
+        )
+        if shortcut_action:
+            return _request(
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": shortcut_action},
+            )
+        safe_scroll = _desktop_safe_scroll(followup)
+        if safe_scroll:
+            return _request(
+                f"app.{mode}_and_safe_scroll",
+                {"app_name": app_name, **safe_scroll},
+            )
+        safe_key = _app_followup_safe_key(followup) or _desktop_safe_key(f"按{followup}")
+        if safe_key:
+            return _request(
+                f"app.{mode}_and_safe_key",
+                {"app_name": app_name, **safe_key},
+            )
+    return None
+
+
+def _app_scoped_hotkey_tool_request(text: str) -> dict[str, Any] | None:
+    for mode, raw_app, app_name, followup in _app_scoped_foreground_action_matches(text):
+        if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+            continue
+        if _known_music_app_name(raw_app) and _music_control_followup_action(followup):
+            continue
+        if not _looks_like_press_key_without_ui_kind(followup):
+            continue
+        hotkey = _desktop_hotkey(followup)
+        if not hotkey:
+            continue
+        return _request(f"app.{mode}_and_hotkey", {"app_name": app_name, **hotkey})
+    return None
+
+
+def _app_scoped_foreground_action_matches(text: str) -> list[tuple[str, str, str, str]]:
+    clean = _strip_query(text)
+    if not clean:
+        return []
+    candidates: list[tuple[str, str]] = []
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?(?P<body>.+)$",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<body>.+)$",
+        ),
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|到|给|向|用|通过)\s*(?P<body>.+)$",
+        ),
+        (
+            "open",
+            r"^(?:please\s+)?(?:open|launch|start)\s+(?P<body>.+)$",
+        ),
+        (
+            "focus",
+            r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up|in|on|with|using)\s+(?P<body>.+)$",
+        ),
+    )
+    for mode, pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidates.append((mode, _strip_query(match.group("body"))))
+    candidates.append(("focus", clean))
+
+    matches: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for mode, body in candidates:
+        split = _known_app_prefix_split(body)
+        if not split:
+            continue
+        raw_app, app_name, followup = split
+        if not raw_app or not app_name or not followup:
+            continue
+        item = (mode, raw_app, app_name, followup)
+        if item not in seen:
+            seen.add(item)
+            matches.append(item)
+    return matches
+
+
+def _looks_like_press_key_without_ui_kind(value: str) -> bool:
+    text = _strip_query(value)
+    if re.search(
+        r"(?:按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框|"
+        r"button|control|element|field|input|menu|checkbox)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.match(
+            r"^(?:按一下|按下|按|发送|触发)\s*",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_scoped_safe_shortcut_tool_request(text: str) -> dict[str, Any] | None:

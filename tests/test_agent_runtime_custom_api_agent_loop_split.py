@@ -1022,6 +1022,102 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
     ) == []
 
 
+def test_daily_desktop_intent_planner_routes_app_scoped_safe_keys_and_scroll() -> None:
+    allowed_tools = [
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.focus_and_click_ui_element",
+    ]
+
+    assert daily_desktop_intent_tool_requests("在 Slack 里按 Tab", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "tab", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里按两次 Tab", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "tab", "repeat_count": 2},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里按 Command F", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里向下滚动两页", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_scroll",
+            "input": {"app_name": "Slack", "direction": "down", "pages": 2},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("切到 Slack 后取消", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 后取消", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里按回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 后按回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_hotkey",
+            "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里按确认按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "确认",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        }
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 Slack 里按 Tab",
+        ["app.focus_and_click_ui_element"],
+    ) == []
+    assert daily_desktop_intent_tool_requests(
+        "在 Slack 里按回车",
+        ["app.focus_and_click_ui_element"],
+    ) == []
+    assert daily_desktop_intent_tool_requests(
+        "在 Slack 里向下滚动两页",
+        ["app.focus_and_safe_key"],
+    ) == []
+
+
 def test_daily_desktop_intent_planner_routes_dynamic_sources_to_ui_inputs() -> None:
     allowed_tools = [
         "desktop.safe_shortcut",

@@ -2295,6 +2295,92 @@ def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
     )
 
 
+def test_daily_desktop_entrypoint_routes_app_scoped_safe_keys_and_scroll() -> None:
+    assert daily_desktop_entrypoint_requests("在 Slack 里按 Tab") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "tab", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里按两次 Tab") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "tab", "repeat_count": 2},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里按 Command F") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里向下滚动两页") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_scroll",
+            "input": {"app_name": "Slack", "direction": "down", "pages": 2},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("切到 Slack 后取消") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Slack 后取消") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里按回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Slack 后按回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_hotkey",
+            "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里按确认按钮") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "确认",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        }
+    ]
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 Slack 里按 Tab",
+            allowed_tools=("app.focus_and_click_ui_element",),
+        )
+        == []
+    )
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 Slack 里按回车",
+            allowed_tools=("app.focus_and_click_ui_element",),
+        )
+        == []
+    )
+
+
 def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
     assert daily_desktop_entrypoint_requests("打开推特") == [
         {
