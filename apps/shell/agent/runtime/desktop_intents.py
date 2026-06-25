@@ -11981,7 +11981,8 @@ def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, str] |
         groups = match.groupdict()
         raw_label = groups.get("label") or groups.get("label_en") or ""
         raw_text = groups.get("text") or groups.get("text_en") or ""
-        target = _strip_desktop_ui_element_label(raw_label) or _strip_desktop_ui_input_target(raw_label)
+        clean_label = _strip_click_type_label(raw_label)
+        target = _strip_desktop_ui_element_label(clean_label) or _strip_desktop_ui_input_target(clean_label)
         typed_text = _strip_typed_text(raw_text)
         if not target or not typed_text:
             continue
@@ -11993,9 +11994,26 @@ def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, str] |
                 "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
             },
             typed_text,
-            _click_type_submit_action(raw_text, raw_label),
+            _click_type_submit_action(raw_text, clean_label),
         )
     return None
+
+
+def _strip_click_type_label(value: str) -> str:
+    label = _strip_query(value)
+    label = re.sub(
+        r"\s*(?:然后|并且|并|之后|随后|再|接着)$",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    )
+    label = re.sub(
+        r"\s+(?:and\s+then|then|and)$",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(label)
 
 
 def _click_type_submit_action(raw_text: str, target: str) -> str:
@@ -12003,8 +12021,6 @@ def _click_type_submit_action(raw_text: str, target: str) -> str:
         return "send"
     if not _typed_text_has_return_followup(raw_text, target):
         return ""
-    if re.search(r"(?:搜索|查找|检索|search|find|query)", str(target or ""), flags=re.IGNORECASE):
-        return "search"
     return "confirm"
 
 

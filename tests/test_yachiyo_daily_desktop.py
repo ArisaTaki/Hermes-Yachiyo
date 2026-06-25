@@ -2746,6 +2746,83 @@ def test_daily_desktop_entrypoint_routes_click_type_submit_sequences() -> None:
         },
         {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
     ]
+    assert daily_desktop_entrypoint_requests("Slack 点击搜索按钮然后输入 Alice") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack click Search button then type Alice") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "Search",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在 Linear 里点击创建按钮然后输入 Task title") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "创建",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Task title"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack 点击搜索按钮然后输入 Alice 并回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_app_scoped_safe_keys_and_scroll() -> None:

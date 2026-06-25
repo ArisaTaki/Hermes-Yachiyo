@@ -13,7 +13,7 @@ MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS = """
 白名单快捷动作也包括隐藏其他应用，即 desktop.safe_shortcut 的 hide_other_apps。
 命令面板内输入明确命令时，先用 app.open_and_safe_shortcut/app.focus_and_safe_shortcut 打开命令面板，再用 desktop.safe_type_text 输入；若用户要求执行、确认、回车或选择第一个结果，使用 desktop.submit_foreground 生成审批；若用户要求用方向键移动选择，先用 desktop.safe_key，再确认，不要直接裸按回车。
 应用内搜索或查找结果需要用方向键选择时，先用 app.open_and_safe_shortcut/app.focus_and_safe_shortcut 打开搜索，再用 desktop.safe_type_text 输入查询，再用 desktop.safe_key 导航；若用户要求确认/回车，使用 desktop.submit_foreground，不要裸按 Return。
-点击某个可见输入框后输入消息并发送时，先用 app.open_and_click_ui_element/app.focus_and_click_ui_element 聚焦目标，再用 desktop.safe_type_text 输入；发送、提交或确认必须用 desktop.submit_foreground，不要裸按 Return。
+点击某个可见输入框、按钮或控件后输入明确文本时，先用 app.open_and_click_ui_element/app.focus_and_click_ui_element 聚焦目标，再用 desktop.safe_type_text 输入；发送、提交或确认必须用 desktop.submit_foreground，不要裸按 Return，也不要把“then type/然后输入”并入目标名称。
 点击可见按钮、控件或菜单项后还要求确认、提交、发送或按回车时，先用 app.open_and_click_ui_element/app.focus_and_click_ui_element 或 desktop.click_ui_element 点击目标，再用 desktop.submit_foreground 表达最终确认；不要把“then confirm/然后确认”并入目标名称。
 退出当前/前台应用用 desktop.quit_app，需要审批；不要改成让用户自己按 Command+Q。
 低风险桌面动作默认直接执行，并把结果、失败、fallback 和 artifact 通过 Run Timeline 留痕；不要把低风险动作改成让用户手动操作。

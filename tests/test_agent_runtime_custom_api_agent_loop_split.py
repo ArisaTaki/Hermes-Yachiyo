@@ -1334,6 +1334,95 @@ def test_daily_desktop_intent_planner_routes_click_type_submit_sequences() -> No
         },
         {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
     ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack 点击搜索按钮然后输入 Alice",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack click Search button then type Alice",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "Search",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 Linear 里点击创建按钮然后输入 Task title",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "创建",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Task title"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack 点击搜索按钮然后输入 Alice 并回车",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
     assert (
         daily_desktop_intent_tool_requests(
             "Slack click message field and type hello then send",
