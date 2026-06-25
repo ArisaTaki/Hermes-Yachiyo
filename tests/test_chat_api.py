@@ -1108,33 +1108,44 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
         fake_apple_music_play,
     )
     try:
-        result = api.send_message("播放超时空辉夜姬")
-        task = runtime.state.get_task(result["task_id"])
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
-        events = service.list_run_events(run["run_id"])["events"]
-        event_types = [event["event_type"] for event in events]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        cases = (
+            ("播放超时空辉夜姬", "超时空辉夜姬"),
+            ("放点周杰伦", "周杰伦"),
+            ("播点轻音乐", "轻音乐"),
+            ("play some jazz", "jazz"),
+            ("play Some Nights", "Some Nights"),
+            ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
+        )
+        for text, query in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+            events = service.list_run_events(run["run_id"])["events"]
+            event_types = [event["event_type"] for event in events]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+            summary = f"已在 Apple Music 播放：{query} - Yachiyo。"
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["run_id"] == run["run_id"]
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
-        assert play_calls == ["超时空辉夜姬"]
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["run_id"] == run["run_id"]
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"query": query}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert play_calls[-1] == query
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()

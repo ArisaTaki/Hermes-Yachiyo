@@ -2200,10 +2200,15 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     direct_prompts = (
         ("我想听超时空辉夜姬吧", "bubble", "超时空辉夜姬"),
         ("播放超时空辉夜姬 Apple Music", "live2d", "超时空辉夜姬"),
+        ("放点周杰伦", "bubble", "周杰伦"),
+        ("播点轻音乐", "live2d", "轻音乐"),
+        ("play some jazz", "bubble", "jazz"),
+        ("play Some Nights", "live2d", "Some Nights"),
         ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "bubble", "超时空辉夜姬"),
         ("Apple Music 搜索超时空辉夜姬并播放", "live2d", "超时空辉夜姬"),
         ("search Space Oddity in Apple Music and play it", "bubble", "Space Oddity"),
         ("Apple Music search Space Oddity and play it", "live2d", "Space Oddity"),
+        ("search Apple Music for Taylor Swift and play it", "bubble", "Taylor Swift"),
     )
     for prompt, launcher_mode, query in direct_prompts:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -2228,15 +2233,7 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert play_calls == [
-        "超时空辉夜姬",
-        "超时空辉夜姬",
-        "超时空辉夜姬",
-        "超时空辉夜姬",
-        "超时空辉夜姬",
-        "Space Oddity",
-        "Space Oddity",
-    ]
+    assert play_calls == ["超时空辉夜姬"] + [query for _prompt, _launcher_mode, query in direct_prompts]
 
 
 def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoints(

@@ -188,6 +188,38 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         }
 
 
+def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music() -> None:
+    cases = (
+        ("放点周杰伦", {"query": "周杰伦"}),
+        ("播点轻音乐", {"query": "轻音乐"}),
+        ("来点轻音乐", {"query": "轻音乐"}),
+        ("play some jazz", {"query": "jazz"}),
+        ("play some Taylor Swift", {"query": "Taylor Swift"}),
+        ("play Some Nights", {"query": "Some Nights"}),
+        ("search Apple Music for Taylor Swift and play it", {"query": "Taylor Swift"}),
+    )
+
+    for prompt, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.apple_music_play",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "media.apple_music_play"
+
+    assert daily_desktop_entrypoint_requests("播点音乐") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.apple_music_open_and_play",
+            "input": {},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_tools() -> None:
     cases = (
         ("大点声", {"action": "up"}),

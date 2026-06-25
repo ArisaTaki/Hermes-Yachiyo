@@ -7170,6 +7170,10 @@ def _apple_music_search_play_query(text: str) -> str:
         r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
         r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+up)\s+(?:in|on|with|using\s+)?"
+        r"(?:apple\s*music|music)(?:\s+app)?\s+(?:for\s+)?(?P<query6>[^.!?]+?)\s+"
+        r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
         r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query5>[^.!?]+?)\s+"
         r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
@@ -7196,6 +7200,7 @@ def _music_query(text: str) -> str:
         return ""
     patterns = (
         r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
+        r"(?:帮我|请|麻烦)?(?:直接)?(?:来|播放|播|放)(?:点|点儿|些|一点|一点儿)\s*(?P<query>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦)?(?:直接)?来(?:一首|首)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:我)?(?:想听|听)(?:一下|下)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦)?(?:直接)?(?:播放(?!器)|播(?!放器)|放(?!器))(?:一下|一首|首)?\s*(?P<query>[^。！？!?，,]+)",
@@ -7247,6 +7252,7 @@ def _strip_music_query_context(value: str) -> str:
     query = re.sub(r"^apple\s*music(?:里|中|上|内)?(?:的)?\s*", "", query, flags=re.IGNORECASE)
     query = re.sub(r"^(?:music|音乐)(?:里|中|上|内)(?:的)?\s*", "", query, flags=re.IGNORECASE)
     query = re.sub(r"^(?:里|中|上|内|里面)(?:的)?\s*", "", query)
+    query = re.sub(r"^some\s+", "", query)
     return _strip_polite_suffix(_strip_query(query))
 
 
