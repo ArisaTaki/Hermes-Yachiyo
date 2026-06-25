@@ -7221,7 +7221,7 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:play|start\s+playing)\s+(?P<app>[^.!?]+?)[.!?]*$",
         r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:播放|播|放)(?:一下)?\s*(?P<app>[^。！？!?，,]+?)"
+        r"(?:播放|播|放)(?:一下|一个|个)?\s*(?P<app>[^。！？!?，,]+?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
     )
     for pattern in patterns:
@@ -7590,7 +7590,7 @@ def _music_query(text: str) -> str:
     ):
         return ""
     patterns = (
-        r"(?:play)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
+        r"(?:play|put(?:\s+on)?)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
         r"(?:帮我|请|麻烦)?(?:直接)?(?:来|播放|播|放)(?:点|点儿|些|一点|一点儿)\s*(?P<query>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦)?(?:直接)?来(?:一首|首)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:我)?(?:想听|听)(?:一下|下)?\s*(?P<query>[^。！？!?，,]+)",
@@ -7643,6 +7643,7 @@ def _strip_music_query_context(value: str) -> str:
     query = re.sub(r"^apple\s*music(?:里|中|上|内)?(?:的)?\s*", "", query, flags=re.IGNORECASE)
     query = re.sub(r"^(?:music|音乐)(?:里|中|上|内)(?:的)?\s*", "", query, flags=re.IGNORECASE)
     query = re.sub(r"^(?:里|中|上|内|里面)(?:的)?\s*", "", query)
+    query = re.sub(r"^(?:一个|个)\s*", "", query)
     query = re.sub(r"^some\s+", "", query)
     return _strip_polite_suffix(_strip_query(query))
 
@@ -7684,6 +7685,9 @@ def _is_specific_music_query(query: str) -> bool:
         "点",
         "一点",
         "点儿",
+        "个",
+        "一个",
+        "一首",
         "something",
         "anything",
         "track",
@@ -7872,7 +7876,7 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
             lowered,
         )
         or re.fullmatch(
-            r"(?:play|start)\s+(?:a\s+)?(?:song|track|music|some\s+music|something|anything)",
+            r"(?:play|start|put\s+on)\s+(?:a\s+)?(?:song|track|music|some\s+music|something|anything)",
             lowered,
         )
         or re.fullmatch(

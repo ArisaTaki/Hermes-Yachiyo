@@ -2139,6 +2139,8 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         ("Apple Music 随便放点", "bubble"),
         ("Music app play something", "live2d"),
         ("start playing in Music", "bubble"),
+        ("put on some music", "bubble"),
+        ("能不能直接播个 Apple Music", "live2d"),
         ("放音乐听听", "live2d"),
         ("听点音乐", "bubble"),
         ("想听音乐", "live2d"),
@@ -2172,7 +2174,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_and_play_calls == 21
+    assert open_and_play_calls == 1 + len(launcher_prompts)
 
 
 def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(
@@ -2328,6 +2330,8 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         ("播点轻音乐", "live2d", "轻音乐"),
         ("play some jazz", "bubble", "jazz"),
         ("play Some Nights", "live2d", "Some Nights"),
+        ("播个超时空辉夜姬", "live2d", "超时空辉夜姬"),
+        ("put some jazz on Apple Music", "bubble", "jazz"),
         ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "bubble", "超时空辉夜姬"),
         ("Apple Music 搜索超时空辉夜姬并播放", "live2d", "超时空辉夜姬"),
         ("search Space Oddity in Apple Music and play it", "bubble", "Space Oddity"),

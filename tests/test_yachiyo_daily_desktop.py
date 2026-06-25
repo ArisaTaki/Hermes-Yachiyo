@@ -686,6 +686,8 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("可以帮我打开网易云并播放吗", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
         ("Could you launch Spotify and play music?", "media.music_app_open_and_play", {"app_name": "Spotify"}),
         ("能帮我播放 Apple Music 吗", "media.apple_music_open_and_play", {}),
+        ("能不能直接播个 Apple Music", "media.apple_music_open_and_play", {}),
+        ("put on some music", "media.apple_music_open_and_play", {}),
     )
 
     for prompt, tool_name, tool_input in cases:
@@ -715,6 +717,8 @@ def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music
         ("play some jazz", {"query": "jazz"}),
         ("play some Taylor Swift", {"query": "Taylor Swift"}),
         ("play Some Nights", {"query": "Some Nights"}),
+        ("播个超时空辉夜姬", {"query": "超时空辉夜姬"}),
+        ("put some jazz on Apple Music", {"query": "jazz"}),
         ("search Apple Music for Taylor Swift and play it", {"query": "Taylor Swift"}),
     )
 

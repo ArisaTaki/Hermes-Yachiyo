@@ -188,7 +188,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         fake_apple_music_open_and_play,
     )
     try:
-        result = api.send_message("能否帮我播放apple Music?")
+        result = api.send_message("能不能直接播个 Apple Music")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -1150,6 +1150,8 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
             ("播点轻音乐", "轻音乐"),
             ("play some jazz", "jazz"),
             ("play Some Nights", "Some Nights"),
+            ("播个超时空辉夜姬", "超时空辉夜姬"),
+            ("put some jazz on Apple Music", "jazz"),
             ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
         )
         for text, query in cases:
