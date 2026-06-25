@@ -1338,7 +1338,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/close tab/next tab/previous tab/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/close tab/next tab/previous tab/next window/previous window/Mission Control/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
@@ -2200,6 +2200,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "previous_tab": "切到上一个标签页",
         "next_window": "切到下一个窗口",
         "previous_window": "切到上一个窗口",
+        "mission_control": "打开任务控制中心",
         "new_window": "新建窗口",
         "new_document": "新建文档",
         "new_note": "新建笔记",

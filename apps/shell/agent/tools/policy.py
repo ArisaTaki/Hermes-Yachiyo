@@ -112,6 +112,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "previous_tab",
     "next_window",
     "previous_window",
+    "mission_control",
     "new_window",
     "new_document",
     "new_note",
@@ -1712,7 +1713,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
             "select all, undo, redo, find, new tab, close tab, next tab, previous tab, "
-            "next window, previous window, new window, new note, new reminder, "
+            "next window, previous window, Mission Control, new window, new note, new reminder, "
             "new calendar event, refresh, "
             "browser back, or browser forward. Unlike desktop.hotkey, this tool does not "
             "accept arbitrary keys."

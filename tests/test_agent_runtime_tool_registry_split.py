@@ -636,6 +636,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "previous_tab"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "next_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "previous_window"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "mission_control"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_document"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
@@ -4011,6 +4012,36 @@ def test_desktop_safe_shortcut_next_window_uses_grave_key_code(monkeypatch) -> N
     }
     assert "key code keyCodeValue using {command down}" in calls[0][0][2]
     assert calls[0][0][-1] == "50"
+
+
+def test_desktop_safe_shortcut_mission_control_uses_control_up(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("mission_control")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_shortcut",
+        "summary": "Executed safe shortcut: mission control",
+        "data": {
+            "key": "up",
+            "modifiers": ["control"],
+            "key_code": 126,
+            "shortcut_action": "mission_control",
+            "shortcut_label": "mission control",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "key code keyCodeValue using {control down}" in calls[0][0][2]
+    assert calls[0][0][-1] == "126"
 
 
 def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeypatch) -> None:
