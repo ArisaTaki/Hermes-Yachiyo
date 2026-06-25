@@ -784,6 +784,17 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.submit_foreground",
     ]
 
+    comm_clipboard_requests = daily_desktop_entrypoint_requests("把剪贴板内容发给微信文件传输助手")
+
+    assert comm_clipboard_requests == comm_paste_requests
+    assert daily_desktop_user_metadata(comm_clipboard_requests)["daily_desktop_tools"] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+
     comm_selected_requests = daily_desktop_entrypoint_requests("微信给文件传输助手发送选中的内容")
 
     assert comm_selected_requests == [

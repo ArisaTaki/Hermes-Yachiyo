@@ -9756,6 +9756,17 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
                 "app.focus_and_safe_shortcut",
             ),
             (
+                "把剪贴板内容发给微信文件传输助手",
+                [
+                    ("focus", "WeChat"),
+                    ("shortcut", "find"),
+                    ("type", "文件传输助手"),
+                    ("search_submit", ""),
+                    ("shortcut", "paste"),
+                ],
+                "app.focus_and_safe_shortcut",
+            ),
+            (
                 "微信给文件传输助手发送选中的内容",
                 [
                     ("shortcut", "copy"),

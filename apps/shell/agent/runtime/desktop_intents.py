@@ -6154,14 +6154,13 @@ def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
 
 def _communication_paste_request(text: str) -> tuple[str, str, str, bool] | None:
     app_followup = _communication_app_followup_request(text)
-    if not app_followup:
-        return None
-    mode, app_name, followup = app_followup
-    parsed = _communication_paste_recipient(followup)
-    if not parsed:
-        return None
-    recipient, should_submit = parsed
-    return mode, app_name, recipient, should_submit
+    if app_followup:
+        mode, app_name, followup = app_followup
+        parsed = _communication_paste_recipient(followup)
+        if parsed:
+            recipient, should_submit = parsed
+            return mode, app_name, recipient, should_submit
+    return _communication_paste_postposed_request(text)
 
 
 def _communication_app_followup_request(text: str) -> tuple[str, str, str] | None:
@@ -6261,6 +6260,45 @@ def _communication_paste_recipient(text: str) -> tuple[str, bool] | None:
         should_submit = _communication_paste_has_submit_intent(followup)
         return recipient, should_submit
     return None
+
+
+def _communication_paste_postposed_request(text: str) -> tuple[str, str, str, bool] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    clipboard_source = _communication_clipboard_source_pattern()
+    patterns = (
+        rf"^(?:把|将)?\s*(?:{clipboard_source})\s*"
+        rf"(?:(?:然后|并且|并|之后|后|再|接着)\s*)?"
+        rf"(?:发送|发出|发|分享|转发)\s*(?:给|到|至|向)?\s*(?P<target>.+)$",
+        rf"^(?:read|send|share|forward|message)\s+(?:the\s+)?(?:{clipboard_source})\s+"
+        rf"(?:and\s+then\s+|then\s+)?(?:send\s+)?to\s+(?P<target>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?:the\s+)?(?:{clipboard_source})\s+to\s+"
+        rf"(?P<target>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_query(match.group("target"))
+        split = _known_app_prefix_split(target)
+        if not split:
+            continue
+        _raw_app, app_name, followup = split
+        if app_name not in _COMMUNICATION_APP_NAMES:
+            continue
+        recipient = _strip_communication_piece(followup)
+        if recipient:
+            return "focus", app_name, recipient, True
+    return None
+
+
+def _communication_clipboard_source_pattern() -> str:
+    return (
+        r"(?:(?:读取|读一下|读取一下)\s*)?"
+        r"(?:当前|系统|这个|这份|我的)?(?:剪贴板|粘贴板)(?:内容)?|"
+        r"(?:(?:current|system|my)\s+)?clipboard(?:\s+contents?)?"
+    )
 
 
 def _communication_paste_has_submit_intent(value: str) -> bool:
