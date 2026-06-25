@@ -126,6 +126,9 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'browser.open_url' && url) return `打开 ${url}`;
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(String(input.action || '').trim());
+  if (tool === 'system.volume') return systemVolumeRetryPrompt(String(input.action || '').trim(), input);
+  if (tool === 'system.brightness') return systemBrightnessRetryPrompt(String(input.action || '').trim());
   return '';
 }
 
@@ -133,7 +136,10 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
   return tool === 'app.open'
     || tool === 'browser.open_url'
     || tool === 'desktop.open_path'
-    || tool === 'system.settings_open';
+    || tool === 'media.apple_music_control'
+    || tool === 'system.brightness'
+    || tool === 'system.settings_open'
+    || tool === 'system.volume';
 }
 
 function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unknown>): string {
@@ -192,6 +198,8 @@ function systemVolumeRetryPrompt(action: string, input: Record<string, unknown>)
   if (action === 'status') return '当前音量是多少';
   if (action === 'mute') return '静音';
   if (action === 'unmute') return '取消静音';
+  if (action === 'up') return '调大音量';
+  if (action === 'down') return '调小音量';
   const level = typeof input.level === 'number' ? input.level : Number(input.level);
   if (action === 'set' && Number.isFinite(level)) return `把音量调到 ${level}%`;
   return '';

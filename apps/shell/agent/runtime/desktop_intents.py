@@ -926,11 +926,22 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if str(metadata.get("recovery_risk_level") or "").strip().lower() != "low":
         return ""
     recovery_tool = str(metadata.get("recovery_tool") or "").strip()
-    if recovery_tool not in {"app.open", "browser.open_url", "desktop.open_path", "system.settings_open"}:
+    if recovery_tool not in {
+        "app.open",
+        "browser.open_url",
+        "desktop.open_path",
+        "media.apple_music_control",
+        "system.brightness",
+        "system.settings_open",
+        "system.volume",
+    }:
         return ""
     recovery_input = metadata.get("recovery_input")
     if not isinstance(recovery_input, Mapping):
         return ""
+    recovery_prompt = _daily_desktop_recovery_control_prompt(recovery_tool, recovery_input)
+    if recovery_prompt:
+        return recovery_prompt
     if recovery_tool == "system.settings_open":
         target = str(recovery_input.get("target") or "").strip()
         return f"打开{target}" if target else ""
@@ -944,6 +955,38 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if not app_name:
         return ""
     return f"打开{app_name}"
+
+
+def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mapping[str, Any]) -> str:
+    action = str(recovery_input.get("action") or "").strip().lower()
+    if tool_name == "media.apple_music_control":
+        return {
+            "play": "播放音乐",
+            "pause": "暂停音乐",
+            "next": "下一首",
+            "previous": "上一首",
+            "toggle": "播放暂停",
+        }.get(action, "")
+    if tool_name == "system.volume":
+        if action == "status":
+            return "当前音量是多少"
+        if action == "mute":
+            return "静音"
+        if action == "unmute":
+            return "取消静音"
+        if action == "up":
+            return "调大音量"
+        if action == "down":
+            return "调小音量"
+        if action == "set":
+            level = str(recovery_input.get("level") or "").strip()
+            return f"把音量调到 {level}%" if level else ""
+    if tool_name == "system.brightness":
+        if action == "up":
+            return "屏幕亮一点"
+        if action == "down":
+            return "屏幕暗一点"
+    return ""
 
 
 def _split_daily_desktop_sequence(text: str) -> list[str]:

@@ -6028,6 +6028,30 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "media.apple_music_control",
+            "recovery_input": {"action": "pause"},
+            "recovery_risk_level": "low",
+        }
+    ) == "暂停音乐"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "system.volume",
+            "recovery_input": {"action": "set", "level": 35},
+            "recovery_risk_level": "low",
+        }
+    ) == "把音量调到 35%"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "system.brightness",
+            "recovery_input": {"action": "down"},
+            "recovery_risk_level": "low",
+        }
+    ) == "屏幕暗一点"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.click",
             "recovery_input": {"x": 120, "y": 240},
             "recovery_risk_level": "low",

@@ -6440,6 +6440,143 @@ def test_chat_bridge_quick_message_executes_browser_open_recovery_action_without
         store.close()
 
 
+def test_chat_bridge_quick_message_executes_control_recovery_actions_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-control-recovery-action.db",
+        workspace_dir=tmp_path / "runtime-control-recovery-action",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    music_calls: list[str] = []
+    volume_calls: list[tuple[str, object, object]] = []
+    brightness_calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher control recovery action should not call model")
+        ),
+    )
+
+    def fake_apple_music_control(action: str) -> dict:
+        music_calls.append(action)
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {action} executed",
+            "data": {"control": action, "player_state": "paused"},
+        }
+
+    def fake_system_volume(action: str, *, level=None, step=None) -> dict:
+        volume_calls.append((action, level, step))
+        return {
+            "ok": True,
+            "action": "system.volume",
+            "summary": "System volume set to 35%",
+            "data": {
+                "requested_action": action,
+                "old_level": 20,
+                "old_muted": False,
+                "level": level,
+                "muted": False,
+                "changed": True,
+            },
+        }
+
+    def fake_system_brightness(action: str, *, step=None) -> dict:
+        brightness_calls.append((action, step))
+        return {
+            "ok": True,
+            "action": "system.brightness",
+            "summary": "Display brightness decreased",
+            "data": {
+                "requested_action": action,
+                "step": step,
+                "key_code": 144,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_control", fake_apple_music_control)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
+    bridge = ChatBridge(runtime)
+    try:
+        cases = (
+            (
+                "暂停音乐",
+                "media.apple_music_control",
+                {"action": "pause"},
+                "已暂停 Apple Music。",
+            ),
+            (
+                "设置音量",
+                "system.volume",
+                {"action": "set", "level": 35},
+                "已把系统音量调到 35%。",
+            ),
+            (
+                "调低亮度",
+                "system.brightness",
+                {"action": "down"},
+                "已调低屏幕亮度（2 格）。",
+            ),
+        )
+        for prompt, tool_name, tool_input, expected_summary in cases:
+            result = bridge.send_quick_message(
+                prompt,
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": "live2d",
+                    "launcher_surface": "quick_message",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                    "desktop_permission_recovery": True,
+                    "recovery_tool": tool_name,
+                    "recovery_input": tool_input,
+                    "recovery_permission_target": "desktop_control",
+                    "recovery_risk_level": "low",
+                },
+            )
+            agent_task = result["agent_task"]
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert agent_task["status"] == "completed"
+            assert agent_task["needs_user_action"] is False
+            assert agent_task["pending_approvals"] == []
+            assert agent_task["summary"] == expected_summary
+            assert agent_task["tool_calls"][-1]["tool_name"] == tool_name
+            assert agent_task["tool_calls"][-1]["input_preview"] == tool_input
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert music_calls == ["pause"]
+        assert volume_calls == [("set", 35, None)]
+        assert brightness_calls == [("down", None)]
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
     tmp_path,
     monkeypatch,
