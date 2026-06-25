@@ -1338,7 +1338,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/close tab/next tab/previous tab/next window/previous window/Mission Control/Application Windows/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/close tab/next tab/previous tab/next window/previous window/Mission Control/Application Windows/Spotlight/Emoji picker/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
@@ -2202,6 +2202,9 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "previous_window": "切到上一个窗口",
         "mission_control": "打开任务控制中心",
         "application_windows": "显示当前应用窗口",
+        "spotlight_search": "打开 Spotlight",
+        "emoji_picker": "打开 Emoji 面板",
+        "lock_screen": "锁屏",
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",
         "new_document": "新建文档",

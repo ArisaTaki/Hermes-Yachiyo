@@ -5332,6 +5332,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "previous_window": "`",
             "mission_control": "up",
             "application_windows": "down",
+            "spotlight_search": "space",
+            "emoji_picker": "space",
+            "lock_screen": "q",
             "force_quit_dialog": "escape",
         }.get(action, "")
         modifiers = ["command", "shift"] if action == "previous_window" else ["command"]
@@ -5339,6 +5342,10 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             modifiers = ["control"]
         if action == "application_windows":
             modifiers = ["control"]
+        if action == "emoji_picker":
+            modifiers = ["control", "command"]
+        if action == "lock_screen":
+            modifiers = ["control", "command"]
         if action == "force_quit_dialog":
             modifiers = ["command", "option"]
         return {
@@ -5362,6 +5369,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("show mission control", "mission_control", "已打开任务控制中心。"),
             ("显示当前应用窗口", "application_windows", "已显示当前应用窗口。"),
             ("show app windows", "application_windows", "已显示当前应用窗口。"),
+            ("打开聚焦搜索", "spotlight_search", "已打开 Spotlight。"),
+            ("show emoji picker", "emoji_picker", "已打开 Emoji 面板。"),
+            ("lock screen", "lock_screen", "已锁屏。"),
             ("show force quit applications", "force_quit_dialog", "已打开强制退出窗口。"),
             ("refresh the current page", "refresh", "已刷新。"),
             ("刷新当前页面", "refresh", "已刷新。"),
@@ -5409,6 +5419,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "mission_control",
             "application_windows",
             "application_windows",
+            "spotlight_search",
+            "emoji_picker",
+            "lock_screen",
             "force_quit_dialog",
             "refresh",
             "refresh",
