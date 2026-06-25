@@ -109,7 +109,7 @@ def test_system_media_control_tool_is_low_risk_and_validates_payload() -> None:
         ToolDescriptorRegistry.validate_payload("media.system_control", {"action": "shuffle"})
 
 
-def test_app_switch_safe_shortcuts_are_low_risk_and_validated() -> None:
+def test_desktop_safe_shortcut_actions_are_low_risk_and_validated() -> None:
     assert "desktop.safe_shortcut" in LOW_RISK_DESKTOP_TOOL_NAMES
 
     ToolDescriptorRegistry.validate_payload(
@@ -119,6 +119,10 @@ def test_app_switch_safe_shortcuts_are_low_risk_and_validated() -> None:
     ToolDescriptorRegistry.validate_payload(
         "desktop.safe_shortcut",
         {"action": "switch_next_app"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.safe_shortcut",
+        {"action": "toggle_full_screen"},
     )
     with pytest.raises(AgentRuntimeError, match="action"):
         ToolDescriptorRegistry.validate_payload(

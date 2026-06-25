@@ -5660,6 +5660,8 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("switch to previous app", "live2d", "switch_previous_app", "已切到上一个应用。"),
         ("切到下一个应用", "bubble", "switch_next_app", "已切到下一个应用。"),
         ("switch to next app", "live2d", "switch_next_app", "已切到下一个应用。"),
+        ("最大化当前窗口", "bubble", "toggle_full_screen", "已切换当前窗口全屏。"),
+        ("maximize the current window", "live2d", "toggle_full_screen", "已切换当前窗口全屏。"),
         ("打开任务控制中心", "bubble", "mission_control", "已打开任务控制中心。"),
         ("显示当前应用窗口", "bubble", "application_windows", "已显示当前应用窗口。"),
         ("打开聚焦搜索", "bubble", "spotlight_search", "已打开 Spotlight。"),
@@ -8979,22 +8981,16 @@ def test_chat_bridge_quick_message_routes_system_hotkeys_to_approval_and_complet
     try:
         cases = (
             (
-                "最大化当前窗口",
-                {"key": "f", "modifiers": ["control", "command"]},
-                ("f", ["control", "command"]),
-                "已发送快捷键：Control+Command+F。",
+                "Can you press Command L?",
+                {"key": "l", "modifiers": ["command"]},
+                ("l", ["command"]),
+                "已发送快捷键：Command+L。",
             ),
             (
-                "switch to previous app",
-                {"key": "tab", "modifiers": ["command"]},
-                ("tab", ["command"]),
-                "已发送快捷键：Command+tab。",
-            ),
-            (
-                "switch to next app",
-                {"key": "tab", "modifiers": ["command"]},
-                ("tab", ["command"]),
-                "已发送快捷键：Command+tab。",
+                "当前窗口按回车",
+                {"key": "return", "modifiers": []},
+                ("return", []),
+                "已发送快捷键：return。",
             ),
         )
         for text, input_preview, expected_call, summary in cases:
@@ -9038,9 +9034,8 @@ def test_chat_bridge_quick_message_routes_system_hotkeys_to_approval_and_complet
             assert "model.output.completed" in event_types
 
         assert hotkey_calls == [
-            ("f", ["control", "command"]),
-            ("tab", ["command"]),
-            ("tab", ["command"]),
+            ("l", ["command"]),
+            ("return", []),
         ]
     finally:
         service.close()

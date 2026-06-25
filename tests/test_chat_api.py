@@ -7601,6 +7601,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "previous_window": "`",
             "switch_previous_app": "tab",
             "switch_next_app": "tab",
+            "toggle_full_screen": "f",
             "mission_control": "up",
             "application_windows": "down",
             "spotlight_search": "space",
@@ -7613,6 +7614,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             if action in {"previous_window", "switch_next_app"}
             else ["command"]
         )
+        if action == "toggle_full_screen":
+            modifiers = ["control", "command"]
         if action == "mission_control":
             modifiers = ["control"]
         if action == "application_windows":
@@ -7650,6 +7653,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("switch to previous app", "switch_previous_app", "已切到上一个应用。"),
             ("切到下一个应用", "switch_next_app", "已切到下一个应用。"),
             ("switch to next app", "switch_next_app", "已切到下一个应用。"),
+            ("最大化当前窗口", "toggle_full_screen", "已切换当前窗口全屏。"),
+            ("maximize the current window", "toggle_full_screen", "已切换当前窗口全屏。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
             ("显示当前应用窗口", "application_windows", "已显示当前应用窗口。"),
             ("显示当前应用的所有窗口", "application_windows", "已显示当前应用窗口。"),
@@ -7725,6 +7730,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
                 "switch_previous_app",
                 "switch_next_app",
                 "switch_next_app",
+                "toggle_full_screen",
+                "toggle_full_screen",
                 "mission_control",
             "application_windows",
             "application_windows",
@@ -8042,11 +8049,6 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             ("当前窗口按回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("press enter in current window", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("空格一下", "desktop.hotkey", {"key": "space", "modifiers": []}),
-            (
-                "最大化当前窗口",
-                "desktop.hotkey",
-                {"key": "f", "modifiers": ["control", "command"]},
-            ),
             ("退出当前应用", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
             ("关闭当前 app", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
             (

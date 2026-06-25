@@ -1507,6 +1507,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "previous_window": "切到上一个窗口",
         "switch_previous_app": "切到上一个应用",
         "switch_next_app": "切到下一个应用",
+        "toggle_full_screen": "切换当前窗口全屏",
         "mission_control": "打开任务控制中心",
         "application_windows": "显示当前应用窗口",
         "spotlight_search": "打开 Spotlight",
@@ -10642,8 +10643,6 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
 
 
 def _system_desktop_hotkey_request(text: str) -> dict[str, Any] | None:
-    if _is_maximize_current_window_request(text):
-        return {"key": "f", "modifiers": ["control", "command"]}
     return None
 
 
@@ -10652,15 +10651,22 @@ def _is_maximize_current_window_request(text: str) -> bool:
     lowered = value.lower()
     return bool(
         re.search(
-            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)?\s*"
-            r"(?:最大化|放大|全屏|进入全屏)",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)\s*"
+            r"(?:最大化|放大|全屏|进入全屏)(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:最大化|放大|全屏|进入全屏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:最大化|放大|全屏|进入全屏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window|app|应用)"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:进入|切换到|打开)?\s*"
+            r"全屏(?:模式)?(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             value,
             flags=re.IGNORECASE,
         )
@@ -10844,6 +10850,8 @@ def _desktop_safe_shortcut_action(text: str) -> str:
     hotkey_action = _safe_shortcut_action_from_hotkey(text)
     if hotkey_action:
         return hotkey_action
+    if _is_maximize_current_window_request(text):
+        return "toggle_full_screen"
     phrase = _normalize_named_hotkey_phrase(text)
     mapping = {
         "复制": "copy",
@@ -11088,6 +11096,16 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "switchtonextapplication": "switch_next_app",
         "gotonextapp": "switch_next_app",
         "movetonextapp": "switch_next_app",
+        "当前窗口最大化": "toggle_full_screen",
+        "当前窗口全屏": "toggle_full_screen",
+        "最大化当前窗口": "toggle_full_screen",
+        "全屏当前窗口": "toggle_full_screen",
+        "进入全屏": "toggle_full_screen",
+        "进入全屏模式": "toggle_full_screen",
+        "maximizecurrentwindow": "toggle_full_screen",
+        "maximizethecurrentwindow": "toggle_full_screen",
+        "fullscreencurrentwindow": "toggle_full_screen",
+        "enterfullscreen": "toggle_full_screen",
         "任务控制中心": "mission_control",
         "打开任务控制中心": "mission_control",
         "显示任务控制中心": "mission_control",

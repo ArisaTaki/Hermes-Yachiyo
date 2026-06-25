@@ -297,13 +297,13 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
     cases = (
         (
             "当前窗口最大化",
-            "desktop.hotkey",
-            {"key": "f", "modifiers": ["control", "command"]},
+            "desktop.safe_shortcut",
+            {"action": "toggle_full_screen"},
         ),
         (
             "maximize the current window",
-            "desktop.hotkey",
-            {"key": "f", "modifiers": ["control", "command"]},
+            "desktop.safe_shortcut",
+            {"action": "toggle_full_screen"},
         ),
         (
             "切换到上一个应用",
@@ -1750,6 +1750,8 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("switch to previous app", "desktop.safe_shortcut", {"action": "switch_previous_app"}),
         ("切到下一个应用", "desktop.safe_shortcut", {"action": "switch_next_app"}),
         ("switch to next app", "desktop.safe_shortcut", {"action": "switch_next_app"}),
+        ("当前窗口最大化", "desktop.safe_shortcut", {"action": "toggle_full_screen"}),
+        ("maximize the current window", "desktop.safe_shortcut", {"action": "toggle_full_screen"}),
         ("show mission control", "desktop.safe_shortcut", {"action": "mission_control"}),
         ("show app windows", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("show application windows", "desktop.safe_shortcut", {"action": "application_windows"}),
