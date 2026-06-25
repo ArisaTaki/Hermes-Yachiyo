@@ -6637,6 +6637,8 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
     try:
         cases = (
             ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+            ("当前窗口按回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
+            ("press enter in current window", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("复制当前网页链接", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             (
                 "最大化当前窗口",

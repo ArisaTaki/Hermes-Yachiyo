@@ -977,6 +977,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
         ("你可以帮我按Tab吗", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
         ("显示桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
+        ("当前窗口按 Command V", "desktop.safe_shortcut", {"action": "paste"}),
         ("Can you copy?", "desktop.safe_shortcut", {"action": "copy"}),
         ("Could you paste?", "desktop.safe_shortcut", {"action": "paste"}),
         ("Would you select all please?", "desktop.safe_shortcut", {"action": "select_all"}),
@@ -1005,6 +1006,23 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    hotkey_cases = (
+        ("当前窗口按回车", {"key": "return", "modifiers": []}),
+        ("前台按回车", {"key": "return", "modifiers": []}),
+        ("press enter in current window", {"key": "return", "modifiers": []}),
+    )
+    for prompt, tool_input in hotkey_cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.hotkey",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.hotkey"
 
     approval_cases = (
         ("按 Command+L", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),

@@ -449,6 +449,9 @@ def daily_desktop_intent_tool_requests(
     system_hotkey = _system_desktop_hotkey_request(context)
     if system_hotkey and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", system_hotkey)]
+    direct_hotkey = _desktop_hotkey(context)
+    if direct_hotkey and not _desktop_safe_key(context) and "desktop.hotkey" in allowed:
+        return [_request("desktop.hotkey", direct_hotkey)]
     app_close_window_sequence = _app_open_or_focus_close_window_tool_requests(context)
     if app_close_window_sequence:
         if all(str(request.get("tool") or "") in allowed for request in app_close_window_sequence):
@@ -8703,7 +8706,7 @@ def _looks_like_project_or_design_request(text: str) -> bool:
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
-    text = _strip_desktop_action_request_shell(text)
+    text = _strip_foreground_action_target(_strip_desktop_action_request_shell(text))
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:
         return system_hotkey
@@ -9319,8 +9322,32 @@ def _strip_desktop_action_request_shell(value: str) -> str:
     return phrase.strip()
 
 
+def _strip_foreground_action_target(value: str) -> str:
+    phrase = _strip_query(value)
+    phrase = re.sub(
+        r"^(?:在|向|给)?\s*"
+        r"(?:(?:当前|现在|这个|该)\s*(?:窗口|应用|app|界面|输入框)|前台|foreground|frontmost|"
+        r"current\s+window|active\s+window)"
+        r"(?:里|中|内|上)?\s*"
+        r"(?=(?:按一下|按下|按|敲一下|敲下|敲|发送|触发)|(?:press|hit|tap)\b|"
+        r"(?:回车|enter|return|tab|escape|esc|space|空格|退出|上箭头|下箭头|左箭头|右箭头))",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"\s+(?:in|on|to)\s+(?:the\s+)?"
+        r"(?:current|active|foreground|frontmost)\s+"
+        r"(?:window|app|application)$",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    return phrase.strip()
+
+
 def _safe_shortcut_action_from_hotkey(text: str) -> str:
-    phrase = _strip_desktop_action_request_shell(text)
+    phrase = _strip_foreground_action_target(_strip_desktop_action_request_shell(text))
     phrase = re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:按一下|按下|按|执行|触发|发送|敲一下|敲下|敲)?\s*",
@@ -9359,7 +9386,7 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
 
 
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:
-    text = _strip_desktop_action_request_shell(text)
+    text = _strip_foreground_action_target(_strip_desktop_action_request_shell(text))
     if _is_show_desktop_request(text):
         return {"action": "show_desktop", "repeat_count": 1}
     if _is_next_foreground_focus_request(text):

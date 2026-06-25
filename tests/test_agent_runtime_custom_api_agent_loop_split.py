@@ -6590,6 +6590,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},
     }
+    assert daily_desktop_intent_tool_request("当前窗口按回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("前台按回车", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("press enter in current window", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "return", "modifiers": []},
+    }
+    assert daily_desktop_intent_tool_request("当前窗口按 Command V", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None
 
