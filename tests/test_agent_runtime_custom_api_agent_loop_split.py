@@ -1419,6 +1419,35 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"selector": "search-result=1", "click_count": 1},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在 Chrome 里搜索 OpenAI 并打开第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在浏览器里搜索 oha yachiyo 然后点第一个", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=oha+yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("百度一下 八千代 agent 然后打开第一个结果", allowed_tools) == [
         {
             "protocol": "json_fallback",

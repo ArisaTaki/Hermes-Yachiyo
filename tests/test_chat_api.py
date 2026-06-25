@@ -5995,7 +5995,7 @@ def test_send_message_routes_app_browser_search_click_to_approval_without_model(
         ),
     )
     try:
-        result = api.send_message("Chrome 搜索 OpenAI 并打开第一个结果")
+        result = api.send_message("在 Chrome 里搜索 OpenAI 并打开第一个结果")
         run = service.get_run(result["run_id"])
         event_types = [
             event["event_type"]

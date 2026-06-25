@@ -2746,6 +2746,7 @@ def _looks_like_search_request(text: str) -> bool:
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
+            r"(?:里|中|上|内)?\s*"
             r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|百度一下|谷歌一下|google\s+一下)\s*",
             text,
         )
@@ -2794,6 +2795,7 @@ def _browser_search_url(text: str) -> str:
         r"(?P<engine_en_app_suffix>chrome|google\s+chrome|browser|safari|firefox|edge|arc|brave|google|baidu)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启|用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:里|中|上|内)?\s*"
         r"(?:[，,；;。]?\s*(?:并且|并|然后|之后|后|再)?\s*)?"
         r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*(?P<query>[^。！？!?]+)",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
@@ -2875,6 +2877,7 @@ def _browser_search_then_click(text: str) -> tuple[str, str, int] | None:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:浏览器|chrome|google\s*chrome|谷歌|谷歌浏览器|safari)\s*)?"
         r"(?:(?:用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
+        r"(?:里|中|上|内)?\s*"
         r"(?:搜索|搜一下|搜|查一下|查查|查(?!看)|检索|谷歌一下|google\s+一下)\s*"
         r"(?P<query>.+?)\s*"
         r"(?:然后|并且|并|之后|随后|再|后)\s*"
@@ -5451,11 +5454,15 @@ def _app_open_or_focus_browser_search(text: str) -> tuple[str, str, str, int] | 
     if shorthand_match:
         mode, raw_app, app_name, followup = shorthand_match
     else:
-        split = _known_app_prefix_split(text)
-        if not split:
-            return None
-        raw_app, app_name, followup = split
-        mode = "focus"
+        scoped_match = _app_scoped_browser_search_match(text)
+        if scoped_match:
+            mode, raw_app, app_name, followup = scoped_match
+        else:
+            split = _known_app_prefix_split(text)
+            if not split:
+                return None
+            raw_app, app_name, followup = split
+            mode = "focus"
     if (
         app_name not in _BROWSER_APP_NAMES
         or _looks_like_generic_browser_app_reference(raw_app)
@@ -5473,6 +5480,27 @@ def _app_open_or_focus_browser_search(text: str) -> tuple[str, str, str, int] | 
     if search_url:
         return mode, app_name, search_url, 0
     return None
+
+
+def _app_scoped_browser_search_match(text: str) -> tuple[str, str, str, str] | None:
+    match = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)\s*"
+        r"(?P<app>浏览器|chrome|google\s*chrome|谷歌|谷歌浏览器|safari|firefox|edge|arc|brave)"
+        r"\s*(?:里|中|上|内|里面)?\s*(?P<followup>.+)$",
+        _strip_query(text),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    raw_app = _strip_query(match.group("app"))
+    app_name = _normalize_app_name(raw_app)
+    followup = _strip_query(match.group("followup"))
+    if app_name not in _BROWSER_APP_NAMES:
+        return None
+    if not (_browser_search_then_click(followup) or _browser_search_url(followup)):
+        return None
+    return "focus", raw_app, app_name, followup
 
 
 def _looks_like_generic_browser_app_reference(value: str) -> bool:
