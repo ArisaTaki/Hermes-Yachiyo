@@ -1157,6 +1157,82 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"app_name": "Slack", "action": "paste"},
         },
     ]
+    current_content_copy_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    for prompt in (
+        "把当前窗口内容粘贴到 Slack",
+        "把当前页面内容粘贴到 Slack",
+        "paste current page content into Slack",
+        "在 Slack 粘贴当前页面内容",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            *current_content_copy_requests,
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+            },
+        ]
+    assert daily_desktop_entrypoint_requests("打开 Slack 粘贴当前页面内容") == [
+        *current_content_copy_requests,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前页面内容粘贴到当前输入框",
+        "paste current page content here",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == []
+    current_content_comm_requests = [
+        *current_content_copy_requests,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    for prompt in (
+        "把当前窗口内容发给微信文件传输助手",
+        "把当前页面内容发给微信文件传输助手",
+        "微信给文件传输助手发送当前页面内容",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_content_comm_requests
+    assert (
+        daily_desktop_entrypoint_requests(
+            "把当前页面内容发给微信文件传输助手",
+            allowed_tools=("desktop.ui_elements",),
+        )
+        == []
+    )
 
     app_submit_requests = daily_desktop_entrypoint_requests("微信按回车发送")
 

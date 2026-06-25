@@ -504,6 +504,14 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_current_page_link_sequence
     ):
         return communication_current_page_link_sequence
+    communication_current_content_sequence = _communication_current_content_tool_requests(context)
+    if communication_current_content_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in communication_current_content_sequence
+        ):
+            return communication_current_content_sequence
+        return []
     communication_paste_sequence = _communication_paste_tool_requests(context)
     if communication_paste_sequence and all(
         str(request.get("tool") or "") in allowed for request in communication_paste_sequence
@@ -569,6 +577,8 @@ def daily_desktop_intent_tool_requests(
             for request in dynamic_source_open_sequence
         ):
             return dynamic_source_open_sequence
+        return []
+    if _current_content_foreground_paste_request(context):
         return []
     dynamic_source_paste_sequence = _dynamic_source_paste_tool_requests(context)
     if dynamic_source_paste_sequence:
@@ -4543,8 +4553,7 @@ def _current_content_to_note_tool_requests(text: str) -> list[dict[str, Any]]:
     if not _current_content_to_note_request(text):
         return []
     return [
-        _request("desktop.safe_shortcut", {"action": "select_all"}),
-        _request("desktop.safe_shortcut", {"action": "copy"}),
+        *_current_content_copy_tool_requests(),
         _request(
             "app.open_and_safe_shortcut",
             {"app_name": "Notes", "action": "new_note"},
@@ -4559,14 +4568,7 @@ def _current_content_to_note_request(text: str) -> bool:
         return False
     if _current_page_link_to_note_request(clean):
         return False
-    current_content_source = (
-        r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
-        r"(?:网页|网站|页面|页|窗口|应用|app|浏览器|标签页)"
-        r"(?:内容|正文|文字|文本)?|"
-        r"(?:current|active|this)\s+"
-        r"(?:(?:browser\s+)?(?:page|tab)|window|app|application)"
-        r"(?:\s+(?:content|contents|text|body))?"
-    )
+    current_content_source = _current_content_source_pattern()
     note_target = r"(?:备忘录|笔记|note)"
     return bool(
         re.search(
@@ -4607,6 +4609,24 @@ def _current_content_to_note_request(text: str) -> bool:
             clean,
             flags=re.IGNORECASE,
         )
+    )
+
+
+def _current_content_copy_tool_requests() -> list[dict[str, Any]]:
+    return [
+        _request("desktop.safe_shortcut", {"action": "select_all"}),
+        _request("desktop.safe_shortcut", {"action": "copy"}),
+    ]
+
+
+def _current_content_source_pattern() -> str:
+    return (
+        r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
+        r"(?:网页|网站|页面|页|窗口|应用|app|浏览器|标签页)"
+        r"(?:内容|正文|文字|文本)?|"
+        r"(?:current|active|this)\s+"
+        r"(?:(?:browser\s+)?(?:page|tab)|window|app|application)"
+        r"(?:\s+(?:content|contents|text|body))?"
     )
 
 
@@ -4997,6 +5017,8 @@ def _dynamic_source_paste_tool_requests(text: str) -> list[dict[str, Any]]:
         requests.append(
             _request("desktop.safe_shortcut", {"action": "copy_current_page_link"})
         )
+    elif source == "current_content":
+        requests.extend(_current_content_copy_tool_requests())
     requests.append(_request(shortcut_tool, shortcut_input))
     if should_submit:
         requests.append(_request("desktop.submit_foreground", {"action": "send"}))
@@ -5012,6 +5034,42 @@ def _dynamic_source_paste_request(
     return _dynamic_source_paste_request_for_app_scope(
         clean
     ) or _dynamic_source_paste_request_for_foreground_scope(clean)
+
+
+def _current_content_foreground_paste_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    current_content_source = _current_content_source_pattern()
+    target = _dynamic_paste_foreground_target_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            rf"(?:{current_content_source})\s*(?:复制|拷贝)?\s*"
+            rf"(?:(?:并|然后|再)\s*)?(?:粘贴|贴上|贴入)"
+            rf"(?:\s*(?:到|进|在)\s*(?:{target}))?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:paste|copy)\s+(?:the\s+)?(?:{current_content_source})\s+"
+            rf"(?:into|to|in|on)\s+(?:the\s+)?(?:{target})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:paste|copy)\s+(?:the\s+)?(?:{current_content_source})\s+"
+            rf"(?:the\s+)?(?:{target})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:copy\s+)?(?:the\s+)?(?:{current_content_source})\s+"
+            rf"(?:and\s+then\s+|and\s+)?paste\s+(?:{target})?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _dynamic_source_paste_request_for_app_scope(
@@ -5156,7 +5214,7 @@ def _dynamic_source_paste_request_for_foreground_scope(
         if not match:
             continue
         source = _dynamic_paste_source_kind(match.group("source"))
-        if not source:
+        if not source or source == "current_content":
             continue
         raw_target = str(match.groupdict().get("target") or "").strip()
         if raw_target and not _dynamic_paste_target_is_foreground(raw_target):
@@ -5199,12 +5257,15 @@ def _dynamic_paste_source_kind(value: str) -> str:
     selected_text_source = _selected_text_source_pattern()
     clipboard_source = _clipboard_source_pattern()
     current_page_link_source = _communication_current_page_link_source_pattern()
+    current_content_source = _current_content_source_pattern()
     if re.fullmatch(rf"(?:{selected_text_source})", clean, flags=re.IGNORECASE):
         return "selected_text"
     if re.fullmatch(rf"(?:{clipboard_source})", clean, flags=re.IGNORECASE):
         return "clipboard"
     if re.fullmatch(rf"(?:{current_page_link_source})", clean, flags=re.IGNORECASE):
         return "current_page_link"
+    if re.fullmatch(rf"(?:{current_content_source})", clean, flags=re.IGNORECASE):
+        return "current_content"
     return ""
 
 
@@ -8012,6 +8073,95 @@ def _communication_current_page_link_source_pattern() -> str:
         r"(?:current|active|this)\s+(?:(?:browser\s+)?(?:page|tab)\s+)?"
         r"(?:url|link|address)"
     )
+
+
+def _communication_current_content_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _communication_current_content_request(text)
+    if not parsed:
+        return []
+    mode, app_name, recipient = parsed
+    return [
+        *_current_content_copy_tool_requests(),
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": recipient}),
+        _request("desktop.search_submit", {}),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+        _request("desktop.submit_foreground", {"action": "send"}),
+    ]
+
+
+def _communication_current_content_request(text: str) -> tuple[str, str, str] | None:
+    app_followup = _communication_app_followup_request(text)
+    if app_followup:
+        mode, app_name, followup = app_followup
+        recipient = _communication_current_content_recipient(followup)
+        if recipient:
+            return mode, app_name, recipient
+    return _communication_current_content_postposed_request(text)
+
+
+def _communication_current_content_recipient(text: str) -> str:
+    followup = _strip_query(text)
+    if not followup or _looks_like_explicit_text_input_target(followup):
+        return ""
+    current_content_source = _current_content_source_pattern()
+    patterns = (
+        rf"^(?:给|向)\s*(?P<recipient_to>.+?)\s*(?:发送|发出|发|分享|转发)\s*"
+        rf"(?:{current_content_source})$",
+        rf"^(?:发送|发出|发|分享|转发)\s*(?:{current_content_source})\s*(?:给|向)\s*"
+        rf"(?P<recipient_send>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?:the\s+)?(?:{current_content_source})\s+to\s+"
+        rf"(?P<recipient_content_to>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?P<recipient_with_content>.+?)\s+"
+        rf"(?:with\s+)?(?:the\s+)?(?:{current_content_source})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _strip_communication_piece(
+            groups.get("recipient_to")
+            or groups.get("recipient_send")
+            or groups.get("recipient_content_to")
+            or groups.get("recipient_with_content")
+            or ""
+        )
+        if recipient:
+            return recipient
+    return ""
+
+
+def _communication_current_content_postposed_request(text: str) -> tuple[str, str, str] | None:
+    clean = _strip_query(text)
+    if not clean or _communication_current_page_link_request(clean):
+        return None
+    current_content_source = _current_content_source_pattern()
+    patterns = (
+        rf"^(?:把|将)?\s*(?:复制|拷贝|copy)?\s*(?:{current_content_source})\s*"
+        rf"(?:(?:并|然后|再)\s*)?"
+        rf"(?:发送|发出|发|分享|转发)\s*(?:给|到|至|向)\s*(?P<target>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?:the\s+)?(?:{current_content_source})\s+to\s+"
+        rf"(?P<target>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_query(match.group("target"))
+        split = _known_app_prefix_split(target)
+        if not split:
+            continue
+        _raw_app, app_name, followup = split
+        if app_name not in _COMMUNICATION_APP_NAMES:
+            continue
+        recipient = _strip_communication_piece(followup)
+        if recipient:
+            return "focus", app_name, recipient
+    return None
 
 
 def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
