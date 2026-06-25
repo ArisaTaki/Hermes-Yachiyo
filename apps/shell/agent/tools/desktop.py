@@ -219,6 +219,66 @@ _NOTIFICATIONS_SETTINGS_URLS = (
     "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
     "x-apple.systempreferences:com.apple.preference.notifications",
 )
+_BATTERY_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Battery-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.battery",
+)
+_MOUSE_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Mouse-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.mouse",
+)
+_TRACKPAD_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Trackpad-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.trackpad",
+)
+_PRINTERS_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Print-Scan-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.printfax",
+)
+_FOCUS_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Focus-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.notifications?Focus",
+)
+_WALLPAPER_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Wallpaper-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.desktopscreeneffect",
+)
+_DESKTOP_DOCK_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Desktop-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.dock",
+)
+_SCREEN_SAVER_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.ScreenSaver-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.desktopscreeneffect?ScreenSaver",
+)
+_SIRI_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Siri-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.speech?Siri",
+)
+_LANGUAGE_REGION_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Localization-Settings.extension",
+    "x-apple.systempreferences:com.apple.Localization",
+)
+_DATE_TIME_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Date-Time-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.datetime",
+)
+_SOFTWARE_UPDATE_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Software-Update-Settings.extension",
+    "x-apple.systempreferences:com.apple.preferences.softwareupdate",
+)
+_STORAGE_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Storage-Settings.extension",
+    "x-apple.systempreferences:com.apple.settings.Storage",
+)
+_LOGIN_ITEMS_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+    "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+)
+_USERS_GROUPS_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Users-Groups-Settings.extension",
+    "x-apple.systempreferences:com.apple.preferences.users",
+)
 
 _SYSTEM_SETTINGS_TARGETS = {
     "privacysecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
@@ -256,6 +316,58 @@ _SYSTEM_SETTINGS_TARGETS = {
     "notification": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
     "通知": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
     "通知设置": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
+    "battery": ("Battery", _BATTERY_SETTINGS_URLS),
+    "电池": ("Battery", _BATTERY_SETTINGS_URLS),
+    "电池设置": ("Battery", _BATTERY_SETTINGS_URLS),
+    "mouse": ("Mouse", _MOUSE_SETTINGS_URLS),
+    "鼠标": ("Mouse", _MOUSE_SETTINGS_URLS),
+    "鼠标设置": ("Mouse", _MOUSE_SETTINGS_URLS),
+    "trackpad": ("Trackpad", _TRACKPAD_SETTINGS_URLS),
+    "触控板": ("Trackpad", _TRACKPAD_SETTINGS_URLS),
+    "触控板设置": ("Trackpad", _TRACKPAD_SETTINGS_URLS),
+    "printers": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "printersscanners": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "printersandscanners": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "打印机": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "打印机与扫描仪": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "打印机和扫描仪": ("Printers & Scanners", _PRINTERS_SETTINGS_URLS),
+    "专注模式": ("Focus", _FOCUS_SETTINGS_URLS),
+    "focus": ("Focus", _FOCUS_SETTINGS_URLS),
+    "wallpaper": ("Wallpaper", _WALLPAPER_SETTINGS_URLS),
+    "墙纸": ("Wallpaper", _WALLPAPER_SETTINGS_URLS),
+    "壁纸": ("Wallpaper", _WALLPAPER_SETTINGS_URLS),
+    "desktopdock": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "desktopanddock": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "桌面与程序坞": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "桌面和程序坞": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "程序坞": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "dock": ("Desktop & Dock", _DESKTOP_DOCK_SETTINGS_URLS),
+    "screensaver": ("Screen Saver", _SCREEN_SAVER_SETTINGS_URLS),
+    "screen saver": ("Screen Saver", _SCREEN_SAVER_SETTINGS_URLS),
+    "屏幕保护程序": ("Screen Saver", _SCREEN_SAVER_SETTINGS_URLS),
+    "屏幕保护": ("Screen Saver", _SCREEN_SAVER_SETTINGS_URLS),
+    "siri": ("Siri", _SIRI_SETTINGS_URLS),
+    "siri与聚焦": ("Siri", _SIRI_SETTINGS_URLS),
+    "siri和聚焦": ("Siri", _SIRI_SETTINGS_URLS),
+    "languageregion": ("Language & Region", _LANGUAGE_REGION_SETTINGS_URLS),
+    "languageandregion": ("Language & Region", _LANGUAGE_REGION_SETTINGS_URLS),
+    "语言与地区": ("Language & Region", _LANGUAGE_REGION_SETTINGS_URLS),
+    "语言和地区": ("Language & Region", _LANGUAGE_REGION_SETTINGS_URLS),
+    "datetime": ("Date & Time", _DATE_TIME_SETTINGS_URLS),
+    "dateandtime": ("Date & Time", _DATE_TIME_SETTINGS_URLS),
+    "日期与时间": ("Date & Time", _DATE_TIME_SETTINGS_URLS),
+    "日期和时间": ("Date & Time", _DATE_TIME_SETTINGS_URLS),
+    "softwareupdate": ("Software Update", _SOFTWARE_UPDATE_SETTINGS_URLS),
+    "软件更新": ("Software Update", _SOFTWARE_UPDATE_SETTINGS_URLS),
+    "storage": ("Storage", _STORAGE_SETTINGS_URLS),
+    "储存空间": ("Storage", _STORAGE_SETTINGS_URLS),
+    "存储空间": ("Storage", _STORAGE_SETTINGS_URLS),
+    "loginitems": ("Login Items", _LOGIN_ITEMS_SETTINGS_URLS),
+    "登录项": ("Login Items", _LOGIN_ITEMS_SETTINGS_URLS),
+    "usersgroups": ("Users & Groups", _USERS_GROUPS_SETTINGS_URLS),
+    "usersandgroups": ("Users & Groups", _USERS_GROUPS_SETTINGS_URLS),
+    "用户与群组": ("Users & Groups", _USERS_GROUPS_SETTINGS_URLS),
+    "用户和群组": ("Users & Groups", _USERS_GROUPS_SETTINGS_URLS),
     "accessibility": (
         "Accessibility Permission",
         ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),

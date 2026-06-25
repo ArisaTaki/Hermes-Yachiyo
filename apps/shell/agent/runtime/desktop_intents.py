@@ -8304,6 +8304,45 @@ def _bare_system_settings_open_name(text: str) -> str:
         (r"(?:声音设置|音频设置|\bsound\s+settings?\b|\baudio\s+settings?\b)", "声音"),
         (r"(?:键盘设置|\bkeyboard\s+settings?\b)", "键盘"),
         (r"(?:通知设置|\bnotifications?\s+settings?\b)", "通知"),
+        (r"(?:电池设置|电池|\bbattery\s+settings?\b|\bbattery\b)", "电池"),
+        (r"(?:鼠标设置|鼠标|\bmouse\s+settings?\b|\bmouse\b)", "鼠标"),
+        (r"(?:触控板设置|触控板|\btrackpad\s+settings?\b|\btrackpad\b)", "触控板"),
+        (
+            r"(?:打印机(?:与|和)?扫描仪设置|打印机设置|打印机|"
+            r"\bprinters?(?:\s+(?:and|&)\s+scanners?)?\s+settings?\b|\bprinters?\b)",
+            "打印机与扫描仪",
+        ),
+        (r"(?:专注模式设置|专注模式|\bfocus\s+settings?\b|\bfocus\b)", "专注模式"),
+        (r"(?:墙纸设置|壁纸设置|墙纸|壁纸|\bwallpaper\s+settings?\b|\bwallpaper\b)", "墙纸"),
+        (
+            r"(?:桌面(?:与|和)程序坞设置|桌面(?:与|和)程序坞|程序坞设置|程序坞|"
+            r"\bdesktop\s+(?:and|&)\s+dock\s+settings?\b|\bdock\s+settings?\b)",
+            "桌面与程序坞",
+        ),
+        (
+            r"(?:屏幕保护程序设置|屏幕保护设置|屏幕保护程序|屏幕保护|"
+            r"\bscreen\s+saver\s+settings?\b|\bscreensaver\s+settings?\b)",
+            "屏幕保护程序",
+        ),
+        (r"(?:siri(?:\s+settings?)?|Siri设置|siri设置)", "Siri"),
+        (
+            r"(?:语言(?:与|和)地区设置|语言(?:与|和)地区|"
+            r"\blanguage\s+(?:and|&)\s+region\s+settings?\b)",
+            "语言与地区",
+        ),
+        (
+            r"(?:日期(?:与|和)时间设置|日期(?:与|和)时间|"
+            r"\bdate\s+(?:and|&)\s+time\s+settings?\b)",
+            "日期与时间",
+        ),
+        (r"(?:软件更新|\bsoftware\s+updates?\b|\bsoftware\s+update\s+settings?\b)", "软件更新"),
+        (r"(?:储存空间设置|存储空间设置|储存空间|存储空间|\bstorage\s+settings?\b|\bstorage\b)", "储存空间"),
+        (r"(?:登录项设置|登录项|\blogin\s+items?\s+settings?\b|\blogin\s+items?\b)", "登录项"),
+        (
+            r"(?:用户(?:与|和)群组设置|用户(?:与|和)群组|"
+            r"\busers?\s+(?:and|&)\s+groups?\s+settings?\b)",
+            "用户与群组",
+        ),
         (r"(?:隐私与安全性|隐私和安全性|隐私.*安全|隐私|\bprivacy\b|\bsecurity\b)", "隐私与安全性"),
         (r"(?:定位服务|定位|位置服务|\blocation\s+services?\b|\blocation\b)", "定位服务"),
     )
@@ -8354,6 +8393,60 @@ def _system_settings_target_name(text: str) -> str:
         return "键盘"
     if re.search(r"(?:通知设置|\bnotifications?\s+settings?\b)", lowered):
         return "通知"
+    if re.search(r"(?:电池设置|电池|\bbattery\s+settings?\b|\bbattery\b)", lowered):
+        return "电池"
+    if re.search(r"(?:鼠标设置|鼠标|\bmouse\s+settings?\b|\bmouse\b)", lowered):
+        return "鼠标"
+    if re.search(r"(?:触控板设置|触控板|\btrackpad\s+settings?\b|\btrackpad\b)", lowered):
+        return "触控板"
+    if re.search(
+        r"(?:打印机(?:与|和)?扫描仪设置|打印机设置|打印机|"
+        r"\bprinters?(?:\s+(?:and|&)\s+scanners?)?\s+settings?\b|\bprinters?\b)",
+        lowered,
+    ):
+        return "打印机与扫描仪"
+    if re.search(r"(?:专注模式设置|专注模式|\bfocus\s+settings?\b|\bfocus\b)", lowered):
+        return "专注模式"
+    if re.search(r"(?:墙纸设置|壁纸设置|墙纸|壁纸|\bwallpaper\s+settings?\b|\bwallpaper\b)", lowered):
+        return "墙纸"
+    if re.search(
+        r"(?:桌面(?:与|和)程序坞设置|桌面(?:与|和)程序坞|程序坞设置|程序坞|"
+        r"\bdesktop\s+(?:and|&)\s+dock\s+settings?\b|\bdock\s+settings?\b)",
+        lowered,
+    ):
+        return "桌面与程序坞"
+    if re.search(
+        r"(?:屏幕保护程序设置|屏幕保护设置|屏幕保护程序|屏幕保护|"
+        r"\bscreen\s+saver\s+settings?\b|\bscreensaver\s+settings?\b)",
+        lowered,
+    ):
+        return "屏幕保护程序"
+    if re.search(r"(?:siri(?:\s+settings?)?|Siri设置|siri设置)", lowered):
+        return "Siri"
+    if re.search(
+        r"(?:语言(?:与|和)地区设置|语言(?:与|和)地区|"
+        r"\blanguage\s+(?:and|&)\s+region\s+settings?\b)",
+        lowered,
+    ):
+        return "语言与地区"
+    if re.search(
+        r"(?:日期(?:与|和)时间设置|日期(?:与|和)时间|"
+        r"\bdate\s+(?:and|&)\s+time\s+settings?\b)",
+        lowered,
+    ):
+        return "日期与时间"
+    if re.search(r"(?:软件更新|\bsoftware\s+updates?\b|\bsoftware\s+update\s+settings?\b)", lowered):
+        return "软件更新"
+    if re.search(r"(?:储存空间设置|存储空间设置|储存空间|存储空间|\bstorage\s+settings?\b|\bstorage\b)", lowered):
+        return "储存空间"
+    if re.search(r"(?:登录项设置|登录项|\blogin\s+items?\s+settings?\b|\blogin\s+items?\b)", lowered):
+        return "登录项"
+    if re.search(
+        r"(?:用户(?:与|和)群组设置|用户(?:与|和)群组|"
+        r"\busers?\s+(?:and|&)\s+groups?\s+settings?\b)",
+        lowered,
+    ):
+        return "用户与群组"
     if re.search(
         r"(?:系统设置|系统偏好|系统偏好设置|设置|偏好|system\s+settings?|system\s+preferences?|settings?|preferences?)",
         lowered,
@@ -8364,6 +8457,11 @@ def _system_settings_target_name(text: str) -> str:
 
 def _permission_settings_open_name(text: str) -> str:
     lowered = text.lower()
+    if re.search(
+        r"(?:桌面(?:与|和)程序坞|程序坞|\bdesktop\s+(?:and|&)\s+dock\b|\bdock\s+settings?\b)",
+        lowered,
+    ):
+        return ""
     if re.search(
         r"(?:打开|启动|开启|拉起|显示|前往|进入|去|修复|修一下|修下|处理|解决).{0,20}"
         r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面|"

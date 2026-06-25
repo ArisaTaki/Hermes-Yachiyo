@@ -3409,6 +3409,13 @@ def test_send_message_executes_system_settings_panes_without_model(tmp_path, mon
             ("打开声音设置", "声音", "已打开系统设置：声音。"),
             ("open keyboard settings", "键盘", "已打开系统设置：键盘。"),
             ("打开通知设置", "通知", "已打开系统设置：通知。"),
+            ("打开电池设置", "电池", "已打开系统设置：电池。"),
+            ("open mouse settings", "鼠标", "已打开系统设置：鼠标。"),
+            ("打开触控板设置", "触控板", "已打开系统设置：触控板。"),
+            ("open printers settings", "打印机与扫描仪", "已打开系统设置：打印机与扫描仪。"),
+            ("open desktop and dock settings", "桌面与程序坞", "已打开系统设置：桌面与程序坞。"),
+            ("open software update", "软件更新", "已打开系统设置：软件更新。"),
+            ("打开储存空间设置", "储存空间", "已打开系统设置：储存空间。"),
         )
         for text, target, summary in cases:
             result = api.send_message(text)
@@ -3439,7 +3446,18 @@ def test_send_message_executes_system_settings_panes_without_model(tmp_path, mon
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
 
-        assert settings_calls == ["声音", "键盘", "通知"]
+        assert settings_calls == [
+            "声音",
+            "键盘",
+            "通知",
+            "电池",
+            "鼠标",
+            "触控板",
+            "打印机与扫描仪",
+            "桌面与程序坞",
+            "软件更新",
+            "储存空间",
+        ]
     finally:
         service.close()
         store.close()

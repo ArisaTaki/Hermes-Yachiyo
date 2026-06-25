@@ -2353,6 +2353,59 @@ def test_system_settings_open_handles_common_pane_aliases(monkeypatch) -> None:
         "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
     ]
 
+    extra_cases = (
+        ("电池", "Battery", "x-apple.systempreferences:com.apple.Battery-Settings.extension"),
+        ("鼠标", "Mouse", "x-apple.systempreferences:com.apple.Mouse-Settings.extension"),
+        ("触控板", "Trackpad", "x-apple.systempreferences:com.apple.Trackpad-Settings.extension"),
+        (
+            "打印机与扫描仪",
+            "Printers & Scanners",
+            "x-apple.systempreferences:com.apple.Print-Scan-Settings.extension",
+        ),
+        ("专注模式", "Focus", "x-apple.systempreferences:com.apple.Focus-Settings.extension"),
+        ("墙纸", "Wallpaper", "x-apple.systempreferences:com.apple.Wallpaper-Settings.extension"),
+        (
+            "桌面与程序坞",
+            "Desktop & Dock",
+            "x-apple.systempreferences:com.apple.Desktop-Settings.extension",
+        ),
+        (
+            "屏幕保护程序",
+            "Screen Saver",
+            "x-apple.systempreferences:com.apple.ScreenSaver-Settings.extension",
+        ),
+        ("Siri", "Siri", "x-apple.systempreferences:com.apple.Siri-Settings.extension"),
+        (
+            "语言与地区",
+            "Language & Region",
+            "x-apple.systempreferences:com.apple.Localization-Settings.extension",
+        ),
+        (
+            "日期与时间",
+            "Date & Time",
+            "x-apple.systempreferences:com.apple.Date-Time-Settings.extension",
+        ),
+        (
+            "软件更新",
+            "Software Update",
+            "x-apple.systempreferences:com.apple.Software-Update-Settings.extension",
+        ),
+        ("储存空间", "Storage", "x-apple.systempreferences:com.apple.Storage-Settings.extension"),
+        ("登录项", "Login Items", "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"),
+        (
+            "用户与群组",
+            "Users & Groups",
+            "x-apple.systempreferences:com.apple.Users-Groups-Settings.extension",
+        ),
+    )
+    for index, (target, label, url) in enumerate(extra_cases, start=3):
+        result = desktop_mod.system_settings_open(target)
+
+        assert result["ok"] is True
+        assert result["summary"] == f"Opened System Settings: {label}"
+        assert result["data"]["settings_label"] == label
+        assert calls[index][0] == ["open", url]
+
 
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
     calls = []

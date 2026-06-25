@@ -4606,6 +4606,66 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.settings_open",
         "input": {"target": "网络"},
     }
+    assert daily_desktop_intent_tool_request("打开电池设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "电池"},
+    }
+    assert daily_desktop_intent_tool_request("open battery settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "电池"},
+    }
+    assert daily_desktop_intent_tool_request("打开鼠标设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "鼠标"},
+    }
+    assert daily_desktop_intent_tool_request("open mouse settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "鼠标"},
+    }
+    assert daily_desktop_intent_tool_request("打开触控板设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "触控板"},
+    }
+    assert daily_desktop_intent_tool_request("open trackpad settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "触控板"},
+    }
+    assert daily_desktop_intent_tool_request("打开打印机设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "打印机与扫描仪"},
+    }
+    assert daily_desktop_intent_tool_request("open printers settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "打印机与扫描仪"},
+    }
+    assert daily_desktop_intent_tool_request("打开桌面与程序坞设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "桌面与程序坞"},
+    }
+    assert daily_desktop_intent_tool_request("open desktop and dock settings", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "桌面与程序坞"},
+    }
+    assert daily_desktop_intent_tool_request("打开软件更新", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "软件更新"},
+    }
+    assert daily_desktop_intent_tool_request("open software update", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "软件更新"},
+    }
     assert daily_desktop_intent_tool_request("打开显示器设置", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.settings_open",
