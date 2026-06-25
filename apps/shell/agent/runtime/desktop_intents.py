@@ -7084,7 +7084,8 @@ def _looks_like_generic_app_quit_target(value: str) -> bool:
 
 
 def _looks_like_current_app_scope(value: str) -> bool:
-    app = _strip_app_name(value)
+    app = _strip_app_name(value).strip().lower()
+    app = re.sub(r"^(?:the|an|a)\s+", "", app).strip()
     compact = re.sub(r"[\s._-]+", "", app.lower())
     return compact in {
         "当前",
@@ -8644,6 +8645,7 @@ def _is_close_current_window_request(text: str) -> bool:
 
 
 def _is_minimize_current_window_request(text: str) -> bool:
+    text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
     return bool(
         re.search(
@@ -8672,11 +8674,12 @@ def _is_minimize_current_window_request(text: str) -> bool:
 
 
 def _is_hide_current_app_request(text: str) -> bool:
+    text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:隐藏|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            r"(?:隐藏|收起)(?:一下|下)?\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )
@@ -8701,11 +8704,12 @@ def _is_hide_current_app_request(text: str) -> bool:
 
 
 def _is_minimize_current_app_request(text: str) -> bool:
+    text = _strip_desktop_action_request_shell(text)
     lowered = text.lower()
     return bool(
         re.search(
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:最小化|收起)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
+            r"(?:最小化|收起)(?:一下|下)?\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)(?:一下|下)?",
             text,
             flags=re.IGNORECASE,
         )

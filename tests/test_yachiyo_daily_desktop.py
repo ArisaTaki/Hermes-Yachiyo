@@ -83,6 +83,33 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_tools() -> None:
+    cases = (
+        ("你可以帮我隐藏一下前台应用吗", "desktop.hide_app", {}),
+        ("Can you hide the current app?", "desktop.hide_app", {}),
+        ("Could you hide the foreground app please?", "desktop.hide_app", {}),
+        ("你能帮我收起一下当前应用吗", "desktop.hide_app", {}),
+        ("Can you minimize the current app?", "desktop.minimize_window", {}),
+        ("Could you minimize the foreground application please?", "desktop.minimize_window", {}),
+        ("Can you hide Chrome?", "app.hide", {"app_name": "Google Chrome"}),
+        ("Could you minimize Chrome please?", "app.minimize", {"app_name": "Google Chrome"}),
+        ("Can you close the current window?", "desktop.close_window", {}),
+        ("Could you quit Slack please?", "app.quit", {"app_name": "Slack"}),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:
     cases = (
         ("你可以帮我复制一下吗", "desktop.safe_shortcut", {"action": "copy"}),

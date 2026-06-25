@@ -1598,28 +1598,35 @@ def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
         "apps.shell.agent.tools.desktop.desktop_minimize_window",
         fake_minimize_window,
     )
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "最小化当前窗口",
+    cases = (
+        ("最小化当前窗口", "bubble"),
+        ("Can you minimize the current app?", "live2d"),
+        ("Could you minimize the foreground application please?", "bubble"),
     )
+    for index, (text, launcher_mode) in enumerate(cases, start=1):
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert minimize_calls == 1
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已最小化当前窗口。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert minimize_calls == index
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已最小化当前窗口。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_hide_app_without_approval(
@@ -1642,28 +1649,36 @@ def test_chat_bridge_quick_message_executes_hide_app_without_approval(
         "apps.shell.agent.tools.desktop.desktop_hide_app",
         fake_hide_app,
     )
-    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "隐藏当前应用",
+    cases = (
+        ("隐藏当前应用", "bubble"),
+        ("你可以帮我隐藏一下前台应用吗", "live2d"),
+        ("Can you hide the current app?", "bubble"),
+        ("Could you hide the foreground app please?", "live2d"),
     )
+    for index, (text, launcher_mode) in enumerate(cases, start=1):
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
 
-    assert result["ok"] is True
-    assert hide_calls == 1
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已隐藏当前应用。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
-    assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
-    assert "model.request.started" not in event_types
-    assert "model.requested" not in event_types
+        assert result["ok"] is True
+        assert hide_calls == index
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已隐藏当前应用。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
 
 
 def test_chat_bridge_quick_message_executes_named_app_hide_without_approval(

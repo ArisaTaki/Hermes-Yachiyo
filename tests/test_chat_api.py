@@ -5663,65 +5663,119 @@ def test_send_message_executes_direct_minimize_current_window_task(tmp_path, mon
         fake_minimize_window,
     )
     try:
-        result = api.send_message("把当前窗口最小化")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        cases = (
+            "把当前窗口最小化",
+            "当前窗口最小化",
+            "Can you minimize the current app?",
+            "Could you minimize the foreground application please?",
+        )
+        for index, text in enumerate(cases, start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "已最小化当前窗口。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
-        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已最小化当前窗口。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已最小化当前窗口。"
-        assert minimize_calls == 1
-        assert run["status"] == "completed"
-        assert run["pending_approval"] == {}
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "agent.desktop.intent_approval_required" not in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == "已最小化当前窗口。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已最小化当前窗口。"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "已最小化当前窗口。"
+            assert minimize_calls == index
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
 
-        second = api.send_message("当前窗口最小化")
-        second_task = runtime.state.get_task(second["task_id"])
-        second_run = service.get_run(second["run_id"])
-        second_event_types = [
-            event["event_type"]
-            for event in service.list_run_events(second_run["run_id"])["events"]
-        ]
-        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
 
-        assert second["ok"] is True
-        assert second["status"] == "completed"
-        assert second["agent_task"]["status"] == "completed"
-        assert second["agent_task"]["summary"] == "已最小化当前窗口。"
-        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
-        assert second_task is not None
-        assert second_task.status == TaskStatus.COMPLETED
-        assert second_assistant is not None
-        assert second_assistant.status == MessageStatus.COMPLETED
-        assert second_assistant.content == "已最小化当前窗口。"
-        assert minimize_calls == 2
-        assert second_run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in second_event_types
-        assert "agent.tool.call" in second_event_types
-        assert "agent.desktop.intent_completed" in second_event_types
-        assert "model.request.started" not in second_event_types
-        assert "model.requested" not in second_event_types
+def test_send_message_executes_direct_hide_current_app_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    hide_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct hide current app task should not call model")
+        ),
+    )
+
+    def fake_hide_app() -> dict:
+        nonlocal hide_calls
+        hide_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.hide_app",
+            "summary": "Hid current app",
+            "data": {},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hide_app", fake_hide_app)
+    try:
+        cases = (
+            "你可以帮我隐藏一下前台应用吗",
+            "Can you hide the current app?",
+            "Could you hide the foreground app please?",
+        )
+        for index, text in enumerate(cases, start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == "已隐藏当前应用。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已隐藏当前应用。"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "已隐藏当前应用。"
+            assert hide_calls == index
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()
