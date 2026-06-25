@@ -2097,7 +2097,7 @@ def _desktop_find_query(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在(?:当前|前台)?(?:窗口|应用|app)?(?:里|中|内|上)?\s*)?"
-        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"(?:搜索(?!框|栏|输入框)|搜一下|搜(?!索(?:$|框|栏|输入框)|框|栏)|查找(?!框)|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:find|search)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
     )
     for pattern in patterns:
@@ -2551,7 +2551,13 @@ def _prefer_system_settings_open_sequence(
 
 
 def _clean_text(value: str) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return re.sub(
+        r"^\s*(?:你|您)?\s*(?:能否|可否)\s*帮我",
+        "帮我",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def _looks_like_explanation_request(text: str) -> bool:
@@ -6564,6 +6570,13 @@ def _app_open_or_focus_find_text_tool_requests(text: str) -> list[dict[str, Any]
     mode, _raw_app, app_name, followup = shorthand_match
     if _desktop_type_into_ui_element(followup):
         return []
+    if _app_find_shortcut_followup(followup):
+        return [
+            _request(
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": "find"},
+            )
+        ]
     if app_name not in _BROWSER_APP_NAMES:
         parsed = _app_search_query_from_followup(followup)
         if parsed is not None:
@@ -7273,7 +7286,7 @@ def _looks_like_explicit_text_input_target(value: str) -> bool:
 def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
     followup = _strip_query(value)
     patterns = (
-        r"^(?:搜索(?!框|栏)|搜一下|搜(?!索?(?:框|栏))|查找(?!框)|查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:搜索(?!框|栏)|搜一下|搜(?!索(?:$|框|栏)|框|栏)|查找(?!框)|查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:find|search|look\s+for)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
     )
     for pattern in patterns:
@@ -7307,6 +7320,27 @@ def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
         if query:
             return query, submit_return
     return None
+
+
+def _app_find_shortcut_followup(value: str) -> bool:
+    return _normalize_named_hotkey_phrase(value) in {
+        "查找",
+        "打开查找",
+        "查找框",
+        "打开查找框",
+        "搜索",
+        "搜索框",
+        "搜索栏",
+        "搜索输入框",
+        "打开搜索",
+        "打开搜索框",
+        "打开搜索栏",
+        "打开搜索输入框",
+        "search",
+        "find",
+        "openfind",
+        "openfindbox",
+    }
 
 
 def _app_open_or_focus_browser_action_tool_requests(text: str) -> list[dict[str, Any]]:
@@ -8017,7 +8051,8 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             )
         ):
             continue
-        return "open", raw_app, app_name, followup
+        mode = "focus" if _app_find_shortcut_followup(followup) else "open"
+        return mode, raw_app, app_name, followup
     return None
 
 
@@ -8184,6 +8219,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_hotkey(followup)
         or _desktop_submit_foreground_action(followup)
         or _app_followup_safe_type_text(followup)
+        or _app_find_shortcut_followup(followup)
         or _app_search_query_from_followup(followup) is not None
         or _desktop_find_query(followup)
         or _browser_click_request(_browser_context_followup(followup)) is not None

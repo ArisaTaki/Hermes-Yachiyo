@@ -70,6 +70,8 @@ def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> Non
 def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool() -> None:
     cases = (
         ("你能帮我打开微信吗", "WeChat"),
+        ("能否帮我打开微信", "WeChat"),
+        ("能否帮我启动备忘录", "Notes"),
         ("你能启动一下备忘录吗", "Notes"),
         ("打开短信", "Messages"),
         ("把 Finder 拉起来", "Finder"),
@@ -169,8 +171,11 @@ def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() 
 def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools() -> None:
     cases = (
         ("你能帮我切到Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
+        ("能否帮我切到微信", "app.focus", {"app_name": "WeChat"}),
+        ("能否帮我把微信切到前台", "app.focus", {"app_name": "WeChat"}),
         ("你可以帮我聚焦Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
         ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
+        ("能否帮我显示微信", "app.show", {"app_name": "WeChat"}),
         ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
         ("打开微信到前台", "app.show", {"app_name": "WeChat"}),
         ("把Chrome叫出来", "app.show", {"app_name": "Google Chrome"}),

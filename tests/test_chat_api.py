@@ -2812,6 +2812,18 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert third_task.status == TaskStatus.COMPLETED
         assert third_task.result == "已打开 Messages。"
         assert open_calls[-1] == "Messages"
+
+        fourth = api.send_message("能否帮我打开微信")
+        fourth_task = runtime.state.get_task(fourth["task_id"])
+
+        assert fourth["ok"] is True
+        assert fourth["status"] == "completed"
+        assert fourth["agent_task"]["summary"] == "已打开 WeChat。"
+        assert fourth["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert fourth_task is not None
+        assert fourth_task.status == TaskStatus.COMPLETED
+        assert fourth_task.result == "已打开 WeChat。"
+        assert open_calls[-1] == "WeChat"
     finally:
         service.close()
         store.close()
