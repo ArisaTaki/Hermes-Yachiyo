@@ -784,6 +784,24 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
             "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 1},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在 Finder 搜索 report 并打开第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "report"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
+        },
+    ]
 
 
 def test_daily_desktop_intent_planner_routes_spotlight_search_language() -> None:
@@ -2490,7 +2508,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "send"},
         },
     ]
-    assert daily_desktop_intent_tool_requests("把当前网页链接发给微信文件传输助手", allowed_tools) == [
+    wechat_current_page_link_requests = [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
@@ -2522,6 +2540,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "send"},
         },
     ]
+    assert (
+        daily_desktop_intent_tool_requests("把当前网页链接发给微信文件传输助手", allowed_tools)
+        == wechat_current_page_link_requests
+    )
+    assert (
+        daily_desktop_intent_tool_requests("复制当前网页链接发给微信文件传输助手", allowed_tools)
+        == wechat_current_page_link_requests
+    )
+    assert (
+        daily_desktop_intent_tool_requests("复制当前网页链接并发给微信文件传输助手", allowed_tools)
+        == wechat_current_page_link_requests
+    )
     assert daily_desktop_intent_tool_requests("open Slack send current page link to Alice", allowed_tools) == [
         {
             "protocol": "json_fallback",

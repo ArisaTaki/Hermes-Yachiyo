@@ -6362,7 +6362,8 @@ def _communication_current_page_link_postposed_request(text: str) -> tuple[str, 
         return None
     current_page_link_source = _communication_current_page_link_source_pattern()
     patterns = (
-        rf"^(?:把|将)?\s*(?:{current_page_link_source})\s*"
+        rf"^(?:把|将)?\s*(?:复制|拷贝|copy)?\s*(?:{current_page_link_source})\s*"
+        rf"(?:(?:并|然后|再)\s*)?"
         rf"(?:发送|发出|发|分享|转发)\s*(?:给|到|至|向)\s*(?P<target>.+)$",
         rf"^(?:send|share|forward)\s+(?:the\s+)?(?:{current_page_link_source})\s+to\s+"
         rf"(?P<target>.+)$",
@@ -6828,7 +6829,7 @@ def _app_open_or_focus_find_open_first_tool_requests(text: str) -> list[dict[str
     if shorthand_match:
         mode, raw_app, app_name, followup = shorthand_match
     else:
-        split = _known_app_prefix_split(text)
+        split = _known_app_prefix_split(_strip_app_search_scope_prefix(text))
         if not split:
             return []
         raw_app, app_name, followup = split

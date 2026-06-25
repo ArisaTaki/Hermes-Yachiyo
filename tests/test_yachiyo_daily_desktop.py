@@ -973,6 +973,9 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.submit_foreground",
     ]
 
+    assert daily_desktop_entrypoint_requests("复制当前网页链接发给微信文件传输助手") == comm_link_requests
+    assert daily_desktop_entrypoint_requests("复制当前网页链接并发给微信文件传输助手") == comm_link_requests
+
     open_comm_requests = daily_desktop_entrypoint_requests("打开微信发消息给张三你好")
 
     assert open_comm_requests[0] == {
@@ -1405,6 +1408,25 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.click_ui_element",
+    ]
+
+    assert daily_desktop_entrypoint_requests("在 Finder 搜索 report 并打开第一个结果") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "report"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
+        },
     ]
     assert daily_desktop_entrypoint_requests("微信打开搜索") == [
         {
