@@ -1172,6 +1172,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "WeCom"},
     }
+    assert daily_desktop_intent_tool_request("打开短信", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Messages"},
+    }
     assert daily_desktop_intent_tool_request("微信帮我打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",
@@ -4006,6 +4011,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.quit",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("退出当前应用", ["app.quit"]) is None
+    assert daily_desktop_intent_tool_request("关闭当前 app", ["app.quit"]) is None
     assert daily_desktop_intent_tool_requests("关闭微信窗口", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -7196,6 +7203,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},
     }
+    assert daily_desktop_intent_tool_request("退出当前应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "q", "modifiers": ["command"]},
+    }
+    assert daily_desktop_intent_tool_request("关闭当前 app", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "q", "modifiers": ["command"]},
+    }
     assert daily_desktop_intent_tool_request("当前窗口按 Command V", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -7207,6 +7224,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "copy"},
     }
     assert daily_desktop_intent_tool_request("应用窗口都显示一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "application_windows"},
+    }
+    assert daily_desktop_intent_tool_request("显示当前应用的所有窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "application_windows"},

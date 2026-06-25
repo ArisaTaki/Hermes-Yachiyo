@@ -73,6 +73,7 @@ _APP_ALIASES = {
     "电子邮件": "Mail",
     "messages": "Messages",
     "信息": "Messages",
+    "短信": "Messages",
     "通讯": "Messages",
     "facetime": "FaceTime",
     "contacts": "Contacts",
@@ -7941,6 +7942,8 @@ def _app_quit_name(text: str) -> str:
             continue
         if _looks_like_generic_app_quit_target(raw_app):
             continue
+        if _looks_like_current_app_scope(raw_app):
+            continue
         app_name = _normalize_app_name(raw_app)
         if app_name:
             return app_name
@@ -9568,6 +9571,18 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "closecurrenttab": ("w", ("command",)),
         "closethecurrenttab": ("w", ("command",)),
         "closetab": ("w", ("command",)),
+        "退出当前应用": ("q", ("command",)),
+        "退出前台应用": ("q", ("command",)),
+        "退出当前app": ("q", ("command",)),
+        "关闭当前应用": ("q", ("command",)),
+        "关闭前台应用": ("q", ("command",)),
+        "关闭当前app": ("q", ("command",)),
+        "关掉当前应用": ("q", ("command",)),
+        "关掉当前app": ("q", ("command",)),
+        "quitcurrentapp": ("q", ("command",)),
+        "quitcurrentapplication": ("q", ("command",)),
+        "closecurrentapp": ("q", ("command",)),
+        "closecurrentapplication": ("q", ("command",)),
         "空格": ("space", ()),
         "space": ("space", ()),
         "回车": ("return", ()),
@@ -9793,9 +9808,15 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "显示应用窗口": "application_windows",
         "显示所有应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
+        "显示当前应用的所有窗口": "application_windows",
         "显示前台应用窗口": "application_windows",
+        "显示前台应用的所有窗口": "application_windows",
         "应用窗口都显示": "application_windows",
+        "当前应用窗口都显示": "application_windows",
+        "前台应用窗口都显示": "application_windows",
         "所有应用窗口": "application_windows",
+        "当前应用的所有窗口": "application_windows",
+        "前台应用的所有窗口": "application_windows",
         "当前应用窗口": "application_windows",
         "前台应用窗口": "application_windows",
         "应用expose": "application_windows",

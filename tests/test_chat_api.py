@@ -2660,6 +2660,18 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert second_task.status == TaskStatus.COMPLETED
         assert second_task.result == "已打开 Finder。"
         assert open_calls[-1] == "Finder"
+
+        third = api.send_message("打开短信")
+        third_task = runtime.state.get_task(third["task_id"])
+
+        assert third["ok"] is True
+        assert third["status"] == "completed"
+        assert third["agent_task"]["summary"] == "已打开 Messages。"
+        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert third_task is not None
+        assert third_task.status == TaskStatus.COMPLETED
+        assert third_task.result == "已打开 Messages。"
+        assert open_calls[-1] == "Messages"
     finally:
         service.close()
         store.close()
@@ -6964,6 +6976,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("switch to previous window", "previous_window", "已切到上一个窗口。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
             ("显示当前应用窗口", "application_windows", "已显示当前应用窗口。"),
+            ("显示当前应用的所有窗口", "application_windows", "已显示当前应用窗口。"),
             ("应用窗口都显示一下", "application_windows", "已显示当前应用窗口。"),
             ("show app windows", "application_windows", "已显示当前应用窗口。"),
             ("打开聚焦搜索", "spotlight_search", "已打开 Spotlight。"),
@@ -7030,6 +7043,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "next_window",
             "previous_window",
             "mission_control",
+            "application_windows",
             "application_windows",
             "application_windows",
             "application_windows",
@@ -7260,6 +7274,8 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
                 "desktop.hotkey",
                 {"key": "f", "modifiers": ["control", "command"]},
             ),
+            ("退出当前应用", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
+            ("关闭当前 app", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
             (
                 "switch to previous app",
                 "desktop.hotkey",

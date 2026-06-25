@@ -47,6 +47,7 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
     cases = (
         ("你能帮我打开微信吗", "WeChat"),
         ("你能启动一下备忘录吗", "Notes"),
+        ("打开短信", "Messages"),
         ("把 Finder 拉起来", "Finder"),
         ("把日历启动起来", "Calendar"),
         ("把备忘录开起来", "Notes"),
@@ -1317,6 +1318,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("显示当前应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("显示前台应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("应用窗口都显示一下", "desktop.safe_shortcut", {"action": "application_windows"}),
+        ("显示当前应用的所有窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("打开聚焦搜索", "desktop.safe_shortcut", {"action": "spotlight_search"}),
         ("打开 Spotlight", "desktop.safe_shortcut", {"action": "spotlight_search"}),
         ("打开 emoji 面板", "desktop.safe_shortcut", {"action": "emoji_picker"}),
@@ -1375,6 +1377,8 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("前台按回车", {"key": "return", "modifiers": []}),
         ("press enter in current window", {"key": "return", "modifiers": []}),
         ("空格一下", {"key": "space", "modifiers": []}),
+        ("退出当前应用", {"key": "q", "modifiers": ["command"]}),
+        ("关闭当前 app", {"key": "q", "modifiers": ["command"]}),
     )
     for prompt, tool_input in hotkey_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
