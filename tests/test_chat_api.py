@@ -2495,6 +2495,26 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         assert app_open_calls == []
         assert run["status"] == "completed"
 
+        result = api.send_message("打开 iCloud Drive")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert (
+            result["agent_task"]["summary"]
+            == "已打开文件夹：~/Library/Mobile Documents/com~apple~CloudDocs。"
+        )
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件夹：~/Library/Mobile Documents/com~apple~CloudDocs。"
+        assert open_path_calls[-1] == "~/Library/Mobile Documents/com~apple~CloudDocs"
+        assert reveal_calls == []
+        assert app_open_calls == []
+        assert run["status"] == "completed"
+
         result = api.send_message("打开当前工作区")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
@@ -2965,6 +2985,35 @@ def test_send_message_executes_reveal_path_without_model(tmp_path, monkeypatch):
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == "已在 Finder 中显示：.。"
         assert reveal_calls[-1] == "."
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        result = api.send_message("在 Finder 中显示共享文件夹")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已在 Finder 中显示：/Users/Shared。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.reveal_path"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"path": "/Users/Shared"}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已在 Finder 中显示：/Users/Shared。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已在 Finder 中显示：/Users/Shared。"
+        assert reveal_calls[-1] == "/Users/Shared"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

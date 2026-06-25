@@ -412,6 +412,31 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~"},
         ),
         (
+            "打开 iCloud Drive",
+            "desktop.open_path",
+            {"path": "~/Library/Mobile Documents/com~apple~CloudDocs"},
+        ),
+        (
+            "打开 iCloud 云盘",
+            "desktop.open_path",
+            {"path": "~/Library/Mobile Documents/com~apple~CloudDocs"},
+        ),
+        (
+            "打开共享文件夹",
+            "desktop.open_path",
+            {"path": "/Users/Shared"},
+        ),
+        (
+            "在 Finder 中显示 iCloud 云盘",
+            "desktop.reveal_path",
+            {"path": "~/Library/Mobile Documents/com~apple~CloudDocs"},
+        ),
+        (
+            "在 Finder 中显示共享文件夹",
+            "desktop.reveal_path",
+            {"path": "/Users/Shared"},
+        ),
+        (
             "打开当前工作区",
             "desktop.open_path",
             {"path": "."},

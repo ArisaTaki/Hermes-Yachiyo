@@ -4359,6 +4359,9 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
         ("打开 Music 文件夹", "live2d", "~/Music"),
         ("打开用户目录", "bubble", "~"),
         ("open user directory", "live2d", "~"),
+        ("打开 iCloud Drive", "bubble", "~/Library/Mobile Documents/com~apple~CloudDocs"),
+        ("打开 iCloud 云盘", "live2d", "~/Library/Mobile Documents/com~apple~CloudDocs"),
+        ("打开共享文件夹", "bubble", "/Users/Shared"),
         ("打开当前工作区", "bubble", "."),
         ("打开项目目录", "live2d", "."),
         ("打开垃圾桶", "bubble", "~/.Trash"),
@@ -4574,6 +4577,8 @@ def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints
         ("显示当前选中文件", "live2d"),
         ("在 Finder 中显示当前工作区", "bubble"),
         ("在 Finder 中显示项目目录", "live2d"),
+        ("在 Finder 中显示 iCloud 云盘", "bubble"),
+        ("在 Finder 中显示共享文件夹", "live2d"),
     ):
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
@@ -4582,7 +4587,14 @@ def test_chat_bridge_quick_message_executes_reveal_path_for_launcher_entrypoints
             launcher_mode=launcher_mode,
         )
 
-        expected_path = "finder_selection" if "选中" in prompt else "."
+        if "选中" in prompt:
+            expected_path = "finder_selection"
+        elif "iCloud" in prompt:
+            expected_path = "~/Library/Mobile Documents/com~apple~CloudDocs"
+        elif "共享" in prompt:
+            expected_path = "/Users/Shared"
+        else:
+            expected_path = "."
         assert reveal_calls[-1] == expected_path
         assert agent_task["status"] == "completed"
         assert agent_task["summary"] == f"已在 Finder 中显示：{expected_path}。"
