@@ -7666,6 +7666,11 @@ def _reminder_create_payload(value: str) -> dict[str, Any] | None:
         due, title = scheduled
         if title:
             return {"title": title, "due_at": _local_datetime_text(due)}
+    day_only = _extract_reminder_date_only_datetime_and_title(body)
+    if day_only:
+        due, title = day_only
+        if title:
+            return {"title": title, "due_at": _local_datetime_text(due)}
     title = _reminders_create_and_type_text(value)
     if title:
         return {"title": title}
@@ -7706,6 +7711,9 @@ def _reminder_create_body(value: str) -> str:
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<body_prefixed>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒|reminder)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:设|设置|定|订)\s*(?:个|一个|一条|一项|新的?)?\s*"
+        r"(?P<body_set>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?:提醒事项|reminders?)\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
         r"(?:新建|创建|添加|新增|加)\s*(?:一个|一条|一项|新的?)?\s*"
@@ -7714,7 +7722,7 @@ def _reminder_create_body(value: str) -> str:
         r"(?P<body_to_reminders>[^。！？!?]+?)\s*"
         r"(?:加到|添加到|新增到|放到|加入)\s*(?:提醒事项|提醒|reminders?)$",
         r"^(?:please\s+)?remind me\s+(?P<body>[^.!?]+)$",
-        r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+        r"^(?:please\s+)?(?:create|add|make|set)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
         r"(?:called|named|for|to)?\s*(?P<body>[^.!?]+)$",
     )
     for pattern in patterns:
@@ -7726,6 +7734,7 @@ def _reminder_create_body(value: str) -> str:
             body = _strip_query(
                 groups.get("body")
                 or groups.get("body_prefixed")
+                or groups.get("body_set")
                 or groups.get("body_to_reminders")
                 or ""
             )
@@ -7762,6 +7771,9 @@ def _calendar_event_create_body(value: str) -> str:
         r"(?:加到|添加到|新增到|放到|加入)\s*(?:日历|calendar)$",
         r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?calendar event\s+"
         r"(?:called|named|for)?\s*(?P<body>[^.!?]+)$",
+        r"^(?:please\s+)?(?:schedule|add|create|make)\s+(?P<body_to_calendar_en>[^.!?]+?)\s+"
+        r"(?:to|on|in)\s+(?:the\s+)?calendar$",
+        r"^(?:please\s+)?schedule\s+(?P<body_scheduled_en>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -7775,6 +7787,8 @@ def _calendar_event_create_body(value: str) -> str:
                 groups.get("body")
                 or groups.get("body_prefixed")
                 or groups.get("body_to_calendar")
+                or groups.get("body_to_calendar_en")
+                or groups.get("body_scheduled_en")
                 or ""
             )
     return ""
@@ -7795,6 +7809,18 @@ _SCHEDULE_TIME_PATTERNS = (
         r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
         r"(?P<hour>\d{1,2})\s*[:：]\s*(?P<minute>\d{1,2})"
         r")"
+    ),
+    re.compile(
+        r"(?P<full>\b(?P<day_en>today|tomorrow|tonight)\b\s*(?:at\s*)?"
+        r"(?P<hour_en>\d{1,2})(?:[:.](?P<minute_en>\d{2}))?\s*"
+        r"(?P<ampm_en>a\.?m\.?|p\.?m\.?)?\b)",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?P<full>\b(?:at\s*)?(?P<hour_en>\d{1,2})(?:[:.](?P<minute_en>\d{2}))?\s*"
+        r"(?P<ampm_en>a\.?m\.?|p\.?m\.?)\s*"
+        r"(?P<day_en>today|tomorrow|tonight)\b)",
+        flags=re.IGNORECASE,
     ),
 )
 
@@ -7817,6 +7843,24 @@ def _extract_schedule_datetime_and_title(value: str) -> tuple[datetime, str] | N
 
 
 def _datetime_from_schedule_match(match: re.Match[str]) -> datetime | None:
+    groups = match.groupdict()
+    if groups.get("hour_en"):
+        hour = _parse_schedule_number(groups.get("hour_en"))
+        if hour is None or hour < 0 or hour > 23:
+            return None
+        minute = _parse_schedule_number(groups.get("minute_en") or "0")
+        if minute is None or minute < 0 or minute > 59:
+            return None
+        ampm = str(groups.get("ampm_en") or "").replace(".", "").lower()
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        if ampm == "am" and hour == 12:
+            hour = 0
+        day = str(groups.get("day_en") or "").lower()
+        if day == "tonight" and not ampm and hour < 12:
+            hour += 12
+        return _datetime_for_english_day_marker(day, hour, minute)
+
     full = str(match.group("full") or "")
     hour = _parse_schedule_number(match.group("hour"))
     if hour is None or hour < 0 or hour > 23:
@@ -7835,6 +7879,35 @@ def _datetime_from_schedule_match(match: re.Match[str]) -> datetime | None:
         day_offset = 2
     elif any(marker in full for marker in ("明天", "明日", "明晚")):
         day_offset = 1
+    target_date = date.today() + timedelta(days=day_offset)
+    return datetime.combine(target_date, time(hour=hour, minute=minute))
+
+
+def _extract_reminder_date_only_datetime_and_title(value: str) -> tuple[datetime, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = (
+        r"^(?P<day>today|tomorrow|tonight)\b\s*(?:to\s+)?(?P<title_after>[^.!?]+)$",
+        r"^(?P<title_before>[^.!?]+?)\s+\b(?P<day>today|tomorrow|tonight)\b$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        title = _strip_schedule_title(groups.get("title_after") or groups.get("title_before") or "")
+        if not title:
+            continue
+        day = str(groups.get("day") or "").lower()
+        hour = 20 if day == "tonight" else 9
+        return _datetime_for_english_day_marker(day, hour, 0), title
+    return None
+
+
+def _datetime_for_english_day_marker(day: str, hour: int, minute: int) -> datetime:
+    marker = str(day or "").lower()
+    day_offset = 1 if marker == "tomorrow" else 0
     target_date = date.today() + timedelta(days=day_offset)
     return datetime.combine(target_date, time(hour=hour, minute=minute))
 
@@ -7880,6 +7953,7 @@ def _parse_schedule_number(value: str | None) -> int | None:
 def _strip_schedule_title(value: str) -> str:
     title = _strip_typed_text(str(value or ""))
     title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我)\s*", "", title)
+    title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
     return _strip_typed_text(title)
 

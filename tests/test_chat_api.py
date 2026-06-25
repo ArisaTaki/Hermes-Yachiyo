@@ -1604,6 +1604,88 @@ def test_send_message_executes_natural_calendar_event_without_model(tmp_path, mo
         store.close()
 
 
+def test_send_message_executes_natural_reminder_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    tomorrow = date.today() + timedelta(days=1)
+    tomorrow_0900 = f"{tomorrow.isoformat()}T09:00"
+    reminder_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct reminder task should not call model")
+        ),
+    )
+
+    def fake_reminders_create(
+        title: str,
+        *,
+        due_at: str | None = None,
+        list_name: str = "",
+    ) -> dict:
+        reminder_calls.append((title, str(due_at or ""), list_name))
+        return {
+            "ok": True,
+            "action": "reminders.create",
+            "summary": "Created reminder",
+            "data": {
+                "title": title,
+                "due_at": str(due_at or ""),
+                "list_name": list_name,
+                "reminder_id": "reminder_fake",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.reminders_create",
+        fake_reminders_create,
+    )
+    try:
+        result = api.send_message("remind me tomorrow at 9 to join meeting")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user_message = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["run_id"] == run["run_id"]
+        assert reminder_calls == [("join meeting", tomorrow_0900, "")]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "reminders.create"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "title": "join meeting",
+            "due_at": tomorrow_0900,
+        }
+        assert planned_event["payload"]["tool"] == "reminders.create"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert run["status"] == "completed"
+        assert user_message.metadata["daily_desktop_tool"] == "reminders.create"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

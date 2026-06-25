@@ -1637,6 +1637,18 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             "input": {"title": "开会", "due_at": tomorrow_0900},
         }
     ]
+    for prompt, title in (
+        ("帮我设个明天上午九点开会的提醒", "开会"),
+        ("remind me tomorrow at 9 to join meeting", "join meeting"),
+        ("set a reminder to buy milk tomorrow", "buy milk"),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "reminders.create",
+                "input": {"title": title, "due_at": tomorrow_0900},
+            }
+        ]
     assert daily_desktop_entrypoint_requests("明天下午三点日历上加一个开会") == [
         {
             "protocol": "json_fallback",
@@ -1648,6 +1660,22 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             },
         }
     ]
+    for prompt in (
+        "schedule meeting tomorrow at 3pm",
+        "add meeting tomorrow 3pm to calendar",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "calendar.create_event",
+                "input": {
+                    "title": "meeting",
+                    "start_at": tomorrow_1500,
+                    "end_at": tomorrow_1600,
+                },
+            }
+        ]
+    assert daily_desktop_entrypoint_requests("add meeting tomorrow to calendar") == []
 
 
 def test_daily_desktop_entrypoint_routes_colloquial_safe_scroll_language() -> None:
