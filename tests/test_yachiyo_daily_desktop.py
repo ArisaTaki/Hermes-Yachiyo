@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_direct_metadata_request,
     daily_desktop_entrypoint_requests,
@@ -219,6 +221,25 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tool": "desktop.safe_shortcut",
         "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
     }
+
+
+def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
+    tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+
+    assert daily_desktop_entrypoint_requests("帮我新建备忘录：明天买牛奶") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "明天买牛奶"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("明天上午九点提醒我开会") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "开会", "due_at": tomorrow_0900},
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:

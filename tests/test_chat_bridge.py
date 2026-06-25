@@ -738,6 +738,7 @@ def test_chat_bridge_quick_message_opens_notes_creates_note_and_types_without_mo
     cases = (
         ("新建备忘录 hello", "bubble"),
         ("帮我记下 hello", "live2d"),
+        ("帮我新建备忘录：hello", "bubble"),
     )
     for prompt, launcher_mode in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -2151,6 +2152,22 @@ def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launch
         monkeypatch,
         "创建明天上午10点开会的提醒",
         launcher_mode="live2d",
+    )
+
+    assert result["ok"] is True
+    assert calls[-1] == ("reminder", "开会", tomorrow_1000, "")
+    assert agent_task["summary"] == f"已创建提醒事项：开会（{tomorrow_1000}）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "reminders.create"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "明天上午10点提醒我开会",
+        launcher_mode="bubble",
     )
 
     assert result["ok"] is True

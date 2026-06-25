@@ -5355,6 +5355,8 @@ def _calendar_event_create_payload(value: str) -> dict[str, Any] | None:
 def _reminder_create_body(value: str) -> str:
     text = str(value or "").strip()
     patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<body_time_first>[^。！？!?]+?)\s*提醒我\s*(?P<body_time_after>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
@@ -5378,6 +5380,8 @@ def _reminder_create_body(value: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             groups = match.groupdict()
+            if groups.get("body_time_first") and groups.get("body_time_after"):
+                return _strip_query(f"{groups['body_time_first']} {groups['body_time_after']}")
             return _strip_query(
                 groups.get("body")
                 or groups.get("body_prefixed")
@@ -5585,7 +5589,12 @@ def _notes_create_and_type_text(value: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
-        r"(?:备忘录|笔记|note)\s+(?P<text_short>[^。！？!?]+)$",
+        r"(?:备忘录|笔记|note)\s*[:：]\s*(?P<text_short_colon>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)\s+"
+        r"(?!(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)(?:\s|$))"
+        r"(?P<text_short>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:记一下|记下|记录一下|记录|记上)\s*(?P<text_memory>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -5606,6 +5615,7 @@ def _notes_create_and_type_text(value: str) -> str:
         typed_text = _strip_typed_text(
             groups.get("text")
             or groups.get("text_en")
+            or groups.get("text_short_colon")
             or groups.get("text_short")
             or groups.get("text_memory")
             or ""
