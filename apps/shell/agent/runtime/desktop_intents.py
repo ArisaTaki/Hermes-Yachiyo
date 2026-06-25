@@ -473,6 +473,13 @@ def daily_desktop_intent_tool_requests(
         if all(str(request.get("tool") or "") in allowed for request in spotlight_search_sequence):
             return spotlight_search_sequence
         return []
+    app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
+    if app_scoped_low_risk_action:
+        low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
+        if low_risk_tool in allowed:
+            return [app_scoped_low_risk_action]
+        if _app_scoped_low_risk_action_should_not_fallback(app_scoped_low_risk_action):
+            return []
     system_settings_target = _direct_system_settings_tool_target(context)
     if system_settings_target and "system.settings_open" in allowed:
         return [_request("system.settings_open", {"target": system_settings_target})]
@@ -490,7 +497,7 @@ def daily_desktop_intent_tool_requests(
         low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
         if low_risk_tool in allowed:
             return [app_scoped_low_risk_action]
-        if low_risk_tool.endswith("_and_safe_key") or low_risk_tool.endswith("_and_safe_scroll"):
+        if _app_scoped_low_risk_action_should_not_fallback(app_scoped_low_risk_action):
             return []
     app_scoped_hotkey = _app_scoped_hotkey_tool_request(context)
     if app_scoped_hotkey:
@@ -849,7 +856,7 @@ def daily_desktop_intent_tool_requests(
         low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
         if low_risk_tool in allowed:
             return [app_scoped_low_risk_action]
-        if low_risk_tool.endswith("_and_safe_key") or low_risk_tool.endswith("_and_safe_scroll"):
+        if _app_scoped_low_risk_action_should_not_fallback(app_scoped_low_risk_action):
             return []
     app_scoped_hotkey = _app_scoped_hotkey_tool_request(context)
     if app_scoped_hotkey:
@@ -1692,6 +1699,9 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "bookmark_page": "加入书签",
         "show_history": "打开历史记录",
         "open_devtools": "打开开发者工具",
+        "command_palette": "打开命令面板",
+        "obsidian_command_palette": "打开 Obsidian 命令面板",
+        "preferences": "打开偏好设置",
         "zoom_in": "放大页面",
         "zoom_out": "缩小页面",
         "reset_zoom": "重置页面缩放",
@@ -6728,6 +6738,7 @@ def _app_scoped_low_risk_foreground_action_tool_request(text: str) -> dict[str, 
             continue
         shortcut_action = (
             _finder_safe_shortcut_action(app_name, followup)
+            or _app_command_or_preferences_shortcut_action(app_name, followup)
             or _app_default_new_shortcut_action(app_name, followup)
             or _app_followup_full_screen_shortcut_action(followup)
             or _desktop_safe_shortcut_action(followup)
@@ -6750,6 +6761,20 @@ def _app_scoped_low_risk_foreground_action_tool_request(text: str) -> dict[str, 
                 {"app_name": app_name, **safe_key},
             )
     return None
+
+
+def _app_scoped_low_risk_action_should_not_fallback(request: dict[str, Any]) -> bool:
+    tool = str(request.get("tool") or "")
+    if tool.endswith("_and_safe_key") or tool.endswith("_and_safe_scroll"):
+        return True
+    if not tool.endswith("_and_safe_shortcut"):
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+    return str(payload.get("action") or "") in {
+        "command_palette",
+        "obsidian_command_palette",
+        "preferences",
+    }
 
 
 def _app_scoped_hotkey_tool_request(text: str) -> dict[str, Any] | None:
@@ -7224,7 +7249,11 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     postposed_open = _app_postposed_open_followup_match(text)
     if postposed_open:
         mode, _raw_app, app_name, followup = postposed_open
-        action = _finder_safe_shortcut_action(app_name, followup) or _desktop_safe_shortcut_action(followup)
+        action = (
+            _finder_safe_shortcut_action(app_name, followup)
+            or _app_command_or_preferences_shortcut_action(app_name, followup)
+            or _desktop_safe_shortcut_action(followup)
+        )
         if action:
             return {"mode": mode, "app_name": app_name, "action": action}
 
@@ -7234,6 +7263,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         if not _looks_like_window_target(raw_app) and not _looks_like_common_path_target(raw_app):
             action = (
                 _finder_safe_shortcut_action(app_name, followup)
+                or _app_command_or_preferences_shortcut_action(app_name, followup)
                 or _app_followup_full_screen_shortcut_action(followup)
                 or _desktop_safe_shortcut_action(followup)
             )
@@ -7258,6 +7288,8 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"查找(?:一下|下)?|打开查找(?:框)?(?:一下|下)?|"
         r"打开搜索框(?:一下|下)?|页面(?:内|里)?查找(?:一下|下)?|"
         r"当前页查找(?:一下|下)?|"
+        r"命令面板|打开命令面板|指令面板|打开指令面板|命令 palette|command\s+palette|"
+        r"偏好设置|打开偏好设置|应用设置|打开应用设置|设置|打开设置|preferences?|settings?|"
         r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
         r"新建窗口|新窗口|打开新窗口|开新窗口|开一个新窗口|"
         r"新建文档|新文档|新建文件|新文件|开新文档|开一个新文档|开新文件|开一个新文件|"
@@ -7351,6 +7383,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
                 app_name = _normalize_app_name(raw_app)
         action = (
             _finder_safe_shortcut_action(app_name, match.group("action"))
+            or _app_command_or_preferences_shortcut_action(app_name, match.group("action"))
             or _app_followup_full_screen_shortcut_action(match.group("action"))
             or _desktop_safe_shortcut_action(match.group("action"))
         )
@@ -10809,7 +10842,8 @@ def _app_foreground_action_request(
             "input": {"app_name": app_name, "action": finder_action},
         }
     shortcut_action = (
-        _app_default_new_shortcut_action(app_name, followup)
+        _app_command_or_preferences_shortcut_action(app_name, followup)
+        or _app_default_new_shortcut_action(app_name, followup)
         or _app_followup_full_screen_shortcut_action(followup)
         or _desktop_safe_shortcut_action(followup)
     )
@@ -10929,6 +10963,7 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             or _looks_like_generic_app_open_target(raw_app)
             or not (
                 _looks_like_known_app_followup(followup)
+                or _app_command_or_preferences_shortcut_action(app_name, followup)
                 or _app_default_new_shortcut_action(app_name, followup)
                 or _app_followup_full_screen_shortcut_action(followup)
             )
@@ -10967,6 +11002,7 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
         if followup and (
             _looks_like_known_app_followup(followup)
             or _finder_safe_shortcut_action(app_name, followup)
+            or _app_command_or_preferences_shortcut_action(app_name, followup)
             or _app_default_new_shortcut_action(app_name, followup)
             or _app_followup_full_screen_shortcut_action(followup)
         ):
@@ -11010,6 +11046,45 @@ def _app_default_new_shortcut_action(app_name: str, followup: str) -> str:
         "Reminders": "new_reminder",
         "Calendar": "new_event",
     }.get(app_name, "")
+
+
+def _app_command_or_preferences_shortcut_action(app_name: str, followup: str) -> str:
+    clean_app_name = str(app_name or "").strip()
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "命令面板",
+        "打开命令面板",
+        "指令面板",
+        "打开指令面板",
+        "命令palette",
+        "commandpalette",
+        "opencommandpalette",
+        "showcommandpalette",
+    }:
+        if clean_app_name == "Obsidian":
+            return "obsidian_command_palette"
+        if clean_app_name in {"Visual Studio Code", "Cursor"}:
+            return "command_palette"
+        return ""
+    if phrase in {
+        "偏好设置",
+        "打开偏好设置",
+        "应用偏好设置",
+        "打开应用偏好设置",
+        "应用设置",
+        "打开应用设置",
+        "设置",
+        "打开设置",
+        "preferences",
+        "openpreferences",
+        "settings",
+        "opensettings",
+        "appsettings",
+        "openappsettings",
+    }:
+        if clean_app_name and clean_app_name != "System Settings":
+            return "preferences"
+    return ""
 
 
 def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:

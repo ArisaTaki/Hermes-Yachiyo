@@ -225,6 +225,47 @@ def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None
         ]
 
 
+def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -> None:
+    cases = (
+        ("打开 VS Code 命令面板", "app.open_and_safe_shortcut", "Visual Studio Code", "command_palette"),
+        ("在 VS Code 里打开命令面板", "app.focus_and_safe_shortcut", "Visual Studio Code", "command_palette"),
+        ("VS Code command palette", "app.focus_and_safe_shortcut", "Visual Studio Code", "command_palette"),
+        ("打开 Obsidian 命令面板", "app.open_and_safe_shortcut", "Obsidian", "obsidian_command_palette"),
+        ("在 Obsidian 里打开命令面板", "app.focus_and_safe_shortcut", "Obsidian", "obsidian_command_palette"),
+        ("Obsidian command palette", "app.focus_and_safe_shortcut", "Obsidian", "obsidian_command_palette"),
+        ("打开 Slack 偏好设置", "app.open_and_safe_shortcut", "Slack", "preferences"),
+        ("在 Slack 里打开偏好设置", "app.focus_and_safe_shortcut", "Slack", "preferences"),
+        ("Slack preferences", "app.focus_and_safe_shortcut", "Slack", "preferences"),
+        ("打开 Chrome 设置", "app.open_and_safe_shortcut", "Google Chrome", "preferences"),
+        ("在 Chrome 里打开设置", "app.focus_and_safe_shortcut", "Google Chrome", "preferences"),
+        ("Chrome settings", "app.focus_and_safe_shortcut", "Google Chrome", "preferences"),
+    )
+
+    for prompt, tool_name, app_name, action in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": app_name, "action": action},
+            }
+        ]
+
+    assert daily_desktop_entrypoint_requests("打开设置") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "系统设置"},
+        }
+    ]
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 Slack 里打开偏好设置",
+            allowed_tools=("system.settings_open",),
+        )
+        == []
+    )
+
+
 def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut() -> None:
     cases = (
         ("Chrome 最大化", "app.focus_and_safe_shortcut", "Google Chrome"),
