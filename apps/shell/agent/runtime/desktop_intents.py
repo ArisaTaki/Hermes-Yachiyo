@@ -458,6 +458,9 @@ def daily_desktop_intent_tool_requests(
     address_bar_url = _browser_address_bar_url(context)
     if address_bar_url and "browser.open_url" in allowed:
         return [_request("browser.open_url", {"url": address_bar_url})]
+    apple_music_search_play = _apple_music_search_play_query(context)
+    if apple_music_search_play and "media.apple_music_play" in allowed:
+        return [_request("media.apple_music_play", {"query": apple_music_search_play})]
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
         str(request.get("tool") or "") in allowed for request in foreground_find_sequence
@@ -466,9 +469,6 @@ def daily_desktop_intent_tool_requests(
     app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
     if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
         return app_find_sequence
-    apple_music_search_play = _apple_music_search_play_query(context)
-    if apple_music_search_play and "media.apple_music_play" in allowed:
-        return [_request("media.apple_music_play", {"query": apple_music_search_play})]
     app_status_name = _app_status_name(context)
     if app_status_name and "app.status" in allowed:
         return [_request("app.status", {"app_name": app_status_name})]
@@ -7939,6 +7939,14 @@ def _strip_window_title(value: str) -> str:
 def _apple_music_search_play_query(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?"
+        r"(?:apple\s*music|music|苹果音乐|音乐)(?:应用|app|软件|程序)?\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
+        r"(?:搜索|搜|查找|找|检索)(?:一下|下)?\s*(?P<query_open>[^。！？!?，,]+?)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
+        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)?\s*(?:apple\s*music|music|苹果音乐|音乐)"
         r"(?:应用|app|软件|程序)?(?:里|中|上|内|里面)?\s*"
         r"(?:搜索|搜|查找|找|检索)(?:一下|下)?\s*(?P<query>[^。！？!?，,]+?)\s*"
@@ -7954,6 +7962,11 @@ def _apple_music_search_play_query(text: str) -> str:
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?:apple\s*music|music(?:\s+app)?)\s+"
         r"(?:search|find|look\s+up)\s+(?P<query3>[^.!?]+?)\s+"
+        r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:open|launch|start)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
+        r"(?:(?:and|then)\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?"
+        r"(?P<query_open_en>[^.!?]+?)\s+"
         r"(?:and\s+)?(?:play|start\s+playing)(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query4>[^.!?]+?)\s+"

@@ -5027,6 +5027,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_tool_request("打开 Apple Music 搜索超时空辉夜姬并播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
     assert daily_desktop_intent_tool_request("Apple Music 搜索超时空辉夜姬并播放", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
@@ -5048,6 +5053,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"query": "Space Oddity"},
     }
     assert daily_desktop_intent_tool_request("Apple Music search Space Oddity and play it", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "Space Oddity"},
+    }
+    assert daily_desktop_intent_tool_request("open Apple Music and search Space Oddity and play it", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
         "input": {"query": "Space Oddity"},
