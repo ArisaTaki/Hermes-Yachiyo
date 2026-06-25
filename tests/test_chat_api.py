@@ -2938,20 +2938,22 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
     try:
-        result = api.send_message("音量设成 35")
-        task = runtime.state.get_task(result["task_id"])
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
+        cases = ("音量设成 35", "调到35音量", "volume 35", "set sound to 35")
+        for index, text in enumerate(cases, start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已把系统音量调到 35%。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已把系统音量调到 35%。"
-        assert volume_calls == [("set", 35, None)]
-        assert run["status"] == "completed"
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已把系统音量调到 35%。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已把系统音量调到 35%。"
+            assert volume_calls == [("set", 35, None)] * index
+            assert run["status"] == "completed"
     finally:
         service.close()
         store.close()

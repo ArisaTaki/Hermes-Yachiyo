@@ -3978,7 +3978,10 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
     cases = (
         ("调大音量", "bubble", "up", "已把系统音量从 40% 调高到 50%。"),
         ("turn it up", "live2d", "up", "已把系统音量从 40% 调高到 50%。"),
+        ("大点声", "bubble", "up", "已把系统音量从 40% 调高到 50%。"),
+        ("sound up", "live2d", "up", "已把系统音量从 40% 调高到 50%。"),
         ("make it quieter", "bubble", "down", "已把系统音量从 50% 调低到 40%。"),
+        ("sound down", "live2d", "down", "已把系统音量从 50% 调低到 40%。"),
     )
     for prompt, launcher_mode, action, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -3996,7 +3999,14 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert volume_calls == [("up", None, None), ("up", None, None), ("down", None, None)]
+    assert volume_calls == [
+        ("up", None, None),
+        ("up", None, None),
+        ("up", None, None),
+        ("up", None, None),
+        ("down", None, None),
+        ("down", None, None),
+    ]
 
 
 def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypoints(

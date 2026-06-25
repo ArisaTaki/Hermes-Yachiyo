@@ -3086,17 +3086,20 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     level_patterns = (
         r"(?:设置|设定)(?:系统)?(?:音量|声音)\s*(?:为|到|成)?\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
+        r"(?:调到|调至|设为|设置为|设置到)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?\s*"
+        r"(?:系统)?(?:音量|声音)",
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
         r"百分之\s*(?P<level>\d{1,3})",
         r"(?:系统)?(?:音量|声音)\s*(?:设成|设到|调成)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?",
         r"(?:音量|声音)\s*(?P<level>\d{1,3})\s*%",
+        r"\b(?:volume|sound)\s+(?P<level>\d{1,3})\s*%?\b",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:到|调到|调至|设为|设置到)?\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
-        r"\b(?:set|turn)\s+(?:the\s+)?(?:system\s+)?volume\s+(?:to\s+)?"
+        r"\b(?:set|turn)\s+(?:the\s+)?(?:system\s+)?(?:volume|sound)\s+(?:to\s+)?"
         r"(?P<level>\d{1,3})\s*%?\b",
     )
     for pattern in level_patterns:
@@ -3132,11 +3135,12 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     if re.search(
         r"(?:调大|调高|加大|提高|增大|升高).{0,4}(?:音量|声音)|"
         r"(?:音量|声音).{0,4}(?:大一点|大点|高一点|高点|加一点|加点|调大|调高|提高)|"
-        r"(?:大声一点|大声点|声音大点|声音大一点|音量大点|音量大一点)",
+        r"(?:大声一点|大声点|声音大点|声音大一点|音量大点|音量大一点|大点声|大一点声)",
         text,
     ) or re.search(
         r"\b(?:turn|raise|increase)\s+(?:up\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
         r"\bvolume\s+up\b|"
+        r"\bsound\s+up\b|"
         r"\b(?:louder|make\s+it\s+louder|turn\s+it\s+up|turn\s+(?:the\s+)?sound\s+up)\b",
         lowered,
     ):
@@ -3149,6 +3153,7 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     ) or re.search(
         r"\b(?:turn|lower|decrease)\s+(?:down\s+)?(?:the\s+)?(?:system\s+)?volume\b|"
         r"\bvolume\s+down\b|"
+        r"\bsound\s+down\b|"
         r"\b(?:quieter|make\s+it\s+quieter|turn\s+it\s+down|turn\s+(?:the\s+)?sound\s+down)\b",
         lowered,
     ):

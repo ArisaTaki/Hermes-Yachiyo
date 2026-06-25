@@ -188,6 +188,33 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         }
 
 
+def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_tools() -> None:
+    cases = (
+        ("大点声", {"action": "up"}),
+        ("大一点声", {"action": "up"}),
+        ("调到35音量", {"action": "set", "level": 35}),
+        ("volume 35", {"action": "set", "level": 35}),
+        ("set sound to 35", {"action": "set", "level": 35}),
+        ("sound up", {"action": "up"}),
+        ("sound down", {"action": "down"}),
+    )
+
+    for prompt, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.volume",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.volume"
+
+    assert daily_desktop_entrypoint_requests("亮一点") == []
+    assert daily_desktop_entrypoint_requests("暗一点") == []
+
+
 def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_request() -> None:
     metadata = {
         "desktop_permission_recovery": True,
