@@ -4610,7 +4610,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             "open",
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+?)\s*"
-            rf"(?:(?:并|然后|后|之后|再)\s*)?(?P<action>{shortcut_pattern})$",
+            rf"(?:起来)?\s*(?:(?:并|然后|后|之后|再)\s*)?(?P<action>{shortcut_pattern})$",
         ),
         (
             "open",
@@ -4632,7 +4632,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             "focus",
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?P<app>[^。！？!?，,\s]+?)\s*(?:的|里|中|内|上)?\s*"
-            rf"(?P<action>{shortcut_pattern})$",
+            rf"(?:起来)?\s*(?P<action>{shortcut_pattern})$",
         ),
         (
             "focus",
@@ -7141,6 +7141,10 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
         r"(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
         r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
+        r"(?P<followup>.+)$",
         r"^(?:please\s+)?(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+"
         r"(?:and|then)\s+(?P<followup>.+)$",
     )
@@ -7285,6 +7289,8 @@ def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
 
 def _strip_known_app_followup_prefix(value: str) -> str:
     followup = _strip_app_foreground_followup_prefix(_strip_query(value))
+    followup = re.sub(r"^(?:起来)\s*", "", followup, flags=re.IGNORECASE).strip()
+    followup = _strip_app_foreground_followup_prefix(followup)
     followup = re.sub(
         r"^(?:在|到)\s*",
         "",
@@ -8056,7 +8062,7 @@ def _app_open_name(text: str) -> str:
         r"(?P<verb>打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开)\s*(?:一下|下)?"
         r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起来|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
-        r"(?P<app>[^。！？!?，,]+?)(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:起来)?(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
         r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<verb>open|launch|start)\s+"
         r"(?P<app>[^.!?]+?)(?=\s*(?:\b(?:and|then|if)\b|$|[.!?]))",
     )

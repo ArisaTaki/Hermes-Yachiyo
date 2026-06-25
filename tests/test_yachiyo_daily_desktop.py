@@ -50,6 +50,7 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         ("把 Finder 拉起来", "Finder"),
         ("把日历启动起来", "Calendar"),
         ("把备忘录开起来", "Notes"),
+        ("启动Chrome起来", "Google Chrome"),
         ("Could you launch Calendar for me?", "Calendar"),
         ("Would you open Notes please?", "Notes"),
     )
@@ -1063,6 +1064,20 @@ def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "refresh"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("把Chrome启动起来刷新一下") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "refresh"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("启动Chrome起来刷新一下") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "refresh"},
         },
     ]
     assert daily_desktop_entrypoint_requests("Chrome 搜索 OpenAI 并打开第一个结果") == [

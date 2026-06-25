@@ -642,6 +642,11 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.open",
         "input": {"app_name": "Calendar"},
     }
+    assert daily_desktop_intent_tool_request("启动Chrome起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("打开 Finder 选择的文件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -661,6 +666,16 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Google Chrome", "action": "new_tab"},
+    }
+    assert daily_desktop_intent_tool_request("把Chrome启动起来刷新一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "refresh"},
+    }
+    assert daily_desktop_intent_tool_request("启动Chrome起来刷新一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "refresh"},
     }
     assert daily_desktop_intent_tool_request("把Chrome打开然后刷新", allowed_tools) == {
         "protocol": "json_fallback",

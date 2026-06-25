@@ -1137,6 +1137,43 @@ def test_send_message_executes_app_open_browser_back_without_fake_app_name(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
+        calls.clear()
+        second = api.send_message("把Chrome启动起来刷新一下")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert calls == [
+            ("open", "Google Chrome"),
+            ("focus", "Google Chrome"),
+            ("shortcut", "refresh"),
+        ]
+        assert second["agent_task"]["summary"] == "已打开 Google Chrome 并刷新。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
+        assert second["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "app_name": "Google Chrome",
+            "action": "refresh",
+        }
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已打开 Google Chrome 并刷新。"
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "已打开 Google Chrome 并刷新。"
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
+
     finally:
         service.close()
         store.close()
