@@ -2734,7 +2734,7 @@ def test_send_message_executes_music_app_search_play_sequence_without_model(tmp_
         fake_music_app_open_and_play,
     )
     try:
-        result = api.send_message("打开 Spotify 搜索 Taylor Swift 并播放")
+        result = api.send_message("打开 Spotify 播放 Taylor Swift")
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
         event_types = [

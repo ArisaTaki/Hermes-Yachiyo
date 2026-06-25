@@ -1087,6 +1087,27 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
         "media.music_app_open_and_play",
     ]
 
+    direct_play_requests = daily_desktop_entrypoint_requests("用 Spotify 播放 Taylor Swift")
+
+    assert direct_play_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Taylor Swift"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+        },
+    ]
+
     focus_requests = daily_desktop_entrypoint_requests("网易云音乐搜索周杰伦并播放")
 
     assert focus_requests[0] == {
@@ -1095,6 +1116,15 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
         "input": {"app_name": "网易云音乐", "action": "find"},
     }
     assert focus_requests[1]["input"] == {"text": "周杰伦"}
+
+    open_direct_play_requests = daily_desktop_entrypoint_requests("打开网易云音乐播放周杰伦")
+
+    assert open_direct_play_requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "网易云音乐", "action": "find"},
+    }
+    assert open_direct_play_requests[1]["input"] == {"text": "周杰伦"}
 
 
 def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music() -> None:

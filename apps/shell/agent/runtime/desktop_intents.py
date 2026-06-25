@@ -5976,19 +5976,23 @@ def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
 
 
 def _music_app_search_play_tool_requests(text: str) -> list[dict[str, Any]]:
-    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
-    if shorthand_match:
-        mode, raw_app, app_name, followup = shorthand_match
+    named_play_match = _non_apple_music_named_play_match(text)
+    if named_play_match:
+        mode, _raw_app, music_app, query = named_play_match
     else:
-        split = _known_app_prefix_split(text)
-        if not split:
+        shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+        if shorthand_match:
+            mode, raw_app, app_name, followup = shorthand_match
+        else:
+            split = _known_app_prefix_split(text)
+            if not split:
+                return []
+            raw_app, app_name, followup = split
+            mode = "focus"
+        music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
+        if not music_app or music_app == "Music":
             return []
-        raw_app, app_name, followup = split
-        mode = "focus"
-    music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
-    if not music_app or music_app == "Music":
-        return []
-    query = _music_app_search_play_query_from_followup(followup)
+        query = _music_app_search_play_query_from_followup(followup)
     if not query:
         return []
     return [
@@ -6001,18 +6005,20 @@ def _music_app_search_play_tool_requests(text: str) -> list[dict[str, Any]]:
         _request("media.music_app_open_and_play", {"app_name": music_app}),
     ]
 
-
 def _music_app_search_play_query_from_followup(value: str) -> str:
     followup = _strip_query(value)
     patterns = (
         r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找下|找找|找)\s*"
         r"(?P<query>[^。！？!?]+?)\s*"
         r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
-        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:播放|播(?!放)|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:开始)?(?:播放|播(?!放)|放)(?:一下)?\s*(?P<play_query>[^。！？!?]+?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query_en>[^.!?]+?)\s+"
         r"(?:and\s+|then\s+)?(?:play|start\s+playing)"
         r"(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+        r"^(?:play|start\s+playing)\s+(?P<play_query_en>[^.!?]+?)[.!?]*$",
     )
     for pattern in patterns:
         match = re.search(pattern, followup, flags=re.IGNORECASE)
@@ -7902,30 +7908,54 @@ def _music_app_open_and_play_app_name(text: str) -> str:
 
 
 def _non_apple_music_named_play_app_name(text: str) -> str:
-    patterns = (
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
-        r"(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
-        r"(?:(?:并|然后|后|之后|再)\s*)?(?:开始)?(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
-        r"^(?P<app>[^。！？!?，,]+?)\s*(?:播放|播|放)\s*(?P<query>[^。！？!?，,]+)$",
-        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
-        r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+?)\s+"
-        r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)$",
-        r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
-        r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
-        r"^(?P<app>[^.!?]+?)\s+(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
+    match = _non_apple_music_named_play_match(text)
+    return match[2] if match else ""
+
+
+def _non_apple_music_named_play_match(text: str) -> tuple[str, str, str, str] | None:
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            "focus",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
+            r"(?:播放|播(?!放)|放)\s*(?P<query>[^。！？!?，,]+)$",
+        ),
+        (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:(?:并|然后|后|之后|再)\s*)?(?:开始)?(?:播放|播(?!放)|放)\s*(?P<query>[^。！？!?，,]+)$",
+        ),
+        (
+            "focus",
+            r"^(?P<app>[^。！？!?，,]+?)\s*(?:播放|播(?!放)|放)\s*(?P<query>[^。！？!?，,]+)$",
+        ),
+        (
+            "focus",
+            r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+?)\s+"
+            r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)$",
+        ),
+        (
+            "open",
+            r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
+            r"(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
+        ),
+        (
+            "focus",
+            r"^(?P<app>[^.!?]+?)\s+(?:play|start\s+playing)\s+(?P<query>[^.!?]+)$",
+        ),
     )
-    for pattern in patterns:
+    for mode, pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _known_music_app_name(match.group("app"))
+        raw_app = _strip_query(match.group("app"))
+        app_name = _known_music_app_name(raw_app)
         query = _strip_music_query_context(match.group("query"))
         if app_name and app_name != "Music" and query and _is_specific_music_query(query):
-            return app_name
-    return ""
+            return mode, raw_app, app_name, query
+    return None
 
 
 def _known_music_app_name(value: str) -> str:
