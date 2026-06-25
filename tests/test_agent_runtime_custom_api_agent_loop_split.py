@@ -6520,6 +6520,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_tab"},
     }
+    assert daily_desktop_intent_tool_request("新建标签", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_tab"},
+    }
     assert daily_desktop_intent_tool_request("重新打开刚关闭的标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -6738,6 +6743,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "browser_forward"},
     }
+    assert daily_desktop_intent_tool_request("前进下一页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "browser_forward"},
+    }
     assert daily_desktop_intent_tool_request("go back", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
@@ -6762,6 +6772,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "browser_forward"},
+    }
+    assert daily_desktop_intent_tool_request("锁一下屏", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "lock_screen"},
     }
     assert daily_desktop_intent_tool_request("复制选中内容", ["desktop.hotkey"]) == {
         "protocol": "json_fallback",
