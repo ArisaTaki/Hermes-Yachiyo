@@ -42,12 +42,12 @@ from apps.core.executor import (
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
-from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_entrypoint_tool_requests,
-)
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_entrypoint_requests,
+    daily_desktop_user_metadata,
+)
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
@@ -590,23 +590,7 @@ class ChatAPI:
     def _daily_desktop_user_metadata(
         requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        tools = [
-            str(request.get("tool") or "").strip()
-            for request in requests
-            if str(request.get("tool") or "").strip()
-        ]
-        if not tools:
-            return {}
-        first_request = requests[0]
-        return {
-            "daily_desktop_intent": True,
-            "daily_desktop_source": str(first_request.get("source") or "daily_desktop_intent"),
-            "daily_desktop_planning_reason": str(
-                first_request.get("planning_reason") or "clear_daily_desktop_intent"
-            ),
-            "daily_desktop_tool": tools[0],
-            "daily_desktop_tools": tools,
-        }
+        return daily_desktop_user_metadata(requests)
 
     def _idempotent_message_response(self, client_message_id: str) -> Dict[str, Any] | None:
         if not client_message_id:
@@ -712,9 +696,8 @@ class ChatAPI:
         text: str,
         metadata: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
-        return daily_desktop_entrypoint_tool_requests(
+        return daily_desktop_entrypoint_requests(
             text,
-            list(DAILY_DESKTOP_TOOL_NAMES),
             metadata=metadata,
         )
 
@@ -736,7 +719,7 @@ class ChatAPI:
         query = self._daily_desktop_music_followup_query(text)
         if not query:
             return text
-        if daily_desktop_entrypoint_tool_requests(text, list(DAILY_DESKTOP_TOOL_NAMES)):
+        if daily_desktop_entrypoint_requests(text):
             return text
         if not self._has_recent_daily_desktop_music_context():
             return text
@@ -748,10 +731,7 @@ class ChatAPI:
             return ""
         if not self._recent_daily_desktop_browser_context_is_latest():
             return ""
-        requests = daily_desktop_entrypoint_tool_requests(
-            candidate,
-            list(DAILY_DESKTOP_TOOL_NAMES),
-        )
+        requests = daily_desktop_entrypoint_requests(candidate)
         if not requests:
             return ""
         if not all(
@@ -839,10 +819,7 @@ class ChatAPI:
         if not app_name:
             return ""
         candidate = f"切到{app_name}，{clause}"
-        requests = daily_desktop_entrypoint_tool_requests(
-            candidate,
-            list(DAILY_DESKTOP_TOOL_NAMES),
-        )
+        requests = daily_desktop_entrypoint_requests(candidate)
         if not requests:
             return ""
         if not self._daily_desktop_requests_target_app_context(requests, app_name):
@@ -901,9 +878,8 @@ class ChatAPI:
 
     @staticmethod
     def _message_daily_desktop_app_context_name(content: str) -> str:
-        requests = daily_desktop_entrypoint_tool_requests(
+        requests = daily_desktop_entrypoint_requests(
             ChatAPI._main_model_goal_text(content),
-            list(DAILY_DESKTOP_TOOL_NAMES),
         )
         for request in reversed(requests):
             tool = str(request.get("tool") or "").strip()
@@ -917,9 +893,8 @@ class ChatAPI:
 
     @staticmethod
     def _message_has_daily_desktop_browser_context(content: str) -> bool:
-        requests = daily_desktop_entrypoint_tool_requests(
+        requests = daily_desktop_entrypoint_requests(
             ChatAPI._main_model_goal_text(content),
-            list(DAILY_DESKTOP_TOOL_NAMES),
         )
         for request in requests:
             tool = str(request.get("tool") or "").strip()
@@ -1009,9 +984,8 @@ class ChatAPI:
 
     @staticmethod
     def _message_has_daily_desktop_music_intent(content: str) -> bool:
-        requests = daily_desktop_entrypoint_tool_requests(
+        requests = daily_desktop_entrypoint_requests(
             ChatAPI._main_model_goal_text(content),
-            list(DAILY_DESKTOP_TOOL_NAMES),
         )
         for request in requests:
             tool = str(request.get("tool") or "").strip()
@@ -1123,9 +1097,8 @@ class ChatAPI:
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
             task_text = self._daily_desktop_followup_goal_text(task_text, current_context)
-            daily_desktop_requests = daily_desktop_entrypoint_tool_requests(
+            daily_desktop_requests = daily_desktop_entrypoint_requests(
                 task_text,
-                list(DAILY_DESKTOP_TOOL_NAMES),
                 metadata=metadata,
             )
             direct_daily_desktop_intent = (
@@ -1170,7 +1143,7 @@ class ChatAPI:
             if direct_daily_desktop_intent:
                 user_metadata = self._merge_user_metadata(
                     user_metadata,
-                    self._daily_desktop_user_metadata(daily_desktop_requests),
+                    daily_desktop_user_metadata(daily_desktop_requests),
                 )
             task_description = self._with_group_context_for_main_model(task_description, current_context)
             task_description = self._with_group_followup_context(task_description, user_metadata)
@@ -1542,7 +1515,7 @@ class ChatAPI:
                 self._warm_daily_desktop_permission_cache(runnable_daily_desktop_requests)
                 user_metadata = self._merge_user_metadata(
                     user_metadata,
-                    self._daily_desktop_user_metadata(runnable_daily_desktop_requests),
+                    daily_desktop_user_metadata(runnable_daily_desktop_requests),
                 ) or {}
         user_metadata = self._with_client_message_id(user_metadata, client_message_id) or {}
         message_content = text or user_goal

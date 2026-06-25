@@ -1,0 +1,116 @@
+"""Shared daily desktop runtime helpers for Chat, Bubble, and Live2D."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from apps.shell.agent.runtime.desktop_intents import (
+    daily_desktop_entrypoint_tool_requests,
+    daily_desktop_metadata_tool_request,
+    daily_desktop_recovery_prompt,
+)
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+
+
+def daily_desktop_allowed_tools(
+    allowed_tools: Sequence[str] | None = None,
+) -> list[str]:
+    if allowed_tools is None:
+        allowed_tools = DAILY_DESKTOP_TOOL_NAMES
+    return [
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    ]
+
+
+def daily_desktop_entrypoint_requests(
+    text: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    allowed_tools: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    return daily_desktop_entrypoint_tool_requests(
+        str(text or ""),
+        daily_desktop_allowed_tools(allowed_tools),
+        metadata=metadata,
+    )
+
+
+def daily_desktop_direct_metadata_request(
+    metadata: Mapping[str, Any] | None,
+    *,
+    allowed_tools: Sequence[str] | None = None,
+) -> dict[str, Any] | None:
+    return daily_desktop_metadata_tool_request(
+        metadata,
+        daily_desktop_allowed_tools(allowed_tools),
+    )
+
+
+def daily_desktop_recovery_execution_prompt(
+    prompt: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> str:
+    return daily_desktop_recovery_prompt(metadata) or str(prompt or "").strip()
+
+
+def daily_desktop_user_metadata(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    if not requests:
+        return {}
+    tools = [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if str(request.get("tool") or "").strip()
+    ]
+    if not tools:
+        return {}
+    first_request = requests[0]
+    return {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": str(first_request.get("source") or "daily_desktop_intent"),
+        "daily_desktop_planning_reason": str(
+            first_request.get("planning_reason") or "clear_daily_desktop_intent"
+        ),
+        "daily_desktop_tool": tools[0],
+        "daily_desktop_tools": tools,
+    }
+
+
+def daily_desktop_planned_timeline(
+    prompt: str = "",
+    *,
+    requests: Sequence[Mapping[str, Any]] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    allowed_tools: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    planned_requests = list(requests or ())
+    if not planned_requests:
+        planned_requests = daily_desktop_entrypoint_requests(
+            prompt,
+            metadata=metadata,
+            allowed_tools=allowed_tools,
+        )
+    if not planned_requests:
+        return []
+    request = planned_requests[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return []
+    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+    return [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": tool_name,
+            "tool": tool_name,
+            "status": "planned",
+            "source": str(request.get("source") or "daily_desktop_intent"),
+            "planning_reason": str(
+                request.get("planning_reason") or "clear_daily_desktop_intent"
+            ),
+            "input_preview": dict(tool_input),
+        }
+    ]

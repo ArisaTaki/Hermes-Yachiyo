@@ -58,6 +58,14 @@ from .desktop_permissions import (
     clear_desktop_permission_probe_cache,
     desktop_permission_missing_by_capability,
 )
+from .daily_desktop import (
+    daily_desktop_allowed_tools,
+    daily_desktop_direct_metadata_request,
+    daily_desktop_entrypoint_requests,
+    daily_desktop_planned_timeline,
+    daily_desktop_recovery_execution_prompt,
+    daily_desktop_user_metadata,
+)
 from .links import studio_run_url
 from .policy import (
     DESKTOP_ACTION_RISK_LEVELS,
@@ -96,6 +104,12 @@ __all__ = [
     "ChatRunnableParticipantSnapshot",
     "ChatRunnableSnapshot",
     "clear_desktop_permission_probe_cache",
+    "daily_desktop_allowed_tools",
+    "daily_desktop_direct_metadata_request",
+    "daily_desktop_entrypoint_requests",
+    "daily_desktop_planned_timeline",
+    "daily_desktop_recovery_execution_prompt",
+    "daily_desktop_user_metadata",
     "DESKTOP_ACTION_RISK_LEVELS",
     "desktop_action_risk_level",
     "desktop_action_risk_snapshots",

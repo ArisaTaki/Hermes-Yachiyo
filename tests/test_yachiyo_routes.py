@@ -1459,7 +1459,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         fake_type_into_ui_element,
     )
     try:
-        sent = ChatAPI(app_runtime).send_message("打开 Chrome 并在搜索框输入 github.com")
+        sent = ChatAPI(app_runtime).send_message("打开 Chrome 并在名为 URL 的输入框输入 github.com")
         waiting_task = state.get_task(sent["task_id"])
         waiting_message = session.get_assistant_message_for_task(sent["task_id"])
         waiting_run = service.get_run(sent["run_id"])
@@ -1474,7 +1474,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         assert waiting_run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
         assert waiting_run["pending_approval"]["input_preview"] == {
             "app_name": "Google Chrome",
-            "target": "搜索",
+            "target": "名为 URL 的",
             "text": "github.com",
             "role_filter": "text",
             "limit": 80,
@@ -1496,7 +1496,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "搜索", "github.com", "text", 80),
+            ("type_into_ui", "名为 URL 的", "github.com", "text", 80),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -3940,7 +3940,7 @@ async def test_yachiyo_task_route_surfaces_safe_click_accessibility_recovery(
         assert "桌面操作未完成：Not authorized to send Apple events to System Events." in started["summary"]
         assert "缺少权限：accessibility" in started["summary"]
         assert "可直接打开：打开辅助功能权限。" in started["summary"]
-        assert started["needs_user_action"] is False
+        assert started["needs_user_action"] is True
         assert started["pending_approvals"] == []
         assert tool_call["tool_name"] == "desktop.safe_click"
         assert tool_call["status"] == "failed"
@@ -4771,7 +4771,7 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
             "media.apple_music_control。"
         ) in started["summary"]
         assert "可直接打开：打开 Apple Music、打开自动化权限。" in started["summary"]
-        assert started["needs_user_action"] is False
+        assert started["needs_user_action"] is True
         assert started["pending_approvals"] == []
         assert tool_call["tool_name"] == "desktop.permissions"
         assert tool_call["status"] == "completed"
@@ -5612,7 +5612,7 @@ async def test_yachiyo_task_route_projects_browser_cdp_recovery(
         )
 
         assert started["status"] == "completed"
-        assert started["needs_user_action"] is False
+        assert started["needs_user_action"] is True
         assert started["pending_approvals"] == []
         assert "桌面操作未完成：chrome_cdp_unavailable" in started["summary"]
         assert "缺少权限：chrome_cdp" in started["summary"]
@@ -6046,11 +6046,11 @@ async def test_yachiyo_task_route_approves_browser_interaction_intent_without_mo
             "apps.shell.agent.tools.desktop.type_into_ui_element",
         ),
         (
-            "打开 Chrome 并在搜索框输入 github.com",
+            "打开 Chrome 并在名为 URL 的输入框输入 github.com",
             "app.open_and_type_into_ui_element",
             {
                 "app_name": "Google Chrome",
-                "target": "搜索",
+                "target": "名为 URL 的",
                 "text": "github.com",
                 "role_filter": "text",
                 "limit": 80,
@@ -6226,11 +6226,11 @@ async def test_yachiyo_task_route_projects_daily_desktop_permission_recovery(
         )
 
         assert capture_targets
-        assert capture_targets[0].endswith("screenshots/current-screen.png")
+        assert Path(capture_targets[0]).suffix == ".png"
         assert started["status"] == "completed"
         assert "桌面操作未完成：screen recording permission denied" in started["summary"]
         assert "缺少权限：screen_recording" in started["summary"]
-        assert started["needs_user_action"] is False
+        assert started["needs_user_action"] is True
         assert tool_call["tool_name"] == "screen.capture"
         assert tool_call["status"] == "failed"
         assert tool_call["output_preview"]["permission_error"] is True

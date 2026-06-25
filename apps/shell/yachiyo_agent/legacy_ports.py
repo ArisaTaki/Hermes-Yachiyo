@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_entrypoint_tool_requests,
-    daily_desktop_metadata_tool_request,
-    daily_desktop_recovery_prompt,
-)
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.chat_api import ChatAPI
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
+from .daily_desktop import (
+    daily_desktop_allowed_tools,
+    daily_desktop_direct_metadata_request,
+    daily_desktop_entrypoint_requests,
+    daily_desktop_planned_timeline,
+    daily_desktop_recovery_execution_prompt,
+    daily_desktop_user_metadata,
+)
 from .legacy_event_pages import (
     is_replay_enrichment_event as _is_replay_enrichment_event,
     run_event_page_from_legacy_stream as _run_event_page_from_legacy_stream,
@@ -154,7 +156,7 @@ class LegacyChatTaskStarter:
                     "user_goal": request.get("prompt") or request.get("goal") or "",
                     "summary": result.get("summary") or result.get("result") or "",
                     "timeline": result.get("timeline")
-                    or _planned_daily_desktop_timeline(str(request.get("prompt") or "")),
+                    or daily_desktop_planned_timeline(str(request.get("prompt") or "")),
                 },
                 conversation_id=conversation_id,
             )
@@ -201,16 +203,16 @@ class LegacyChatTaskStarter:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
-        allowed_daily_desktop_tools = list(DAILY_DESKTOP_TOOL_NAMES)
-        direct_tool_request = daily_desktop_metadata_tool_request(
+        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        direct_tool_request = daily_desktop_direct_metadata_request(
             metadata,
-            allowed_daily_desktop_tools,
+            allowed_tools=allowed_daily_desktop_tools,
         )
-        execution_prompt = daily_desktop_recovery_prompt(metadata) or prompt
-        desktop_requests = daily_desktop_entrypoint_tool_requests(
+        execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
+        desktop_requests = daily_desktop_entrypoint_requests(
             prompt,
-            allowed_daily_desktop_tools,
             metadata=metadata,
+            allowed_tools=allowed_daily_desktop_tools,
         )
         if not task_id:
             return None
@@ -314,7 +316,7 @@ class LegacyChatTaskStarter:
         update_metadata = getattr(chat_session, "update_message_metadata_for_task", None)
         if not callable(update_metadata):
             return
-        metadata = ChatAPI._daily_desktop_user_metadata(desktop_requests)
+        metadata = daily_desktop_user_metadata(desktop_requests)
         if not metadata:
             return
         try:
@@ -417,32 +419,6 @@ class LegacyChatTaskStarter:
             return session
         except Exception:
             return current
-
-
-def _planned_daily_desktop_timeline(prompt: str) -> list[dict[str, Any]]:
-    candidates = daily_desktop_entrypoint_tool_requests(
-        prompt,
-        list(DAILY_DESKTOP_TOOL_NAMES),
-    )
-    if not candidates:
-        return []
-    request = candidates[0]
-    tool_name = str(request.get("tool") or "").strip()
-    if not tool_name:
-        return []
-    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
-    return [
-        {
-            "event": "agent.desktop.intent_planned",
-            "detail": tool_name,
-            "tool": tool_name,
-            "status": "planned",
-            "source": "daily_desktop_intent",
-            "planning_reason": "clear_daily_desktop_intent",
-            "input_preview": tool_input,
-        }
-    ]
-
 
 class LegacyStudioPort:
     """StudioPort adapter for the current Agent Studio runtime API."""

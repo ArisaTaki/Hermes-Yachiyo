@@ -22,11 +22,11 @@ import time
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
-from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_entrypoint_tool_requests,
-)
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.chat_api import ChatAPI
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_entrypoint_requests,
+    daily_desktop_planned_timeline,
+)
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
 from packages.security import redact_api_error_text
@@ -220,9 +220,8 @@ def _daily_desktop_candidates_for_quick_message(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    return daily_desktop_entrypoint_tool_requests(
+    return daily_desktop_entrypoint_requests(
         text,
-        list(DAILY_DESKTOP_TOOL_NAMES),
         metadata=metadata,
     )
 
@@ -270,7 +269,9 @@ def planned_agent_task_snapshot_for_quick_message(
     tool_name = str(request.get("tool") or "").strip()
     if not tool_name:
         return None
-    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+    timeline = daily_desktop_planned_timeline(text, requests=candidates)
+    if not timeline:
+        return None
     snapshot = agent_task_snapshot_from_payload(
         {
             "task_id": task_id,
@@ -279,17 +280,7 @@ def planned_agent_task_snapshot_for_quick_message(
             "status": "queued",
             "current_step": "",
             "progress_text": "",
-            "timeline": [
-                {
-                    "event": "agent.desktop.intent_planned",
-                    "detail": tool_name,
-                    "tool": tool_name,
-                    "status": "planned",
-                    "source": "daily_desktop_intent",
-                    "planning_reason": "clear_daily_desktop_intent",
-                    "input_preview": tool_input,
-                }
-            ],
+            "timeline": timeline,
         }
     ).model_dump(mode="json")
     snapshot["open_in_studio_url"] = None
