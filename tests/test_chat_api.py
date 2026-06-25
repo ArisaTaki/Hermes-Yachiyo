@@ -6354,6 +6354,96 @@ def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch)
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert typed_texts == ["你好八千代"]
+
+        result = api.send_message("在当前输入框输入 hello")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已向前台输入文字（5 个字符）。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已向前台输入文字（5 个字符）。"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert typed_texts[-1] == "hello"
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_executes_direct_search_submit_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    submit_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct search submit task should not call model")
+        ),
+    )
+
+    def fake_search_submit() -> dict:
+        submit_calls.append("search_submit")
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    try:
+        cases = ("提交当前搜索", "press enter to search")
+        for text in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            events = service.list_run_events(run["run_id"])["events"]
+            event_types = [event["event_type"] for event in events]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == "已提交前台搜索。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.search_submit"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已提交前台搜索。"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "已提交前台搜索。"
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+
+        assert submit_calls == ["search_submit", "search_submit"]
     finally:
         service.close()
         store.close()

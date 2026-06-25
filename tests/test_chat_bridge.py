@@ -505,7 +505,6 @@ def test_chat_bridge_quick_message_opens_system_settings_pane_without_model(
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
-
     assert "model.requested" not in event_types
 
     cases = (
@@ -5359,6 +5358,63 @@ def test_chat_bridge_quick_message_executes_safe_type_text_without_approval(
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
+
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "在当前输入框输入 hello",
+        launcher_mode="bubble",
+    )
+
+    assert typed_text[-1] == "hello"
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert agent_task["summary"] == "已向前台输入文字（5 个字符）。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_search_submit_without_approval(
+    tmp_path,
+    monkeypatch,
+):
+    submit_calls: list[str] = []
+
+    def fake_search_submit() -> dict:
+        submit_calls.append("search_submit")
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    cases = (
+        ("提交当前搜索", "bubble"),
+        ("press enter to search", "live2d"),
+    )
+    for prompt, launcher_mode in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已提交前台搜索。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.search_submit"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert submit_calls == ["search_submit", "search_submit"]
 
 
 def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_approval(

@@ -1611,6 +1611,37 @@ def _external_submit_followup_action(text: str) -> str:
     return _submit_foreground_action_for_phrase(_normalize_submit_foreground_phrase(text))
 
 
+def _desktop_search_submit_request(text: str) -> bool:
+    phrase = _normalize_submit_foreground_phrase(text)
+    return phrase in {
+        "提交搜索",
+        "提交当前搜索",
+        "搜索提交",
+        "确认搜索",
+        "确定搜索",
+        "回车搜索",
+        "按回车搜索",
+        "按下回车搜索",
+        "开始搜索",
+        "执行搜索",
+        "提交查找",
+        "确认查找",
+        "确定查找",
+        "回车查找",
+        "按回车查找",
+        "submitsearch",
+        "submitcurrentsearch",
+        "confirmsearch",
+        "runsearch",
+        "startsearch",
+        "pressentertosearch",
+        "hitentertosearch",
+        "submitfind",
+        "confirmfind",
+        "pressentertofind",
+    }
+
+
 def _desktop_submit_foreground_action(text: str) -> str:
     return _submit_foreground_action_for_phrase(_normalize_submit_foreground_phrase(text))
 
@@ -2010,6 +2041,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_close_current_window_request(text):
         candidates.append(_request("desktop.close_window", {}))
+
+    if _desktop_search_submit_request(text):
+        candidates.append(_request("desktop.search_submit", {}))
 
     type_into_ui_element = _desktop_type_into_ui_element(text)
     if type_into_ui_element:
@@ -4214,6 +4248,21 @@ def _normalize_app_scoped_ui_action_app(value: str) -> str:
         "给",
         "向",
         "到",
+        "当前",
+        "在当前",
+        "前台",
+        "在前台",
+        "这个",
+        "该",
+        "current",
+        "foreground",
+        "active",
+        "currentwindow",
+        "foregroundwindow",
+        "activewindow",
+        "currentapp",
+        "foregroundapp",
+        "activeapp",
         "能否",
         "能不能",
         "可以",
@@ -8840,6 +8889,13 @@ def _desktop_type_text(text: str) -> str:
     if _is_next_foreground_focus_request(text) or _is_previous_foreground_focus_request(text):
         return ""
     patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|向|给)?\s*(?:当前|前台|这个|该)?(?:输入框|文本框|输入栏)"
+        r"(?:里|中|内|上)?\s*(?:输入|打字|键入|敲入|打入|打上|填写|填入|写入|写)\s*"
+        r"(?P<current_input_text>.+)$",
+        r"(?:type|enter|input|fill)\s+(?P<current_input_text_en>[^.!?]+?)\s+"
+        r"(?:into|in|to)\s+(?:the\s+)?(?:current|foreground|active)\s+"
+        r"(?:input|field|text\s+field|textbox)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在前台|向前台|给当前窗口)?"
         r"(?:输入|打字|键入|敲入|打入|打上)\s*(?P<text>.+)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -8854,7 +8910,13 @@ def _desktop_type_text(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        typed_text = _strip_typed_text(match.group("text"))
+        groups = match.groupdict()
+        typed_text = _strip_typed_text(
+            groups.get("current_input_text")
+            or groups.get("current_input_text_en")
+            or groups.get("text")
+            or ""
+        )
         if typed_text:
             return typed_text
     return ""
@@ -8901,6 +8963,8 @@ def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
         target = _strip_desktop_ui_input_target(raw_target)
         if not target or not typed_text:
             continue
+        if _is_current_foreground_input_target(raw_target, target, text):
+            continue
         return {
             "target": target,
             "text": typed_text,
@@ -8908,6 +8972,59 @@ def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
             "limit": 80,
         }
     return None
+
+
+def _is_current_foreground_input_target(raw_target: str, target: str, text: str) -> bool:
+    compact_raw = re.sub(r"[\s._-]+", "", _strip_query(raw_target).lower())
+    compact_target = re.sub(r"[\s._-]+", "", _strip_query(target).lower())
+    if compact_target in {
+        "current",
+        "foreground",
+        "active",
+        "当前",
+        "前台",
+        "这个",
+        "该",
+    }:
+        return True
+    if compact_raw in {
+        "currentinput",
+        "currentfield",
+        "currenttextfield",
+        "currenttextbox",
+        "foregroundinput",
+        "foregroundfield",
+        "foregroundtextfield",
+        "foregroundtextbox",
+        "activeinput",
+        "activefield",
+        "activetextfield",
+        "activetextbox",
+        "当前输入框",
+        "当前文本框",
+        "当前输入栏",
+        "前台输入框",
+        "前台文本框",
+        "前台输入栏",
+    }:
+        return True
+    generic_target = compact_target in {
+        "input",
+        "field",
+        "textfield",
+        "textbox",
+        "输入框",
+        "文本框",
+        "输入栏",
+    }
+    return bool(
+        generic_target
+        and re.search(
+            r"(?:当前|前台|这个|该|\bcurrent\b|\bforeground\b|\bactive\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _desktop_safe_type_text(text: str) -> str:

@@ -291,6 +291,27 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
     }
 
+    assert daily_desktop_entrypoint_requests("在当前输入框输入 hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("type hello in current input") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("提交当前搜索") == [
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}}
+    ]
+    assert daily_desktop_entrypoint_requests("press enter to search") == [
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}}
+    ]
+
     copy_link_requests = daily_desktop_entrypoint_requests("复制当前网页链接")
 
     assert copy_link_requests == [
