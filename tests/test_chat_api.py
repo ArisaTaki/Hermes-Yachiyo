@@ -1304,6 +1304,15 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         calls.append(("focus", app_name))
         return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
 
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
     def fake_safe_shortcut(action: str) -> dict:
         calls.append(("shortcut", action))
         return {
@@ -1322,6 +1331,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
             "data": {"character_count": len(text), "explicit_user_text": True},
         }
 
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
@@ -1391,6 +1401,39 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
+
+        third = api.send_message("打开 Finder 找下载文件")
+        third_task = runtime.state.get_task(third["task_id"])
+        third_link = service.get_task_run_link(third["task_id"])
+        third_run = service.get_run(third_link["run_id"])
+        third_events = service.list_run_events(third_run["run_id"])["events"]
+        third_event_types = [event["event_type"] for event in third_events]
+        third_assistant = runtime.chat_session.get_assistant_message_for_task(third["task_id"])
+
+        assert third["ok"] is True
+        assert third["status"] == "completed"
+        assert calls[-4:] == [
+            ("open", "Finder"),
+            ("focus", "Finder"),
+            ("shortcut", "find"),
+            ("type", "下载文件"),
+        ]
+        assert third["agent_task"]["status"] == "completed"
+        assert third["agent_task"]["summary"] == "已打开 Finder 并打开查找。 已向前台输入文字（4 个字符）。"
+        assert [tool_call["tool_name"] for tool_call in third["agent_task"]["tool_calls"][-2:]] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert third_task is not None
+        assert third_task.status == TaskStatus.COMPLETED
+        assert third_assistant is not None
+        assert third_assistant.status == MessageStatus.COMPLETED
+        assert third_assistant.content == third["agent_task"]["summary"]
+        assert third_run["status"] == "completed"
+        assert third_event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in third_event_types
+        assert "model.request.started" not in third_event_types
+        assert "model.requested" not in third_event_types
     finally:
         service.close()
         store.close()

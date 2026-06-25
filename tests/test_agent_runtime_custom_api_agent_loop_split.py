@@ -663,6 +663,50 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "input": {"app_name": "Google Chrome", "action": "browser_back"},
     }
 
+def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
+    allowed_tools = [
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+
+    assert daily_desktop_intent_tool_requests("打开 Finder 找下载文件", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "下载文件"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Finder 找下载文件", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "下载文件"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Finder look for Downloads", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
+        },
+    ]
+
 
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [

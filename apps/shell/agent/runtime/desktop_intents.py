@@ -5397,8 +5397,8 @@ def _looks_like_explicit_text_input_target(value: str) -> bool:
 def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
     followup = _strip_query(value)
     patterns = (
-        r"^(?:搜索(?!框|栏)|搜一下|搜|查找(?!框)|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
-        r"^(?:find|search)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
+        r"^(?:搜索(?!框|栏)|搜一下|搜|查找(?!框)|查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:find|search|look\s+for)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, followup, flags=re.IGNORECASE)

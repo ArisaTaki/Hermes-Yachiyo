@@ -548,6 +548,45 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
     assert daily_desktop_entrypoint_requests("打开项目") == []
 
 
+def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
+    assert daily_desktop_entrypoint_requests("打开 Finder 找下载文件") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "下载文件"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Finder 找下载文件") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "下载文件"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Finder look for Downloads") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
+        },
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
     assert daily_desktop_entrypoint_requests("设置剪贴板为 hello") == [
         {
