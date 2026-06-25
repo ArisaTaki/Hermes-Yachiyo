@@ -5752,6 +5752,170 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
         store.close()
 
 
+def test_send_message_routes_app_prefix_search_field_click_to_approval_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app search field click approval should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.click_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("click_ui_element should wait for approval")
+        ),
+    )
+    try:
+        result = api.send_message("微信点击搜索框")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        input_preview = {
+            "app_name": "WeChat",
+            "target": "搜索",
+            "role_filter": "text",
+            "limit": 80,
+            "click_count": 1,
+        }
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == (
+            "app.focus_and_click_ui_element"
+        )
+        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_click_ui_element"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "app.focus_and_click_ui_element"
+        assert run["pending_approval"]["input_preview"] == input_preview
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_routes_app_browser_search_click_to_approval_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    focus_calls: list[str] = []
+    open_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app browser search-click approval should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_open_url(url: str) -> dict:
+        open_calls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened browser page: {url}",
+            "data": {"url": url, "title": "Search"},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.browser.click",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser.click should wait for approval")
+        ),
+    )
+    try:
+        result = api.send_message("Chrome 搜索 OpenAI 并打开第一个结果")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert focus_calls == ["Google Chrome"]
+        assert open_calls == ["https://www.google.com/search?q=OpenAI"]
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert any(
+            call["tool_name"] == "app.focus" and call["status"] == "completed"
+            for call in result["agent_task"]["tool_calls"]
+        )
+        assert any(
+            call["tool_name"] == "browser.open_url" and call["status"] == "completed"
+            for call in result["agent_task"]["tool_calls"]
+        )
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {
+            "selector": "search-result=1",
+            "click_count": 1,
+        }
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "browser.click"
+        assert run["pending_approval"]["input_preview"] == {
+            "selector": "search-result=1",
+            "click_count": 1,
+        }
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

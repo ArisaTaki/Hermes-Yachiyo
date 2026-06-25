@@ -423,6 +423,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
     ):
         return communication_compose_sequence
+    app_browser_search_sequence = _app_open_or_focus_browser_search_tool_requests(context)
+    if app_browser_search_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_browser_search_sequence
+    ):
+        return app_browser_search_sequence
     browser_search_click_sequence = _browser_search_then_click_tool_requests(context)
     if browser_search_click_sequence and all(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
@@ -525,6 +530,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
     ):
         return app_prefix_click_type_sequence
+    app_prefix_click_ui_element = _app_prefix_click_ui_element_tool_request(context)
+    if app_prefix_click_ui_element and str(app_prefix_click_ui_element.get("tool") or "") in allowed:
+        return [app_prefix_click_ui_element]
     app_prefix_foreground_action = _app_prefix_foreground_action_tool_request(context)
     if app_prefix_foreground_action and str(app_prefix_foreground_action.get("tool") or "") in allowed:
         return [app_prefix_foreground_action]
@@ -2840,10 +2848,7 @@ def _browser_search_then_click_tool_requests(text: str) -> list[dict[str, Any]]:
     if not parsed:
         return []
     query, engine, index = parsed
-    if engine in {"百度", "baidu"}:
-        url = f"https://www.baidu.com/s?wd={quote_plus(query)}"
-    else:
-        url = f"https://www.google.com/search?q={quote_plus(query)}"
+    url = _browser_search_url_for_query(query, engine)
     return [
         _request("browser.open_url", {"url": url}),
         _request(
@@ -2894,6 +2899,12 @@ def _browser_search_then_click(text: str) -> tuple[str, str, int] | None:
         if index:
             return query, engine, index
     return None
+
+
+def _browser_search_url_for_query(query: str, engine: str) -> str:
+    if engine in {"百度", "baidu"}:
+        return f"https://www.baidu.com/s?wd={quote_plus(query)}"
+    return f"https://www.google.com/search?q={quote_plus(query)}"
 
 
 def _browser_search_result_rank_index(value: str) -> int:
@@ -3994,6 +4005,28 @@ def _app_prefix_safe_click_tool_request(text: str) -> dict[str, Any] | None:
     return _request(
         "app.focus_and_safe_click",
         {"app_name": app_name, **safe_click},
+    )
+
+
+def _app_prefix_click_ui_element_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    if (
+        _app_followup_safe_key(followup)
+        or _desktop_safe_shortcut_action(followup)
+        or _desktop_hotkey(followup)
+    ):
+        return None
+    click_payload = _desktop_click_ui_element(followup, require_context=False)
+    if not click_payload:
+        return None
+    return _request(
+        "app.focus_and_click_ui_element",
+        {"app_name": app_name, **click_payload},
     )
 
 
@@ -5373,6 +5406,59 @@ def _app_open_or_focus_screen_capture_tool_requests(text: str) -> list[dict[str,
     ]
 
 
+def _app_open_or_focus_browser_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _app_open_or_focus_browser_search(text)
+    if not parsed:
+        return []
+    mode, app_name, url, click_index = parsed
+    requests = [
+        _request(f"app.{mode}", {"app_name": app_name}),
+        _request("browser.open_url", {"url": url}),
+    ]
+    if click_index:
+        requests.append(
+            _request(
+                "browser.click",
+                {"selector": f"search-result={click_index}", "click_count": 1},
+            )
+        )
+    return requests
+
+
+def _app_open_or_focus_browser_search(text: str) -> tuple[str, str, str, int] | None:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, raw_app, app_name, followup = shorthand_match
+    else:
+        split = _known_app_prefix_split(text)
+        if not split:
+            return None
+        raw_app, app_name, followup = split
+        mode = "focus"
+    if (
+        app_name not in _BROWSER_APP_NAMES
+        or _looks_like_generic_browser_app_reference(raw_app)
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return None
+    if _desktop_safe_shortcut_action(followup):
+        return None
+    parsed_click = _browser_search_then_click(followup)
+    if parsed_click:
+        query, engine, index = parsed_click
+        return mode, app_name, _browser_search_url_for_query(query, engine), index
+    search_url = _browser_search_url(followup)
+    if search_url:
+        return mode, app_name, search_url, 0
+    return None
+
+
+def _looks_like_generic_browser_app_reference(value: str) -> bool:
+    compact = re.sub(r"[\s._-]+", "", _strip_query(value).lower())
+    return compact in {"浏览器", "browser", "webbrowser"}
+
+
 def _app_open_or_focus_observe_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -6446,6 +6532,8 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_find_query(followup)
         or _browser_click_request(_browser_context_followup(followup)) is not None
         or _browser_type_text_request(_browser_context_followup(followup)) is not None
+        or _browser_search_then_click(followup) is not None
+        or bool(_browser_search_url(followup))
         or _desktop_ui_elements_request(followup) is not None
         or _desktop_windows_request(followup) is not None
         or _is_active_window_request(followup)
@@ -6692,7 +6780,7 @@ def _click_ui_element_then_type(value: str) -> tuple[dict[str, Any], str, bool] 
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
         r"(?P<label>[^。！？!?，,]+?)(?:里|中|内|上)?\s*"
-        r"(?:输入|填写|键入|打入|填入|写入|写|打字|打上|打)\s*"
+        r"(?:输入(?!框|栏)|填写|键入|打入|填入|写入|写|打字|打上|打)\s*"
         r"(?P<text>[^。！？!?]+)$",
         r"^(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
         r"(?:the\s+)?(?P<label_en>[^.!?]+?)\s+"
@@ -9500,12 +9588,13 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
         r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
         r"(?P<context>(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?(?:上|里|中|内|的|里的|中的)?)\s*"
         r"(?P<label>[^。！？!?，,]+?)"
-        r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
+        r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|搜索框|搜索栏|搜索输入框|菜单项|菜单|复选框)?"
         r"(?:一下|一次)?$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
         r"(?:the\s+)?(?P<label_en>[^.!?]+?)"
-        r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|menu item|menu|checkbox))?"
+        r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|"
+        r"search field|search box|search bar|menu item|menu|checkbox))?"
         r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
     )
     for pattern in patterns:
@@ -9517,6 +9606,8 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
         kind = groups.get("kind") or groups.get("kind_en") or ""
         context = groups.get("context") or ""
         label = _strip_desktop_ui_element_label(raw_label)
+        if not label:
+            label = _strip_desktop_ui_input_target(raw_label)
         has_short_label = _desktop_ui_click_has_short_label(label, text=text)
         if (
             require_context

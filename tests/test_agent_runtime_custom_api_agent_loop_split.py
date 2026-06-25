@@ -1376,8 +1376,42 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("打开 Chrome 搜索 yachiyo 然后打开第一个结果", allowed_tools) == [
         {
             "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.google.com/search?q=yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 搜索 OpenAI 并打开第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
         },
         {
             "protocol": "json_fallback",
@@ -2511,6 +2545,17 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "click_count": 1,
         },
     }
+    assert daily_desktop_intent_tool_request("微信点击搜索框", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "WeChat",
+            "target": "搜索",
+            "role_filter": "text",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
     assert daily_desktop_intent_tool_request("click the login button in Chrome", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_click_ui_element",
@@ -3126,6 +3171,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         }
     ]
     assert daily_desktop_intent_tool_requests("打开 Chrome，然后搜索 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+        },
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url",

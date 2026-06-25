@@ -3178,6 +3178,7 @@ def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_res
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    app_open_calls: list[str] = []
     open_calls: list[str] = []
     click_calls: list[tuple[str, int]] = []
     monkeypatch.setattr(
@@ -3194,6 +3195,15 @@ def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_res
         "apps.shell.chat_api.desktop_permission_missing_by_capability",
         lambda use_cache=True: {},
     )
+
+    def fake_app_open(app_name: str) -> dict:
+        app_open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
 
     def fake_open_url(url: str) -> dict:
         open_calls.append(url)
@@ -3217,6 +3227,7 @@ def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_res
             },
         }
 
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
@@ -3235,6 +3246,7 @@ def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_res
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert app_open_calls == ["Google Chrome"]
         assert open_calls == ["https://www.google.com/search?q=yachiyo"]
         assert click_calls == []
         assert waiting_task["status"] == "waiting_approval"
@@ -3258,10 +3270,12 @@ def test_chat_bridge_quick_message_searches_then_requires_approval_for_first_res
             for event in service.list_run_events(run["run_id"])["events"]
         ]
 
+        assert app_open_calls == ["Google Chrome"]
         assert open_calls == ["https://www.google.com/search?q=yachiyo"]
         assert click_calls == [("search-result=1", 1)]
         assert approved.status == "completed"
         assert approved.summary == (
+            "已打开 Google Chrome。 "
             "已打开网页：https://www.google.com/search?q=yachiyo。 "
             "已点击网页元素：Yachiyo result。"
         )
@@ -3387,7 +3401,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         assert "model.requested" not in event_types
 
         second = bridge.send_quick_message(
-            "Slack 点搜索",
+            "微信点击搜索框",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "bubble",
@@ -3408,9 +3422,9 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
             "app.focus_and_click_ui_element"
         )
         assert second_waiting_task["pending_approvals"][0]["input_preview"] == {
-            "app_name": "Slack",
+            "app_name": "WeChat",
             "target": "搜索",
-            "role_filter": "button",
+            "role_filter": "text",
             "limit": 80,
             "click_count": 1,
         }
@@ -3424,8 +3438,8 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
             for event in service.list_run_events(second_run["run_id"])["events"]
         ]
 
-        assert focus_calls == ["Slack", "Slack"]
-        assert click_calls == [("Send", "button", 80, 1), ("搜索", "button", 80, 1)]
+        assert focus_calls == ["Slack", "WeChat"]
+        assert click_calls == [("Send", "button", 80, 1), ("搜索", "text", 80, 1)]
         assert second_approved.status == "completed"
         assert second_run["status"] == "completed"
         assert "agent.desktop.intent_approval_required" in second_event_types

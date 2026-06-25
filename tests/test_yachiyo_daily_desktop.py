@@ -732,6 +732,51 @@ def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
             },
         },
     ]
+    assert daily_desktop_entrypoint_requests("微信点击搜索框") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+
+
+def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
+    assert daily_desktop_entrypoint_requests("Chrome 搜索 OpenAI") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Chrome 搜索 OpenAI 并打开第一个结果") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        },
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
