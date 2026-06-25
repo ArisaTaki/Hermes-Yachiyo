@@ -6459,12 +6459,13 @@ def _reminder_create_body(value: str) -> str:
             groups = match.groupdict()
             if groups.get("body_time_first") and groups.get("body_time_after"):
                 return _strip_query(f"{groups['body_time_first']} {groups['body_time_after']}")
-            return _strip_query(
+            body = _strip_query(
                 groups.get("body")
                 or groups.get("body_prefixed")
                 or groups.get("body_to_reminders")
                 or ""
             )
+            return "" if _is_blank_reminder_item_label(body) else body
     return ""
 
 
@@ -6658,11 +6659,22 @@ def _reminders_create_and_type_text(value: str) -> str:
         title = _strip_typed_text(
             groups.get("title") or groups.get("title_open") or groups.get("title_en") or ""
         )
+        if _is_blank_reminder_item_label(title):
+            continue
         if _looks_like_reminder_title_with_due_time(title):
             continue
         if title:
             return title
     return ""
+
+
+def _is_blank_reminder_item_label(value: str) -> bool:
+    return _normalize_named_hotkey_phrase(value) in {
+        "提醒",
+        "提醒事项",
+        "reminder",
+        "reminders",
+    }
 
 
 def _looks_like_reminder_title_with_due_time(value: str) -> bool:
@@ -6763,7 +6775,10 @@ def _app_foreground_action_request(
     app_name: str,
     followup: str,
 ) -> dict[str, Any] | None:
-    shortcut_action = _desktop_safe_shortcut_action(followup)
+    shortcut_action = _app_default_new_shortcut_action(
+        app_name,
+        followup,
+    ) or _desktop_safe_shortcut_action(followup)
     if shortcut_action:
         return {
             "tool": f"app.{mode}_and_safe_shortcut",
@@ -6873,7 +6888,10 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             or _looks_like_window_target(raw_app)
             or _looks_like_common_path_target(raw_app)
             or _looks_like_generic_app_open_target(raw_app)
-            or not _looks_like_known_app_followup(followup)
+            or not (
+                _looks_like_known_app_followup(followup)
+                or _app_default_new_shortcut_action(app_name, followup)
+            )
         ):
             continue
         return "open", raw_app, app_name, followup
@@ -6890,9 +6908,50 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
             continue
         raw_app, followup = split
         followup = _strip_known_app_followup_prefix(followup)
-        if followup and _looks_like_known_app_followup(followup):
+        if followup and (
+            _looks_like_known_app_followup(followup)
+            or _app_default_new_shortcut_action(app_name, followup)
+        ):
             return raw_app, app_name, followup
     return None
+
+
+def _app_default_new_shortcut_action(app_name: str, followup: str) -> str:
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase not in {
+        "新建",
+        "新建一个",
+        "新建一条",
+        "新建一项",
+        "新建一篇",
+        "创建",
+        "创建一个",
+        "创建一条",
+        "创建一项",
+        "创建一篇",
+        "新增",
+        "新增一个",
+        "新增一条",
+        "新增一项",
+        "新增一篇",
+        "添加",
+        "添加一个",
+        "添加一条",
+        "添加一项",
+        "添加一篇",
+        "new",
+        "newitem",
+        "create",
+        "createitem",
+        "make",
+        "makeitem",
+    }:
+        return ""
+    return {
+        "Notes": "new_note",
+        "Reminders": "new_reminder",
+        "Calendar": "new_event",
+    }.get(app_name, "")
 
 
 def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:

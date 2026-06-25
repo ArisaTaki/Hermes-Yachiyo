@@ -64,6 +64,37 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
 
 
+def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
+    cases = (
+        ("打开备忘录新建", "app.open_and_safe_shortcut", "Notes", "new_note"),
+        ("备忘录新建", "app.focus_and_safe_shortcut", "Notes", "new_note"),
+        ("打开提醒事项新建", "app.open_and_safe_shortcut", "Reminders", "new_reminder"),
+        ("提醒事项新建", "app.focus_and_safe_shortcut", "Reminders", "new_reminder"),
+        ("打开日历新建", "app.open_and_safe_shortcut", "Calendar", "new_event"),
+        ("日历新建", "app.focus_and_safe_shortcut", "Calendar", "new_event"),
+    )
+
+    for prompt, tool_name, app_name, action in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": app_name, "action": action},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("打开提醒事项新建提醒") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() -> None:
     cases = (
         ("Chrome 开着吗", "Google Chrome"),

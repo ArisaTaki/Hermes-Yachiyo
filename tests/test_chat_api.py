@@ -865,7 +865,7 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
         store.close()
 
 
-def test_send_message_executes_app_open_new_event_without_model(tmp_path, monkeypatch):
+def test_send_message_executes_app_open_new_item_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
@@ -918,40 +918,52 @@ def test_send_message_executes_app_open_new_event_without_model(tmp_path, monkey
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     try:
-        result = api.send_message("打开日历新建日程")
-        task = runtime.state.get_task(result["task_id"])
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
-        events = service.list_run_events(run["run_id"])["events"]
-        event_types = [event["event_type"] for event in events]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        cases = (
+            ("打开备忘录新建", "Notes", "new_note", "已打开 Notes 并新建笔记。"),
+            (
+                "打开提醒事项新建",
+                "Reminders",
+                "new_reminder",
+                "已打开 Reminders 并新建提醒事项。",
+            ),
+            ("打开日历新建日程", "Calendar", "new_event", "已打开 Calendar 并新建日程。"),
+        )
+        for prompt, app_name, action, summary in cases:
+            calls.clear()
+            result = api.send_message(prompt)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+            events = service.list_run_events(run["run_id"])["events"]
+            event_types = [event["event_type"] for event in events]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert calls == [
-            ("open", "Calendar"),
-            ("focus", "Calendar"),
-            ("shortcut", "new_event"),
-        ]
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已打开 Calendar 并新建日程。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
-            "app_name": "Calendar",
-            "action": "new_event",
-        }
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已打开 Calendar 并新建日程。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已打开 Calendar 并新建日程。"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert calls == [
+                ("open", app_name),
+                ("focus", app_name),
+                ("shortcut", action),
+            ]
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+                "app_name": app_name,
+                "action": action,
+            }
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()

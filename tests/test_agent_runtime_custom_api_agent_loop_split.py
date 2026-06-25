@@ -2002,7 +2002,34 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
     }
+    assert daily_desktop_intent_tool_request("打开备忘录新建", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("打开备忘录新建一条", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("打开提醒事项新建", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Reminders", "action": "new_reminder"},
+    }
+    assert daily_desktop_intent_tool_requests("打开提醒事项新建提醒", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开日历新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("打开日历新建", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "Calendar", "action": "new_event"},
@@ -2695,7 +2722,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Notes", "action": "new_note"},
     }
+    assert daily_desktop_intent_tool_request("备忘录新建", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Notes", "action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("提醒事项新建", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Reminders", "action": "new_reminder"},
+    }
     assert daily_desktop_intent_tool_request("日历新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("日历新建", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Calendar", "action": "new_event"},
