@@ -476,6 +476,23 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.submit_foreground",
     ]
 
+    open_comm_requests = daily_desktop_entrypoint_requests("打开微信发消息给张三你好")
+
+    assert open_comm_requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "WeChat", "action": "find"},
+    }
+    assert open_comm_requests[1]["input"] == {"text": "张三"}
+    assert open_comm_requests[3]["input"] == {"text": "你好"}
+    assert daily_desktop_user_metadata(open_comm_requests)["daily_desktop_tools"] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+
     copy_link_requests = daily_desktop_entrypoint_requests("复制当前网页链接")
 
     assert copy_link_requests == [

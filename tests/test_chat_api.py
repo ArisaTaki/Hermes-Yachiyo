@@ -7280,6 +7280,15 @@ def test_send_message_prepares_comm_find_message_then_waits_for_send_approval(
         ),
     )
 
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
     def fake_app_focus(app_name: str) -> dict:
         calls.append(("focus", app_name))
         return {
@@ -7316,6 +7325,7 @@ def test_send_message_prepares_comm_find_message_then_waits_for_send_approval(
             "data": {"key": "return", "modifiers": []},
         }
 
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
@@ -7327,7 +7337,7 @@ def test_send_message_prepares_comm_find_message_then_waits_for_send_approval(
         ),
     )
     try:
-        result = api.send_message("微信找张三并发送你好")
+        result = api.send_message("打开微信发消息给张三你好")
         run = service.get_run(result["run_id"])
         event_types = [
             event["event_type"]
@@ -7337,6 +7347,7 @@ def test_send_message_prepares_comm_find_message_then_waits_for_send_approval(
         assert result["ok"] is True
         assert result["status"] == "waiting_approval"
         assert calls == [
+            ("open", "WeChat"),
             ("focus", "WeChat"),
             ("shortcut", "find"),
             ("type", "张三"),

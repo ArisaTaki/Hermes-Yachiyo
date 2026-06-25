@@ -2743,7 +2743,7 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "微信找张三并发送你好",
+            "微信给张三说你好",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "bubble",
@@ -2759,7 +2759,7 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
         ]
 
         second = bridge.send_quick_message(
-            "打开 Slack 找 Alice 并发送 hello",
+            "打开 Slack 给 Alice 说 hello",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "live2d",

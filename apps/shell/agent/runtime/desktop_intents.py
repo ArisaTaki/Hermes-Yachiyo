@@ -5244,11 +5244,15 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
         r"^(?P<verb>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
         r"(?:给|向|to)\s*(?P<recipient>.+?)\s*"
         r"(?:说|内容是|内容为|:|：)\s*(?P<message>.+)$",
+        r"^(?P<verb_tail>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
+        r"(?:给|向|to)\s*(?P<recipient_message_tail>.+)$",
         r"^(?:给|向|to)\s*(?P<recipient>.+?)\s*"
         r"(?P<verb>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
         r"(?:(?:说|内容是|内容为|:|：)\s*)?(?P<message>.+)$",
         r"^(?:给|向)\s*(?P<recipient>.+?)\s*"
         r"(?P<verb>发送|发出|发|send)\s*(?P<message>.+)$",
+        r"^(?:给|向|to)\s*(?P<recipient_say>.+?)\s*"
+        r"(?P<verb_say>说|告诉|留言|say|tell|message)\s*(?P<message_say>.+)$",
         r"^(?:搜索|搜一下|搜|查找|查一下|检索|找一下|找|find|search)\s*"
         r"(?P<recipient>.+?)\s*"
         r"(?:然后|并且|并|之后|后|再|接着|and\s+then|then|and)\s*"
@@ -5260,24 +5264,78 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
         if not match:
             continue
         groups = match.groupdict()
-        recipient = _strip_communication_piece(
-            groups.get("recipient")
-            or groups.get("recipient_search")
-            or ""
-        )
-        raw_message = str(
-            groups.get("message")
-            or groups.get("message_search")
-            or ""
-        ).strip()
+        recipient_tail = str(groups.get("recipient_message_tail") or "").strip()
+        if recipient_tail:
+            split_tail = _split_communication_implicit_recipient_message(recipient_tail)
+            if not split_tail:
+                continue
+            recipient, raw_message = split_tail
+        else:
+            recipient = _strip_communication_piece(
+                groups.get("recipient")
+                or groups.get("recipient_search")
+                or groups.get("recipient_say")
+                or ""
+            )
+            raw_message = str(
+                groups.get("message")
+                or groups.get("message_search")
+                or groups.get("message_say")
+                or ""
+            ).strip()
         message = _strip_typed_text(raw_message)
-        verb = str(groups.get("verb") or groups.get("verb_search") or "").strip().lower()
+        verb = str(
+            groups.get("verb")
+            or groups.get("verb_search")
+            or groups.get("verb_tail")
+            or groups.get("verb_say")
+            or ""
+        ).strip().lower()
         should_submit = bool(
             re.search(r"^(?:发送|发出|发|send)$", verb, flags=re.IGNORECASE)
             or _communication_message_has_submit_suffix(raw_message)
+            or bool(groups.get("verb_say"))
         )
         if recipient and message:
             return recipient, message, should_submit
+    return None
+
+
+def _split_communication_implicit_recipient_message(value: str) -> tuple[str, str] | None:
+    text = _strip_query(value)
+    explicit = re.search(
+        r"^(?P<recipient>.+?)\s*(?:说|内容是|内容为|:|：)\s*(?P<message>.+)$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if explicit:
+        recipient = _strip_communication_piece(explicit.group("recipient"))
+        message = _strip_typed_text(explicit.group("message"))
+        return (recipient, message) if recipient and message else None
+    greeting_pattern = (
+        r"hello\b.*|hi\b.*|hey\b.*|thanks\b.*|thank\s+you\b.*|ok\b.*|okay\b.*"
+    )
+    spaced = re.search(
+        rf"^(?P<recipient>.+?)\s+(?P<message>{greeting_pattern})$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if spaced:
+        recipient = _strip_communication_piece(spaced.group("recipient"))
+        message = _strip_typed_text(spaced.group("message"))
+        return (recipient, message) if recipient and message else None
+    compact = re.search(
+        r"^(?P<recipient>.+?)(?P<message>"
+        r"你好.*|您好.*|在吗.*|早上好.*|中午好.*|下午好.*|晚上好.*|"
+        r"晚安.*|早安.*|谢谢.*|辛苦了.*|收到.*|好的.*|测试(?:一下)?"
+        r")$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if compact:
+        recipient = _strip_communication_piece(compact.group("recipient"))
+        message = _strip_typed_text(compact.group("message"))
+        return (recipient, message) if recipient and message else None
     return None
 
 
