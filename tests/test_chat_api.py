@@ -5006,9 +5006,24 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
                 {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
             ),
             (
+                "点一下登录",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "点击确认",
+                "desktop.click_ui_element",
+                {"target": "确认", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
                 "Can you type hello into the search field?",
                 "desktop.type_into_ui_element",
                 {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
+            ),
+            (
+                "click login",
+                "desktop.click_ui_element",
+                {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},
             ),
         )
         for prompt, tool_name, input_preview in cases:

@@ -8564,14 +8564,23 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
         raw_label = groups.get("label") or groups.get("label_en") or ""
         kind = groups.get("kind") or groups.get("kind_en") or ""
         context = groups.get("context") or ""
-        if require_context and not kind and not _desktop_ui_click_has_context(text, context):
-            continue
         label = _strip_desktop_ui_element_label(raw_label)
+        has_short_label = _desktop_ui_click_has_short_label(label, text=text)
+        if (
+            require_context
+            and not kind
+            and not _desktop_ui_click_has_context(text, context)
+            and not has_short_label
+        ):
+            continue
         if not label or _looks_like_click_coordinate_label(label):
             continue
+        role_filter = _desktop_ui_element_role_filter(kind or text)
+        if not role_filter and has_short_label:
+            role_filter = "button"
         return {
             "target": label,
-            "role_filter": _desktop_ui_element_role_filter(kind or text),
+            "role_filter": role_filter,
             "limit": 80,
             "click_count": 2 if groups.get("double") or groups.get("double_en") else 1,
         }
@@ -8592,6 +8601,60 @@ def _desktop_ui_click_has_context(text: str, context: str) -> bool:
             text,
             flags=re.IGNORECASE,
         )
+    )
+
+
+def _desktop_ui_click_has_short_label(label: str, *, text: str = "") -> bool:
+    normalized = _strip_query(label)
+    if not normalized or _looks_like_click_coordinate_label(normalized):
+        return False
+    compact = re.sub(r"\s+", " ", normalized).strip().lower()
+    if _desktop_ui_click_short_label_is_key_like(compact) and re.search(
+        r"^\s*(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:按一下|按下|按|press|hit|tap)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if compact in {
+        "it",
+        "this",
+        "that",
+        "there",
+        "here",
+        "thing",
+        "item",
+        "这个",
+        "那个",
+        "这里",
+        "那里",
+        "它",
+        "他",
+        "她",
+        "按钮",
+        "控件",
+        "元素",
+    }:
+        return False
+    if len(normalized) > 48:
+        return False
+    if len([part for part in compact.split(" ") if part]) > 5:
+        return False
+    return True
+
+
+def _desktop_ui_click_short_label_is_key_like(label: str) -> bool:
+    compact = re.sub(r"\s+", " ", label).strip().lower()
+    if not compact:
+        return False
+    key_phrase = re.sub(r"\s+key$", "", compact)
+    if _parse_hotkey_combo(key_phrase):
+        return True
+    if re.search(r"(?:command|cmd|control|ctrl|shift|option|alt|fn|⌘|⇧|⌥|⌃|\+)", compact):
+        return True
+    return bool(
+        re.search(r"(?:回车|确认|确定|enter|return)(?:\s+key)?(?:提交|发送|send|submit)?$", compact)
     )
 
 
