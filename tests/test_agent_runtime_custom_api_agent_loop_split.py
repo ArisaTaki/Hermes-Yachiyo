@@ -6132,6 +6132,46 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.safe_shortcut",
+            "recovery_input": {"action": "copy"},
+            "recovery_risk_level": "low",
+        }
+    ) == "复制选中内容"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.safe_key",
+            "recovery_input": {"action": "arrow_down", "repeat_count": 3},
+            "recovery_risk_level": "low",
+        }
+    ) == "按下箭头3次"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.safe_scroll",
+            "recovery_input": {"direction": "down", "pages": 2},
+            "recovery_risk_level": "low",
+        }
+    ) == "向下滚动2页"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.safe_click",
+            "recovery_input": {"x": 120, "y": 240},
+            "recovery_risk_level": "low",
+        }
+    ) == "点击 120, 240"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.safe_type_text",
+            "recovery_input": {"text": "hello"},
+            "recovery_risk_level": "low",
+        }
+    ) == "输入hello"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.click",
             "recovery_input": {"x": 120, "y": 240},
             "recovery_risk_level": "low",

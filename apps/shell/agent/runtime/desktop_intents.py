@@ -937,6 +937,11 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.open_path",
         "desktop.permissions",
         "desktop.running_apps",
+        "desktop.safe_click",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.ui_elements",
         "desktop.windows",
         "media.apple_music_control",
@@ -1014,11 +1019,86 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
         return f"查看{app_name}窗口" if app_name else "查看桌面窗口"
     if tool_name == "desktop.ui_elements":
         return "查看当前界面控件"
+    if tool_name == "desktop.safe_shortcut":
+        return _safe_shortcut_recovery_prompt(action)
+    if tool_name == "desktop.safe_key":
+        return _safe_key_recovery_prompt(recovery_input)
+    if tool_name == "desktop.safe_scroll":
+        return _safe_scroll_recovery_prompt(recovery_input)
+    if tool_name == "desktop.safe_click":
+        x = recovery_input.get("x")
+        y = recovery_input.get("y")
+        return f"点击 {x}, {y}" if x is not None and y is not None else ""
+    if tool_name == "desktop.safe_type_text":
+        text = str(recovery_input.get("text") or "").strip()
+        return f"输入{text}" if text else ""
     if tool_name == "browser.current_page":
         return "查看当前网页"
     if tool_name == "browser.extract_text":
         return "读取当前网页正文"
     return ""
+
+
+def _safe_shortcut_recovery_prompt(action: str) -> str:
+    return {
+        "copy": "复制选中内容",
+        "paste": "粘贴",
+        "select_all": "全选",
+        "undo": "撤销",
+        "redo": "重做",
+        "find": "打开查找",
+        "new_tab": "新建标签页",
+        "close_tab": "关闭标签页",
+        "next_tab": "切到下一个标签页",
+        "previous_tab": "切到上一个标签页",
+        "new_window": "新建窗口",
+        "new_document": "新建文档",
+        "new_note": "新建笔记",
+        "new_reminder": "新建提醒事项",
+        "new_event": "新建日程",
+        "refresh": "刷新",
+        "browser_back": "返回上一页",
+        "browser_forward": "前进一页",
+        "reopen_closed_tab": "重新打开关闭的标签页",
+    }.get(str(action or "").strip().lower(), "")
+
+
+def _safe_key_recovery_prompt(recovery_input: Mapping[str, Any]) -> str:
+    action = str(recovery_input.get("action") or "").strip().lower()
+    label = {
+        "escape": "Escape",
+        "tab": "Tab",
+        "shift_tab": "Shift+Tab",
+        "arrow_up": "上箭头",
+        "arrow_down": "下箭头",
+        "arrow_left": "左箭头",
+        "arrow_right": "右箭头",
+        "home": "Home",
+        "end": "End",
+        "page_up": "Page Up",
+        "page_down": "Page Down",
+    }.get(action, "")
+    if not label:
+        return ""
+    try:
+        repeat_count = int(recovery_input.get("repeat_count") or 1)
+    except (TypeError, ValueError):
+        repeat_count = 1
+    suffix = "" if repeat_count == 1 else f"{repeat_count}次"
+    return f"按{label}{suffix}"
+
+
+def _safe_scroll_recovery_prompt(recovery_input: Mapping[str, Any]) -> str:
+    direction = str(recovery_input.get("direction") or "").strip().lower()
+    label = {"down": "向下", "up": "向上"}.get(direction, "")
+    if not label:
+        return ""
+    try:
+        pages = int(recovery_input.get("pages") or 1)
+    except (TypeError, ValueError):
+        pages = 1
+    suffix = "" if pages == 1 else f"{pages}页"
+    return f"{label}滚动{suffix}"
 
 
 def _split_daily_desktop_sequence(text: str) -> list[str]:

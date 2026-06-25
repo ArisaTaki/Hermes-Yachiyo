@@ -137,6 +137,11 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.ui_elements') return '查看当前界面控件';
+  if (tool === 'desktop.safe_shortcut') return desktopSafeShortcutPrompt(String(input.action || '').trim());
+  if (tool === 'desktop.safe_key') return desktopSafeKeyPrompt(input);
+  if (tool === 'desktop.safe_scroll') return desktopSafeScrollPrompt(input);
+  if (tool === 'desktop.safe_click') return desktopSafeClickPrompt(input);
+  if (tool === 'desktop.safe_type_text') return desktopSafeTypeTextPrompt(input);
   if (tool === 'browser.current_page') return '查看当前网页';
   if (tool === 'browser.extract_text') return '读取当前网页正文';
   return '';
@@ -153,6 +158,11 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'desktop.open_path'
     || tool === 'desktop.permissions'
     || tool === 'desktop.running_apps'
+    || tool === 'desktop.safe_click'
+    || tool === 'desktop.safe_key'
+    || tool === 'desktop.safe_scroll'
+    || tool === 'desktop.safe_shortcut'
+    || tool === 'desktop.safe_type_text'
     || tool === 'desktop.ui_elements'
     || tool === 'desktop.windows'
     || tool === 'media.apple_music_control'
@@ -194,6 +204,11 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.permissions') return '检查桌面权限';
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'desktop.safe_shortcut') return desktopSafeShortcutPrompt(action);
+  if (tool === 'desktop.safe_key') return desktopSafeKeyPrompt(input);
+  if (tool === 'desktop.safe_scroll') return desktopSafeScrollPrompt(input);
+  if (tool === 'desktop.safe_click') return desktopSafeClickPrompt(input);
+  if (tool === 'desktop.safe_type_text') return desktopSafeTypeTextPrompt(input);
   if (tool === 'desktop.reveal_path' && path) return `在 Finder 中显示 ${path}`;
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
@@ -229,6 +244,74 @@ function systemBrightnessRetryPrompt(action: string): string {
   if (action === 'up') return '屏幕亮一点';
   if (action === 'down') return '屏幕暗一点';
   return '';
+}
+
+function desktopSafeShortcutPrompt(action: string): string {
+  if (action === 'copy') return '复制选中内容';
+  if (action === 'paste') return '粘贴';
+  if (action === 'select_all') return '全选';
+  if (action === 'undo') return '撤销';
+  if (action === 'redo') return '重做';
+  if (action === 'find') return '打开查找';
+  if (action === 'new_tab') return '新建标签页';
+  if (action === 'close_tab') return '关闭标签页';
+  if (action === 'next_tab') return '切到下一个标签页';
+  if (action === 'previous_tab') return '切到上一个标签页';
+  if (action === 'new_window') return '新建窗口';
+  if (action === 'new_document') return '新建文档';
+  if (action === 'new_note') return '新建笔记';
+  if (action === 'new_reminder') return '新建提醒事项';
+  if (action === 'new_event') return '新建日程';
+  if (action === 'refresh') return '刷新';
+  if (action === 'browser_back') return '返回上一页';
+  if (action === 'browser_forward') return '前进一页';
+  if (action === 'reopen_closed_tab') return '重新打开关闭的标签页';
+  return '';
+}
+
+function desktopSafeKeyPrompt(input: Record<string, unknown>): string {
+  const action = String(input.action || '').trim();
+  const label = desktopSafeKeyLabel(action);
+  if (!label) return '';
+  const repeatCount = Number(input.repeat_count || 1);
+  return Number.isFinite(repeatCount) && repeatCount > 1
+    ? `按${label}${repeatCount}次`
+    : `按${label}`;
+}
+
+function desktopSafeKeyLabel(action: string): string {
+  if (action === 'escape') return 'Escape';
+  if (action === 'tab') return 'Tab';
+  if (action === 'shift_tab') return 'Shift+Tab';
+  if (action === 'arrow_up') return '上箭头';
+  if (action === 'arrow_down') return '下箭头';
+  if (action === 'arrow_left') return '左箭头';
+  if (action === 'arrow_right') return '右箭头';
+  if (action === 'home') return 'Home';
+  if (action === 'end') return 'End';
+  if (action === 'page_up') return 'Page Up';
+  if (action === 'page_down') return 'Page Down';
+  return '';
+}
+
+function desktopSafeScrollPrompt(input: Record<string, unknown>): string {
+  const direction = String(input.direction || '').trim();
+  const label = direction === 'down' ? '向下' : direction === 'up' ? '向上' : '';
+  if (!label) return '';
+  const pages = Number(input.pages || 1);
+  return Number.isFinite(pages) && pages > 1 ? `${label}滚动${pages}页` : `${label}滚动`;
+}
+
+function desktopSafeClickPrompt(input: Record<string, unknown>): string {
+  const x = input.x;
+  const y = input.y;
+  if (x === undefined || x === null || y === undefined || y === null) return '';
+  return `点击 ${x}, ${y}`;
+}
+
+function desktopSafeTypeTextPrompt(input: Record<string, unknown>): string {
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  return text ? `输入${text}` : '';
 }
 
 function isExecutableRecoveryPrompt(value: string): boolean {
