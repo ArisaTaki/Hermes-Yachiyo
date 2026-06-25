@@ -938,6 +938,20 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {},
         }
     ]
+    for prompt in (
+        "读取当前网页链接",
+        "当前网页链接是什么",
+        "当前网址是什么",
+        "what is current page url?",
+        "read current page link",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.current_page",
+                "input": {},
+            }
+        ]
     for prompt in ("read current webpage", "extract current page text"):
         assert daily_desktop_entrypoint_requests(prompt) == [
             {

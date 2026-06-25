@@ -3737,6 +3737,8 @@ def _is_browser_current_page_request(text: str) -> bool:
         flags=re.IGNORECASE,
     ):
         return False
+    if _is_browser_current_page_link_read_request(text):
+        return True
     return bool(
         re.search(
             r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|页|浏览器|标签页).{0,8}"
@@ -3769,6 +3771,8 @@ def _is_browser_current_page_request(text: str) -> bool:
 
 def _is_browser_extract_text_request(text: str) -> bool:
     lowered = text.lower()
+    if _is_browser_current_page_link_read_request(text):
+        return False
     return bool(
         re.search(
             r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取).{0,10}"
@@ -3830,6 +3834,42 @@ def _is_browser_extract_text_request(text: str) -> bool:
         or "summarise this page" in lowered
         or "what is this page about" in lowered
         or "what's this page about" in lowered
+    )
+
+
+def _is_browser_current_page_link_read_request(text: str) -> bool:
+    clean = str(text or "").strip()
+    lowered = clean.lower()
+    if _is_browser_current_page_link_copy_request(clean):
+        return False
+    return bool(
+        re.search(
+            r"(?:读取|读一下|读下|查看|看一下|看看|获取|告诉我|给我).{0,8}"
+            r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
+            r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
+            r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址).{0,8}"
+            r"(?:是什么|是啥|多少|哪个|告诉我|给我|查看|看一下|看看|读取|读一下|读下|获取)?",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:what(?:'s|\s+is)|read|show|get|tell\s+me)\s+"
+            r"(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:what(?:'s|\s+is)|read|show|get|tell\s+me)\s+"
+            r"(?:the\s+)?(?:url|link|address)\s+"
+            r"(?:of|from|for)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:browser\s+)?(?:page|tab)\b",
+            lowered,
+        )
     )
 
 

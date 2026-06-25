@@ -7269,6 +7269,28 @@ def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatc
         assert recovery_event["payload"]["recovery_actions"] == tool_call["output_preview"]["recovery_actions"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        link_result = api.send_message("读取当前网页链接")
+        link_run = service.get_run(link_result["run_id"])
+        link_events = service.list_run_events(link_run["run_id"])["events"]
+        link_event_types = [event["event_type"] for event in link_events]
+        link_tool_call = link_result["agent_task"]["tool_calls"][-1]
+        link_user = [
+            message
+            for message in runtime.chat_session.get_messages()
+            if message.role == MessageRole.USER
+        ][-1]
+
+        assert link_result["ok"] is True
+        assert link_result["status"] == "completed"
+        assert link_tool_call["tool_name"] == "browser.current_page"
+        assert link_tool_call["status"] == "failed"
+        assert link_user.metadata["daily_desktop_tool"] == "browser.current_page"
+        assert link_run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in link_event_types
+        assert "agent.desktop.permission_recovery" in link_event_types
+        assert "model.request.started" not in link_event_types
+        assert "model.requested" not in link_event_types
     finally:
         service.close()
         store.close()
