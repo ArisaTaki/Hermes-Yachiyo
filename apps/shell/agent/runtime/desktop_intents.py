@@ -210,6 +210,10 @@ _COMMUNICATION_APP_NAMES = {
     "WeChat",
     "WhatsApp",
 }
+_EMAIL_APP_NAMES = {
+    "Mail",
+    "Microsoft Outlook",
+}
 
 _TERMINAL_COMMAND_HEADS = {
     "awk",
@@ -11710,6 +11714,42 @@ def _app_default_new_shortcut_action(app_name: str, followup: str) -> str:
         "startconversation",
     }:
         return "new_message" if app_name in _COMMUNICATION_APP_NAMES else ""
+    if phrase in {
+        "新建邮件",
+        "新邮件",
+        "创建邮件",
+        "创建一封邮件",
+        "写邮件",
+        "写新邮件",
+        "撰写邮件",
+        "撰写新邮件",
+        "发邮件",
+        "发送邮件",
+        "composeemail",
+        "composemail",
+        "newemail",
+        "newmail",
+        "createemail",
+        "createmail",
+        "writeemail",
+        "writemail",
+    }:
+        return "new_message" if app_name in _EMAIL_APP_NAMES else ""
+    if phrase in {
+        "新建会议",
+        "新会议",
+        "创建会议",
+        "创建一个会议",
+        "添加会议",
+        "添加一个会议",
+        "安排会议",
+        "安排一个会议",
+        "newmeeting",
+        "createmeeting",
+        "schedulemeeting",
+        "makeameeting",
+    }:
+        return "new_event" if app_name == "Calendar" else ""
     if phrase not in {
         "新建",
         "新建一个",

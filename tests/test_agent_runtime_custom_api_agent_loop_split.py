@@ -4947,10 +4947,35 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Calendar", "action": "new_event"},
     }
+    assert daily_desktop_intent_tool_request("打开日历新建会议", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
     assert daily_desktop_intent_tool_request("Calendar new event", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Calendar", "action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("Calendar new meeting", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Calendar", "action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("打开邮件新建邮件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Mail", "action": "new_message"},
+    }
+    assert daily_desktop_intent_tool_request("Mail compose email", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Mail", "action": "new_message"},
+    }
+    assert daily_desktop_intent_tool_request("Outlook 新建邮件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Microsoft Outlook", "action": "new_message"},
     }
     assert daily_desktop_intent_tool_request("打开 Notes write hello yachiyo", allowed_tools) == {
         "protocol": "json_fallback",

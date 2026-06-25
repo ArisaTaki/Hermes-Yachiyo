@@ -1371,6 +1371,7 @@ class RuntimeCustomApiAgentLoop:
             "map Finder open/focus followed by new folder/directory to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_folder; "
             "map Finder open/focus followed by rename selected item, get info/show info, parent folder, or copy selected file to app.open_and_safe_shortcut or app.focus_and_safe_shortcut actions rename_selected, finder_get_info, parent_folder, or copy; "
             "map communication app open/focus followed by new message/new chat/compose message to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_message; "
+            "map Mail/Outlook open/focus followed by compose/new/write email to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_message; map Calendar open/focus followed by new meeting/new event to action=new_event; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
