@@ -3429,7 +3429,7 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
     level_patterns = (
         r"(?:设置|设定)(?:系统)?(?:音量|声音)\s*(?:为|到|成)?\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
-        r"(?:调到|调至|设为|设置为|设置到)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?\s*"
+        r"(?:调到|调至|调成|设为|设到|设成|设置为|设置到)\s*(?P<level>\d{1,3})(?:\s*%|百分之)?\s*"
         r"(?:系统)?(?:音量|声音)",
         r"(?:把|将)?(?:系统)?(?:音量|声音)\s*(?:调到|调至|设为|设置为|设置到)\s*"
         r"(?P<level>\d{1,3})(?:\s*%|百分之)?",
@@ -3468,7 +3468,7 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         return {"action": "unmute"}
     if re.search(
         r"(?:静音|设为静音|开启静音|关闭声音|关掉声音|把声音关掉|把音量关掉|"
-        r"把声音关了|把音量关了|声音关了|音量关了)",
+        r"把声音关了|把音量关了|声音关掉|音量关掉|声音关了|音量关了|别出声)",
         text,
     ) or re.search(
         r"\bmute(?:\s+(?:system\s+)?volume)?\b|\bturn\s+(?:the\s+)?sound\s+off\b",
@@ -3531,14 +3531,14 @@ def _system_brightness_request(text: str) -> dict[str, Any] | None:
         return None
     up_patterns = (
         rf"^(?:再|稍微|略微)?(?:调亮(?:一点点|一点|点|一些|些)?|亮一点点|亮一点|亮点|亮一些|亮些)(?:\s*{count}\s*(?:次|下|格))?",
-        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调高|提高|调亮|变亮|亮一点|亮点|亮一些|亮些|亮一点点)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调高|提高|调亮|变亮|大一点|大点|亮一点|亮点|亮一些|亮些|亮一点点)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:调高|提高|调亮|增大|加大).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:屏幕|显示器)?(?:太暗|有点暗|太黑|看不清)",
         rf"\b(?:brightness\s+up|increase\s+(?:the\s+)?brightness|brighten\s+(?:the\s+)?(?:screen|display)|make\s+(?:the\s+)?(?:screen|display)\s+brighter)\b",
     )
     down_patterns = (
         rf"^(?:再|稍微|略微)?(?:调暗(?:一点点|一点|点|一些|些)?|暗一点点|暗一点|暗点|暗一些|暗些)(?:\s*{count}\s*(?:次|下|格))?",
-        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调低|降低|调暗|变暗|暗一点|暗点|暗一些|暗些|暗一点点)(?:\s*{count}\s*(?:次|下|格))?",
+        rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调低|降低|调暗|变暗|小一点|小点|暗一点|暗点|暗一些|暗些|暗一点点)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:调低|降低|调暗|减小).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:屏幕|显示器)?(?:太亮|有点亮|刺眼|晃眼)",
         rf"\b(?:brightness\s+down|decrease\s+(?:the\s+)?brightness|dim\s+(?:the\s+)?(?:screen|display)|make\s+(?:the\s+)?(?:screen|display)\s+dimmer)\b",

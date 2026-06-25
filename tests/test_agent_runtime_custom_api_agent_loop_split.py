@@ -5507,6 +5507,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "set", "level": 35},
     }
+    assert daily_desktop_intent_tool_request("设成 35 音量", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "set", "level": 35},
+    }
     assert daily_desktop_intent_tool_request("设置音量为 40", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -5582,6 +5587,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.volume",
         "input": {"action": "mute"},
     }
+    assert daily_desktop_intent_tool_request("声音关掉", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "mute"},
+    }
+    assert daily_desktop_intent_tool_request("别出声", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "mute"},
+    }
     assert daily_desktop_intent_tool_request("turn sound off", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.volume",
@@ -5627,6 +5642,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.brightness",
         "input": {"action": "up", "step": 3},
     }
+    assert daily_desktop_intent_tool_request("亮度大一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 2},
+    }
     assert daily_desktop_intent_tool_request("屏幕太暗了", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.brightness",
@@ -5643,6 +5663,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"action": "down", "step": 2},
     }
     assert daily_desktop_intent_tool_request("调暗一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "down", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("亮度小一点", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.brightness",
         "input": {"action": "down", "step": 2},

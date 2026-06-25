@@ -1286,8 +1286,11 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         ("大点声", {"action": "up"}),
         ("大一点声", {"action": "up"}),
         ("调到35音量", {"action": "set", "level": 35}),
+        ("设成 35 音量", {"action": "set", "level": 35}),
         ("volume 35", {"action": "set", "level": 35}),
         ("set sound to 35", {"action": "set", "level": 35}),
+        ("声音关掉", {"action": "mute"}),
+        ("别出声", {"action": "mute"}),
         ("sound up", {"action": "up"}),
         ("sound down", {"action": "down"}),
         ("查看当前音量", {"action": "status"}),
@@ -1309,8 +1312,10 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
     brightness_cases = (
         ("亮一点", {"action": "up", "step": 2}),
         ("再亮一点", {"action": "up", "step": 2}),
+        ("亮度大一点", {"action": "up", "step": 2}),
         ("暗一点", {"action": "down", "step": 2}),
         ("调暗一点", {"action": "down", "step": 2}),
+        ("亮度小一点", {"action": "down", "step": 2}),
     )
     for prompt, tool_input in brightness_cases:
         requests = daily_desktop_entrypoint_requests(prompt)

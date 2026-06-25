@@ -3741,7 +3741,7 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_volume", fake_system_volume)
     try:
-        cases = ("音量设成 35", "调到35音量", "volume 35", "set sound to 35")
+        cases = ("音量设成 35", "设成 35 音量", "调到35音量", "volume 35", "set sound to 35")
         for index, text in enumerate(cases, start=1):
             result = api.send_message(text)
             task = runtime.state.get_task(result["task_id"])
@@ -3773,6 +3773,23 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
             assert task.status == TaskStatus.COMPLETED
             assert task.result == "当前系统音量是 35%。"
             assert volume_calls[-1] == ("status", None, None)
+            assert run["status"] == "completed"
+
+        for text in ("声音关掉", "别出声"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已将系统音量静音。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"action": "mute"}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已将系统音量静音。"
+            assert volume_calls[-1] == ("mute", None, None)
             assert run["status"] == "completed"
     finally:
         service.close()
@@ -3813,20 +3830,21 @@ def test_send_message_executes_direct_system_brightness_task(tmp_path, monkeypat
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
     try:
-        result = api.send_message("亮一点")
-        task = runtime.state.get_task(result["task_id"])
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
+        for index, text in enumerate(("亮一点", "亮度大一点"), start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已调高屏幕亮度（2 格）。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.brightness"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已调高屏幕亮度（2 格）。"
-        assert brightness_calls == [("up", 2)]
-        assert run["status"] == "completed"
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已调高屏幕亮度（2 格）。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.brightness"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已调高屏幕亮度（2 格）。"
+            assert brightness_calls == [("up", 2)] * index
+            assert run["status"] == "completed"
     finally:
         service.close()
         store.close()
