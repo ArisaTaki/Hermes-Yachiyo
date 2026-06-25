@@ -4824,6 +4824,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "/Applications"},
     }
+    assert daily_desktop_intent_tool_request("打开当前仓库", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "."},
+    }
+    assert daily_desktop_intent_tool_request("open current repo", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "."},
+    }
+    assert daily_desktop_intent_tool_request("打开临时目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "/tmp"},
+    }
+    assert daily_desktop_intent_tool_request("打开根目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "/"},
+    }
     for prompt in ("打开文件夹", "打开一个文件夹", "open folder", "open a folder"):
         assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
             "protocol": "json_fallback",

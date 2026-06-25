@@ -640,6 +640,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "."},
         ),
         (
+            "打开当前仓库",
+            "desktop.open_path",
+            {"path": "."},
+        ),
+        (
             "打开项目目录",
             "desktop.open_path",
             {"path": "."},
@@ -663,6 +668,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             "打开垃圾桶",
             "desktop.open_path",
             {"path": "~/.Trash"},
+        ),
+        (
+            "打开临时目录",
+            "desktop.open_path",
+            {"path": "/tmp"},
+        ),
+        (
+            "打开根目录",
+            "desktop.open_path",
+            {"path": "/"},
         ),
         (
             "open trash folder",
