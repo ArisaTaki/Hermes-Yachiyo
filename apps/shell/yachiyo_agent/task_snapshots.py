@@ -67,6 +67,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "media.apple_music_open_and_play": "打开并播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
     "media.music_app_open_and_play": "打开并播放音乐应用",
+    "media.music_app_control": "控制音乐应用",
     "system.settings_open": "打开系统设置",
     "system.volume": "控制系统音量",
     "system.brightness": "调整屏幕亮度",

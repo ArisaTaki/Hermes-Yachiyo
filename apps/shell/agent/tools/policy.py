@@ -65,6 +65,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
     "media.apple_music_control": "media_apple_music_control",
     "media.music_app_open_and_play": "media_music_app_open_and_play",
+    "media.music_app_control": "media_music_app_control",
     "system.settings_open": "system_settings_open",
     "system.volume": "system_volume",
     "system.brightness": "system_brightness",
@@ -179,6 +180,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_open_and_play",
     "media.apple_music_control",
     "media.music_app_open_and_play",
+    "media.music_app_control",
     "system.settings_open",
     "system.volume",
     "system.brightness",
@@ -493,6 +495,15 @@ class ToolDescriptor:
             if action not in {"toggle", "play", "pause", "next", "previous"}:
                 raise AgentRuntimeError(
                     "media.apple_music_control 参数 action 必须是 toggle、play、pause、next 或 previous"
+                )
+        if self.name == "media.music_app_control":
+            app_name = str(payload.get("app_name") or "").strip()
+            if not app_name:
+                raise AgentRuntimeError("media.music_app_control 参数 app_name 必须是非空字符串")
+            action = str(payload.get("action") or "").strip()
+            if action not in {"toggle", "play", "pause", "next", "previous"}:
+                raise AgentRuntimeError(
+                    "media.music_app_control 参数 action 必须是 toggle、play、pause、next 或 previous"
                 )
         if self.name == "system.volume":
             action = str(payload.get("action") or "").strip()
@@ -1561,6 +1572,26 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("app_name",),
+    ),
+    "media.music_app_control": ToolDescriptor(
+        name="media.music_app_control",
+        description=(
+            "Focus a named local music app such as Spotify, QQ Music, or NetEase Cloud Music "
+            "and send a safe system media key for explicit low-risk playback controls. "
+            "The resulting playback state is not verified."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Local music application name to focus before sending the media key.",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["toggle", "play", "pause", "next", "previous"],
+                "description": "Playback control action to attempt with the system media key.",
+            },
+        },
+        required=("app_name", "action"),
     ),
     "system.settings_open": ToolDescriptor(
         name="system.settings_open",

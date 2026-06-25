@@ -1069,7 +1069,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         assert "model.requested" not in event_types
 
     music_cases = (
-        ("打开 Spotify 播放周杰伦", "bubble", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
+        ("打开 Spotify 并播放", "bubble", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
         ("用 Spotify 播放音乐", "live2d", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
         ("打开网易云并播放", "bubble", "网易云音乐", "已打开网易云音乐，并用媒体键尝试开始播放。"),
         ("可以帮我打开网易云并播放吗", "live2d", "网易云音乐", "已打开网易云音乐，并用媒体键尝试开始播放。"),

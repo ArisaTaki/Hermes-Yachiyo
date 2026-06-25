@@ -55,6 +55,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
         "system.settings_open",
         "system.volume",
         "system.brightness",
@@ -249,6 +250,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
     ),
     "system_settings": ("system.settings_open",),
     "control_system_volume": ("system.volume",),
@@ -441,6 +443,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
         "system.settings_open",
         "system.volume",
         "system.brightness",
@@ -499,6 +502,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
     ),
     "foreground_input": (
         "app.open_and_safe_type_text",
@@ -576,6 +580,7 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "media.apple_music_open_and_play": ("automation",),
     "media.apple_music_control": ("automation",),
     "media.music_app_open_and_play": ("accessibility",),
+    "media.music_app_control": ("accessibility",),
     "system.brightness": ("accessibility",),
 }
 
@@ -904,13 +909,14 @@ def _tool_missing_permissions(
         )
     elif tool in {"app.hide", "app.minimize"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-    elif tool == "media.music_app_open_and_play":
+    elif tool in {"media.music_app_open_and_play", "media.music_app_control"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-        values.extend(
-            value
-            for value in _missing_permissions(missing_by_capability, "app_control")
-            if value == "open_command"
-        )
+        if tool == "media.music_app_open_and_play":
+            values.extend(
+                value
+                for value in _missing_permissions(missing_by_capability, "app_control")
+                if value == "open_command"
+            )
     else:
         values.extend(capability_missing)
     if tool in {"browser.screenshot", "browser.open_url_and_screenshot"}:

@@ -80,6 +80,26 @@ def test_tool_payload_validation_rejects_unknown_and_undeclared_fields() -> None
         )
 
 
+def test_music_app_control_tool_is_low_risk_and_validates_payload() -> None:
+    assert "media.music_app_control" in LOW_RISK_DESKTOP_TOOL_NAMES
+    assert TOOL_FUNCTION_NAMES["media.music_app_control"] == "media_music_app_control"
+
+    ToolDescriptorRegistry.validate_payload(
+        "media.music_app_control",
+        {"app_name": "Spotify", "action": "pause"},
+    )
+    with pytest.raises(AgentRuntimeError, match="app_name"):
+        ToolDescriptorRegistry.validate_payload(
+            "media.music_app_control",
+            {"action": "pause"},
+        )
+    with pytest.raises(AgentRuntimeError, match="action"):
+        ToolDescriptorRegistry.validate_payload(
+            "media.music_app_control",
+            {"app_name": "Spotify", "action": "shuffle"},
+        )
+
+
 def test_write_patch_payload_validation_requires_patch_and_matching_hash_aliases() -> None:
     with pytest.raises(AgentRuntimeError, match="patch"):
         ToolDescriptorRegistry.validate_payload("workspace.write_patch", {"path": "a.txt"})

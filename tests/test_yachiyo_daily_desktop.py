@@ -1915,8 +1915,19 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
             "input": {"action": "pause"},
         }
     ]
-    assert daily_desktop_entrypoint_requests("Spotify 暂停") == []
-    assert daily_desktop_entrypoint_requests("网易云下一首") == []
+    for prompt, app_name, action in (
+        ("Spotify 暂停", "Spotify", "pause"),
+        ("网易云下一首", "网易云音乐", "next"),
+        ("QQ音乐上一首", "QQ音乐", "previous"),
+        ("QQ Music next track", "QQ音乐", "next"),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.music_app_control",
+                "input": {"app_name": app_name, "action": action},
+            }
+        ]
 
     for prompt in ("当前播放什么", "现在播放什么歌", "Apple Music 现在在播什么", "音乐状态"):
         status_requests = daily_desktop_entrypoint_requests(prompt)

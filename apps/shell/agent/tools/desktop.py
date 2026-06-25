@@ -500,9 +500,11 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_control",
     ),
     "foreground_input": (
         "media.music_app_open_and_play",
+        "media.music_app_control",
         "app.open_and_safe_type_text",
         "app.focus_and_safe_type_text",
         "app.open_and_safe_shortcut",
@@ -3066,6 +3068,114 @@ def music_app_open_and_play(app_name: str) -> dict[str, Any]:
     return _with_permission_metadata("media.music_app_open_and_play", payload)
 
 
+def music_app_control(app_name: str, action: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("media.music_app_control")
+    clean_name = _clean_required(app_name, "app_name")
+    clean_action = _clean_music_control_action(action)
+    if clean_name == "Music":
+        return apple_music_control(clean_action)
+
+    status_result = app_status(clean_name)
+    status_data = status_result.get("data") if isinstance(status_result.get("data"), dict) else {}
+    if status_result.get("ok") and status_data.get("running") is False:
+        return {
+            "ok": False,
+            "action": "media.music_app_control",
+            "summary": f"{clean_name} is not running",
+            "error": "music_app_not_running",
+            "data": {
+                "app_name": clean_name,
+                "control": clean_action,
+                "running": False,
+                "playback_state_unverified": True,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {"status": status_result},
+        }
+    if not status_result.get("ok"):
+        return _with_permission_metadata(
+            "media.music_app_control",
+            {
+                **status_result,
+                "action": "media.music_app_control",
+                "summary": f"Could not check {clean_name} before media control",
+                "data": {
+                    "app_name": clean_name,
+                    "control": clean_action,
+                    "status": status_data,
+                },
+            },
+        )
+
+    focus_result = app_focus(clean_name)
+    if not focus_result.get("ok"):
+        return _with_permission_metadata(
+            "media.music_app_control",
+            {
+                **focus_result,
+                "action": "media.music_app_control",
+                "summary": f"Could not focus {clean_name} before media control",
+                "data": {
+                    "app_name": clean_name,
+                    "control": clean_action,
+                    "focus_ok": False,
+                },
+                "fallback_result": {"status": status_result, "focus": focus_result},
+            },
+        )
+
+    media_key_control = "toggle" if clean_action in {"play", "pause"} else clean_action
+    media_key_result = _system_media_key_press("media.music_app_control", media_key_control)
+    media_key_data = (
+        media_key_result.get("data") if isinstance(media_key_result.get("data"), dict) else {}
+    )
+    data = {
+        "app_name": clean_name,
+        "control": clean_action,
+        "media_key_control": media_key_control,
+        "focus_ok": True,
+        "player_state": "unknown",
+        "playback_state_unverified": True,
+    }
+    if media_key_data.get("media_key"):
+        data["media_key"] = media_key_data.get("media_key") or ""
+    if media_key_data.get("media_control"):
+        data["fallback_control"] = media_key_data.get("media_control") or ""
+    if media_key_result.get("ok"):
+        return {
+            "ok": True,
+            "action": "media.music_app_control",
+            "summary": f"Sent {clean_action} media key control to {clean_name}",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
+            "fallback_result": {
+                "status": status_result,
+                "focus": focus_result,
+                "media_key": media_key_result,
+            },
+        }
+
+    payload = {
+        "ok": False,
+        "action": "media.music_app_control",
+        "summary": f"Could not send {clean_action} media key control to {clean_name}",
+        "error": str(media_key_result.get("error") or "music app media control failed"),
+        "data": data,
+        "permission_error": bool(media_key_result.get("permission_error")),
+        "fallback_used": bool(focus_result.get("ok")),
+        "fallback_result": {
+            "status": status_result,
+            "focus": focus_result,
+            "media_key": media_key_result,
+        },
+    }
+    return _with_permission_metadata("media.music_app_control", payload)
+
+
 def _open_apple_music_search(query: str) -> dict[str, Any]:
     clean_query = _clean_required(query, "query")
     search_url = f"https://music.apple.com/search?term={quote_plus(clean_query)}"
@@ -4978,6 +5088,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
         "media.music_app_open_and_play": ["accessibility", "open_command"],
+        "media.music_app_control": ["accessibility"],
         "system.brightness": ["accessibility"],
         "notes.create": ["automation"],
         "reminders.create": ["automation"],
@@ -5033,6 +5144,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "media.apple_music_status": ["music_app", "automation"],
         "media.apple_music_open_and_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "media.music_app_control": ["accessibility"],
         "system.brightness": ["accessibility"],
         "notes.create": ["automation"],
         "reminders.create": ["automation"],

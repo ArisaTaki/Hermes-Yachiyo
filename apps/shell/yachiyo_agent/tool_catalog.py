@@ -282,6 +282,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "media.music_app_open_and_play": [
             "Opens the named music app, then sends a system media play key; track selection is not verified.",
         ],
+        "media.music_app_control": [
+            "Focuses the named music app, then sends a system media key; playback state is not verified.",
+        ],
         "system.settings_open": [
             "Opens macOS System Settings with a safe system URL; it does not change settings by itself.",
         ],

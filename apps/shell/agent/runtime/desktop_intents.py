@@ -603,6 +603,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in music_app_search_play_sequence
     ):
         return music_app_search_play_sequence
+    music_app_control = _music_app_control_request(context)
+    if music_app_control and str(music_app_control.get("tool") or "") in allowed:
+        return [music_app_control]
     if _is_apple_music_open_and_play_request(context):
         if "media.apple_music_open_and_play" in allowed:
             return [_request("media.apple_music_open_and_play", {})]
@@ -1061,6 +1064,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.windows",
     "media.apple_music_control",
     "media.apple_music_status",
+    "media.music_app_control",
     "media.music_app_open_and_play",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
@@ -1256,6 +1260,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_play",
+        "media.music_app_control",
         "media.music_app_open_and_play",
         "screen.capture",
         "system.brightness",
@@ -1320,6 +1325,17 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
     if tool_name == "media.music_app_open_and_play":
         app_name = str(recovery_input.get("app_name") or "").strip()
         return f"打开{app_name}并播放" if app_name else ""
+    if tool_name == "media.music_app_control":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        action = str(recovery_input.get("action") or "").strip()
+        label = {
+            "play": "播放",
+            "pause": "暂停",
+            "next": "下一首",
+            "previous": "上一首",
+            "toggle": "播放暂停",
+        }.get(action, "")
+        return f"{app_name}{label}" if app_name and label else ""
     if tool_name == "media.apple_music_control":
         return {
             "play": "播放音乐",
@@ -2412,6 +2428,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         candidates.append(
             _request("media.music_app_open_and_play", {"app_name": music_app_open_and_play})
         )
+
+    music_app_control = _music_app_control_request(text)
+    if music_app_control:
+        candidates.append(music_app_control)
 
     if _is_apple_music_open_and_play_request(text):
         candidates.append(_request("media.apple_music_open_and_play", {}))
@@ -10252,12 +10272,40 @@ def _is_specific_music_query(query: str) -> bool:
     }
 
 
+def _music_app_control_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
+    if not music_app or music_app == "Music":
+        return None
+    action = next(
+        (
+            parsed
+            for candidate in _music_app_control_followup_candidates(text, raw_app, followup)
+            if (parsed := _music_control_action(candidate))
+        ),
+        "",
+    )
+    if not action:
+        return None
+    return _request("media.music_app_control", {"app_name": music_app, "action": action})
+
+
 def _music_control_action(text: str) -> str:
     split = _known_app_prefix_split(text)
     if split:
         raw_app, app_name, followup = split
         music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
-        if music_app and music_app != "Music" and _looks_like_music_control_followup(followup):
+        if (
+            music_app
+            and music_app != "Music"
+            and any(
+                _looks_like_music_control_followup(candidate)
+                for candidate in _music_app_control_followup_candidates(text, raw_app, followup)
+            )
+        ):
             return ""
     lowered = text.lower()
     if re.search(
@@ -10344,6 +10392,15 @@ def _music_control_action(text: str) -> str:
     if re.fullmatch(r"(?:play|start)\s+(?:music|apple\s*music)(?:\s+app)?", lowered):
         return "play"
     return ""
+
+
+def _music_app_control_followup_candidates(text: str, raw_app: str, followup: str) -> tuple[str, ...]:
+    candidates = [_strip_query(followup)]
+    source = str(text or "").strip()
+    prefix = str(raw_app or "").strip()
+    if prefix and source.lower().startswith(prefix.lower()):
+        candidates.append(_strip_query(source[len(prefix) :]))
+    return tuple(candidate for candidate in candidates if candidate)
 
 
 def _looks_like_music_control_followup(value: str) -> bool:
