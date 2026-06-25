@@ -530,6 +530,14 @@ def daily_desktop_intent_tool_requests(
         ):
             return current_page_link_to_note_sequence
         return []
+    current_content_to_note_sequence = _current_content_to_note_tool_requests(context)
+    if current_content_to_note_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in current_content_to_note_sequence
+        ):
+            return current_content_to_note_sequence
+        return []
     clipboard_to_note_sequence = _clipboard_to_note_tool_requests(context)
     if clipboard_to_note_sequence and all(
         str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
@@ -4483,6 +4491,77 @@ def _current_page_link_to_note_request(text: str) -> bool:
     )
 
 
+def _current_content_to_note_tool_requests(text: str) -> list[dict[str, Any]]:
+    if not _current_content_to_note_request(text):
+        return []
+    return [
+        _request("desktop.safe_shortcut", {"action": "select_all"}),
+        _request("desktop.safe_shortcut", {"action": "copy"}),
+        _request(
+            "app.open_and_safe_shortcut",
+            {"app_name": "Notes", "action": "new_note"},
+        ),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+    ]
+
+
+def _current_content_to_note_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    if _current_page_link_to_note_request(clean):
+        return False
+    current_content_source = (
+        r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
+        r"(?:网页|网站|页面|页|窗口|应用|app|浏览器|标签页)"
+        r"(?:内容|正文|文字|文本)?|"
+        r"(?:current|active|this)\s+"
+        r"(?:(?:browser\s+)?(?:page|tab)|window|app|application)"
+        r"(?:\s+(?:content|contents|text|body))?"
+    )
+    note_target = r"(?:备忘录|笔记|note)"
+    return bool(
+        re.search(
+            rf"^(?:把|将|复制|拷贝)?\s*(?:{current_content_source})\s*"
+            rf"(?:写进|写入|记到|记入|保存到|存到|放到|放进|加到|加入|添加到|"
+            rf"复制到|复制进|拷贝到|拷贝进|copy\s+to|copy\s+into|"
+            rf"新建成|创建成|到|至)\s*{note_target}(?:里|中|上)?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*(?:{current_content_source})\s*"
+            rf"(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*{note_target}$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*{note_target}(?:里|中|上)?\s*"
+            rf"(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*(?:{current_content_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:paste|put|save|write|add|copy)\s+(?:the\s+)?"
+            r"(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)|window|app|application)"
+            r"(?:\s+(?:content|contents|text|body))?\s+"
+            r"(?:into|to|in)\s+(?:a\s+)?(?:new\s+)?note$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add)\s+(?:a\s+)?(?:new\s+)?note\s+"
+            r"(?:from|with|using)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)|window|app|application)"
+            r"(?:\s+(?:content|contents|text|body))?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_postposed_clipboard_copy_request(text: str) -> bool:
     return bool(
         re.search(
@@ -4498,6 +4577,7 @@ def _clipboard_read_request(text: str) -> bool:
         _clipboard_to_note_request(text)
         or _selected_text_to_note_request(text)
         or _current_page_link_to_note_request(text)
+        or _current_content_to_note_request(text)
     ):
         return False
     if _clipboard_write_text(text):

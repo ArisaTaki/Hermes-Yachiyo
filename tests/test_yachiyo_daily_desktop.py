@@ -1931,11 +1931,51 @@ def test_daily_desktop_entrypoint_routes_context_sources_to_notes() -> None:
         "create a note from current page link",
         allowed_tools=("notes.create", "browser.current_page"),
     ) == []
-    assert daily_desktop_entrypoint_requests("把当前网页内容写进备忘录") == [
+    current_content_note_requests = [
         {
             "protocol": "json_fallback",
-            "tool": "browser.current_page",
-            "input": {},
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把当前网页内容写进备忘录",
+        "把当前页面内容保存到备忘录",
+        "把当前网页正文新建成备忘录",
+        "把当前网页文字放到笔记",
+        "把当前页面复制到备忘录",
+        "复制当前页面内容到备忘录",
+        "把当前窗口内容写进备忘录",
+        "把当前应用内容保存到备忘录",
+        "save current page content to a new note",
+        "create a note from current page content",
+        "copy current page to a note",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == current_content_note_requests
+    assert daily_desktop_entrypoint_requests(
+        "create a note from current page content",
+        allowed_tools=("notes.create", "browser.current_page"),
+    ) == []
+    assert daily_desktop_entrypoint_requests("把当前屏幕内容写进备忘录") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
         }
     ]
 
