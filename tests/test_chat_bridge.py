@@ -955,6 +955,10 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
     app_cases = (
         ("微信帮我打开一下", "live2d", "WeChat"),
         ("open WeChat for me", "bubble", "WeChat"),
+        ("你能帮我打开微信吗", "live2d", "WeChat"),
+        ("你能启动一下备忘录吗", "bubble", "Notes"),
+        ("Could you launch Calendar for me?", "live2d", "Calendar"),
+        ("Would you open Notes please?", "bubble", "Notes"),
     )
     for prompt, launcher_mode, app_name in app_cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1005,7 +1009,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
 
     assert music_calls == ["Spotify", "Spotify", "网易云音乐", "网易云音乐", "Spotify"]
 
-    assert open_calls == ["WeChat", "WeChat"]
+    assert open_calls == ["WeChat", "WeChat", "WeChat", "Notes", "Calendar", "Notes"]
 
 
 def test_chat_bridge_quick_message_opens_default_browser_without_model(

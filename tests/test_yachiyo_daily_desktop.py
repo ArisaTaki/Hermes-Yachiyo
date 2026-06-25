@@ -41,6 +41,27 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
+def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool() -> None:
+    cases = (
+        ("你能帮我打开微信吗", "WeChat"),
+        ("你能启动一下备忘录吗", "Notes"),
+        ("Could you launch Calendar for me?", "Calendar"),
+        ("Would you open Notes please?", "Notes"),
+    )
+
+    for prompt, app_name in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": app_name},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
+
+
 def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
     cases = (
         ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
