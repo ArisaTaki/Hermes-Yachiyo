@@ -7613,6 +7613,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "previous_window": "`",
             "switch_previous_app": "tab",
             "switch_next_app": "tab",
+            "hide_other_apps": "h",
             "toggle_full_screen": "f",
             "mission_control": "up",
             "application_windows": "down",
@@ -7637,6 +7638,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         if action == "lock_screen":
             modifiers = ["control", "command"]
         if action == "force_quit_dialog":
+            modifiers = ["command", "option"]
+        if action == "hide_other_apps":
             modifiers = ["command", "option"]
         return {
             "ok": True,
@@ -7665,6 +7668,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("switch to previous app", "switch_previous_app", "已切到上一个应用。"),
             ("切到下一个应用", "switch_next_app", "已切到下一个应用。"),
             ("switch to next app", "switch_next_app", "已切到下一个应用。"),
+            ("隐藏其他应用", "hide_other_apps", "已隐藏其他应用。"),
+            ("hide other apps", "hide_other_apps", "已隐藏其他应用。"),
             ("最大化当前窗口", "toggle_full_screen", "已切换当前窗口全屏。"),
             ("maximize the current window", "toggle_full_screen", "已切换当前窗口全屏。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
@@ -7742,6 +7747,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
                 "switch_previous_app",
                 "switch_next_app",
                 "switch_next_app",
+                "hide_other_apps",
+                "hide_other_apps",
                 "toggle_full_screen",
                 "toggle_full_screen",
                 "mission_control",

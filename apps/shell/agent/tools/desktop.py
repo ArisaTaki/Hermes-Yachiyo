@@ -125,6 +125,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "previous_window": ("`", ("command", "shift"), "previous window"),
     "switch_previous_app": ("tab", ("command",), "switch to previous app"),
     "switch_next_app": ("tab", ("command", "shift"), "switch to next app"),
+    "hide_other_apps": ("h", ("command", "option"), "hide other apps"),
     "toggle_full_screen": ("f", ("control", "command"), "toggle full screen"),
     "mission_control": ("up", ("control",), "mission control"),
     "application_windows": ("down", ("control",), "application windows"),

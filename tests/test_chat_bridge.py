@@ -5660,6 +5660,8 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("switch to previous app", "live2d", "switch_previous_app", "已切到上一个应用。"),
         ("切到下一个应用", "bubble", "switch_next_app", "已切到下一个应用。"),
         ("switch to next app", "live2d", "switch_next_app", "已切到下一个应用。"),
+        ("隐藏其他应用", "bubble", "hide_other_apps", "已隐藏其他应用。"),
+        ("hide other apps", "live2d", "hide_other_apps", "已隐藏其他应用。"),
         ("最大化当前窗口", "bubble", "toggle_full_screen", "已切换当前窗口全屏。"),
         ("maximize the current window", "live2d", "toggle_full_screen", "已切换当前窗口全屏。"),
         ("打开任务控制中心", "bubble", "mission_control", "已打开任务控制中心。"),

@@ -121,6 +121,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "previous_window",
     "switch_previous_app",
     "switch_next_app",
+    "hide_other_apps",
     "toggle_full_screen",
     "mission_control",
     "application_windows",
@@ -1820,7 +1821,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
             "select all, undo, redo, find, new tab, close tab, next tab, previous tab, "
-            "next window, previous window, app switching, toggle full screen, "
+            "next window, previous window, app switching, hide other apps, toggle full screen, "
             "Mission Control, Application Windows, Spotlight, Emoji picker, Lock Screen, Force Quit dialog, new window, new note, new reminder, "
             "new calendar event, copy current page link, refresh, "
             "browser back, or browser forward. Unlike desktop.hotkey, this tool does not "

@@ -122,6 +122,10 @@ def test_desktop_safe_shortcut_actions_are_low_risk_and_validated() -> None:
     )
     ToolDescriptorRegistry.validate_payload(
         "desktop.safe_shortcut",
+        {"action": "hide_other_apps"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.safe_shortcut",
         {"action": "toggle_full_screen"},
     )
     with pytest.raises(AgentRuntimeError, match="action"):

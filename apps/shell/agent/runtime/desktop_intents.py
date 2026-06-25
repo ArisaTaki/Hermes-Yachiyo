@@ -1507,6 +1507,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "previous_window": "切到上一个窗口",
         "switch_previous_app": "切到上一个应用",
         "switch_next_app": "切到下一个应用",
+        "hide_other_apps": "隐藏其他应用",
         "toggle_full_screen": "切换当前窗口全屏",
         "mission_control": "打开任务控制中心",
         "application_windows": "显示当前应用窗口",
@@ -11133,6 +11134,17 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "switchtonextapplication": "switch_next_app",
         "gotonextapp": "switch_next_app",
         "movetonextapp": "switch_next_app",
+        "隐藏其他应用": "hide_other_apps",
+        "隐藏其它应用": "hide_other_apps",
+        "隐藏所有其他应用": "hide_other_apps",
+        "隐藏所有其它应用": "hide_other_apps",
+        "只显示当前应用": "hide_other_apps",
+        "只保留当前应用": "hide_other_apps",
+        "只留下当前应用": "hide_other_apps",
+        "hideotherapps": "hide_other_apps",
+        "hideallotherapps": "hide_other_apps",
+        "showonlycurrentapp": "hide_other_apps",
+        "showonlycurrentapplication": "hide_other_apps",
         "当前窗口最大化": "toggle_full_screen",
         "当前窗口全屏": "toggle_full_screen",
         "最大化当前窗口": "toggle_full_screen",
@@ -11461,7 +11473,7 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
         return ""
     key = str(parsed.get("key") or "").strip().lower()
     modifiers = frozenset(str(item).strip().lower() for item in parsed.get("modifiers") or [])
-    if not key or not modifiers.issubset({"command", "shift"}):
+    if not key or not modifiers.issubset({"command", "shift", "option"}):
         return ""
     mapping = {
         ("c", frozenset({"command"})): "copy",
@@ -11477,6 +11489,7 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
         ("w", frozenset({"command"})): "close_tab",
         ("n", frozenset({"command"})): "new_window",
         ("r", frozenset({"command"})): "refresh",
+        ("h", frozenset({"command", "option"})): "hide_other_apps",
     }
     return mapping.get((key, modifiers), "")
 
