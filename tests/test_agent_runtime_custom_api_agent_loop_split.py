@@ -7479,6 +7479,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.music_app_open_and_play",
         "input": {"app_name": "Spotify"},
     }
+    assert daily_desktop_intent_tool_request("把 Spotify 打开然后播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("把网易云打开然后播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "网易云音乐"},
+    }
+    assert daily_desktop_intent_tool_request("Spotify 随便放一首", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("网易云给我放点歌", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "网易云音乐"},
+    }
     assert daily_desktop_intent_tool_requests("打开 Spotify 播放周杰伦", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -7710,6 +7730,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_open_and_play",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("把 Apple Music 打开然后播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("打开 Apple Music 播放音乐", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
@@ -7746,6 +7771,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {},
     }
     assert daily_desktop_intent_tool_request("Apple Music 放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 随便播一首", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
         "input": {},

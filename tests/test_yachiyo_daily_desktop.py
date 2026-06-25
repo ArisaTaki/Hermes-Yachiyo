@@ -3875,6 +3875,8 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("Could you launch Spotify and play music?", "media.music_app_open_and_play", {"app_name": "Spotify"}),
         ("能帮我播放 Apple Music 吗", "media.apple_music_open_and_play", {}),
         ("能不能直接播个 Apple Music", "media.apple_music_open_and_play", {}),
+        ("把 Apple Music 打开然后播放", "media.apple_music_open_and_play", {}),
+        ("Apple Music 随便播一首", "media.apple_music_open_and_play", {}),
         ("你能不能帮我播放音乐", "media.apple_music_open_and_play", {}),
         ("帮我在 Apple Music 播放点音乐", "media.apple_music_open_and_play", {}),
         ("打开音乐听听", "media.apple_music_open_and_play", {}),
@@ -3882,6 +3884,10 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("打开音乐听一下", "media.apple_music_open_and_play", {}),
         ("can you play some music?", "media.apple_music_open_and_play", {}),
         ("put on some music", "media.apple_music_open_and_play", {}),
+        ("把 Spotify 打开然后播放", "media.music_app_open_and_play", {"app_name": "Spotify"}),
+        ("把网易云打开然后播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
+        ("Spotify 随便放一首", "media.music_app_open_and_play", {"app_name": "Spotify"}),
+        ("网易云给我放点歌", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
     )
 
     for prompt, tool_name, tool_input in cases:

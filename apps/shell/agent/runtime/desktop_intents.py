@@ -764,6 +764,22 @@ def daily_desktop_intent_tool_requests(
         if "media.apple_music_status" in allowed:
             return [_request("media.apple_music_status", {})]
         return []
+    generic_music_play_app = _music_app_generic_play_open_name(context)
+    if generic_music_play_app:
+        if generic_music_play_app == "Music":
+            if "media.apple_music_open_and_play" in allowed:
+                return [_request("media.apple_music_open_and_play", {})]
+            if "media.apple_music_control" in allowed:
+                return [_request("media.apple_music_control", {"action": "play"})]
+            return []
+        if "media.music_app_open_and_play" in allowed:
+            return [
+                _request(
+                    "media.music_app_open_and_play",
+                    {"app_name": generic_music_play_app},
+                )
+            ]
+        return []
     apple_music_search_play = _apple_music_search_play_query(context)
     if apple_music_search_play and "media.apple_music_play" in allowed:
         return [_request("media.apple_music_play", {"query": apple_music_search_play})]
@@ -12936,6 +12952,13 @@ def _known_music_app_name(value: str) -> str:
 
 
 def _music_app_generic_play_open_name(text: str) -> str:
+    if re.search(
+        r"(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找下|找找|"
+        r"\bsearch\b|\bfind\b|\blook\s+up\b)",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ):
+        return ""
     patterns = (
         r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
@@ -12947,6 +12970,16 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:听听|听一下|听下|听))"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:给我|帮我|请|麻烦)?\s*(?:随便|随机)?"
+        r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
+        r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
+        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:打开|启动|运行|拉起|开启)\s*(?:一下)?\s*"
+        r"(?:(?:并|然后|后|之后|再|接着)\s*)?(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
         r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
