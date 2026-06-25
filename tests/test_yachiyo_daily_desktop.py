@@ -784,6 +784,16 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"reason": "user asked to capture the screen"},
         ),
         (
+            "截取选区",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_selection"},
+        ),
+        (
+            "capture selected area",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_selection"},
+        ),
+        (
             "打开截图工具",
             "desktop.safe_shortcut",
             {"action": "screenshot_toolbar"},
@@ -795,6 +805,16 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
         ),
         (
             "open screenshot toolbar",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_toolbar"},
+        ),
+        (
+            "打开录屏工具",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_toolbar"},
+        ),
+        (
+            "screen recording toolbar",
             "desktop.safe_shortcut",
             {"action": "screenshot_toolbar"},
         ),

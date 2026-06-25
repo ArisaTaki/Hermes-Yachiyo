@@ -135,6 +135,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "application_windows": ("down", ("control",), "application windows"),
     "spotlight_search": ("space", ("command",), "spotlight search"),
     "emoji_picker": ("space", ("control", "command"), "emoji picker"),
+    "screenshot_selection": ("4", ("command", "shift"), "screenshot selection"),
     "screenshot_toolbar": ("5", ("command", "shift"), "screenshot toolbar"),
     "lock_screen": ("q", ("control", "command"), "lock screen"),
     "force_quit_dialog": ("escape", ("command", "option"), "force quit dialog"),

@@ -1366,7 +1366,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
-            "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/focus address bar/new tab/new private window/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/screenshot toolbar/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/bookmark page/history/DevTools/page zoom/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
+            "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/focus address bar/new tab/new private window/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/screenshot selection/screenshot or recording toolbar/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/bookmark page/history/DevTools/page zoom/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map Finder open/focus followed by new folder/directory to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_folder; "
             "map Finder open/focus followed by rename selected item, get info/show info, parent folder, or copy selected file to app.open_and_safe_shortcut or app.focus_and_safe_shortcut actions rename_selected, finder_get_info, parent_folder, or copy; "
             "map communication app open/focus followed by new message/new chat/compose message to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_message; "
@@ -2296,7 +2296,8 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "application_windows": "显示当前应用窗口",
         "spotlight_search": "打开 Spotlight",
         "emoji_picker": "打开 Emoji 面板",
-        "screenshot_toolbar": "打开截图工具",
+        "screenshot_selection": "截取选区截图",
+        "screenshot_toolbar": "打开截图/录屏工具",
         "lock_screen": "锁屏",
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",

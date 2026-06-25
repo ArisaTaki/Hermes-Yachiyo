@@ -692,6 +692,7 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "application_windows"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "spotlight_search"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "emoji_picker"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "screenshot_selection"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "screenshot_toolbar"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "lock_screen"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "force_quit_dialog"})
@@ -4330,6 +4331,7 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
 
     spotlight = desktop_mod.desktop_safe_shortcut("spotlight_search")
     emoji = desktop_mod.desktop_safe_shortcut("emoji_picker")
+    screenshot_selection = desktop_mod.desktop_safe_shortcut("screenshot_selection")
     screenshot_toolbar = desktop_mod.desktop_safe_shortcut("screenshot_toolbar")
     lock_screen = desktop_mod.desktop_safe_shortcut("lock_screen")
     finder_quick_look = desktop_mod.desktop_safe_shortcut("finder_quick_look")
@@ -4349,6 +4351,13 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
         "key_code": 49,
         "shortcut_action": "emoji_picker",
         "shortcut_label": "emoji picker",
+    }
+    assert screenshot_selection["summary"] == "Executed safe shortcut: screenshot selection"
+    assert screenshot_selection["data"] == {
+        "key": "4",
+        "modifiers": ["command", "shift"],
+        "shortcut_action": "screenshot_selection",
+        "shortcut_label": "screenshot selection",
     }
     assert screenshot_toolbar["summary"] == "Executed safe shortcut: screenshot toolbar"
     assert screenshot_toolbar["data"] == {
@@ -4377,12 +4386,14 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
     assert "key code keyCodeValue using {control down, command down}" in calls[1][0][2]
     assert calls[1][0][-1] == "49"
     assert "keystroke keyName using {command down, shift down}" in calls[2][0][2]
-    assert calls[2][0][-1] == "5"
-    assert "keystroke keyName using {control down, command down}" in calls[3][0][2]
-    assert calls[3][0][-1] == "q"
-    assert "key code keyCodeValue" in calls[4][0][2]
-    assert " using " not in calls[4][0][2]
-    assert calls[4][0][-1] == "49"
+    assert calls[2][0][-1] == "4"
+    assert "keystroke keyName using {command down, shift down}" in calls[3][0][2]
+    assert calls[3][0][-1] == "5"
+    assert "keystroke keyName using {control down, command down}" in calls[4][0][2]
+    assert calls[4][0][-1] == "q"
+    assert "key code keyCodeValue" in calls[5][0][2]
+    assert " using " not in calls[5][0][2]
+    assert calls[5][0][-1] == "49"
 
 
 def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeypatch) -> None:

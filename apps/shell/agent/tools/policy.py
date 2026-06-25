@@ -130,6 +130,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "application_windows",
     "spotlight_search",
     "emoji_picker",
+    "screenshot_selection",
     "screenshot_toolbar",
     "lock_screen",
     "force_quit_dialog",
