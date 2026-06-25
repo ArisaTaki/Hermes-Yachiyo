@@ -759,6 +759,8 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.click_ui_element",
+        "desktop.safe_key",
+        "desktop.submit_foreground",
     ]
 
     assert daily_desktop_intent_tool_requests("打开 Finder 找下载文件", allowed_tools) == [
@@ -894,6 +896,60 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
         daily_desktop_intent_tool_requests(
             "在 Slack 搜索 Alice 并选择第一个结果",
             ["app.focus_and_safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+        )
+        == []
+    )
+    assert daily_desktop_intent_tool_requests("在 Slack 搜索 Alice 后按下箭头再确认", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack search Alice then press down arrow and enter",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "Slack search Alice then press down arrow and enter",
+            ["app.focus_and_safe_shortcut", "desktop.safe_type_text", "desktop.safe_key", "desktop.hotkey"],
         )
         == []
     )

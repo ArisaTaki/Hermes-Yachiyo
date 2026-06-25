@@ -2404,6 +2404,50 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
             "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
         },
     ]
+    assert daily_desktop_entrypoint_requests("在 Slack 搜索 Alice 后按下箭头再确认") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack search Alice then press down arrow and enter") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
     assert daily_desktop_entrypoint_requests("微信打开搜索") == [
         {
             "protocol": "json_fallback",

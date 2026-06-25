@@ -638,6 +638,14 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
     ):
         return clipboard_to_note_sequence
+    app_search_navigation_sequence = _app_open_or_focus_search_navigation_tool_requests(context)
+    if app_search_navigation_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in app_search_navigation_sequence
+        ):
+            return app_search_navigation_sequence
+        return []
     english_app_search_sequence = _english_app_scoped_search_tool_requests(context)
     if english_app_search_sequence and all(
         str(request.get("tool") or "") in allowed for request in english_app_search_sequence
@@ -9690,6 +9698,112 @@ def _find_then_open_first_result(value: str) -> tuple[str, str, int] | None:
         )
         return query, target, click_count
     return None
+
+
+def _app_open_or_focus_search_navigation_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, raw_app, app_name, followup = shorthand_match
+    else:
+        split = _known_app_prefix_split(_strip_app_search_scope_prefix(text))
+        if not split:
+            return []
+        raw_app, app_name, followup = split
+        mode = "focus"
+    if (
+        not app_name
+        or app_name in _BROWSER_APP_NAMES
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return []
+    parsed = _app_search_navigation_followup(followup)
+    if not parsed:
+        return []
+    query, safe_key, should_submit = parsed
+    requests = [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": query}),
+        _request("desktop.safe_key", safe_key),
+    ]
+    if should_submit:
+        requests.append(_request("desktop.submit_foreground", {"action": "confirm"}))
+    return requests
+
+
+def _app_search_navigation_followup(
+    value: str,
+) -> tuple[str, dict[str, Any], bool] | None:
+    followup = _strip_query(value)
+    patterns = (
+        r"^(?:搜索(?!框|栏)|搜一下|搜(?!索(?:$|框|栏)|框|栏)|查找(?!框)|"
+        r"查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*"
+        r"(?P<query>.+?)\s*"
+        r"(?:然后|并且|并|之后|随后|再|后(?!退)|接着)\s*"
+        r"(?P<tail>.+)$",
+        r"^(?:find|search|look\s+for)\s+(?:for\s+)?(?P<query_en>.+?)\s+"
+        r"(?:and\s+then|then|and)\s+(?P<tail_en>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_query = str(match.groupdict().get("query") or match.groupdict().get("query_en") or "")
+        raw_tail = str(match.groupdict().get("tail") or match.groupdict().get("tail_en") or "")
+        query = _strip_search_query(raw_query)
+        key_text, should_submit = _app_search_navigation_key_and_submit(raw_tail)
+        if not query or not key_text:
+            continue
+        safe_key = _desktop_safe_key(key_text) or _desktop_safe_key(f"按{key_text}")
+        if safe_key:
+            return query, safe_key, should_submit
+    return None
+
+
+def _app_search_navigation_key_and_submit(value: str) -> tuple[str, bool]:
+    tail = _strip_query(value)
+    if not tail:
+        return "", False
+    should_submit = _app_search_navigation_tail_has_submit(tail)
+    key_text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+        r"(?:enter|return|confirm|ok)$",
+        "",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    key_text = re.sub(
+        r"\s*(?:然后|并且|并|之后|随后|再|接着)?\s*"
+        r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定)$",
+        "",
+        key_text,
+        flags=re.IGNORECASE,
+    )
+    key_text = _strip_query(key_text)
+    if key_text == tail and _desktop_safe_key(key_text) is None:
+        return "", False
+    return key_text, should_submit
+
+
+def _app_search_navigation_tail_has_submit(value: str) -> bool:
+    tail = str(value or "").strip()
+    return bool(
+        re.search(
+            r"(?:然后|并且|并|之后|随后|再|接着)?\s*"
+            r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定)$",
+            tail,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+            r"(?:enter|return|confirm|ok)$",
+            tail,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _first_result_target_label(value: str) -> str:
