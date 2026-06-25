@@ -233,6 +233,32 @@ def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None
             }
         ]
 
+    internal_page_cases = (
+        ("Chrome 打开下载内容", "app.focus_and_safe_shortcut", "chrome://downloads/"),
+        ("Chrome 打开书签", "app.focus_and_safe_shortcut", "chrome://bookmarks/"),
+        ("Chrome 打开扩展程序", "app.focus_and_safe_shortcut", "chrome://extensions/"),
+        ("打开 Chrome 下载内容", "app.open_and_safe_shortcut", "chrome://downloads/"),
+        ("open Chrome extensions", "app.open_and_safe_shortcut", "chrome://extensions/"),
+    )
+    for prompt, tool_name, internal_url in internal_page_cases:
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": internal_url},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+            },
+        ]
+
 
 def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -> None:
     cases = (

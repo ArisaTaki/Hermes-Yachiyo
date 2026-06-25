@@ -1366,6 +1366,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit foreground text input by visible input field label to desktop.type_into_ui_element; "
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
+            "map Chrome/Edge/Brave downloads, bookmarks, and extensions page requests to app open/focus address bar, desktop.safe_type_text with the whitelisted internal URL, then desktop.search_submit; "
             "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/focus address bar/new tab/new private window/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/screenshot selection/screenshot or recording toolbar/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/bookmark page/history/DevTools/page zoom/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map Finder open/focus followed by new folder/directory to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_folder; "
             "map Finder open/focus followed by rename selected item, get info/show info, parent folder, or copy selected file to app.open_and_safe_shortcut or app.focus_and_safe_shortcut actions rename_selected, finder_get_info, parent_folder, or copy; "

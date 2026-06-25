@@ -188,6 +188,16 @@ _BROWSER_APP_NAMES = {
     "Microsoft Edge",
     "Safari",
 }
+_BROWSER_INTERNAL_PAGE_SCHEMES = {
+    "Brave Browser": "brave",
+    "Google Chrome": "chrome",
+    "Microsoft Edge": "edge",
+}
+_BROWSER_INTERNAL_PAGE_PATHS = {
+    "downloads": "downloads",
+    "bookmarks": "bookmarks",
+    "extensions": "extensions",
+}
 
 _COMMUNICATION_APP_NAMES = {
     "DingTalk",
@@ -838,6 +848,12 @@ def daily_desktop_intent_tool_requests(
     browser_open_request = _browser_open_url_tool_request(context, allowed)
     if browser_open_request:
         return [browser_open_request]
+    browser_internal_page_sequence = _browser_internal_page_tool_requests(context)
+    if browser_internal_page_sequence and all(
+        str(request.get("tool") or "") in allowed
+        for request in browser_internal_page_sequence
+    ):
+        return browser_internal_page_sequence
     schedule_create_request = _schedule_create_tool_request(context)
     if schedule_create_request and str(schedule_create_request.get("tool") or "") in allowed:
         return [schedule_create_request]
@@ -1919,6 +1935,75 @@ def _browser_open_url_tool_request(text: str, allowed: set[str]) -> dict[str, An
     if browser_open_target_url and "browser.open_url" in allowed:
         return _request("browser.open_url", {"url": browser_open_target_url})
     return None
+
+
+def _browser_internal_page_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _app_open_or_focus_browser_followup_match(text)
+    if not parsed:
+        return []
+    mode, _raw_app, app_name, followup = parsed
+    scheme = _BROWSER_INTERNAL_PAGE_SCHEMES.get(app_name)
+    if not scheme:
+        return []
+    path = _browser_internal_page_path(followup)
+    if not path:
+        return []
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "focus_address_bar"},
+        ),
+        _request("desktop.safe_type_text", {"text": f"{scheme}://{path}/"}),
+        _request("desktop.search_submit", {}),
+    ]
+
+
+def _browser_internal_page_path(value: str) -> str:
+    phrase = _strip_query(value)
+    phrase = re.sub(
+        r"^(?:打开|开启|查看|看看|显示|进入|启动|拉起|open|show|view|go\s+to)\s*",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"\s*(?:一下|下|页面|页|page|panel|pane|manager|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    compact = re.sub(r"[\s._/-]+", "", phrase.lower())
+    mapping = {
+        "下载": "downloads",
+        "下载内容": "downloads",
+        "下载列表": "downloads",
+        "下载记录": "downloads",
+        "下载管理": "downloads",
+        "downloads": "downloads",
+        "download": "downloads",
+        "downloadslist": "downloads",
+        "downloadhistory": "downloads",
+        "downloadmanager": "downloads",
+        "书签": "bookmarks",
+        "书签栏": "bookmarks",
+        "书签页面": "bookmarks",
+        "书签管理": "bookmarks",
+        "书签管理器": "bookmarks",
+        "bookmarks": "bookmarks",
+        "bookmark": "bookmarks",
+        "bookmarkmanager": "bookmarks",
+        "扩展": "extensions",
+        "扩展程序": "extensions",
+        "扩展页面": "extensions",
+        "扩展管理": "extensions",
+        "扩展管理器": "extensions",
+        "插件": "extensions",
+        "插件管理": "extensions",
+        "extensions": "extensions",
+        "extension": "extensions",
+        "extensionmanager": "extensions",
+    }
+    return _BROWSER_INTERNAL_PAGE_PATHS.get(mapping.get(compact, ""), "")
 
 
 def _coalesce_app_foreground_sequence(

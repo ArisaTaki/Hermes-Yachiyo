@@ -2235,6 +2235,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_requests("Chrome 打开下载内容", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "chrome://downloads/"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("open Chrome extensions", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "chrome://extensions/"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
     assert daily_desktop_intent_tool_request("打开 GitHub", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
