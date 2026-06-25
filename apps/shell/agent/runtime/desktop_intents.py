@@ -9634,6 +9634,12 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
         ),
         (
             zh_prefix
+            + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)(?:到|至)?\s*"
+            + r"(?P<direction_near>下面|下方|上面|上方)"
+            + r"(?:一点|点|一些|一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            zh_prefix
             + r"(?P<direction>向下|往下|朝下|下|向上|往上|朝上|上)"
             + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)"
             + rf"(?:\s*{page_count.format(name='count')}\s*(?:页|屏|次))?"
@@ -9680,6 +9686,7 @@ def _desktop_safe_scroll(text: str) -> dict[str, Any] | None:
         groups = match.groupdict()
         direction = (
             groups.get("direction_extent")
+            or groups.get("direction_near")
             or groups.get("direction")
             or groups.get("direction_phrase")
             or groups.get("direction_target")
@@ -9725,6 +9732,8 @@ def _scroll_direction_is_up(value: str) -> bool:
         "上滚",
         "上翻",
         "上一页",
+        "上面",
+        "上方",
         "页面顶部",
         "顶部",
         "顶端",

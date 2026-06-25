@@ -981,6 +981,27 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
     ]
 
 
+def test_daily_desktop_entrypoint_routes_colloquial_safe_scroll_language() -> None:
+    cases = (
+        ("滚动到下面一点", {"direction": "down", "pages": 1}),
+        ("滑到下方一点", {"direction": "down", "pages": 1}),
+        ("滚动到上面一点", {"direction": "up", "pages": 1}),
+        ("滑到上方一点", {"direction": "up", "pages": 1}),
+    )
+
+    for prompt, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_scroll",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.safe_scroll"
+
+
 def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:
     cases = (
         ("你可以帮我复制一下吗", "desktop.safe_shortcut", {"action": "copy"}),

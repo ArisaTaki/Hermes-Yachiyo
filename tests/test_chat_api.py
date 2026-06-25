@@ -8048,7 +8048,7 @@ def test_send_message_executes_direct_safe_scroll_page_task(tmp_path, monkeypatc
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
     try:
-        result = api.send_message("翻到下一页")
+        result = api.send_message("滚动到下面一点")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]
