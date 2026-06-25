@@ -1206,8 +1206,25 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.volume"
 
-    assert daily_desktop_entrypoint_requests("亮一点") == []
-    assert daily_desktop_entrypoint_requests("暗一点") == []
+    brightness_cases = (
+        ("亮一点", {"action": "up", "step": 2}),
+        ("再亮一点", {"action": "up", "step": 2}),
+        ("暗一点", {"action": "down", "step": 2}),
+        ("调暗一点", {"action": "down", "step": 2}),
+    )
+    for prompt, tool_input in brightness_cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.brightness",
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "system.brightness"
+
+    assert daily_desktop_entrypoint_requests("漂亮一点") == []
 
 
 def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_request() -> None:

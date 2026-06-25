@@ -3725,7 +3725,7 @@ def test_send_message_executes_direct_system_brightness_task(tmp_path, monkeypat
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.system_brightness", fake_system_brightness)
     try:
-        result = api.send_message("屏幕亮一点")
+        result = api.send_message("亮一点")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])

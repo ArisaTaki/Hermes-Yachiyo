@@ -5459,6 +5459,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.brightness",
         "input": {"action": "up", "step": 2},
     }
+    assert daily_desktop_intent_tool_request("亮一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("再亮一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("亮一点点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "up", "step": 1},
+    }
     assert daily_desktop_intent_tool_request("亮度调高三下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.brightness",
@@ -5474,11 +5489,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "system.brightness",
         "input": {"action": "down", "step": 2},
     }
+    assert daily_desktop_intent_tool_request("暗一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "down", "step": 2},
+    }
+    assert daily_desktop_intent_tool_request("调暗一点", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.brightness",
+        "input": {"action": "down", "step": 2},
+    }
     assert daily_desktop_intent_tool_request("dim the screen", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "system.brightness",
         "input": {"action": "down", "step": 2},
     }
+    assert daily_desktop_intent_tool_request("漂亮一点", allowed_tools) is None
     assert daily_desktop_intent_tool_request("亮度调到 50%", allowed_tools) is None
     assert daily_desktop_intent_tool_request("把 047e43ac 复制到剪贴板", allowed_tools) == {
         "protocol": "json_fallback",

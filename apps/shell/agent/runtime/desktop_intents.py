@@ -3479,12 +3479,14 @@ def _system_brightness_request(text: str) -> dict[str, Any] | None:
     if re.search(exact_or_settings, text, flags=re.IGNORECASE):
         return None
     up_patterns = (
+        rf"^(?:再|稍微|略微)?(?:调亮(?:一点点|一点|点|一些|些)?|亮一点点|亮一点|亮点|亮一些|亮些)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调高|提高|调亮|变亮|亮一点|亮点|亮一些|亮些|亮一点点)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:调高|提高|调亮|增大|加大).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:屏幕|显示器)?(?:太暗|有点暗|太黑|看不清)",
         rf"\b(?:brightness\s+up|increase\s+(?:the\s+)?brightness|brighten\s+(?:the\s+)?(?:screen|display)|make\s+(?:the\s+)?(?:screen|display)\s+brighter)\b",
     )
     down_patterns = (
+        rf"^(?:再|稍微|略微)?(?:调暗(?:一点点|一点|点|一些|些)?|暗一点点|暗一点|暗点|暗一些|暗些)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:亮度|屏幕|显示器).{{0,6}}(?:调低|降低|调暗|变暗|暗一点|暗点|暗一些|暗些|暗一点点)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:调低|降低|调暗|减小).{{0,6}}(?:亮度|屏幕|显示器)(?:\s*{count}\s*(?:次|下|格))?",
         rf"(?:屏幕|显示器)?(?:太亮|有点亮|刺眼|晃眼)",
