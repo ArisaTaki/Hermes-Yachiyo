@@ -3929,6 +3929,18 @@ def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.clipboard_write", fake_clipboard_write)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        lambda app_name: (_ for _ in ()).throw(
+            AssertionError(f"clipboard write task should not focus app: {app_name}")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        lambda action: (_ for _ in ()).throw(
+            AssertionError(f"clipboard write task should not press shortcut: {action}")
+        ),
+    )
     try:
         result = api.send_message("剪贴板写入 047e43ac")
         task = runtime.state.get_task(result["task_id"])
@@ -3946,7 +3958,7 @@ def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch
         assert clipboard_calls == ["047e43ac"]
         assert run["status"] == "completed"
 
-        for text in ("设置剪贴板为 hello", "set clipboard to hello"):
+        for text in ("设置剪贴板为 hello", "set clipboard to hello", "把 hello 复制一下"):
             result = api.send_message(text)
             task = runtime.state.get_task(result["task_id"])
             link = service.get_task_run_link(result["task_id"])

@@ -1063,6 +1063,17 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
             "input": {"text": "hello"},
         }
     ]
+    assert daily_desktop_entrypoint_requests("把 hello 复制一下") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "把 hello 复制一下",
+        allowed_tools=("app.focus_and_safe_shortcut",),
+    ) == []
     assert daily_desktop_entrypoint_requests("复制选中文字并读取剪贴板") == [
         {
             "protocol": "json_fallback",

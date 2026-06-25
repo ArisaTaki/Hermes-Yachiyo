@@ -5825,6 +5825,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello"},
     }
+    assert daily_desktop_intent_tool_request("把 hello 复制一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "clipboard.write",
+        "input": {"text": "hello"},
+    }
+    assert daily_desktop_intent_tool_request(
+        "把 hello 复制一下",
+        ["app.focus_and_safe_shortcut"],
+    ) is None
+    assert daily_desktop_intent_tool_request("把当前窗口内容复制一下", ["clipboard.write"]) is None
     assert daily_desktop_intent_tool_request("复制一下 hello world", allowed_tools) is None
     assert daily_desktop_intent_tool_request("copy hello world to clipboard", allowed_tools) == {
         "protocol": "json_fallback",

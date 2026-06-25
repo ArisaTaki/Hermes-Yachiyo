@@ -488,6 +488,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in current_page_link_copy_sequence
     ):
         return current_page_link_copy_sequence
+    direct_clipboard_text = _clipboard_write_text(context)
+    if direct_clipboard_text:
+        if "clipboard.write" in allowed:
+            return [_request("clipboard.write", {"text": direct_clipboard_text})]
+        return []
     direct_safe_shortcut = _desktop_safe_shortcut_action(context)
     if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
         return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
@@ -3738,6 +3743,7 @@ def _clipboard_write_text(text: str) -> str:
         r"(?:system\s+)?clipboard\b",
         r"\b(?:copy|write)\s+(?:to\s+)?(?:the\s+)?(?:system\s+)?clipboard\s*[:：]\s*"
         r"(?P<text>.+)$",
+        r"(?:把|将)\s*(?P<text>[^。！？!?，,\n]+?)\s*(?:复制|拷贝)(?:一下|下)?\s*(?:吧|给我)?$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -3747,6 +3753,16 @@ def _clipboard_write_text(text: str) -> str:
         if cleaned:
             return cleaned
     return ""
+
+
+def _looks_like_postposed_clipboard_copy_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(?:把|将)\s*[^。！？!?，,\n]+?\s*(?:复制|拷贝)(?:一下|下)?\s*(?:吧|给我)?$",
+            str(text or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _clipboard_read_request(text: str) -> bool:
@@ -3872,7 +3888,72 @@ def _normalize_clipboard_text(value: str) -> str:
     text = re.sub(r"^(?:一下|下|这个|那个)\s*", "", text)
     text = text.strip(" 「」『』“”\"'`")
     compact = re.sub(r"[\s._-]+", "", text.lower())
-    if compact in {"", "这段", "这段文字", "这段文本", "这个", "这个文本", "text", "thistext"}:
+    generic_sources = {
+        "",
+        "这段",
+        "这段文字",
+        "这段文本",
+        "这个",
+        "这个文本",
+        "这个内容",
+        "那个",
+        "那个内容",
+        "它",
+        "当前",
+        "当前内容",
+        "当前文字",
+        "当前文本",
+        "当前窗口",
+        "当前窗口内容",
+        "当前页面",
+        "当前页面内容",
+        "当前网页",
+        "当前网页内容",
+        "当前网址",
+        "当前链接",
+        "当前页面链接",
+        "当前网页链接",
+        "当前选中",
+        "当前选中内容",
+        "当前选中文字",
+        "当前选中文本",
+        "选中",
+        "选中内容",
+        "选中文字",
+        "选中文本",
+        "选区",
+        "选择内容",
+        "高亮内容",
+        "窗口内容",
+        "页面内容",
+        "网页内容",
+        "文件",
+        "这个文件",
+        "text",
+        "thistext",
+        "selectedtext",
+        "selectedcontent",
+        "selection",
+        "currentselection",
+        "currenttext",
+        "currentcontent",
+        "currentpage",
+        "currenturl",
+        "currentlink",
+        "this",
+        "it",
+    }
+    if compact in generic_sources:
+        return ""
+    if re.fullmatch(
+        r"(?:当前|现在|这个|该)?(?:窗口|界面|屏幕|页面|网页|应用|app|ui)(?:内容|文字|文本|选区)?",
+        compact,
+    ):
+        return ""
+    if re.fullmatch(
+        r"(?:当前|现在|这个|该)?(?:选中|选取|高亮|选择)(?:的)?(?:内容|文字|文本|选区)?",
+        compact,
+    ):
         return ""
     return text
 
@@ -4438,6 +4519,8 @@ def _looks_like_bare_safe_key_followup(value: str) -> bool:
 
 
 def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
+    if _looks_like_postposed_clipboard_copy_request(text):
+        return None
     postposed_open = _app_postposed_open_followup_match(text)
     if postposed_open:
         mode, _raw_app, app_name, followup = postposed_open
