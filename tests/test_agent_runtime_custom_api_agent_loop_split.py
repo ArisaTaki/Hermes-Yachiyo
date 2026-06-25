@@ -3261,6 +3261,71 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             },
         },
     ]
+    selected_calendar_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容创建成日历事件",
+        "把当前选中文字加入日历",
+        "用选中内容新建日程",
+        "create a calendar event from selected text",
+        "add selected text to calendar",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_calendar_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "create a calendar event from selected text",
+            ["calendar.create_event"],
+        )
+        == []
+    )
+    clipboard_calendar_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把剪贴板内容创建成日历事件",
+        "把剪贴板内容加入日历",
+        "用剪贴板内容新建日程",
+        "create a calendar event from clipboard",
+        "add clipboard contents to calendar",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == clipboard_calendar_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把剪贴板内容加入日历",
+            ["clipboard.read", "calendar.create_event"],
+        )
+        == []
+    )
     assert daily_desktop_intent_tool_requests("创建明天上午10点开会的日程", allowed_tools) == [
         {
             "protocol": "json_fallback",
