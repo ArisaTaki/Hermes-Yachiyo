@@ -1527,7 +1527,13 @@ class ChatAPI:
         }
         user_metadata = self._merge_user_metadata(user_metadata, metadata) or {}
         runnable_daily_desktop_requests: list[dict[str, Any]] = []
-        if current_context.get("conversation_kind") != "group" and runnable.get("kind") == "agent":
+        if (
+            runnable.get("kind") == "agent"
+            and (
+                current_context.get("conversation_kind") != "group"
+                or keep_manual_group
+            )
+        ):
             runnable_daily_desktop_requests = self._daily_desktop_runnable_policy_overlay_requests(
                 user_goal,
                 user_metadata,

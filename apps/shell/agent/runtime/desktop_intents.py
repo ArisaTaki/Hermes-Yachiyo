@@ -1476,19 +1476,17 @@ def _typed_input_followup_requests(
     text: str,
     previous_requests: list[dict[str, Any]],
 ) -> tuple[bool, list[dict[str, Any]]]:
+    input_request = _latest_sequence_typed_input_request(previous_requests)
+    if input_request is not None and _is_input_return_followup(text, input_request):
+        return True, [_request("desktop.hotkey", {"key": "return", "modifiers": []})]
     search_text_request = _latest_sequence_search_text_request(previous_requests)
     if search_text_request is not None and _is_input_return_followup(
         text,
         {"input": {"target": "搜索"}},
     ):
         return True, [_request("desktop.search_submit", {})]
-    input_request = _latest_sequence_typed_input_request(previous_requests)
     if input_request is None:
         return False, []
-    if _is_input_return_followup(text, input_request):
-        if _typed_input_request_targets_search(input_request):
-            return True, [_request("desktop.search_submit", {})]
-        return True, [_request("desktop.hotkey", {"key": "return", "modifiers": []})]
     submit_action = _external_submit_followup_action(text)
     if submit_action:
         return True, [_request("desktop.submit_foreground", {"action": submit_action})]
@@ -4951,6 +4949,11 @@ def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, An
     if not shorthand_match:
         return []
     mode, _raw_app, app_name, followup = shorthand_match
+    if _looks_like_explicit_text_input_target(followup) and _typed_text_has_return_followup(
+        followup,
+        "搜索",
+    ):
+        return []
     payload = _desktop_type_into_ui_element(followup)
     if not _is_search_text_input_payload(payload):
         return []
@@ -4998,6 +5001,16 @@ def _strip_app_search_scope_prefix(text: str) -> str:
         _strip_query(text),
         flags=re.IGNORECASE,
     ).strip()
+
+
+def _looks_like_explicit_text_input_target(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:搜索框|搜索栏|输入框|文本框|地址栏|search\s+(?:box|field|input)|address\s+bar)",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
@@ -6152,6 +6165,8 @@ def _app_show_or_open_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_browser_navigation_followup(text[match.end() :]) and _browser_app_name(raw_app):
+            continue
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
         if _looks_like_screen_observation_target(raw_app):
@@ -6255,6 +6270,8 @@ def _app_show_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_browser_navigation_followup(text[match.end() :]) and _browser_app_name(raw_app):
+            continue
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
         if _looks_like_screen_observation_target(raw_app):
@@ -6293,6 +6310,8 @@ def _app_hide_name(text: str) -> str:
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_browser_navigation_followup(text[match.end() :]) and _browser_app_name(raw_app):
+            continue
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
         if _looks_like_common_path_target(raw_app):
@@ -6464,17 +6483,21 @@ def _app_open_name(text: str) -> str:
         return ""
 
     patterns = (
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?:可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*(?P<verb>打开|启动|运行|拉起|开启|开)\s*(?:一下|下)?"
         r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
-        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?P<app>[^。！？!?，,]+)",
-        r"(?P<verb>open|launch|start)\s+(?P<app>[^.!?]+)",
+        r"^\s*(?:可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*"
+        r"(?P<app>[^。！？!?，,]+?)(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
+        r"^\s*(?:please\s+)?(?P<verb>open|launch|start)\s+"
+        r"(?P<app>[^.!?]+?)(?=\s*(?:and|then|if|$|[.!?]))",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
         raw_app = match.group("app")
+        if _looks_like_browser_navigation_followup(text[match.end() :]) and _browser_app_name(raw_app):
+            continue
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
         if _looks_like_common_path_target(raw_app):
@@ -6495,6 +6518,21 @@ def _app_open_name(text: str) -> str:
         if app_name:
             return app_name
     return ""
+
+
+def _looks_like_browser_navigation_followup(value: str) -> bool:
+    return bool(
+        re.match(
+            r"\s*(?:并|然后|之后|再)\s*(?:打开|访问|浏览|前往|去|搜索|搜)\s*\S+",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _browser_app_name(value: str) -> str:
+    app_name = _generic_browser_open_app_name(value) or _normalize_app_name(value)
+    return app_name if app_name in _BROWSER_APP_NAMES else ""
 
 
 def _system_settings_open_name(text: str) -> str:

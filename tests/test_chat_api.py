@@ -8026,6 +8026,101 @@ def test_bound_agent_session_daily_desktop_intent_requests_policy_overlay(tmp_pa
         store.close()
 
 
+def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    open_and_play_calls = 0
+    agent = service.create_agent(
+        {
+            "name": "Native Agent",
+            "nickname": "Native Agent",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+            "tool_policy": {
+                "allowed_tools": ["workspace.read"],
+                "approval_required": {},
+            },
+        }
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("group agent daily desktop intent should execute before model")
+        ),
+    )
+
+    def fake_music_open_and_play() -> dict:
+        nonlocal open_and_play_calls
+        open_and_play_calls += 1
+        return {
+            "ok": True,
+            "action": "media.apple_music_open_and_play",
+            "summary": "Opened Music and started playback",
+            "data": {
+                "app_name": "Music",
+                "open_ok": True,
+                "playback_ok": True,
+                "control": "play",
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    try:
+        created = api.create_group_session(
+            name="demo Channel",
+            participant_ids=[agent["agent_id"]],
+        )
+        result = api.send_message("@Native Agent 能否帮我播放apple Music?")
+        run_id = str(result.get("agent_run_id") or result.get("run_id") or "")
+        run = _wait_for_agent_run(service, run_id)
+        events = service.list_run_events(run_id)["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        policy_event = next(event for event in events if event["event_type"] == "agent.tool.policy_decision")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        messages = api.get_messages()["messages"]
+        user_message = [message for message in messages if message["role"] == "user"][-1]
+        assistant = _wait_for_assistant_content_contains(api, "已打开 Apple Music 并开始播放")
+        current = next(
+            item
+            for item in api.list_sessions()["sessions"]
+            if item["session_id"] == runtime.chat_session.session_id
+        )
+
+        assert created["ok"] is True
+        assert result["ok"] is True
+        assert result["runnable_command"] is True
+        assert open_and_play_calls == 1
+        assert run["status"] == "completed"
+        assert "已打开 Apple Music 并开始播放" in run["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["source"] == "daily_desktop_intent"
+        assert policy_event["payload"]["reason"] == "daily_desktop_policy_overlay"
+        assert policy_event["payload"]["policy_overlay"] is True
+        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert user_message["metadata"]["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert assistant["metadata"]["conversation_kind"] == "group"
+        assert assistant["metadata"]["run_status"] == "completed"
+        assert current["conversation_kind"] == "group"
+        assert current["runnable_name"] == "demo Channel"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {

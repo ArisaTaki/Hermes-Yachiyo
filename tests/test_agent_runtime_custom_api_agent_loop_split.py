@@ -5672,6 +5672,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     }
     assert daily_desktop_intent_candidates("trigger provider failure") == []
     assert daily_desktop_intent_candidates("Turn the research notes into an implementation plan.") == []
+    assert daily_desktop_intent_candidates(
+        "请做一个很长的移动端验收方案，包含信息架构、状态层级、审批提醒、"
+        "失败提示、运行详情入口、产物入口、连续审批提示、长文本完整展示、"
+        "主模型最终整理和用户下一步动作，并保留结尾标记 long-goal-tail-marker-917263"
+    ) == []
     assert daily_desktop_intent_candidates("为什么不能控制桌面？") == [
         {
             "protocol": "json_fallback",
@@ -6452,6 +6457,7 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     assert timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
     assert [event["event_type"] for event in run_events] == [
         "agent.desktop.intent_planned",
+        "agent.tool.policy_decision",
         "tool.requested",
         "tool.started",
         "tool.completed",
@@ -6465,6 +6471,10 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"query": "超时空辉夜姬"},
     }
+    assert run_events[1]["payload"]["tool"] == "media.apple_music_play"
+    assert run_events[1]["payload"]["decision"] == "allow"
+    assert run_events[1]["payload"]["reason"] == "agent_tool_policy"
+    assert run_events[1]["payload"]["policy_overlay"] is False
     assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
@@ -6569,12 +6579,17 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
     assert timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
     assert [event["event_type"] for event in run_events] == [
         "agent.desktop.intent_planned",
+        "agent.tool.policy_decision",
         "tool.requested",
         "tool.started",
         "tool.completed",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
+    assert run_events[1]["payload"]["tool"] == "media.apple_music_play"
+    assert run_events[1]["payload"]["decision"] == "allow"
+    assert run_events[1]["payload"]["reason"] == "agent_tool_policy"
+    assert run_events[1]["payload"]["policy_overlay"] is False
     assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
