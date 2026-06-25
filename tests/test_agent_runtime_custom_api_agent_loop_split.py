@@ -1440,6 +1440,54 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 新建标签页然后搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 新建标签页然后搜索 OpenAI", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Safari 新建标签页然后搜索 apple news", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "new_tab"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=apple+news"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome 后退再刷新", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "browser_back"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "refresh"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("Chrome 搜索 OpenAI 并打开第一个结果", allowed_tools) == [
         {
             "protocol": "json_fallback",

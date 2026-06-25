@@ -423,6 +423,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
     ):
         return communication_compose_sequence
+    browser_shortcut_search_sequence = _app_open_or_focus_browser_shortcut_search_tool_requests(context)
+    if browser_shortcut_search_sequence and all(
+        str(request.get("tool") or "") in allowed for request in browser_shortcut_search_sequence
+    ):
+        return browser_shortcut_search_sequence
     app_browser_search_sequence = _app_open_or_focus_browser_search_tool_requests(context)
     if app_browser_search_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_search_sequence
@@ -558,6 +563,11 @@ def daily_desktop_intent_tool_requests(
     shortcut_sequence = _app_open_or_focus_safe_shortcut_sequence_tool_requests(context)
     if shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in shortcut_sequence):
         return shortcut_sequence
+    app_prefix_shortcut_sequence = _app_prefix_safe_shortcut_sequence_tool_requests(context)
+    if app_prefix_shortcut_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_prefix_shortcut_sequence
+    ):
+        return app_prefix_shortcut_sequence
     foreground_shortcut_sequence = _foreground_safe_shortcut_sequence_tool_requests(context)
     if foreground_shortcut_sequence and all(str(request.get("tool") or "") in allowed for request in foreground_shortcut_sequence):
         return foreground_shortcut_sequence
@@ -5514,6 +5524,103 @@ def _foreground_find_text_tool_requests(text: str) -> list[dict[str, Any]]:
     ]
 
 
+def _app_open_or_focus_browser_shortcut_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _app_open_or_focus_browser_shortcut_search(text)
+    if not parsed:
+        return []
+    mode, app_name, shortcut_action, url = parsed
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": shortcut_action},
+        ),
+        _request("browser.open_url", {"url": url}),
+    ]
+
+
+def _app_open_or_focus_browser_shortcut_search(text: str) -> tuple[str, str, str, str] | None:
+    match = _app_open_or_focus_browser_followup_match(text)
+    if not match:
+        return None
+    mode, raw_app, app_name, followup = match
+    if (
+        app_name not in _BROWSER_APP_NAMES
+        or _looks_like_generic_browser_app_reference(raw_app)
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return None
+    parsed = _browser_shortcut_search_action_and_url(followup)
+    if not parsed:
+        return None
+    shortcut_action, url = parsed
+    return mode, app_name, shortcut_action, url
+
+
+def _app_open_or_focus_browser_followup_match(text: str) -> tuple[str, str, str, str] | None:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match and shorthand_match[2] in _BROWSER_APP_NAMES:
+        return shorthand_match
+    prefix_split = _known_app_prefix_split(text)
+    if prefix_split and prefix_split[1] in _BROWSER_APP_NAMES:
+        raw_app, app_name, followup = prefix_split
+        return "focus", raw_app, app_name, followup
+    stripped = _strip_query(text)
+    prefix_patterns: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "open",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+                r"^(?:please\s+)?(?:open|launch|start)\s+",
+            ),
+        ),
+        (
+            "focus",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*",
+                r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up)\s+",
+            ),
+        ),
+    )
+    for mode, patterns in prefix_patterns:
+        for pattern in patterns:
+            match = re.search(pattern, stripped, flags=re.IGNORECASE)
+            if not match:
+                continue
+            split = _known_app_prefix_split(stripped[match.end() :].strip())
+            if split and split[1] in _BROWSER_APP_NAMES:
+                raw_app, app_name, followup = split
+                return mode, raw_app, app_name, followup
+    return None
+
+
+def _browser_shortcut_search_action_and_url(value: str) -> tuple[str, str] | None:
+    action_pattern = (
+        r"新建标签页|新标签页|打开新标签页|开新标签页|开一个新标签页|"
+        r"新建窗口|新窗口|打开新窗口|开新窗口|开一个新窗口|"
+        r"new\s+tab|new\s+window"
+    )
+    pattern = (
+        rf"^(?P<action>{action_pattern})\s*"
+        r"(?:(?:并且|并|然后|接着|之后|随后|后(?!退)|再|and\s+then|and|then)\s*)?"
+        r"(?P<search>"
+        r"(?:百度一下|谷歌一下|google\s+一下|搜索|搜一下|搜|查一下|查查|查(?!看)|检索|"
+        r"search|google|look\s+up)\s*.+)$"
+    )
+    match = re.search(pattern, _strip_query(value), flags=re.IGNORECASE)
+    if not match:
+        return None
+    shortcut_action = _desktop_safe_shortcut_action(match.group("action"))
+    search_url = _browser_search_url(match.group("search"))
+    if not shortcut_action or not search_url:
+        return None
+    if shortcut_action not in {"new_tab", "new_window"}:
+        return None
+    return shortcut_action, search_url
+
+
 def _app_open_or_focus_shortcut_type_tool_requests(text: str) -> list[dict[str, Any]]:
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if not shorthand_match:
@@ -5546,6 +5653,25 @@ def _app_open_or_focus_safe_shortcut_sequence_tool_requests(text: str) -> list[d
     return [
         _request(
             f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": actions[0]},
+        ),
+        *[_request("desktop.safe_shortcut", {"action": action}) for action in actions[1:]],
+    ]
+
+
+def _app_prefix_safe_shortcut_sequence_tool_requests(text: str) -> list[dict[str, Any]]:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return []
+    _raw_app, app_name, followup = split
+    if app_name not in _BROWSER_APP_NAMES:
+        return []
+    actions = _safe_shortcut_action_sequence(followup)
+    if len(actions) < 2:
+        return []
+    return [
+        _request(
+            "app.focus_and_safe_shortcut",
             {"app_name": app_name, "action": actions[0]},
         ),
         *[_request("desktop.safe_shortcut", {"action": action}) for action in actions[1:]],

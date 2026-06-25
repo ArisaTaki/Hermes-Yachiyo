@@ -999,6 +999,116 @@ def test_send_message_executes_app_open_browser_back_without_fake_app_name(
         store.close()
 
 
+def test_send_message_executes_browser_shortcut_search_sequence_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser shortcut search sequence should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {
+                "shortcut_action": action,
+                "shortcut_label": "新建标签页" if action == "new_tab" else action,
+            },
+        }
+
+    def fake_open_url(url: str) -> dict:
+        calls.append(("open_url", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url, "browser": "Google Chrome"},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    try:
+        result = api.send_message("打开 Chrome 新建标签页然后搜索 OpenAI")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [
+            ("open", "Google Chrome"),
+            ("focus", "Google Chrome"),
+            ("shortcut", "new_tab"),
+            ("open_url", "https://www.google.com/search?q=OpenAI"),
+        ]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert any(
+            call["tool_name"] == "app.open_and_safe_shortcut"
+            and call["input_preview"] == {"app_name": "Google Chrome", "action": "new_tab"}
+            for call in result["agent_task"]["tool_calls"]
+        )
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "url": "https://www.google.com/search?q=OpenAI",
+        }
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_app_prefix_find_shortcut_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

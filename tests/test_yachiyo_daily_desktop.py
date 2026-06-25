@@ -838,6 +838,30 @@ def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
         },
     ]
+    assert daily_desktop_entrypoint_requests("打开 Chrome 新建标签页然后搜索 OpenAI") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Chrome 后退再刷新") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "browser_back"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "refresh"},
+        },
+    ]
     assert daily_desktop_entrypoint_requests("Chrome 搜索 OpenAI 并打开第一个结果") == [
         {
             "protocol": "json_fallback",
