@@ -2880,6 +2880,105 @@ def test_chat_bridge_quick_message_executes_foreground_search_type_submit_withou
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_browser_prefix_search_field_type_without_click(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    def fake_browser_click(*_args, **_kwargs) -> dict:
+        raise AssertionError("search field typing should not route to browser.click")
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+
+    cases = (
+        (
+            "Chrome 点击搜索框输入 yachiyo",
+            "bubble",
+            [("focus", "Google Chrome"), ("shortcut", "find"), ("type", "yachiyo")],
+            "已切到 Google Chrome 并打开查找。 已向前台输入文字（7 个字符）。",
+            ["app.focus_and_safe_shortcut", "desktop.safe_type_text"],
+        ),
+        (
+            "打开 Safari 点击搜索栏输入 yachiyo 并搜索",
+            "live2d",
+            [
+                ("open", "Safari"),
+                ("focus", "Safari"),
+                ("shortcut", "find"),
+                ("type", "yachiyo"),
+                ("search_submit", ""),
+            ],
+            "已打开 Safari 并打开查找。 已向前台输入文字（7 个字符）。 已提交前台搜索。",
+            ["app.open_and_safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+        ),
+    )
+    for prompt, launcher_mode, expected_calls, summary, tool_names in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert calls[-len(expected_calls):] == expected_calls
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == summary
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-len(tool_names):]] == tool_names
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_read_followup_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

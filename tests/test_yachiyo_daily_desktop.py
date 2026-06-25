@@ -1125,6 +1125,35 @@ def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
         },
     ]
+    assert daily_desktop_entrypoint_requests("Chrome 点击搜索框输入 yachiyo") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Chrome 点击搜索栏输入 yachiyo 并搜索") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+    ]
     assert daily_desktop_entrypoint_requests("打开 Chrome 新建标签页然后搜索 OpenAI") == [
         {
             "protocol": "json_fallback",

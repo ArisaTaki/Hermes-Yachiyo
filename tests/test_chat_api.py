@@ -1920,6 +1920,142 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         store.close()
 
 
+def test_send_message_executes_browser_prefix_search_field_type_without_browser_click(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser prefix search field task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.browser.click",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("search field typing should not route to browser.click")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action, "key": "f", "modifiers": ["command"]},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    try:
+        result = api.send_message("Chrome 点击搜索框输入 yachiyo")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [("focus", "Google Chrome"), ("shortcut", "find"), ("type", "yachiyo")]
+        assert result["agent_task"]["summary"] == (
+            "已切到 Google Chrome 并打开查找。 已向前台输入文字（7 个字符）。"
+        )
+        assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        second = api.send_message("打开 Chrome 点击搜索栏输入 yachiyo 并搜索")
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert calls[-5:] == [
+            ("open", "Google Chrome"),
+            ("focus", "Google Chrome"),
+            ("shortcut", "find"),
+            ("type", "yachiyo"),
+            ("search_submit", ""),
+        ]
+        assert second["agent_task"]["summary"] == (
+            "已打开 Google Chrome 并打开查找。 "
+            "已向前台输入文字（7 个字符）。 已提交前台搜索。"
+        )
+        assert [tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"][-3:]] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ]
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "agent.desktop.intent_approval_required" not in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_browser_read_followup_before_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

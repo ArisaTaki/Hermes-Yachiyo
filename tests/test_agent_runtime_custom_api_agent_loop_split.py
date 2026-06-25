@@ -3786,6 +3786,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"key": "return", "modifiers": []},
         },
     ]
+    assert daily_desktop_intent_tool_requests("Chrome 点击搜索框输入 yachiyo", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Chrome 点击搜索栏输入 yachiyo 并搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
     assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
         {
             "protocol": "json_fallback",

@@ -637,6 +637,14 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_type_into_ui_element_sequence
     ):
         return app_type_into_ui_element_sequence
+    click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
+    if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
+        return click_type_sequence
+    app_prefix_click_type_sequence = _app_prefix_click_type_tool_requests(context)
+    if app_prefix_click_type_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
+    ):
+        return app_prefix_click_type_sequence
     app_browser_action_sequence = _app_open_or_focus_browser_action_tool_requests(context)
     if app_browser_action_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
@@ -647,11 +655,6 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_prefix_browser_action_sequence
     ):
         return app_prefix_browser_action_sequence
-    app_prefix_click_type_sequence = _app_prefix_click_type_tool_requests(context)
-    if app_prefix_click_type_sequence and all(
-        str(request.get("tool") or "") in allowed for request in app_prefix_click_type_sequence
-    ):
-        return app_prefix_click_type_sequence
     app_prefix_click_ui_element = _app_prefix_click_ui_element_tool_request(context)
     if app_prefix_click_ui_element and str(app_prefix_click_ui_element.get("tool") or "") in allowed:
         return [app_prefix_click_ui_element]
@@ -705,9 +708,6 @@ def daily_desktop_intent_tool_requests(
     )
     if app_ui_elements and all(str(request.get("tool") or "") in allowed for request in app_ui_elements):
         return app_ui_elements
-    click_type_sequence = _app_open_or_focus_click_type_tool_requests(context)
-    if click_type_sequence and all(str(request.get("tool") or "") in allowed for request in click_type_sequence):
-        return click_type_sequence
     app_screen_capture_sequence = _prefer_system_settings_open_sequence(
         _app_open_or_focus_screen_capture_tool_requests(context),
         allowed,
