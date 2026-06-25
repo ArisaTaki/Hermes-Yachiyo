@@ -10253,6 +10253,12 @@ def _is_specific_music_query(query: str) -> bool:
 
 
 def _music_control_action(text: str) -> str:
+    split = _known_app_prefix_split(text)
+    if split:
+        raw_app, app_name, followup = split
+        music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
+        if music_app and music_app != "Music" and _looks_like_music_control_followup(followup):
+            return ""
     lowered = text.lower()
     if re.search(
         r"(?:下一首|下一曲|下首|切下一首|跳下一首|跳过这首|跳过当前(?:这)?首|"
@@ -10338,6 +10344,22 @@ def _music_control_action(text: str) -> str:
     if re.fullmatch(r"(?:play|start)\s+(?:music|apple\s*music)(?:\s+app)?", lowered):
         return "play"
     return ""
+
+
+def _looks_like_music_control_followup(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:暂停|停一下|停止|关掉|关了|继续|恢复|开始|播放|播|放|"
+            r"下一首|下一曲|下首|跳过|切歌|换歌|上一首|上一曲|上首)",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:pause|stop|resume|continue|start|play|next|skip|previous|prev|back|toggle)\b",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _is_apple_music_open_and_play_request(text: str) -> bool:
