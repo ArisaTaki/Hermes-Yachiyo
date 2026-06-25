@@ -62,6 +62,27 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
 
 
+def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools() -> None:
+    cases = (
+        ("你能帮我切到Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
+        ("你可以帮我聚焦Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
+        ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
+        ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
     cases = (
         ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),

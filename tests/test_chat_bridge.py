@@ -543,6 +543,8 @@ def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
         ("能不能切到 Slack", "bubble", "Slack"),
         ("切一下微信", "bubble", "WeChat"),
         ("微信切一下", "live2d", "WeChat"),
+        ("你能帮我切到Chrome吗", "bubble", "Google Chrome"),
+        ("你可以帮我聚焦Chrome吗", "live2d", "Google Chrome"),
         ("go back to WeChat", "bubble", "WeChat"),
         ("switch back to WeChat", "live2d", "WeChat"),
     )
@@ -571,7 +573,15 @@ def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert focus_calls == ["Slack", "WeChat", "WeChat", "WeChat", "WeChat"]
+    assert focus_calls == [
+        "Slack",
+        "WeChat",
+        "WeChat",
+        "Google Chrome",
+        "Google Chrome",
+        "WeChat",
+        "WeChat",
+    ]
 
 
 def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
@@ -1768,6 +1778,8 @@ def test_chat_bridge_quick_message_executes_named_app_show_without_approval(
     cases = (
         ("打开 Slack 并切到前台", "live2d", "Slack"),
         ("把微信调出来", "bubble", "WeChat"),
+        ("你能帮我显示Finder吗", "live2d", "Finder"),
+        ("你能帮我还原微信吗", "bubble", "WeChat"),
     )
     for prompt, launcher_mode, app_name in cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1793,7 +1805,7 @@ def test_chat_bridge_quick_message_executes_named_app_show_without_approval(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert show_calls == ["Slack", "WeChat"]
+    assert show_calls == ["Slack", "WeChat", "Finder", "WeChat"]
 
 
 def test_chat_bridge_quick_message_executes_named_app_window_focus_without_approval(
