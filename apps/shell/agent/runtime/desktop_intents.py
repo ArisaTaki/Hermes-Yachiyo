@@ -933,6 +933,8 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "app.focus_and_safe_scroll",
         "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_type_into_ui_element",
         "app.focus_window",
         "app.open",
         "app.open_and_safe_click",
@@ -940,6 +942,8 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "app.open_and_safe_scroll",
         "app.open_and_safe_shortcut",
         "app.open_and_safe_type_text",
+        "app.open_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
         "app.show",
         "app.status",
         "browser.current_page",
@@ -951,11 +955,13 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.open_path",
         "desktop.permissions",
         "desktop.running_apps",
+        "desktop.click_ui_element",
         "desktop.safe_click",
         "desktop.safe_key",
         "desktop.safe_scroll",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.type_into_ui_element",
         "desktop.ui_elements",
         "desktop.windows",
         "media.apple_music_control",
@@ -1053,6 +1059,10 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
         return f"查看{app_name}窗口" if app_name else "查看桌面窗口"
     if tool_name == "desktop.ui_elements":
         return "查看当前界面控件"
+    if tool_name == "desktop.click_ui_element":
+        return _click_ui_element_recovery_prompt(recovery_input)
+    if tool_name == "desktop.type_into_ui_element":
+        return _type_into_ui_element_recovery_prompt(recovery_input)
     if tool_name == "desktop.safe_shortcut":
         return _safe_shortcut_recovery_prompt(action)
     if tool_name == "desktop.safe_key":
@@ -1085,6 +1095,10 @@ def _app_foreground_recovery_prompt(tool_name: str, recovery_input: Mapping[str,
         "app.focus_and_safe_scroll",
         "app.open_and_safe_click",
         "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
     }:
         return ""
     app_name = str(recovery_input.get("app_name") or "").strip()
@@ -1105,9 +1119,28 @@ def _app_foreground_recovery_prompt(tool_name: str, recovery_input: Mapping[str,
         x = recovery_input.get("x")
         y = recovery_input.get("y")
         detail = f"点击 {x}, {y}" if x is not None and y is not None else ""
+    elif tool_name.endswith("click_ui_element"):
+        detail = _click_ui_element_recovery_prompt(recovery_input)
+    elif tool_name.endswith("type_into_ui_element"):
+        detail = _type_into_ui_element_recovery_prompt(recovery_input)
     else:
         detail = ""
     return f"{prefix}{app_name}并{detail}" if detail else ""
+
+
+def _click_ui_element_recovery_prompt(recovery_input: Mapping[str, Any]) -> str:
+    target = str(recovery_input.get("target") or "").strip()
+    return f"点击前台控件{target}" if target else ""
+
+
+def _type_into_ui_element_recovery_prompt(recovery_input: Mapping[str, Any]) -> str:
+    target = str(recovery_input.get("target") or "").strip()
+    text = str(recovery_input.get("text") or "").strip()
+    if target and text:
+        return f"在前台控件{target}输入{text}"
+    if target:
+        return f"在前台控件{target}输入文字"
+    return ""
 
 
 def _safe_shortcut_recovery_prompt(action: str) -> str:

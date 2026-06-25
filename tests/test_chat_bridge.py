@@ -7281,6 +7281,94 @@ def test_chat_bridge_quick_message_executes_app_foreground_recovery_actions_with
         store.close()
 
 
+def test_chat_bridge_quick_message_ui_element_recovery_retry_keeps_approval_gate(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-ui-element-recovery-approval.db",
+        workspace_dir=tmp_path / "runtime-ui-element-recovery-approval",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher UI element recovery retry should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.type_into_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("type_into_ui_element should wait for approval")
+        ),
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        tool_input = {
+            "app_name": "WeChat",
+            "target": "消息",
+            "text": "文件传输助手",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        result = bridge.send_quick_message(
+            "恢复后重试原操作",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "desktop_permission_retry": True,
+                "recovery_action_kind": "retry_original",
+                "recovery_tool": "app.open_and_type_into_ui_element",
+                "recovery_input": tool_input,
+                "recovery_permission_target": "foreground_input",
+                "recovery_retry_tool": "app.open_and_type_into_ui_element",
+                "recovery_retry_input": tool_input,
+                "source_task_id": "task-source-ui-type",
+            },
+        )
+        agent_task = result["agent_task"]
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert agent_task["status"] == "waiting_approval"
+        assert agent_task["needs_user_action"] is True
+        assert agent_task["pending_approvals"][0]["tool_name"] == "app.open_and_type_into_ui_element"
+        assert agent_task["pending_approvals"][0]["input_preview"] == tool_input
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_type_into_ui_element"
+        assert agent_task["tool_calls"][-1]["status"] == "waiting_approval"
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
+        assert run["pending_approval"]["input_preview"] == tool_input
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
     tmp_path,
     monkeypatch,

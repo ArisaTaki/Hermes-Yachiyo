@@ -143,6 +143,8 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.ui_elements') return '查看当前界面控件';
+  if (tool === 'desktop.click_ui_element') return desktopUiClickPrompt(input);
+  if (tool === 'desktop.type_into_ui_element') return desktopUiTypePrompt(input);
   if (tool === 'desktop.safe_shortcut') return desktopSafeShortcutPrompt(String(input.action || '').trim());
   if (tool === 'desktop.safe_key') return desktopSafeKeyPrompt(input);
   if (tool === 'desktop.safe_scroll') return desktopSafeScrollPrompt(input);
@@ -231,6 +233,8 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.safe_scroll') return desktopSafeScrollPrompt(input);
   if (tool === 'desktop.safe_click') return desktopSafeClickPrompt(input);
   if (tool === 'desktop.safe_type_text') return desktopSafeTypeTextPrompt(input);
+  if (tool === 'desktop.click_ui_element') return desktopUiClickPrompt(input);
+  if (tool === 'desktop.type_into_ui_element') return desktopUiTypePrompt(input);
   if (tool === 'desktop.reveal_path' && path) return `在 Finder 中显示 ${path}`;
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(action);
@@ -281,6 +285,8 @@ function appForegroundActionPrompt(tool: string, input: Record<string, unknown>)
   if (tool.endsWith('safe_key')) detail = desktopSafeKeyPrompt(input);
   if (tool.endsWith('safe_scroll')) detail = desktopSafeScrollPrompt(input);
   if (tool.endsWith('safe_click')) detail = desktopSafeClickPrompt(input);
+  if (tool.endsWith('click_ui_element')) detail = desktopUiClickPrompt(input);
+  if (tool.endsWith('type_into_ui_element')) detail = desktopUiTypePrompt(input);
   return detail ? `${prefix}并${detail}` : '';
 }
 
@@ -357,6 +363,18 @@ function desktopSafeClickPrompt(input: Record<string, unknown>): string {
 function desktopSafeTypeTextPrompt(input: Record<string, unknown>): string {
   const text = typeof input.text === 'string' ? input.text.trim() : '';
   return text ? `输入${text}` : '';
+}
+
+function desktopUiClickPrompt(input: Record<string, unknown>): string {
+  const target = String(input.target || '').trim();
+  return target ? `点击前台控件${target}` : '';
+}
+
+function desktopUiTypePrompt(input: Record<string, unknown>): string {
+  const target = String(input.target || '').trim();
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  if (target && text) return `在前台控件${target}输入文字`;
+  return target ? `在前台控件${target}输入文字` : '';
 }
 
 function isExecutableRecoveryPrompt(value: string): boolean {

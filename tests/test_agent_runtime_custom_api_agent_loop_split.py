@@ -6060,6 +6060,43 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.click_ui_element",
+            "recovery_input": {"target": "Send", "role_filter": "button"},
+            "recovery_risk_level": "low",
+        }
+    ) == "点击前台控件Send"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.type_into_ui_element",
+            "recovery_input": {"target": "Search", "text": "hello", "role_filter": "text"},
+            "recovery_risk_level": "low",
+        }
+    ) == "在前台控件Search输入hello"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.open_and_click_ui_element",
+            "recovery_input": {"app_name": "Slack", "target": "Send", "role_filter": "button"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开Slack并点击前台控件Send"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.focus_and_type_into_ui_element",
+            "recovery_input": {
+                "app_name": "Slack",
+                "target": "Message",
+                "text": "hello",
+                "role_filter": "text",
+            },
+            "recovery_risk_level": "low",
+        }
+    ) == "切到Slack并在前台控件Message输入hello"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "browser.open_url",
             "recovery_input": {"url": "https://github.com"},
             "recovery_risk_level": "low",
