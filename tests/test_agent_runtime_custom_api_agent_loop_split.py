@@ -4792,6 +4792,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.reveal_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("显示当前项目", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "."},
+    }
+    assert daily_desktop_intent_tool_request("在 Finder 中显示当前项目", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.reveal_path",
+        "input": {"path": "."},
+    }
     assert daily_desktop_intent_tool_request("可以帮我打开下载文件夹吗", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -4808,12 +4818,21 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "tool": "app.open",
             "input": {"app_name": "Finder"},
         }
-    for prompt in ("打开项目文件夹", "打开工作区", "open project folder", "open workspace"):
+    for prompt in (
+        "打开当前项目",
+        "打开项目文件夹",
+        "打开工作区",
+        "在 Finder 中打开当前项目",
+        "open current project",
+        "open project folder",
+        "open workspace",
+    ):
         assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
             "protocol": "json_fallback",
             "tool": "desktop.open_path",
             "input": {"path": "."},
         }
+    assert daily_desktop_intent_tool_request("打开项目", allowed_tools) is None
     assert daily_desktop_intent_tool_request("打开 Arc 浏览器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

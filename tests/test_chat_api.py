@@ -2905,6 +2905,23 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         assert app_open_calls == []
         assert run["status"] == "completed"
 
+        result = api.send_message("打开当前项目")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件夹：.。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件夹：.。"
+        assert open_path_calls[-1] == "."
+        assert reveal_calls == []
+        assert app_open_calls == []
+        assert run["status"] == "completed"
+
         result = api.send_message("打开垃圾桶")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])

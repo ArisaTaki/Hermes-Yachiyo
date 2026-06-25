@@ -633,12 +633,22 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "."},
         ),
         (
+            "打开当前项目",
+            "desktop.open_path",
+            {"path": "."},
+        ),
+        (
             "打开项目目录",
             "desktop.open_path",
             {"path": "."},
         ),
         (
             "在 Finder 中显示当前工作区",
+            "desktop.reveal_path",
+            {"path": "."},
+        ),
+        (
+            "在 Finder 中显示当前项目",
             "desktop.reveal_path",
             {"path": "."},
         ),
