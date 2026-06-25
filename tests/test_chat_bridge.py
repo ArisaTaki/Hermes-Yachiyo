@@ -6351,6 +6351,95 @@ def test_chat_bridge_quick_message_executes_open_path_recovery_action_without_mo
         store.close()
 
 
+def test_chat_bridge_quick_message_executes_browser_open_recovery_action_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-browser-open-recovery-action.db",
+        workspace_dir=tmp_path / "runtime-browser-open-recovery-action",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    opened_urls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher browser recovery action should not call model")
+        ),
+    )
+
+    def fake_open_url(url: str) -> dict:
+        opened_urls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {
+                "url": url,
+                "browser": "Google Chrome",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            "打开链接",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "recovery_tool": "browser.open_url",
+                "recovery_input": {"url": "https://github.com"},
+                "recovery_permission_target": "browser",
+                "recovery_risk_level": "low",
+            },
+        )
+        agent_task = result["agent_task"]
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        messages = store.load_messages("session-current", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        user_metadata = json.loads(user.metadata_json)
+
+        assert result["ok"] is True
+        assert opened_urls == ["https://github.com"]
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == "已打开网页：https://github.com。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
+        assert agent_task["tool_calls"][-1]["input_preview"] == {"url": "https://github.com"}
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert user_metadata["desktop_permission_recovery"] is True
+        assert user_metadata["recovery_tool"] == "browser.open_url"
+        assert user_metadata["recovery_input"] == {"url": "https://github.com"}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
     tmp_path,
     monkeypatch,

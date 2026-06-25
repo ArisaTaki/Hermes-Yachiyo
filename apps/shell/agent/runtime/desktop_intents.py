@@ -926,7 +926,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if str(metadata.get("recovery_risk_level") or "").strip().lower() != "low":
         return ""
     recovery_tool = str(metadata.get("recovery_tool") or "").strip()
-    if recovery_tool not in {"app.open", "desktop.open_path", "system.settings_open"}:
+    if recovery_tool not in {"app.open", "browser.open_url", "desktop.open_path", "system.settings_open"}:
         return ""
     recovery_input = metadata.get("recovery_input")
     if not isinstance(recovery_input, Mapping):
@@ -934,6 +934,9 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     if recovery_tool == "system.settings_open":
         target = str(recovery_input.get("target") or "").strip()
         return f"打开{target}" if target else ""
+    if recovery_tool == "browser.open_url":
+        url = str(recovery_input.get("url") or "").strip()
+        return f"打开 {url}" if url else ""
     if recovery_tool == "desktop.open_path":
         path = str(recovery_input.get("path") or "").strip()
         return f"打开 {path}" if path else ""

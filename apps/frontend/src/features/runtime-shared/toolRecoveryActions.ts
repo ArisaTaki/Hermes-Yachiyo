@@ -119,9 +119,11 @@ export function runtimeToolRecoveryActionsFromRecord(
 
 function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, unknown>): string {
   const appName = String(input.app_name || '').trim();
+  const url = String(input.url || '').trim();
   const target = String(input.target || '').trim();
   const path = String(input.path || '').trim();
   if (tool === 'app.open' && appName) return `打开${appName}`;
+  if (tool === 'browser.open_url' && url) return `打开 ${url}`;
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
   return '';
@@ -129,6 +131,7 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
 
 function isLowRiskExecutableRecoveryTool(tool: string): boolean {
   return tool === 'app.open'
+    || tool === 'browser.open_url'
     || tool === 'desktop.open_path'
     || tool === 'system.settings_open';
 }

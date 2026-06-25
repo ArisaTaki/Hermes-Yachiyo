@@ -3767,6 +3767,100 @@ def test_send_message_executes_structured_open_path_recovery_action_without_mode
         store.close()
 
 
+def test_send_message_executes_structured_browser_open_recovery_action_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    opened_urls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("structured browser recovery should not call model")
+        ),
+    )
+
+    def fake_open_url(url: str) -> dict:
+        opened_urls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {
+                "url": url,
+                "browser": "Google Chrome",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    try:
+        result = api.send_message(
+            "打开链接",
+            metadata={
+                "source": "chat",
+                "runnable_kind": "main",
+                "daily_desktop_intent": True,
+                "desktop_permission_recovery": True,
+                "recovery_tool": "browser.open_url",
+                "recovery_input": {"url": "https://github.com"},
+                "recovery_permission_target": "browser",
+                "recovery_risk_level": "low",
+                "source_task_id": "task-source-browser",
+                "source_task_title": "打开 GitHub",
+            },
+        )
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        user = next(
+            message
+            for message in store.load_messages(runtime.chat_session.session_id)
+            if message.role == "user"
+        )
+        user_metadata = json.loads(user.metadata_json or "{}")
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["summary"] == "已打开网页：https://github.com。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"url": "https://github.com"}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开网页：https://github.com。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开网页：https://github.com。"
+        assert opened_urls == ["https://github.com"]
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert user_metadata["desktop_permission_recovery"] is True
+        assert user_metadata["recovery_tool"] == "browser.open_url"
+        assert user_metadata["recovery_input"] == {"url": "https://github.com"}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
