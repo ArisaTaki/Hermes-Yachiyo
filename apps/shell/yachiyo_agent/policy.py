@@ -365,7 +365,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "create_note": "Create a local Notes note from explicit user-provided content.",
     "create_reminder": "Create a local Reminders item from an explicit user request.",
     "create_calendar_event": "Create a local Calendar event from an explicit user request.",
-    "foreground_safe_shortcut": "Run a whitelisted foreground shortcut such as copy, paste, select all, undo, redo, find, new tab, or refresh.",
+    "foreground_safe_shortcut": "Run a whitelisted foreground shortcut such as copy, paste, copy current page link, select all, undo, redo, find, new tab, or refresh.",
     "foreground_safe_key": "Press a whitelisted foreground navigation key such as Escape, Tab, arrows, Home, End, Page Up, or Page Down.",
     "foreground_safe_type_text": "Type text explicitly provided by the user into the current foreground target.",
     "foreground_safe_click": "Single-click a screen coordinate explicitly provided by the user.",

@@ -5640,6 +5640,8 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("锁屏", "bubble", "lock_screen", "已锁屏。"),
         ("打开强制退出窗口", "live2d", "force_quit_dialog", "已打开强制退出窗口。"),
         ("Can you copy?", "bubble", "copy", "已复制选中内容。"),
+        ("copy current page link", "bubble", "copy_current_page_link", "已复制当前网页链接。"),
+        ("复制当前网页链接", "live2d", "copy_current_page_link", "已复制当前网页链接。"),
         ("Could you paste?", "live2d", "paste", "已粘贴。"),
         ("Would you select all please?", "bubble", "select_all", "已全选。"),
         ("switch to next window", "bubble", "next_window", "已切到下一个窗口。"),
@@ -6882,11 +6884,21 @@ def test_chat_bridge_quick_message_prepares_paste_then_waits_for_send_approval(
             "data": {"key": "return", "modifiers": []},
         }
 
+    def fake_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict:
+        calls.append(("hotkey", "+".join([*list(modifiers or []), key])))
+        return {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "summary": "Sent hotkey",
+            "data": {"key": key, "modifiers": list(modifiers or [])},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_hotkey)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_submit_foreground",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -6923,6 +6935,19 @@ def test_chat_bridge_quick_message_prepares_paste_then_waits_for_send_approval(
             "bubble",
             [
                 ("shortcut", "copy"),
+                ("focus", "WeChat"),
+                ("shortcut", "find"),
+                ("type", "文件传输助手"),
+                ("search_submit", ""),
+                ("shortcut", "paste"),
+            ],
+            "app.focus_and_safe_shortcut",
+        ),
+        (
+            "把当前网页链接发给微信文件传输助手",
+            "bubble",
+            [
+                ("shortcut", "copy_current_page_link"),
                 ("focus", "WeChat"),
                 ("shortcut", "find"),
                 ("type", "文件传输助手"),
@@ -8785,7 +8810,7 @@ def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task
         store.close()
 
 
-def test_chat_bridge_quick_message_approval_copies_current_page_link_without_model(
+def test_chat_bridge_quick_message_copies_current_page_link_without_model(
     tmp_path,
     monkeypatch,
 ):
@@ -8847,39 +8872,24 @@ def test_chat_bridge_quick_message_approval_copies_current_page_link_without_mod
             },
         )
         task_id = result["task_id"]
-        waiting_task = result["agent_task"]
+        agent_task = result["agent_task"]
         link = service.get_task_run_link(task_id)
-        waiting_run = service.get_run(link["run_id"])
-
-        assert result["ok"] is True
-        assert hotkey_calls == []
-        assert shortcut_calls == []
-        assert waiting_task["status"] == "waiting_approval"
-        assert waiting_task["needs_user_action"] is True
-        assert waiting_task["pending_approvals"][0]["tool_name"] == "desktop.hotkey"
-        assert waiting_task["pending_approvals"][0]["input_preview"] == {
-            "key": "l",
-            "modifiers": ["command"],
-        }
-        assert waiting_run["status"] == "approval_required"
-        assert waiting_run["pending_approval"]["tool"] == "desktop.hotkey"
-
-        approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
         run = service.get_run(link["run_id"])
         event_types = [
             event["event_type"]
             for event in service.list_run_events(run["run_id"])["events"]
         ]
 
-        assert hotkey_calls == [("l", ["command"])]
-        assert shortcut_calls == ["copy"]
-        assert approved.status == "completed"
-        assert approved.summary == "已发送快捷键：Command+L。 已复制选中内容。"
-        assert approved.needs_user_action is False
-        assert approved.pending_approvals == []
+        assert result["ok"] is True
+        assert hotkey_calls == []
+        assert shortcut_calls == ["copy_current_page_link"]
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已复制当前网页链接。"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
-        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types

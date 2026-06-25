@@ -105,6 +105,7 @@ MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 SAFE_SHORTCUT_ACTIONS = (
     "copy",
+    "copy_current_page_link",
     "paste",
     "select_all",
     "undo",
@@ -1763,7 +1764,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Execute a whitelisted common foreground shortcut such as copy, paste, "
             "select all, undo, redo, find, new tab, close tab, next tab, previous tab, "
             "next window, previous window, Mission Control, Application Windows, Spotlight, Emoji picker, Lock Screen, Force Quit dialog, new window, new note, new reminder, "
-            "new calendar event, refresh, "
+            "new calendar event, copy current page link, refresh, "
             "browser back, or browser forward. Unlike desktop.hotkey, this tool does not "
             "accept arbitrary keys."
         ),

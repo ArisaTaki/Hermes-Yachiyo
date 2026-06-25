@@ -111,6 +111,7 @@ _UNSAFE_OPEN_PATH_SUFFIXES = {
 
 _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "copy": ("c", ("command",), "copy"),
+    "copy_current_page_link": ("l", ("command",), "copy current page link"),
     "paste": ("v", ("command",), "paste"),
     "select_all": ("a", ("command",), "select all"),
     "undo": ("z", ("command",), "undo"),
@@ -3931,6 +3932,8 @@ def desktop_safe_shortcut(action: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.safe_shortcut")
     clean_action = _clean_safe_shortcut_action(action)
+    if clean_action == "copy_current_page_link":
+        return _desktop_copy_current_page_link_shortcut()
     key, modifiers, label = _SAFE_SHORTCUTS[clean_action]
     payload = _send_desktop_keystroke("desktop.safe_shortcut", key, list(modifiers))
     if not payload.get("ok"):
@@ -3943,6 +3946,27 @@ def desktop_safe_shortcut(action: str) -> dict[str, Any]:
         "shortcut_label": label,
     }
     return payload
+
+
+def _desktop_copy_current_page_link_shortcut() -> dict[str, Any]:
+    select_payload = _send_desktop_keystroke("desktop.safe_shortcut", "l", ["command"])
+    if not select_payload.get("ok"):
+        return select_payload
+    copy_payload = _send_desktop_keystroke("desktop.safe_shortcut", "c", ["command"])
+    if not copy_payload.get("ok"):
+        return copy_payload
+    data = copy_payload.get("data") if isinstance(copy_payload.get("data"), dict) else {}
+    copy_payload["summary"] = "Executed safe shortcut: copy current page link"
+    copy_payload["data"] = {
+        **data,
+        "shortcut_action": "copy_current_page_link",
+        "shortcut_label": "copy current page link",
+        "steps": [
+            {"key": "l", "modifiers": ["command"]},
+            {"key": "c", "modifiers": ["command"]},
+        ],
+    }
+    return copy_payload
 
 
 def _send_desktop_keystroke(

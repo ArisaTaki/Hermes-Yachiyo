@@ -1267,25 +1267,15 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_requests("把当前网址放到剪贴板", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
-            "input": {"action": "copy"},
+            "input": {"action": "copy_current_page_link"},
         },
     ]
     assert daily_desktop_intent_tool_requests("把当前链接复制给我", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
-            "input": {"action": "copy"},
+            "input": {"action": "copy_current_page_link"},
         },
     ]
     assert daily_desktop_intent_tool_request("read this page", allowed_tools) == {
@@ -2419,6 +2409,70 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("把当前网页链接发给微信文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("open Slack send current page link to Alice", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
         },
         {
             "protocol": "json_fallback",

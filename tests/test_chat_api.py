@@ -7302,6 +7302,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("Can you copy?", "copy", "已复制选中内容。"),
             ("复制选中文本", "copy", "已复制选中内容。"),
             ("复制这个", "copy", "已复制选中内容。"),
+            ("复制当前网页链接", "copy_current_page_link", "已复制当前网页链接。"),
+            ("把当前网址放到剪贴板", "copy_current_page_link", "已复制当前网页链接。"),
+            ("把当前链接复制给我", "copy_current_page_link", "已复制当前网页链接。"),
             ("切到下一个窗口", "next_window", "已切到下一个窗口。"),
             ("switch to previous window", "previous_window", "已切到上一个窗口。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
@@ -7370,6 +7373,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "copy",
             "copy",
             "copy",
+            "copy_current_page_link",
+            "copy_current_page_link",
+            "copy_current_page_link",
             "next_window",
             "previous_window",
             "mission_control",
@@ -7689,9 +7695,6 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             ("当前窗口按回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("press enter in current window", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("空格一下", "desktop.hotkey", {"key": "space", "modifiers": []}),
-            ("复制当前网页链接", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
-            ("把当前网址放到剪贴板", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
-            ("把当前链接复制给我", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             (
                 "最大化当前窗口",
                 "desktop.hotkey",
@@ -9714,11 +9717,21 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
             "data": {"key": "return", "modifiers": []},
         }
 
+    def fake_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict:
+        calls.append(("hotkey", "+".join([*list(modifiers or []), key])))
+        return {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "summary": "Sent hotkey",
+            "data": {"key": key, "modifiers": list(modifiers or [])},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_hotkey)
     try:
         cases = (
             (
@@ -9746,6 +9759,18 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
                 "微信给文件传输助手发送选中的内容",
                 [
                     ("shortcut", "copy"),
+                    ("focus", "WeChat"),
+                    ("shortcut", "find"),
+                    ("type", "文件传输助手"),
+                    ("search_submit", ""),
+                    ("shortcut", "paste"),
+                ],
+                "app.focus_and_safe_shortcut",
+            ),
+            (
+                "把当前网页链接发给微信文件传输助手",
+                [
+                    ("shortcut", "copy_current_page_link"),
                     ("focus", "WeChat"),
                     ("shortcut", "find"),
                     ("type", "文件传输助手"),

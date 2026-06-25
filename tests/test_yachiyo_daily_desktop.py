@@ -823,6 +823,45 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.submit_foreground",
     ]
 
+    comm_link_requests = daily_desktop_entrypoint_requests("把当前网页链接发给微信文件传输助手")
+
+    assert comm_link_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy_current_page_link"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(comm_link_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+
     open_comm_requests = daily_desktop_entrypoint_requests("打开微信发消息给张三你好")
 
     assert open_comm_requests[0] == {
@@ -845,13 +884,8 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
     assert copy_link_requests == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.hotkey",
-            "input": {"key": "l", "modifiers": ["command"]},
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
-            "input": {"action": "copy"},
+            "input": {"action": "copy_current_page_link"},
         },
     ]
     assert daily_desktop_entrypoint_requests("copy current page link") == copy_link_requests
@@ -862,8 +896,8 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_intent": True,
         "daily_desktop_source": "daily_desktop_intent",
         "daily_desktop_planning_reason": "clear_daily_desktop_intent",
-        "daily_desktop_tool": "desktop.hotkey",
-        "daily_desktop_tools": ["desktop.hotkey", "desktop.safe_shortcut"],
+        "daily_desktop_tool": "desktop.safe_shortcut",
+        "daily_desktop_tools": ["desktop.safe_shortcut"],
     }
 
     assert daily_desktop_entrypoint_requests("当前网页是什么") == [

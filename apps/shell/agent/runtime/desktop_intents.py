@@ -493,6 +493,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_selected_text_sequence
     ):
         return communication_selected_text_sequence
+    communication_current_page_link_sequence = _communication_current_page_link_tool_requests(context)
+    if communication_current_page_link_sequence and all(
+        str(request.get("tool") or "") in allowed for request in communication_current_page_link_sequence
+    ):
+        return communication_current_page_link_sequence
     communication_paste_sequence = _communication_paste_tool_requests(context)
     if communication_paste_sequence and all(
         str(request.get("tool") or "") in allowed for request in communication_paste_sequence
@@ -3658,8 +3663,7 @@ def _browser_current_page_link_copy_tool_requests(text: str) -> list[dict[str, A
     if not _is_browser_current_page_link_copy_request(text):
         return []
     return [
-        _request("desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
-        _request("desktop.safe_shortcut", {"action": "copy"}),
+        _request("desktop.safe_shortcut", {"action": "copy_current_page_link"}),
     ]
 
 
@@ -6030,6 +6034,103 @@ def _communication_selected_text_recipient(text: str) -> str:
         if recipient:
             return recipient
     return ""
+
+
+def _communication_current_page_link_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _communication_current_page_link_request(text)
+    if not parsed:
+        return []
+    mode, app_name, recipient = parsed
+    return [
+        *_browser_current_page_link_copy_tool_requests("复制当前网页链接"),
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": recipient}),
+        _request("desktop.search_submit", {}),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+        _request("desktop.submit_foreground", {"action": "send"}),
+    ]
+
+
+def _communication_current_page_link_request(text: str) -> tuple[str, str, str] | None:
+    app_followup = _communication_app_followup_request(text)
+    if app_followup:
+        mode, app_name, followup = app_followup
+        recipient = _communication_current_page_link_recipient(followup)
+        if recipient:
+            return mode, app_name, recipient
+    return _communication_current_page_link_postposed_request(text)
+
+
+def _communication_current_page_link_recipient(text: str) -> str:
+    followup = _strip_query(text)
+    if not followup or _looks_like_explicit_text_input_target(followup):
+        return ""
+    current_page_link_source = _communication_current_page_link_source_pattern()
+    patterns = (
+        rf"^(?:给|向)\s*(?P<recipient_to>.+?)\s*(?:发送|发出|发|分享|转发)\s*"
+        rf"(?:{current_page_link_source})$",
+        rf"^(?:发送|发出|发|分享|转发)\s*(?:{current_page_link_source})\s*(?:给|向)\s*"
+        rf"(?P<recipient_send>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?:the\s+)?(?:{current_page_link_source})\s+to\s+"
+        rf"(?P<recipient_link_to>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?P<recipient_with_link>.+?)\s+"
+        rf"(?:with\s+)?(?:the\s+)?(?:{current_page_link_source})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _strip_communication_piece(
+            groups.get("recipient_to")
+            or groups.get("recipient_send")
+            or groups.get("recipient_link_to")
+            or groups.get("recipient_with_link")
+            or ""
+        )
+        if recipient:
+            return recipient
+    return ""
+
+
+def _communication_current_page_link_postposed_request(text: str) -> tuple[str, str, str] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    current_page_link_source = _communication_current_page_link_source_pattern()
+    patterns = (
+        rf"^(?:把|将)?\s*(?:{current_page_link_source})\s*"
+        rf"(?:发送|发出|发|分享|转发)\s*(?:给|到|至|向)\s*(?P<target>.+)$",
+        rf"^(?:send|share|forward)\s+(?:the\s+)?(?:{current_page_link_source})\s+to\s+"
+        rf"(?P<target>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_query(match.group("target"))
+        split = _known_app_prefix_split(target)
+        if not split:
+            continue
+        _raw_app, app_name, followup = split
+        if app_name not in _COMMUNICATION_APP_NAMES:
+            continue
+        recipient = _strip_communication_piece(followup)
+        if recipient:
+            return "focus", app_name, recipient
+    return None
+
+
+def _communication_current_page_link_source_pattern() -> str:
+    return (
+        r"(?:当前|现在|前台|这个|这页|本页).{0,8}"
+        r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址)|"
+        r"(?:current|active|this)\s+(?:(?:browser\s+)?(?:page|tab)\s+)?"
+        r"(?:url|link|address)"
+    )
 
 
 def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
