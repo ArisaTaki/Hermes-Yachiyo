@@ -5225,7 +5225,14 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
     followup = _strip_query(text)
     if not followup:
         return None
+    if _looks_like_explicit_text_input_target(followup):
+        return None
     patterns = (
+        r"^(?:搜索|搜一下|搜|查找|查一下|检索|找一下|找|find|search)\s*"
+        r"(?P<recipient_search>.+?)\s*"
+        r"(?:(?:然后|并且|并|之后|后|再|接着|and\s+then|then|and)\s*)?"
+        r"(?P<verb_search>输入|打字|键入|敲入|打入|写入|写|发送|发出|发|"
+        r"type|enter|input|send)\s*(?P<message_search>.+)$",
         r"^(?P<verb>发送|发出|发|send)\s*(?:消息|信息|message)?\s*"
         r"(?:给|向|to)\s*(?P<recipient>.+?)\s*"
         r"(?:说|内容是|内容为|:|：)\s*(?P<message>.+)$",
@@ -5234,7 +5241,7 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
         r"(?:(?:说|内容是|内容为|:|：)\s*)?(?P<message>.+)$",
         r"^(?:给|向)\s*(?P<recipient>.+?)\s*"
         r"(?P<verb>发送|发出|发|send)\s*(?P<message>.+)$",
-        r"^(?:搜索|搜一下|搜|查找|查一下|检索|find|search)\s*"
+        r"^(?:搜索|搜一下|搜|查找|查一下|检索|找一下|找|find|search)\s*"
         r"(?P<recipient>.+?)\s*"
         r"(?:然后|并且|并|之后|后|再|接着|and\s+then|then|and)\s*"
         r"(?P<verb>输入|打字|键入|敲入|打入|写入|写|发送|发出|发|"
@@ -5244,10 +5251,19 @@ def _communication_recipient_message(text: str) -> tuple[str, str, bool] | None:
         match = re.search(pattern, followup, flags=re.IGNORECASE)
         if not match:
             continue
-        recipient = _strip_communication_piece(match.group("recipient"))
-        raw_message = str(match.group("message") or "").strip()
+        groups = match.groupdict()
+        recipient = _strip_communication_piece(
+            groups.get("recipient")
+            or groups.get("recipient_search")
+            or ""
+        )
+        raw_message = str(
+            groups.get("message")
+            or groups.get("message_search")
+            or ""
+        ).strip()
         message = _strip_typed_text(raw_message)
-        verb = str(match.group("verb") or "").strip().lower()
+        verb = str(groups.get("verb") or groups.get("verb_search") or "").strip().lower()
         should_submit = bool(
             re.search(r"^(?:发送|发出|发|send)$", verb, flags=re.IGNORECASE)
             or _communication_message_has_submit_suffix(raw_message)

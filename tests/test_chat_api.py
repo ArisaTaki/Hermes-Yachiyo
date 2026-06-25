@@ -7137,6 +7137,108 @@ def test_send_message_executes_direct_search_submit_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_prepares_comm_find_message_then_waits_for_send_approval(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("communication compose approval should not call model")
+        ),
+    )
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut: find",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("submit_foreground should wait for approval")
+        ),
+    )
+    try:
+        result = api.send_message("微信找张三并发送你好")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert calls == [
+            ("focus", "WeChat"),
+            ("shortcut", "find"),
+            ("type", "张三"),
+            ("search_submit", ""),
+            ("type", "你好"),
+        ]
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {"action": "send"}
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
+        assert run["pending_approval"]["input_preview"] == {"action": "send"}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.tool.approval_required" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_foreground_find_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

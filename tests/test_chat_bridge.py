@@ -2675,6 +2675,10 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
 ):
     calls: list[tuple[str, str]] = []
 
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
     def fake_app_focus(app_name: str) -> dict:
         calls.append(("focus", app_name))
         return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
@@ -2725,6 +2729,7 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
             AssertionError("launcher communication compose should not call model")
         ),
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
@@ -2738,7 +2743,7 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "在微信给张三发你好",
+            "微信找张三并发送你好",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "bubble",
@@ -2752,12 +2757,28 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
             event["event_type"]
             for event in service.list_run_events(run["run_id"])["events"]
         ]
+
+        second = bridge.send_quick_message(
+            "打开 Slack 找 Alice 并发送 hello",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        second_task = second["agent_task"]
+        second_link = service.get_task_run_link(second["task_id"])
+        second_run = service.get_run(second_link["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
     finally:
         service.close()
         store.close()
 
     assert result["ok"] is True
-    assert calls == [
+    assert calls[:5] == [
         ("focus", "WeChat"),
         ("shortcut", "find"),
         ("type", "张三"),
@@ -2774,6 +2795,25 @@ def test_chat_bridge_quick_message_prepares_comm_message_then_waits_for_send_app
     assert "agent.desktop.intent_completed" not in event_types
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
+
+    assert second["ok"] is True
+    assert calls[-5:] == [
+        ("focus", "Slack"),
+        ("shortcut", "find"),
+        ("type", "Alice"),
+        ("search_submit", ""),
+        ("type", "hello"),
+    ]
+    assert second_task["status"] == "waiting_approval"
+    assert second_task["needs_user_action"] is True
+    assert second_task["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+    assert second_run["status"] == "approval_required"
+    assert second_run["pending_approval"]["tool"] == "desktop.submit_foreground"
+    assert second_run["pending_approval"]["input_preview"] == {"action": "send"}
+    assert "agent.desktop.intent_approval_required" in second_event_types
+    assert "agent.desktop.intent_completed" not in second_event_types
+    assert "model.request.started" not in second_event_types
+    assert "model.requested" not in second_event_types
 
 
 def test_chat_bridge_quick_message_executes_foreground_search_type_submit_without_model(
