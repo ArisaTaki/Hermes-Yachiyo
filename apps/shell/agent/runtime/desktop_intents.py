@@ -461,6 +461,11 @@ def daily_desktop_intent_tool_requests(
     apple_music_search_play = _apple_music_search_play_query(context)
     if apple_music_search_play and "media.apple_music_play" in allowed:
         return [_request("media.apple_music_play", {"query": apple_music_search_play})]
+    music_app_search_play_sequence = _music_app_search_play_tool_requests(context)
+    if music_app_search_play_sequence and all(
+        str(request.get("tool") or "") in allowed for request in music_app_search_play_sequence
+    ):
+        return music_app_search_play_sequence
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
         str(request.get("tool") or "") in allowed for request in foreground_find_sequence
@@ -5672,6 +5677,56 @@ def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
     if submit_return:
         requests.append(_request("desktop.search_submit", {}))
     return requests
+
+
+def _music_app_search_play_tool_requests(text: str) -> list[dict[str, Any]]:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, raw_app, app_name, followup = shorthand_match
+    else:
+        split = _known_app_prefix_split(text)
+        if not split:
+            return []
+        raw_app, app_name, followup = split
+        mode = "focus"
+    music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
+    if not music_app or music_app == "Music":
+        return []
+    query = _music_app_search_play_query_from_followup(followup)
+    if not query:
+        return []
+    return [
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": music_app, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": query}),
+        _request("desktop.search_submit", {}),
+        _request("media.music_app_open_and_play", {"app_name": music_app}),
+    ]
+
+
+def _music_app_search_play_query_from_followup(value: str) -> str:
+    followup = _strip_query(value)
+    patterns = (
+        r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找下|找找|找)\s*"
+        r"(?P<query>[^。！？!?]+?)\s*"
+        r"(?:(?:并且|并|然后|之后|后|再|接着)\s*)?"
+        r"(?:播放|播|放)(?:一下)?(?:它|这个|这首|这首歌|该歌曲|该曲目)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query_en>[^.!?]+?)\s+"
+        r"(?:and\s+|then\s+)?(?:play|start\s+playing)"
+        r"(?:\s+(?:it|that|this|the\s+(?:song|track)))?[.!?]*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_query = next((value for value in match.groupdict().values() if value), "")
+        query = _strip_music_query_context(raw_query)
+        if query and _is_specific_music_query(query):
+            return query
+    return ""
 
 
 def _app_prefix_click_type_tool_requests(text: str) -> list[dict[str, Any]]:

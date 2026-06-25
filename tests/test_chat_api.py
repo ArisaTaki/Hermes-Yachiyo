@@ -2543,6 +2543,125 @@ def test_send_message_opens_named_music_app_and_attempts_playback_without_model(
         store.close()
 
 
+def test_send_message_executes_music_app_search_play_sequence_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("music app search play task should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        calls.append(("search_submit", ""))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "data": {"key": "return", "modifiers": []},
+        }
+
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        calls.append(("music_play", app_name))
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and attempted playback with media key",
+            "data": {
+                "app_name": app_name,
+                "open_ok": True,
+                "focus_ok": True,
+                "playback_ok": True,
+                "control": "play",
+                "player_state": "unknown",
+                "playback_state_unverified": True,
+            },
+            "permission_error": False,
+            "fallback_used": True,
+            "fallback": "system_media_key",
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
+    try:
+        result = api.send_message("打开 Spotify 搜索 Taylor Swift 并播放")
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert calls == [
+            ("open", "Spotify"),
+            ("focus", "Spotify"),
+            ("shortcut", "find"),
+            ("type", "Taylor Swift"),
+            ("search_submit", ""),
+            ("music_play", "Spotify"),
+        ]
+        assert [
+            tool_call["tool_name"]
+            for tool_call in result["agent_task"]["tool_calls"]
+        ] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

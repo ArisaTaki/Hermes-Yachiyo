@@ -973,6 +973,44 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         }
 
 
+def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> None:
+    requests = daily_desktop_entrypoint_requests("打开 Spotify 搜索 Taylor Swift 并播放")
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Taylor Swift"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+        },
+    ]
+    assert daily_desktop_user_metadata(requests)["daily_desktop_tools"] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+    ]
+
+    focus_requests = daily_desktop_entrypoint_requests("网易云音乐搜索周杰伦并播放")
+
+    assert focus_requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "网易云音乐", "action": "find"},
+    }
+    assert focus_requests[1]["input"] == {"text": "周杰伦"}
+
+
 def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music() -> None:
     cases = (
         ("放点周杰伦", {"query": "周杰伦"}),
