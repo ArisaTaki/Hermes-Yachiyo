@@ -508,6 +508,8 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         },
     ]
     assert daily_desktop_entrypoint_requests("copy current page link") == copy_link_requests
+    assert daily_desktop_entrypoint_requests("把当前网址放到剪贴板") == copy_link_requests
+    assert daily_desktop_entrypoint_requests("当前页地址复制一下") == copy_link_requests
     assert daily_desktop_user_metadata(copy_link_requests) == {
         "daily_desktop_intent": True,
         "daily_desktop_source": "daily_desktop_intent",

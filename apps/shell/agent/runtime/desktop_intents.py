@@ -3211,6 +3211,21 @@ def _is_browser_current_page_link_copy_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"^(?:把|将)?\s*(?:当前|现在|前台|这个|这页|本页).{0,8}"
+            r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址)\s*"
+            r"(?:复制|拷贝)(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:把|将)?\s*(?:当前|现在|前台|这个|这页|本页).{0,8}"
+            r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址).{0,12}"
+            r"(?:复制|拷贝|放(?:到|进|入)?|写入|保存(?:到|进)?).{0,8}"
+            r"(?:剪贴板|粘贴板|clipboard)(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\bcopy\s+(?:the\s+)?(?:current|active|this)\s+"
             r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)\b",
             lowered,
