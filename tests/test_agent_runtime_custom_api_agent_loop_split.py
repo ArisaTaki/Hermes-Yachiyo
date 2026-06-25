@@ -6092,6 +6092,46 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.running_apps",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "查看正在运行的应用"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.windows",
+            "recovery_input": {"app_name": "Google Chrome"},
+            "recovery_risk_level": "low",
+        }
+    ) == "查看Google Chrome窗口"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "desktop.ui_elements",
+            "recovery_input": {"role_filter": "button", "limit": 80},
+            "recovery_risk_level": "low",
+        }
+    ) == "查看当前界面控件"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "browser.current_page",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "查看当前网页"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "browser.extract_text",
+            "recovery_input": {},
+            "recovery_risk_level": "low",
+        }
+    ) == "读取当前网页正文"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.click",
             "recovery_input": {"x": 120, "y": 240},
             "recovery_risk_level": "low",

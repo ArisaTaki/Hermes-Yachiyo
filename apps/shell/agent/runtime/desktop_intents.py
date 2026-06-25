@@ -928,12 +928,17 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
     recovery_tool = str(metadata.get("recovery_tool") or "").strip()
     if recovery_tool not in {
         "app.open",
+        "browser.current_page",
+        "browser.extract_text",
         "browser.open_url",
         "clipboard.read",
         "clipboard.write",
         "desktop.active_window",
         "desktop.open_path",
         "desktop.permissions",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.windows",
         "media.apple_music_control",
         "screen.capture",
         "system.brightness",
@@ -1002,6 +1007,17 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
         return "检查桌面权限"
     if tool_name == "desktop.active_window":
         return "查看当前窗口"
+    if tool_name == "desktop.running_apps":
+        return "查看正在运行的应用"
+    if tool_name == "desktop.windows":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        return f"查看{app_name}窗口" if app_name else "查看桌面窗口"
+    if tool_name == "desktop.ui_elements":
+        return "查看当前界面控件"
+    if tool_name == "browser.current_page":
+        return "查看当前网页"
+    if tool_name == "browser.extract_text":
+        return "读取当前网页正文"
     return ""
 
 

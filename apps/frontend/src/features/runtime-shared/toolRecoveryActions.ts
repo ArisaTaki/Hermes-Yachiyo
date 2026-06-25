@@ -134,17 +134,27 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'screen.capture') return '截图当前屏幕';
   if (tool === 'desktop.permissions') return '检查桌面权限';
   if (tool === 'desktop.active_window') return '查看当前窗口';
+  if (tool === 'desktop.running_apps') return '查看正在运行的应用';
+  if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
+  if (tool === 'desktop.ui_elements') return '查看当前界面控件';
+  if (tool === 'browser.current_page') return '查看当前网页';
+  if (tool === 'browser.extract_text') return '读取当前网页正文';
   return '';
 }
 
 function isLowRiskExecutableRecoveryTool(tool: string): boolean {
   return tool === 'app.open'
+    || tool === 'browser.current_page'
+    || tool === 'browser.extract_text'
     || tool === 'browser.open_url'
     || tool === 'clipboard.read'
     || tool === 'clipboard.write'
     || tool === 'desktop.active_window'
     || tool === 'desktop.open_path'
     || tool === 'desktop.permissions'
+    || tool === 'desktop.running_apps'
+    || tool === 'desktop.ui_elements'
+    || tool === 'desktop.windows'
     || tool === 'media.apple_music_control'
     || tool === 'screen.capture'
     || tool === 'system.brightness'
