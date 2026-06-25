@@ -1757,6 +1757,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",
         "new_document": "新建文档",
+        "new_message": "新建消息",
         "new_folder": "新建文件夹",
         "rename_selected": "重命名 Finder 选中项",
         "finder_get_info": "显示 Finder 选中项简介",
@@ -11599,6 +11600,27 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
 
 def _app_default_new_shortcut_action(app_name: str, followup: str) -> str:
     phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "新建消息",
+        "新消息",
+        "创建消息",
+        "创建一条消息",
+        "写消息",
+        "写新消息",
+        "撰写消息",
+        "新建聊天",
+        "新聊天",
+        "创建聊天",
+        "新建会话",
+        "新会话",
+        "compose",
+        "composemessage",
+        "newmessage",
+        "newchat",
+        "newconversation",
+        "startconversation",
+    }:
+        return "new_message" if app_name in _COMMUNICATION_APP_NAMES else ""
     if phrase not in {
         "新建",
         "新建一个",

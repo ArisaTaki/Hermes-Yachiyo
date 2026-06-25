@@ -1035,6 +1035,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert focus_safe_shortcut.input_schema["required"] == ["app_name", "action"]
     assert "paste" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_document" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert "new_message" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_event" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "finder_get_info" in focus_safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted safe shortcuts" in note for note in focus_safe_shortcut.fallback_notes)

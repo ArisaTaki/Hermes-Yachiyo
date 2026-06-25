@@ -137,6 +137,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "force_quit_dialog": ("escape", ("command", "option"), "force quit dialog"),
     "new_window": ("n", ("command",), "new window"),
     "new_document": ("n", ("command",), "new document"),
+    "new_message": ("n", ("command",), "new message"),
     "new_folder": ("n", ("command", "shift"), "new folder"),
     "rename_selected": ("return", (), "rename selected Finder item"),
     "parent_folder": ("up", ("command",), "open parent folder"),

@@ -152,6 +152,7 @@ APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + (
     "finder_quick_look",
     "finder_get_info",
     "new_folder",
+    "new_message",
     "rename_selected",
     "parent_folder",
 )

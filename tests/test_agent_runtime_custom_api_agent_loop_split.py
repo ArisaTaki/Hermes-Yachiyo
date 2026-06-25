@@ -687,6 +687,22 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Finder", "action": "new_folder"},
     }
+    assert daily_desktop_intent_tool_request("打开 Slack 新建消息", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "new_message"},
+    }
+    assert daily_desktop_intent_tool_request("Slack 新建消息", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Slack", "action": "new_message"},
+    }
+    assert daily_desktop_intent_tool_request("微信新建聊天", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "WeChat", "action": "new_message"},
+    }
+    assert daily_desktop_intent_tool_request("Word 新建消息", allowed_tools) is None
     assert daily_desktop_intent_tool_request("打开 Finder 重命名选中文件", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",

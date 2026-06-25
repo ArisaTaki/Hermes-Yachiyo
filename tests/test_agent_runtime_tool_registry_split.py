@@ -546,6 +546,10 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
     )
     ToolDescriptorRegistry.validate_payload(
         "app.focus_and_safe_shortcut",
+        {"app_name": "Slack", "action": "new_message"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
         {"app_name": "Finder", "action": "finder_quick_look"},
     )
     ToolDescriptorRegistry.validate_payload(
@@ -711,6 +715,8 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_get_info"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_message"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_folder"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
@@ -4436,6 +4442,7 @@ def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
 
     result = desktop_mod.desktop_safe_shortcut("new_document")
+    message = desktop_mod.desktop_safe_shortcut("new_message")
 
     assert result["ok"] is True
     assert result["summary"] == "Executed safe shortcut: new document"
@@ -4444,6 +4451,13 @@ def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
     assert result["data"]["shortcut_action"] == "new_document"
     assert result["data"]["shortcut_label"] == "new document"
     assert calls[0][0][-1] == "n"
+    assert message["ok"] is True
+    assert message["summary"] == "Executed safe shortcut: new message"
+    assert message["data"]["key"] == "n"
+    assert message["data"]["modifiers"] == ["command"]
+    assert message["data"]["shortcut_action"] == "new_message"
+    assert message["data"]["shortcut_label"] == "new message"
+    assert calls[1][0][-1] == "n"
 
 
 def test_desktop_safe_shortcut_new_folder_uses_command_shift_n(monkeypatch) -> None:

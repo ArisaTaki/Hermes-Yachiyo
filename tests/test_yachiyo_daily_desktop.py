@@ -183,6 +183,11 @@ def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
         ("提醒事项新建", "app.focus_and_safe_shortcut", "Reminders", "new_reminder"),
         ("打开日历新建", "app.open_and_safe_shortcut", "Calendar", "new_event"),
         ("日历新建", "app.focus_and_safe_shortcut", "Calendar", "new_event"),
+        ("打开 Slack 新建消息", "app.open_and_safe_shortcut", "Slack", "new_message"),
+        ("Slack 新建消息", "app.focus_and_safe_shortcut", "Slack", "new_message"),
+        ("Slack new message", "app.focus_and_safe_shortcut", "Slack", "new_message"),
+        ("微信新建聊天", "app.focus_and_safe_shortcut", "WeChat", "new_message"),
+        ("Messages compose message", "app.focus_and_safe_shortcut", "Messages", "new_message"),
     )
 
     for prompt, tool_name, app_name, action in cases:
@@ -204,6 +209,7 @@ def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
             "input": {"app_name": "Reminders", "action": "new_reminder"},
         }
     ]
+    assert daily_desktop_entrypoint_requests("Word 新建消息") == []
 
 
 def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None:
