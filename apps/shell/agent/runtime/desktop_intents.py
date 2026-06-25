@@ -949,6 +949,9 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "browser.current_page",
         "browser.extract_text",
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+        "browser.screenshot",
         "clipboard.read",
         "clipboard.write",
         "desktop.active_window",
@@ -1080,6 +1083,14 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
         return "查看当前网页"
     if tool_name == "browser.extract_text":
         return "读取当前网页正文"
+    if tool_name == "browser.open_url_and_extract_text":
+        url = str(recovery_input.get("url") or "").strip()
+        return f"打开并读取 {url}" if url else ""
+    if tool_name == "browser.open_url_and_screenshot":
+        url = str(recovery_input.get("url") or "").strip()
+        return f"打开并截取 {url}" if url else ""
+    if tool_name == "browser.screenshot":
+        return "截取当前网页"
     return ""
 
 

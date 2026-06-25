@@ -6766,7 +6766,9 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
     )
     runtime.agent_runtime_service = service
     current_page_calls = 0
+    opened_urls: list[str] = []
     extract_calls: list[str] = []
+    screenshot_calls: list[str] = []
     running_calls = 0
     windows_calls: list[str] = []
     ui_calls: list[tuple[str, int]] = []
@@ -6801,6 +6803,29 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
                 "selector": selector,
                 "text": "Yachiyo desktop agent runtime",
                 "truncated": False,
+            },
+        }
+
+    def fake_open_url(url: str) -> dict:
+        opened_urls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url, "browser": "Google Chrome"},
+        }
+
+    def fake_screenshot(target_path) -> dict:
+        screenshot_calls.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "browser.screenshot",
+            "summary": "Captured current browser page",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "format": "png",
+                "size": 10,
             },
         }
 
@@ -6856,7 +6881,9 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.current_page", fake_current_page)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_screenshot)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.running_apps", fake_running_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
@@ -6874,6 +6901,24 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
                 "browser.extract_text",
                 {},
                 "Yachiyo desktop agent runtime",
+            ),
+            (
+                "打开并读取 GitHub",
+                "browser.open_url_and_extract_text",
+                {"url": "https://github.com", "selector": ""},
+                "Yachiyo desktop agent runtime",
+            ),
+            (
+                "打开并截取 GitHub",
+                "browser.open_url_and_screenshot",
+                {"url": "https://github.com", "reason": "structured recovery"},
+                "已打开网页并截取当前网页。",
+            ),
+            (
+                "截取当前网页",
+                "browser.screenshot",
+                {"reason": "structured recovery"},
+                "已截取当前网页。",
             ),
             (
                 "查看正在运行的应用",
@@ -6934,7 +6979,10 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
             assert "model.requested" not in event_types
 
         assert current_page_calls == 1
-        assert extract_calls == [""]
+        assert opened_urls == ["https://github.com", "https://github.com"]
+        assert extract_calls == ["", ""]
+        assert len(screenshot_calls) == 2
+        assert all(call.endswith("browser/current-page.png") for call in screenshot_calls)
         assert running_calls == 1
         assert windows_calls == ["Google Chrome"]
         assert ui_calls == [("button", 80)]

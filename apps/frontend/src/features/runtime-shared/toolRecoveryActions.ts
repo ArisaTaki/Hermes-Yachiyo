@@ -130,6 +130,9 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   const foregroundPrompt = appForegroundActionPrompt(tool, input);
   if (foregroundPrompt) return foregroundPrompt;
   if (tool === 'browser.open_url' && url) return `打开 ${url}`;
+  if (tool === 'browser.open_url_and_extract_text' && url) return `打开并读取 ${url}`;
+  if (tool === 'browser.open_url_and_screenshot' && url) return `打开并截取 ${url}`;
+  if (tool === 'browser.screenshot') return '截取当前网页';
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(String(input.action || '').trim());
@@ -174,6 +177,9 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'browser.current_page'
     || tool === 'browser.extract_text'
     || tool === 'browser.open_url'
+    || tool === 'browser.open_url_and_extract_text'
+    || tool === 'browser.open_url_and_screenshot'
+    || tool === 'browser.screenshot'
     || tool === 'clipboard.read'
     || tool === 'clipboard.write'
     || tool === 'desktop.active_window'

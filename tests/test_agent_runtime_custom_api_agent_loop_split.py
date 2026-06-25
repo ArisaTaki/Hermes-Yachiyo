@@ -6105,6 +6105,30 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "browser.open_url_and_extract_text",
+            "recovery_input": {"url": "https://github.com", "selector": ""},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开并读取 https://github.com"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "browser.open_url_and_screenshot",
+            "recovery_input": {"url": "https://github.com"},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开并截取 https://github.com"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "browser.screenshot",
+            "recovery_input": {"reason": "structured recovery"},
+            "recovery_risk_level": "low",
+        }
+    ) == "截取当前网页"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "desktop.open_path",
             "recovery_input": {"path": "~/Downloads"},
             "recovery_risk_level": "low",
