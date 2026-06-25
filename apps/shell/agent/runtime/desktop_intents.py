@@ -773,6 +773,15 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in reminders_create_type_sequence
     ):
         return reminders_create_type_sequence
+    app_scoped_postposed_click = _app_scoped_postposed_click_ui_element_request(context)
+    if app_scoped_postposed_click:
+        click_app_name = str(app_scoped_postposed_click.get("app_name") or "").strip()
+        if click_app_name not in _BROWSER_APP_NAMES:
+            if "app.focus_and_click_ui_element" in allowed:
+                return [_request("app.focus_and_click_ui_element", app_scoped_postposed_click)]
+            return []
+    elif _looks_like_app_scoped_postposed_click(context):
+        return []
     app_direct_search_sequence = _app_direct_search_type_tool_requests(context)
     if app_direct_search_sequence and all(
         str(request.get("tool") or "") in allowed for request in app_direct_search_sequence
@@ -930,9 +939,11 @@ def daily_desktop_intent_tool_requests(
     app_window_management = _app_prefix_window_management_tool_request(context)
     if app_window_management and str(app_window_management.get("tool") or "") in allowed:
         return [app_window_management]
-    app_ui_action = _app_scoped_ui_action_tool_request(context)
-    if app_ui_action and str(app_ui_action.get("tool") or "") in allowed:
-        return [app_ui_action]
+    app_scoped_ui_action = _app_scoped_ui_action_tool_request(context)
+    if app_scoped_ui_action:
+        if str(app_scoped_ui_action.get("tool") or "") in allowed:
+            return [app_scoped_ui_action]
+        return []
     for request in daily_desktop_intent_candidates(context):
         if str(request.get("tool") or "") in allowed:
             return [request]
@@ -7382,6 +7393,11 @@ def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
     text = _strip_query(text)
+    postposed_payload = _app_scoped_postposed_click_ui_element_request(text)
+    if postposed_payload:
+        return postposed_payload
+    if _looks_like_app_scoped_postposed_click(text):
+        return None
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|到|切到|切换到|聚焦|激活)\s*(?P<app>[^。！？!?，,]+?)\s*"
@@ -7456,6 +7472,90 @@ def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
             ),
         }
     return None
+
+
+def _app_scoped_postposed_click_ui_element_request(text: str) -> dict[str, Any] | None:
+    for body in _app_scoped_postposed_click_bodies(text):
+        split = _known_app_prefix_split(body)
+        if not split:
+            continue
+        raw_app, app_name, followup = split
+        if (
+            not app_name
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+        ):
+            continue
+        payload = _postposed_click_ui_element_payload(followup)
+        if payload:
+            return {"app_name": app_name, **payload}
+    return None
+
+
+def _app_scoped_postposed_click_bodies(text: str) -> list[str]:
+    clean = _strip_query(text)
+    if not clean:
+        return []
+    bodies: list[str] = []
+    scoped_match = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|到|切到|切换到|聚焦|激活)\s*(?P<body>.+)$",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    if scoped_match:
+        bodies.append(_strip_query(scoped_match.group("body")))
+    bodies.append(clean)
+    return [body for index, body in enumerate(bodies) if body and body not in bodies[:index]]
+
+
+def _postposed_click_ui_element_payload(followup: str) -> dict[str, Any] | None:
+    clean = re.sub(
+        r"^(?:里面|里边|里的|中的|内的|上的|里|中|内|上|的)\s*",
+        "",
+        _strip_query(followup),
+    )
+    match = re.search(
+        r"^(?P<label>[^。！？!?，,]+?)"
+        r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)\s*"
+        r"(?P<verb>双击|点击|点一下|点按|单击|点|按一下|按)"
+        r"(?:一下|一次)?$",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    label = _strip_app_scoped_ui_action_target(match.group("label") or "")
+    if not label or _looks_like_click_coordinate_label(label):
+        return None
+    kind = str(match.group("kind") or "")
+    verb = str(match.group("verb") or "").strip()
+    return {
+        "target": label,
+        "role_filter": _desktop_ui_element_role_filter(kind),
+        "limit": 80,
+        "click_count": 2 if verb == "双击" else 1,
+    }
+
+
+def _looks_like_app_scoped_postposed_click(text: str) -> bool:
+    kind = r"(?:按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)"
+    verb = r"(?:双击|点击|点一下|点按|单击|点|按一下|按)"
+    return any(
+        (
+            (split := _known_app_prefix_split(body)) is not None
+            and _postposed_click_ui_element_payload(split[2]) is not None
+        )
+        or bool(
+            re.search(
+                rf"^.+?(?:里面|里边|里的|中的|内的|上的|里|中|内|上|的)\s*"
+                rf"[^。！？!?，,]+?{kind}\s*{verb}(?:一下|一次)?$",
+                body,
+                flags=re.IGNORECASE,
+            )
+        )
+        for body in _app_scoped_postposed_click_bodies(text)
+    )
 
 
 def _app_scoped_type_into_ui_element_request(text: str) -> dict[str, Any] | None:

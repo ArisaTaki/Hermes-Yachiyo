@@ -2234,6 +2234,65 @@ def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
             },
         },
     ]
+    assert daily_desktop_entrypoint_requests("在微信里的通讯录按钮点一下") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "通讯录",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 的搜索按钮点一下") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在 Linear 上的创建按钮点击") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "创建",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在微信里的通讯录按钮双击") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "通讯录",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 2,
+            },
+        },
+    ]
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 Slack 的搜索按钮点一下",
+            allowed_tools=("desktop.safe_type_text",),
+        )
+        == []
+    )
 
 
 def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
