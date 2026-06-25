@@ -2361,6 +2361,8 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         ("search Space Oddity in Apple Music and play it", "bubble", "Space Oddity"),
         ("Apple Music search Space Oddity and play it", "live2d", "Space Oddity"),
         ("search Apple Music for Taylor Swift and play it", "bubble", "Taylor Swift"),
+        ("超时空辉夜姬播放", "bubble", "超时空辉夜姬"),
+        ("周杰伦播放一下", "live2d", "周杰伦"),
     )
     for prompt, launcher_mode, query in direct_prompts:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(

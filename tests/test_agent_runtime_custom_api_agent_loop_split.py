@@ -5809,6 +5809,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_play",
         "input": {"query": "超时空辉夜姬"},
     }
+    assert daily_desktop_intent_tool_request("超时空辉夜姬播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "超时空辉夜姬"},
+    }
+    assert daily_desktop_intent_tool_request("周杰伦播放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_play",
+        "input": {"query": "周杰伦"},
+    }
     assert daily_desktop_intent_tool_request("超时空辉夜姬放一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",

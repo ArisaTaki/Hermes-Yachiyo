@@ -1635,6 +1635,8 @@ def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music
         ("play Apple Music Taylor Swift", {"query": "Taylor Swift"}),
         ("打开 Apple Music 搜索超时空辉夜姬并播放", {"query": "超时空辉夜姬"}),
         ("open Apple Music and search Space Oddity and play it", {"query": "Space Oddity"}),
+        ("超时空辉夜姬播放", {"query": "超时空辉夜姬"}),
+        ("周杰伦播放一下", {"query": "周杰伦"}),
     )
 
     for prompt, tool_input in cases:

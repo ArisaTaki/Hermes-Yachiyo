@@ -1632,6 +1632,8 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
             ("play Apple Music Taylor Swift", "Taylor Swift"),
             ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
             ("open Apple Music and search Space Oddity and play it", "Space Oddity"),
+            ("超时空辉夜姬播放", "超时空辉夜姬"),
+            ("周杰伦播放一下", "周杰伦"),
         )
         for text, query in cases:
             result = api.send_message(text)

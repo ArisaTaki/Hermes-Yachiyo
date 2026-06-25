@@ -9214,6 +9214,10 @@ def _music_query(text: str) -> str:
         return ""
     patterns = (
         r"(?:play|put(?:\s+on)?)\s+(?P<query>[^.!?]+?)\s+(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?",
+        r"^(?:帮我|请|麻烦)?(?:直接)?(?!播放|播|放|来)"
+        r"(?P<query_song_first>[^。！？!?，,]+?)\s*"
+        r"(?:播放|播|放)(?:一下|下|一首|首)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
         r"(?:帮我|请|麻烦)?(?:直接)?(?:来|播放|播|放)(?:点|点儿|些|一点|一点儿)\s*(?P<query>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦)?(?:直接)?来(?:一首|首)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:我)?(?:想听|听)(?:一下|下)?\s*(?P<query>[^。！？!?，,]+)",
@@ -9228,7 +9232,8 @@ def _music_query(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        query = _strip_music_query_context(match.group("query"))
+        raw_query = next((value for value in match.groupdict().values() if value), "")
+        query = _strip_music_query_context(raw_query)
         if query and _is_specific_music_query(query):
             return query
     return ""
@@ -9368,6 +9373,9 @@ def _is_specific_music_query(query: str) -> bool:
         "啥",
         "状态",
         "播放状态",
+        "播放",
+        "播",
+        "放",
         "当前播放状态",
         "正在播放什么",
         "正在播什么",
