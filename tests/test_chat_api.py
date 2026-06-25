@@ -5474,10 +5474,17 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             AssertionError("hotkey should wait for approval")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe shortcut after hotkey should wait for approval")
+        ),
+    )
 
     try:
         cases = (
             ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+            ("复制当前网页链接", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             (
                 "最大化当前窗口",
                 "desktop.hotkey",

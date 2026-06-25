@@ -275,6 +275,37 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
     }
 
+    copy_link_requests = daily_desktop_entrypoint_requests("复制当前网页链接")
+
+    assert copy_link_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("copy current page link") == copy_link_requests
+    assert daily_desktop_user_metadata(copy_link_requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "daily_desktop_intent",
+        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+        "daily_desktop_tool": "desktop.hotkey",
+        "daily_desktop_tools": ["desktop.hotkey", "desktop.safe_shortcut"],
+    }
+
+    assert daily_desktop_entrypoint_requests("当前网页是什么") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+        }
+    ]
+
 
 def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> None:
     cases = (

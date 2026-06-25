@@ -376,6 +376,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    current_page_link_copy_sequence = _browser_current_page_link_copy_tool_requests(context)
+    if current_page_link_copy_sequence and all(
+        str(request.get("tool") or "") in allowed for request in current_page_link_copy_sequence
+    ):
+        return current_page_link_copy_sequence
     direct_safe_shortcut = _desktop_safe_shortcut_action(context)
     if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
         return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
@@ -3015,8 +3020,49 @@ def _strip_search_query(value: str) -> str:
     return _strip_query(query)
 
 
+def _browser_current_page_link_copy_tool_requests(text: str) -> list[dict[str, Any]]:
+    if not _is_browser_current_page_link_copy_request(text):
+        return []
+    return [
+        _request("desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+        _request("desktop.safe_shortcut", {"action": "copy"}),
+    ]
+
+
+def _is_browser_current_page_link_copy_request(text: str) -> bool:
+    clean = str(text or "").strip()
+    lowered = clean.lower()
+    return bool(
+        re.search(
+            r"(?:复制|拷贝).{0,8}(?:当前|现在|前台|这个|这页|本页).{0,8}"
+            r"(?:网页|网站|页面|页|浏览器|标签页)?(?:链接|网址|url|URL|地址)",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:复制|拷贝).{0,8}(?:链接|网址|url|URL|地址).{0,8}"
+            r"(?:当前|现在|前台|这个|这页|本页).{0,8}(?:网页|网站|页面|页|浏览器|标签页)?",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bcopy\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:(?:browser\s+)?(?:page|tab)\s+)?(?:url|link|address)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bcopy\s+(?:the\s+)?(?:url|link|address)\s+"
+            r"(?:of|from|for)\s+(?:the\s+)?(?:current|active|this)\s+"
+            r"(?:browser\s+)?(?:page|tab)\b",
+            lowered,
+        )
+    )
+
+
 def _is_browser_current_page_request(text: str) -> bool:
     lowered = text.lower()
+    if _is_browser_current_page_link_copy_request(text):
+        return False
     if re.search(r"(?:刷新|重新加载|reload|refresh)", text, flags=re.IGNORECASE):
         return False
     if re.search(r"(?:总结|摘要|概括|summari[sz]e|summary)", text, flags=re.IGNORECASE):
