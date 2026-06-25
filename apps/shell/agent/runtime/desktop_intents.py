@@ -12184,6 +12184,7 @@ def _strip_app_name(value: str) -> str:
     app = _strip_query(value)
     app = _strip_app_foreground_followup(app)
     app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
+    app = re.sub(r"\s*(?:的|里|中|内|上|里面|里边|内里)$", "", app)
     app = re.sub(
         r"\s*(?:应用|app|软件|程序|客户端|桌面版|桌面客户端|client|desktop\s*app|desktop\s*client)$",
         "",

@@ -1654,6 +1654,60 @@ def test_daily_desktop_entrypoint_routes_dynamic_sources_to_ui_inputs() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_app_scoped_ui_input_suffixes() -> None:
+    assert daily_desktop_entrypoint_requests("在 Slack 的消息框输入 hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "消息",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在微信里的搜索框输入文件传输助手") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Linear 上的搜索框输入 ticket 并回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "搜索",
+                "text": "ticket",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 Slack 的消息框输入 hello",
+            allowed_tools=("app.focus_and_safe_shortcut", "desktop.safe_type_text"),
+        )
+        == []
+    )
+
+
 def test_daily_desktop_entrypoint_routes_dynamic_source_browser_open() -> None:
     selected_open_requests = [
         {
