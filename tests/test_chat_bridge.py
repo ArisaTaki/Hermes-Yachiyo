@@ -980,6 +980,8 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         ("打开 Spotify 播放周杰伦", "bubble", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
         ("用 Spotify 播放音乐", "live2d", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
         ("打开网易云并播放", "bubble", "网易云音乐", "已打开网易云音乐，并用媒体键尝试开始播放。"),
+        ("可以帮我打开网易云并播放吗", "live2d", "网易云音乐", "已打开网易云音乐，并用媒体键尝试开始播放。"),
+        ("Could you launch Spotify and play music?", "bubble", "Spotify", "已打开 Spotify，并用媒体键尝试开始播放。"),
     )
     for prompt, launcher_mode, app_name, expected_summary in music_cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -1001,7 +1003,7 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert music_calls == ["Spotify", "Spotify", "网易云音乐"]
+    assert music_calls == ["Spotify", "Spotify", "网易云音乐", "网易云音乐", "Spotify"]
 
     assert open_calls == ["WeChat", "WeChat"]
 
@@ -1988,6 +1990,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     assert "model.requested" not in event_types
 
     launcher_prompts = [
+        ("能帮我播放 Apple Music 吗", "bubble"),
         ("给我来点音乐", "bubble"),
         ("帮我用 Apple Music 放一首歌", "live2d"),
         ("用 Apple Music 随便放点歌", "bubble"),
@@ -2030,7 +2033,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert open_and_play_calls == 20
+    assert open_and_play_calls == 21
 
 
 def test_chat_bridge_quick_message_executes_natural_schedule_creation_for_launcher_entrypoints(

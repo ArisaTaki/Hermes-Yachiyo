@@ -6793,7 +6793,7 @@ def _known_music_app_name(value: str) -> str:
 
 def _music_app_generic_play_open_name(text: str) -> str:
     patterns = (
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
         r"(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
@@ -6807,7 +6807,7 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
         r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:并|然后|后|之后|再)\s*)?(?:随便|随机)?(?:开始)?"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
@@ -6818,14 +6818,15 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:play|start\s+playing)\s+(?:music|songs?|something)\s+"
         r"(?:in|on|with|using)\s+(?P<app>[^.!?]+)[.!?]*$",
-        r"^(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and\s+)?"
         r"(?:play|start\s+playing)(?:\s+(?:music|songs?|something|anything|a\s+song|a\s+track|some\s+music))?[.!?]*$",
         r"^(?P<app>[^.!?]+?)\s+"
         r"(?:play|start\s+playing)"
         r"(?:\s+(?:music|songs?|something|anything|a\s+song|a\s+track|some\s+music))?[.!?]*$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:play|start\s+playing)\s+(?P<app>[^.!?]+?)[.!?]*$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:播放|播|放)(?:一下)?\s*(?P<app>[^。！？!?，,]+?)"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
     )
@@ -7383,7 +7384,7 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
         return True
     return bool(
         re.search(
-            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
             r"(?:播放|放)(?:一下)?\s*"
             r"(?:apple\s*music|music|苹果音乐|音乐)(?:应用|app|软件|程序)?\s*"
             r"(?:(?:里|中|上|内|里面)?(?:的)?(?:音乐|歌|歌曲)|听听|听一下|听下|听)?"
@@ -7391,7 +7392,7 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
             lowered,
         )
         or re.search(
-            r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
+            r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?"
             r"(?:启动|打开|运行|拉起|开启)(?:一下)?\s*"
             r"(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
             r"(?:并|然后|后|之后|再)\s*(?:开始)?(?:播放|放一下|播放一下)"
@@ -7422,7 +7423,7 @@ def _looks_like_scoped_generic_music_play_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"^(?:我|咱|我们)?(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:用|在|通过)\s*(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?"
             r"(?:里|中|上|内|里面)?\s*"
             r"(?:随便|随机)?"
@@ -7449,7 +7450,7 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
         re.search(
-            r"^(?:我|咱|我们)?(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:随便|随机)?"
             r"(?:(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲)|"
             r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:东西)|"
@@ -7462,7 +7463,7 @@ def _looks_like_generic_music_play_request(text: str) -> bool:
             lowered,
         )
         or re.search(
-            r"^(?:我|咱|我们)?(?:能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
+            r"^(?:我|咱|我们)?(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?(?:帮我|请|麻烦|给我)?(?:直接)?"
             r"(?:随便|随机)?(?:来|放|播放|播)(?:一首|首)"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
             lowered,

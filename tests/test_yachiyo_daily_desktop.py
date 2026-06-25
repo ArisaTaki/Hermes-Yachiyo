@@ -41,23 +41,31 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
-def test_daily_desktop_entrypoint_routes_netease_music_short_name_to_generic_music_app() -> None:
-    requests = daily_desktop_entrypoint_requests("打开网易云并播放")
+def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
+    cases = (
+        ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
+        ("可以帮我打开网易云并播放吗", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
+        ("Could you launch Spotify and play music?", "media.music_app_open_and_play", {"app_name": "Spotify"}),
+        ("能帮我播放 Apple Music 吗", "media.apple_music_open_and_play", {}),
+    )
 
-    assert requests == [
-        {
-            "protocol": "json_fallback",
-            "tool": "media.music_app_open_and_play",
-            "input": {"app_name": "网易云音乐"},
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests) == {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_intent",
+            "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+            "daily_desktop_tool": tool_name,
+            "daily_desktop_tools": [tool_name],
         }
-    ]
-    assert daily_desktop_user_metadata(requests) == {
-        "daily_desktop_intent": True,
-        "daily_desktop_source": "daily_desktop_intent",
-        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
-        "daily_desktop_tool": "media.music_app_open_and_play",
-        "daily_desktop_tools": ["media.music_app_open_and_play"],
-    }
 
 
 def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_request() -> None:
