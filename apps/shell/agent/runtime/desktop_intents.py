@@ -611,6 +611,9 @@ def daily_desktop_intent_tool_requests(
     music_app_control = _music_app_control_request(context)
     if music_app_control and str(music_app_control.get("tool") or "") in allowed:
         return [music_app_control]
+    apple_music_prefix_control = _apple_music_prefix_control_action(context)
+    if apple_music_prefix_control and "media.apple_music_control" in allowed:
+        return [_request("media.apple_music_control", {"action": apple_music_prefix_control})]
     system_media_control = _system_media_control_request(context)
     if system_media_control and str(system_media_control.get("tool") or "") in allowed:
         return [system_media_control]
@@ -2337,6 +2340,12 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     app_prefix_safe_key = _app_prefix_safe_key_tool_request(text)
     if app_prefix_safe_key:
         candidates.append(app_prefix_safe_key)
+
+    apple_music_prefix_control = _apple_music_prefix_control_action(text)
+    if apple_music_prefix_control:
+        candidates.append(
+            _request("media.apple_music_control", {"action": apple_music_prefix_control})
+        )
 
     app_prefix_safe_click = _app_prefix_safe_click_tool_request(text)
     if app_prefix_safe_click:
@@ -4823,6 +4832,8 @@ def _app_prefix_safe_key_tool_request(text: str) -> dict[str, Any] | None:
         return None
     raw_app, app_name, followup = split
     if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    if _known_music_app_name(raw_app) and _music_control_followup_action(followup):
         return None
     safe_key = _app_followup_safe_key(followup)
     if not safe_key:
@@ -9791,7 +9802,8 @@ def _music_app_generic_play_open_name(text: str) -> str:
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
         r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
         r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
-        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?)"
+        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?|"
+        r"(?:听听|听一下|听下|听))"
         r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?P<app>[^。！？!?，,]+?)\s*"
         r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
@@ -10415,7 +10427,54 @@ def _is_specific_music_query(query: str) -> bool:
         "歌听听",
         "歌听一下",
         "歌听下",
+        "听",
+        "听听",
+        "听一下",
+        "听下",
     }
+
+
+def _apple_music_prefix_control_action(text: str) -> str:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return ""
+    raw_app, app_name, followup = split
+    music_app = _known_music_app_name(raw_app) or _known_music_app_name(app_name)
+    if music_app != "Music":
+        return ""
+    return _music_control_followup_action(followup)
+
+
+def _music_control_followup_action(value: str) -> str:
+    text = _strip_query(value)
+    lowered = text.lower()
+    if re.fullmatch(
+        r"(?:下一首|下一曲|下首|切歌|换歌|跳过|跳过这首|跳过当前(?:这)?首|"
+        r"跳过当前歌曲|下一首歌|换首歌)",
+        text,
+    ) or re.fullmatch(r"(?:next|skip)(?:\s+(?:song|track))?", lowered):
+        return "next"
+    if re.fullmatch(r"(?:上一首|上一曲|上首|回到上一首|上一首歌)", text) or re.fullmatch(
+        r"(?:previous|prev|back)(?:\s+(?:song|track))?",
+        lowered,
+    ):
+        return "previous"
+    if re.fullmatch(
+        r"(?:播放\s*/\s*暂停|暂停\s*/\s*播放|播放暂停|切换播放|切换暂停)",
+        text,
+    ) or re.fullmatch(r"(?:toggle|play\s*/\s*pause|playpause)", lowered):
+        return "toggle"
+    if re.fullmatch(r"(?:暂停|停一下|停止|停止播放|别放了|关掉|关了|停掉|停了)", text) or re.fullmatch(
+        r"(?:pause|stop)",
+        lowered,
+    ):
+        return "pause"
+    if re.fullmatch(r"(?:继续|继续播放|恢复|恢复播放|接着|接着播放)", text) or re.fullmatch(
+        r"(?:resume|continue)(?:\s+(?:music|song|track|playback|playing))?",
+        lowered,
+    ):
+        return "play"
+    return ""
 
 
 def _music_app_control_request(text: str) -> dict[str, Any] | None:
@@ -10641,6 +10700,15 @@ def _is_apple_music_open_and_play_request(text: str) -> bool:
             r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)"
             r"(?:音乐|歌|歌曲|东西)?"
             r"(?:听听|听一下|听下|听)?"
+            r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+            lowered,
+        )
+        or re.search(
+            r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|能否|能不能|可以)?"
+            r"(?:帮我|请|麻烦)?(?:直接)?"
+            r"(?:(?:打开|启动|运行|拉起|开启)(?:一下)?\s*)?"
+            r"(?:apple\s*music|music|苹果音乐|音乐)(?:应用|app|软件|程序)?\s*"
+            r"(?:听听|听一下|听下|听)"
             r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
             lowered,
         )

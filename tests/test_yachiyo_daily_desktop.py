@@ -1989,6 +1989,9 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("能不能直接播个 Apple Music", "media.apple_music_open_and_play", {}),
         ("你能不能帮我播放音乐", "media.apple_music_open_and_play", {}),
         ("帮我在 Apple Music 播放点音乐", "media.apple_music_open_and_play", {}),
+        ("打开音乐听听", "media.apple_music_open_and_play", {}),
+        ("音乐听听", "media.apple_music_open_and_play", {}),
+        ("打开音乐听一下", "media.apple_music_open_and_play", {}),
         ("can you play some music?", "media.apple_music_open_and_play", {}),
         ("put on some music", "media.apple_music_open_and_play", {}),
     )
@@ -2050,13 +2053,24 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
             "media.system_control"
         )
 
-    assert daily_desktop_entrypoint_requests("Apple Music 暂停") == [
-        {
-            "protocol": "json_fallback",
-            "tool": "media.apple_music_control",
-            "input": {"action": "pause"},
-        }
-    ]
+    for prompt, action in (
+        ("Apple Music 暂停", "pause"),
+        ("Music pause", "pause"),
+        ("Music stop", "pause"),
+        ("Music next", "next"),
+        ("Apple Music next", "next"),
+        ("Music previous", "previous"),
+        ("Apple Music previous", "previous"),
+        ("Music resume", "play"),
+        ("Apple Music resume", "play"),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.apple_music_control",
+                "input": {"action": action},
+            }
+        ]
     for prompt, app_name, action in (
         ("Spotify 暂停", "Spotify", "pause"),
         ("网易云下一首", "网易云音乐", "next"),
