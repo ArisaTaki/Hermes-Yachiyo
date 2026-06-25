@@ -1536,6 +1536,124 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
     ]
 
 
+def test_daily_desktop_entrypoint_routes_dynamic_sources_to_ui_inputs() -> None:
+    selected_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
+    current_page_link_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy_current_page_link"},
+    }
+    current_content_copy = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        selected_copy,
+    ]
+    foreground_search_click = {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "搜索", "role_filter": "text", "limit": 80, "click_count": 1},
+    }
+    foreground_address_click = {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "地址", "role_filter": "text", "limit": 80, "click_count": 1},
+    }
+    paste = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
+    assert daily_desktop_entrypoint_requests("把选中的内容输入到搜索框") == [
+        selected_copy,
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把选中的内容填到当前输入框") == [
+        selected_copy,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把剪贴板内容输入到搜索框") == [
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把剪贴板内容填到当前输入框") == [paste]
+    assert daily_desktop_entrypoint_requests("把当前网页链接输入到地址栏") == [
+        current_page_link_copy,
+        foreground_address_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把当前页面内容输入到搜索框") == [
+        *current_content_copy,
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把当前页面内容输入到当前输入框") == []
+    assert (
+        daily_desktop_entrypoint_requests(
+            "把选中的内容输入到搜索框",
+            allowed_tools=("desktop.safe_type_text",),
+        )
+        == []
+    )
+
+    slack_search_click = {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "text",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    for prompt in (
+        "把选中的内容输入到 Slack 搜索框",
+        "Slack 搜索框输入选中的内容",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            selected_copy,
+            slack_search_click,
+            paste,
+        ]
+    assert daily_desktop_entrypoint_requests("把剪贴板内容输入到 Slack 搜索框") == [
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把当前网页链接输入到 Slack 搜索框") == [
+        current_page_link_copy,
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("把当前页面内容输入到 Slack 搜索框") == [
+        *current_content_copy,
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Slack 搜索框输入选中的内容") == [
+        selected_copy,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        paste,
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_dynamic_source_browser_open() -> None:
     selected_open_requests = [
         {

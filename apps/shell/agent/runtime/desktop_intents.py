@@ -588,6 +588,16 @@ def daily_desktop_intent_tool_requests(
         return []
     if _current_content_foreground_paste_request(context):
         return []
+    dynamic_source_ui_sequence = _dynamic_source_to_ui_element_tool_requests(context)
+    if dynamic_source_ui_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_ui_sequence
+        ):
+            return dynamic_source_ui_sequence
+        return []
+    if _current_content_foreground_input_request(context):
+        return []
     dynamic_source_paste_sequence = _dynamic_source_paste_tool_requests(context)
     if dynamic_source_paste_sequence:
         if all(
@@ -5170,6 +5180,294 @@ def _dynamic_source_paste_tool_requests(text: str) -> list[dict[str, Any]]:
     if should_submit:
         requests.append(_request("desktop.submit_foreground", {"action": "send"}))
     return requests
+
+
+def _dynamic_source_to_ui_element_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _dynamic_source_to_ui_element_request(text)
+    if not parsed:
+        return []
+    source, click_request = parsed
+    requests = _dynamic_source_copy_tool_requests(source)
+    if click_request:
+        requests.append(click_request)
+    requests.append(_request("desktop.safe_shortcut", {"action": "paste"}))
+    return requests
+
+
+def _dynamic_source_copy_tool_requests(source: str) -> list[dict[str, Any]]:
+    if source == "selected_text":
+        return [_request("desktop.safe_shortcut", {"action": "copy"})]
+    if source == "current_page_link":
+        return [_request("desktop.safe_shortcut", {"action": "copy_current_page_link"})]
+    if source == "current_content":
+        return _current_content_copy_tool_requests()
+    return []
+
+
+def _dynamic_source_to_ui_element_request(
+    text: str,
+) -> tuple[str, dict[str, Any] | None] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    return _dynamic_source_to_app_ui_element_request(
+        clean
+    ) or _dynamic_source_to_foreground_ui_element_request(clean)
+
+
+def _dynamic_source_to_app_ui_element_request(
+    text: str,
+) -> tuple[str, dict[str, Any] | None] | None:
+    app_followup = _dynamic_source_ui_app_followup_request(text)
+    if app_followup:
+        mode, app_name, source, raw_target = app_followup
+        click_request = _dynamic_source_ui_click_request(
+            f"app.{mode}_and_click_ui_element",
+            raw_target,
+            app_name=app_name,
+        )
+        if click_request:
+            return source, click_request
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<source>.+?)\s*(?:输入|填写|填入|填|键入|打入|写入|写|粘贴|贴上|贴入)"
+        r"\s*(?:到|进|在)\s*(?P<target>[^。！？!?，,\n]+)$",
+        r"^(?:paste|put|copy|type|enter|input)\s+(?:the\s+)?(?P<source>.+?)\s+"
+        r"(?:into|to|in|on)\s+(?:the\s+)?(?P<target>[^.!?\n]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_paste_source_kind(match.group("source"))
+        app_target = _dynamic_source_ui_app_target(match.group("target"))
+        if not source or not app_target:
+            continue
+        app_name, raw_target = app_target
+        click_request = _dynamic_source_ui_click_request(
+            "app.focus_and_click_ui_element",
+            raw_target,
+            app_name=app_name,
+        )
+        if click_request:
+            return source, click_request
+    return None
+
+
+def _dynamic_source_ui_app_followup_request(
+    text: str,
+) -> tuple[str, str, str, str] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+
+    mode = "focus"
+    body = stripped
+    prefix_patterns: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "open",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下\s*)?",
+                r"^(?:please\s+)?(?:open|launch|start)\s+",
+            ),
+        ),
+        (
+            "focus",
+            (
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:切换到|切到|切回|回到|聚焦|激活|置前|在|用|通过|到)\s*",
+                r"^(?:please\s+)?(?:focus|activate|switch\s+to|bring\s+up|in|on|with|using)\s+",
+            ),
+        ),
+    )
+    for candidate_mode, patterns in prefix_patterns:
+        for pattern in patterns:
+            match = re.search(pattern, stripped, flags=re.IGNORECASE)
+            if not match:
+                continue
+            mode = candidate_mode
+            body = stripped[match.end() :].strip()
+            break
+        else:
+            continue
+        break
+
+    split = _known_app_prefix_split(body)
+    if not split:
+        return None
+    _raw_app, app_name, followup = split
+    parsed = _dynamic_source_ui_followup(followup)
+    if not parsed:
+        return None
+    source, raw_target = parsed
+    return mode, app_name, source, raw_target
+
+
+def _dynamic_source_ui_followup(value: str) -> tuple[str, str] | None:
+    clean = _strip_query(value)
+    target = _dynamic_source_ui_target_pattern()
+    patterns = (
+        rf"^(?P<target>{target})(?:里|中|内|上)?\s*"
+        rf"(?:输入|填写|填入|填|键入|打入|写入|写|粘贴|贴上|贴入)\s*(?P<source>.+)$",
+        rf"^(?:把|将)?\s*(?P<source>.+?)\s*"
+        rf"(?:输入|填写|填入|填|键入|打入|写入|写|粘贴|贴上|贴入)"
+        rf"\s*(?:到|进|在)\s*(?P<target2>{target})$",
+        rf"^(?:paste|put|copy|type|enter|input)\s+(?:the\s+)?(?P<source_en>.+?)\s+"
+        rf"(?:into|to|in|on)\s+(?:the\s+)?(?P<target_en>{target})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        source = _dynamic_paste_source_kind(
+            groups.get("source") or groups.get("source_en") or ""
+        )
+        raw_target = (
+            groups.get("target")
+            or groups.get("target2")
+            or groups.get("target_en")
+            or ""
+        )
+        if source and raw_target:
+            return source, raw_target
+    return None
+
+
+def _dynamic_source_to_foreground_ui_element_request(
+    text: str,
+) -> tuple[str, dict[str, Any] | None] | None:
+    clean = _strip_query(text)
+    target = _dynamic_source_ui_target_pattern()
+    patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+        rf"(?P<source>.+?)\s*"
+        rf"(?:输入|填写|填入|填|键入|打入|写入|写|粘贴|贴上|贴入)"
+        rf"\s*(?:到|进|在)\s*(?P<target>{target})$",
+        rf"^(?:paste|put|copy|type|enter|input)\s+(?:the\s+)?(?P<source_en>.+?)\s+"
+        rf"(?:into|to|in|on)\s+(?:the\s+)?(?P<target_en>{target})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_paste_source_kind(
+            match.groupdict().get("source") or match.groupdict().get("source_en") or ""
+        )
+        raw_target = (
+            match.groupdict().get("target")
+            or match.groupdict().get("target_en")
+            or ""
+        )
+        if not source or not raw_target:
+            continue
+        if _dynamic_source_ui_target_is_foreground_input(raw_target):
+            if source == "current_content":
+                continue
+            return source, None
+        click_request = _dynamic_source_ui_click_request(
+            "desktop.click_ui_element",
+            raw_target,
+        )
+        if click_request:
+            return source, click_request
+    return None
+
+
+def _dynamic_source_ui_app_target(value: str) -> tuple[str, str] | None:
+    split = _known_app_prefix_split(_strip_query(value))
+    if not split:
+        return None
+    _raw_app, app_name, followup = split
+    if not _dynamic_source_ui_target_kind(followup):
+        return None
+    return app_name, followup
+
+
+def _dynamic_source_ui_click_request(
+    tool: str,
+    raw_target: str,
+    *,
+    app_name: str = "",
+) -> dict[str, Any] | None:
+    target = _strip_desktop_ui_input_target(raw_target)
+    if not target or _dynamic_source_ui_target_is_foreground_input(raw_target):
+        return None
+    role_filter = _desktop_ui_element_role_filter(raw_target) or "text"
+    payload: dict[str, Any] = {
+        "target": target,
+        "role_filter": role_filter,
+        "limit": 80,
+        "click_count": 1,
+    }
+    if app_name:
+        payload = {"app_name": app_name, **payload}
+    return _request(tool, payload)
+
+
+def _current_content_foreground_input_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    current_content_source = _current_content_source_pattern()
+    target = _dynamic_source_ui_foreground_input_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            rf"(?:{current_content_source})\s*"
+            rf"(?:输入|填写|填入|填|键入|打入|写入|写|粘贴|贴上|贴入)"
+            rf"\s*(?:到|进|在)\s*(?:{target})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:paste|put|copy|type|enter|input)\s+(?:the\s+)?"
+            rf"(?:{current_content_source})\s+(?:into|to|in|on)\s+(?:the\s+)?(?:{target})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _dynamic_source_ui_target_pattern() -> str:
+    return (
+        r"(?:当前输入框|当前文本框|当前输入栏|输入框|文本框|输入栏|"
+        r"搜索框|搜索栏|搜索输入框|消息框|聊天框|地址栏|"
+        r"current\s+input|current\s+text\s*field|current\s+field|input|"
+        r"text\s*field|textbox|field|search\s+field|search\s+box|search\s+bar|"
+        r"message\s+field|message\s+box|chat\s+box|address\s+bar)"
+    )
+
+
+def _dynamic_source_ui_foreground_input_pattern() -> str:
+    return (
+        r"(?:当前输入框|当前文本框|当前输入栏|输入框|文本框|输入栏|"
+        r"current\s+input|current\s+text\s*field|current\s+field|input|"
+        r"text\s*field|textbox|field)"
+    )
+
+
+def _dynamic_source_ui_target_kind(value: str) -> str:
+    clean = _strip_query(value)
+    if re.fullmatch(
+        rf"(?:{_dynamic_source_ui_target_pattern()})",
+        clean,
+        flags=re.IGNORECASE,
+    ):
+        return "text"
+    return ""
+
+
+def _dynamic_source_ui_target_is_foreground_input(value: str) -> bool:
+    clean = _strip_query(value)
+    return bool(
+        re.fullmatch(
+            rf"(?:{_dynamic_source_ui_foreground_input_pattern()})",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _dynamic_source_paste_request(

@@ -966,6 +966,129 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
     ]
 
 
+def test_daily_desktop_intent_planner_routes_dynamic_sources_to_ui_inputs() -> None:
+    allowed_tools = [
+        "desktop.safe_shortcut",
+        "desktop.click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+    ]
+    selected_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
+    current_page_link_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy_current_page_link"},
+    }
+    current_content_copy = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+        },
+        selected_copy,
+    ]
+    foreground_search_click = {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "搜索", "role_filter": "text", "limit": 80, "click_count": 1},
+    }
+    paste = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+    }
+
+    assert daily_desktop_intent_tool_requests("把选中的内容输入到搜索框", allowed_tools) == [
+        selected_copy,
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把选中的内容填到当前输入框", allowed_tools) == [
+        selected_copy,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把剪贴板内容输入到搜索框", allowed_tools) == [
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把剪贴板内容填到当前输入框", allowed_tools) == [
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把当前网页链接输入到地址栏", allowed_tools) == [
+        current_page_link_copy,
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "地址", "role_filter": "text", "limit": 80, "click_count": 1},
+        },
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把当前页面内容输入到搜索框", allowed_tools) == [
+        *current_content_copy,
+        foreground_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把当前页面内容输入到当前输入框", allowed_tools) == []
+    assert daily_desktop_intent_tool_requests(
+        "把选中的内容输入到搜索框",
+        ["desktop.safe_type_text"],
+    ) == []
+
+    slack_search_click = {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "text",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    for prompt in (
+        "把选中的内容输入到 Slack 搜索框",
+        "Slack 搜索框输入选中的内容",
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == [
+            selected_copy,
+            slack_search_click,
+            paste,
+        ]
+    assert daily_desktop_intent_tool_requests("把剪贴板内容输入到 Slack 搜索框", allowed_tools) == [
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把当前网页链接输入到 Slack 搜索框", allowed_tools) == [
+        current_page_link_copy,
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("把当前页面内容输入到 Slack 搜索框", allowed_tools) == [
+        *current_content_copy,
+        slack_search_click,
+        paste,
+    ]
+    assert daily_desktop_intent_tool_requests("打开 Slack 搜索框输入选中的内容", allowed_tools) == [
+        selected_copy,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+        paste,
+    ]
+
+
 def test_daily_desktop_intent_planner_routes_app_search_field_typing_language() -> None:
     allowed_tools = [
         "app.open",
