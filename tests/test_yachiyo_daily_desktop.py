@@ -223,6 +223,75 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
     }
 
 
+def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> None:
+    cases = (
+        (
+            "refresh the current page",
+            "desktop.safe_shortcut",
+            {"action": "refresh"},
+        ),
+        (
+            "刷新当前页面",
+            "desktop.safe_shortcut",
+            {"action": "refresh"},
+        ),
+        (
+            "open a new tab",
+            "desktop.safe_shortcut",
+            {"action": "new_tab"},
+        ),
+        (
+            "新开一个标签页",
+            "desktop.safe_shortcut",
+            {"action": "new_tab"},
+        ),
+        (
+            "打开下载目录里的最新文件",
+            "desktop.open_path",
+            {"path": "latest_download"},
+        ),
+        (
+            "打开当前选中的 Finder 文件",
+            "desktop.open_path",
+            {"path": "finder_selection"},
+        ),
+        (
+            "click the first search result",
+            "browser.click",
+            {"selector": "search-result=1", "click_count": 1},
+        ),
+        (
+            "点击当前页面第一个搜索结果",
+            "browser.click",
+            {"selector": "search-result=1", "click_count": 1},
+        ),
+        (
+            "type hello in current webpage search field",
+            "browser.type_text",
+            {
+                "selector": (
+                    'input[type="search"], input[name="q"], textarea[name="q"], '
+                    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+                    'input[aria-label*="search" i], input[placeholder*="search" i]'
+                ),
+                "text": "hello",
+            },
+        ),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
 

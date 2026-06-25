@@ -370,6 +370,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in browser_search_click_sequence
     ):
         return browser_search_click_sequence
+    direct_safe_shortcut = _desktop_safe_shortcut_action(context)
+    if direct_safe_shortcut and "desktop.safe_shortcut" in allowed:
+        return [_request("desktop.safe_shortcut", {"action": direct_safe_shortcut})]
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -2771,6 +2774,24 @@ def _looks_like_click_command(text: str) -> bool:
 def _browser_click_request(text: str) -> dict[str, Any] | None:
     if not _has_browser_page_context(text):
         return None
+    rank_match = re.search(
+        r"(?:点击|点一下|点按|单击|打开|进入|访问)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)$",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:click|open|visit|press)\s+(?:the\s+)?"
+        r"(?P<rank_en>first|1st|second|2nd|third|3rd)\s+"
+        r"(?:search\s+)?(?:result|link)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if rank_match:
+        rank = rank_match.groupdict().get("rank") or rank_match.groupdict().get("rank_en") or ""
+        index = _browser_search_result_rank_index(rank)
+        if index:
+            return {"selector": f"search-result={index}", "click_count": 1}
     point = _browser_click_point(text)
     if point:
         return {
@@ -2837,6 +2858,9 @@ def _browser_type_text_request(text: str) -> dict[str, Any] | None:
             "fallback_y": point["y"],
         }
     patterns = (
+        r"\b(?:type|enter|fill)\s+(?P<text>[^.!?]+?)\s+"
+        r"(?:into|in)\s+(?:the\s+)?(?:current|this)?\s*"
+        r"(?:web\s*page|webpage|page|browser)\s+(?P<target>[^.!?]+)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|向|给)?\s*(?:当前)?(?:网页|页面|浏览器|当前页)"
         r"(?:上|里|中|内)?(?:的)?\s*(?P<target>[^。！？!?，,]*?)"
@@ -2894,7 +2918,8 @@ def _browser_type_text_point(text: str) -> dict[str, Any] | None:
 def _has_browser_page_context(text: str) -> bool:
     return bool(
         re.search(r"(?:网页|页面|浏览器|当前页)", text, flags=re.IGNORECASE)
-        or re.search(r"\b(?:browser|page)\b", text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:browser|page|webpage|web\s+page)\b", text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:search\s+)?(?:result|link)s?\b", text, flags=re.IGNORECASE)
     )
 
 
@@ -4542,12 +4567,16 @@ def _finder_selection_open_path_request(text: str) -> bool:
     lowered = str(text or "").strip().lower()
     return bool(
         re.search(
-            r"(?:打开|开启).{0,10}(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目)",
+            r"(?:打开|开启).{0,10}(?:当前)?(?:选中|选定|选择)的?.{0,10}"
+            r"(?:finder|访达)?\s*(?:文件|项目|条目)",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:当前)?(?:选中|选定|选择)的?.{0,6}(?:文件|项目|条目).{0,10}(?:打开|开启)",
+            r"(?:当前)?(?:选中|选定|选择)的?.{0,10}(?:finder|访达)?\s*"
+            r"(?:文件|项目|条目).{0,10}(?:打开|开启)",
             text,
+            flags=re.IGNORECASE,
         )
         or re.search(
             r"\bopen\s+(?:the\s+)?(?:currently\s+)?selected\s+(?:finder\s+)?(?:file|item)\b",
@@ -4592,6 +4621,11 @@ def _latest_download_open_path_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:打开|开启).{0,12}(?:最近|最新|刚刚|刚才).{0,8}(?:下载|下载的).{0,8}(?:文件|项目|内容|东西)?",
+            text,
+        )
+        or re.search(
+            r"(?:打开|开启).{0,12}(?:下载|下载目录|下载文件夹).{0,8}"
+            r"(?:最近|最新|刚刚|刚才).{0,8}(?:文件|项目|内容|东西)?",
             text,
         )
         or re.search(
@@ -7839,6 +7873,9 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "刷新一下当前页": "refresh",
         "刷新下当前页": "refresh",
         "刷新当前页": "refresh",
+        "刷新一下当前页面": "refresh",
+        "刷新下当前页面": "refresh",
+        "刷新当前页面": "refresh",
         "刷新一下当前网页": "refresh",
         "刷新下当前网页": "refresh",
         "刷新当前网页": "refresh",
@@ -7846,8 +7883,10 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "刷新下网页": "refresh",
         "刷新网页": "refresh",
         "reload": "refresh",
+        "reloadthecurrentpage": "refresh",
         "reloadpage": "refresh",
         "refresh": "refresh",
+        "refreshthecurrentpage": "refresh",
         "refreshpage": "refresh",
         "重新打开关闭的标签页": "reopen_closed_tab",
         "重新打开刚关闭的标签页": "reopen_closed_tab",
@@ -7928,7 +7967,9 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "新标签页": "new_tab",
         "打开新标签页": "new_tab",
         "开新标签页": "new_tab",
+        "新开标签页": "new_tab",
         "开一个新标签页": "new_tab",
+        "新开一个标签页": "new_tab",
         "newtab": "new_tab",
         "opennewtab": "new_tab",
         "openanewtab": "new_tab",

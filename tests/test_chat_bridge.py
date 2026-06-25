@@ -4305,6 +4305,22 @@ def test_chat_bridge_quick_message_executes_latest_download_open_path_for_launch
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开下载目录里的最新文件",
+        launcher_mode="live2d",
+    )
+
+    assert open_calls[-1] == "latest_download"
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已打开文件：~/Downloads/new.pdf。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "latest_download"}
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_latest_screenshot_open_path_for_launcher_entrypoints(
     tmp_path,
@@ -4377,6 +4393,22 @@ def test_chat_bridge_quick_message_executes_finder_selection_open_path_for_launc
     )
 
     assert open_calls == ["finder_selection"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已打开文件：~/Desktop/selected.pdf。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {"path": "finder_selection"}
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开当前选中的 Finder 文件",
+        launcher_mode="bubble",
+    )
+
+    assert open_calls[-1] == "finder_selection"
     assert agent_task["status"] == "completed"
     assert agent_task["summary"] == "已打开文件：~/Desktop/selected.pdf。"
     assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.open_path"
@@ -5017,8 +5049,12 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("Would you select all please?", "bubble", "select_all", "已全选。"),
         ("浏览器刷新", "live2d", "refresh", "已刷新。"),
         ("refresh page", "bubble", "refresh", "已刷新。"),
+        ("refresh the current page", "bubble", "refresh", "已刷新。"),
+        ("刷新当前页面", "live2d", "refresh", "已刷新。"),
         ("reload page", "live2d", "refresh", "已刷新。"),
         ("open new tab", "bubble", "new_tab", "已新建标签页。"),
+        ("open a new tab", "live2d", "new_tab", "已新建标签页。"),
+        ("新开一个标签页", "bubble", "new_tab", "已新建标签页。"),
         ("go back one page", "live2d", "browser_back", "已返回上一页。"),
         ("forward page", "bubble", "browser_forward", "已前进一页。"),
         ("把剪贴板内容粘贴到当前输入框", "bubble", "paste", "已粘贴。"),
@@ -7859,6 +7895,123 @@ def test_chat_bridge_quick_message_browser_click_approval_executes_and_completes
         assert "agent.desktop.intent_approval_required" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.output.completed" in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_chat_bridge_quick_message_browser_search_result_and_type_text_require_approval(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-browser-search-result-type.db",
+        workspace_dir=tmp_path / "runtime-browser-search-result-type",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    click_calls: list[tuple[str, int]] = []
+    type_calls: list[tuple[str, str]] = []
+    search_selector = (
+        'input[type="search"], input[name="q"], textarea[name="q"], '
+        'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+        'input[aria-label*="search" i], input[placeholder*="search" i]'
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher browser approval should not call model")
+        ),
+    )
+
+    def fake_browser_click(selector: str, **kwargs: Any) -> dict:
+        click_calls.append((selector, int(kwargs.get("click_count") or 1)))
+        return {
+            "ok": True,
+            "action": "browser.click",
+            "summary": "Clicked browser selector",
+            "data": {
+                "selector": selector,
+                "label": "Yachiyo result",
+                "tag": "A",
+            },
+        }
+
+    def fake_browser_type_text(selector: str, text: str, **_kwargs: Any) -> dict:
+        type_calls.append((selector, text))
+        return {
+            "ok": True,
+            "action": "browser.type_text",
+            "summary": "Typed browser text",
+            "data": {
+                "selector": selector,
+                "length": len(text),
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.type_text", fake_browser_type_text)
+    bridge = ChatBridge(runtime)
+    try:
+        cases = (
+            (
+                "click the first search result",
+                "browser.click",
+                {"selector": "search-result=1", "click_count": 1},
+            ),
+            (
+                "type hello in current webpage search field",
+                "browser.type_text",
+                {"selector": search_selector, "text": "hello"},
+            ),
+        )
+        for prompt, tool_name, input_preview in cases:
+            result = bridge.send_quick_message(
+                prompt,
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": "bubble",
+                    "launcher_surface": "quick_message",
+                },
+            )
+            task_id = result["task_id"]
+            waiting_task = result["agent_task"]
+            link = service.get_task_run_link(task_id)
+            waiting_run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert waiting_task["status"] == "waiting_approval"
+            assert waiting_task["needs_user_action"] is True
+            assert waiting_task["pending_approvals"][0]["tool_name"] == tool_name
+            assert waiting_task["pending_approvals"][0]["input_preview"] == input_preview
+            assert waiting_run["status"] == "approval_required"
+            assert waiting_run["pending_approval"]["tool"] == tool_name
+
+            approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
+            run = service.get_run(link["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert approved.status == "completed"
+            assert approved.needs_user_action is False
+            assert approved.pending_approvals == []
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.output.completed" in event_types
+
+        assert click_calls == [("search-result=1", 1)]
+        assert type_calls == [(search_selector, "hello")]
     finally:
         service.close()
         store.close()

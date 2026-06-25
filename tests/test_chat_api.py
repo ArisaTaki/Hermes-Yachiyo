@@ -2512,6 +2512,35 @@ def test_send_message_executes_latest_download_open_path_without_model(tmp_path,
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        result = api.send_message("打开下载目录里的最新文件")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件：~/Downloads/new.pdf。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"path": "latest_download"}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件：~/Downloads/new.pdf。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开文件：~/Downloads/new.pdf。"
+        assert open_path_calls[-1] == "latest_download"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
     finally:
         service.close()
         store.close()
@@ -2648,6 +2677,35 @@ def test_send_message_executes_finder_selection_open_path_without_model(tmp_path
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == "已打开文件：~/Desktop/selected.pdf。"
         assert open_path_calls == ["finder_selection"]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+        result = api.send_message("打开当前选中的 Finder 文件")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件：~/Desktop/selected.pdf。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"path": "finder_selection"}
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件：~/Desktop/selected.pdf。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已打开文件：~/Desktop/selected.pdf。"
+        assert open_path_calls[-1] == "finder_selection"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
@@ -5058,6 +5116,89 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
         store.close()
 
 
+def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    search_selector = (
+        'input[type="search"], input[name="q"], textarea[name="q"], '
+        'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+        'input[aria-label*="search" i], input[placeholder*="search" i]'
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct browser approval request should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.browser.click",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser.click should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.browser.type_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("browser.type_text should wait for approval")
+        ),
+    )
+    try:
+        cases = (
+            (
+                "click the first search result",
+                "browser.click",
+                {"selector": "search-result=1", "click_count": 1},
+            ),
+            (
+                "type hello in current webpage search field",
+                "browser.type_text",
+                {"selector": search_selector, "text": "hello"},
+            ),
+        )
+        for prompt, tool_name, input_preview in cases:
+            result = api.send_message(prompt)
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert result["status"] == "waiting_approval"
+            assert result["agent_task"]["status"] == "waiting_approval"
+            assert result["agent_task"]["needs_user_action"] is True
+            assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
+            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["tool"] == tool_name
+            assert run["pending_approval"]["input_preview"] == input_preview
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.tool.approval_required" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
@@ -5166,6 +5307,10 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         cases = (
             ("打开新窗口", "new_window", "已新建窗口。"),
             ("Can you copy?", "copy", "已复制选中内容。"),
+            ("refresh the current page", "refresh", "已刷新。"),
+            ("刷新当前页面", "refresh", "已刷新。"),
+            ("open a new tab", "new_tab", "已新建标签页。"),
+            ("新开一个标签页", "new_tab", "已新建标签页。"),
         )
         for text, action, summary in cases:
             result = api.send_message(text)
@@ -5200,7 +5345,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             assert "model.requested" not in event_types
             assert shortcut_calls[-1] == action
 
-        assert shortcut_calls == ["new_window", "copy"]
+        assert shortcut_calls == ["new_window", "copy", "refresh", "refresh", "new_tab", "new_tab"]
     finally:
         service.close()
         store.close()
