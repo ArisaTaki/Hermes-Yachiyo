@@ -2402,6 +2402,40 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             },
         },
     ]
+    assert daily_desktop_intent_tool_requests("明天下午三点日历上加一个开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("日历上加一个明天下午三点开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("明天下午三点创建一个日程开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("明天下午三点安排一个开会", allowed_tools) == []
     assert daily_desktop_intent_tool_requests("打开日历新建日程 明天下午三点开会", allowed_tools) == [
         {
             "protocol": "json_fallback",

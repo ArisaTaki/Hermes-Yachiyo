@@ -941,6 +941,8 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
 
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
+    tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
 
     assert daily_desktop_entrypoint_requests("帮我新建备忘录：明天买牛奶") == [
         {
@@ -954,6 +956,17 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "开会", "due_at": tomorrow_0900},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("明天下午三点日历上加一个开会") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
         }
     ]
 

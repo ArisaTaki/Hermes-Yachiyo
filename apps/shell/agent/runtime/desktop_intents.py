@@ -6414,9 +6414,19 @@ def _calendar_event_create_body(value: str) -> str:
         r"(?P<body_prefixed>[^。！？!?]+?)\s*(?:的)?(?:日历事件|日程|日历日程|calendar event)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)?\s*(?:日历|calendar)\s*"
+        r"(?:上|里|中|内)?\s*"
         r"(?:(?:并且|并|然后|之后|后|再)\s*)?"
-        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:日程|事件|event)?\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<time_first>[^。！？!?]+?)\s*(?:帮我)?\s*(?:在)?\s*"
+        r"(?:日历|calendar)\s*(?:上|里|中|内)?\s*"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日程|事件|event)?\s*(?P<title_after_calendar>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<time_first_event>[^。！？!?]+?)\s*(?:帮我)?\s*"
+        r"(?:新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日历事件|日程|日历日程|calendar event)\s*(?P<title_after_event>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<body_to_calendar>[^。！？!?]+?)\s*"
         r"(?:加到|添加到|新增到|放到|加入)\s*(?:日历|calendar)$",
@@ -6427,6 +6437,10 @@ def _calendar_event_create_body(value: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             groups = match.groupdict()
+            if groups.get("time_first") and groups.get("title_after_calendar"):
+                return _strip_query(f"{groups['time_first']} {groups['title_after_calendar']}")
+            if groups.get("time_first_event") and groups.get("title_after_event"):
+                return _strip_query(f"{groups['time_first_event']} {groups['title_after_event']}")
             return _strip_query(
                 groups.get("body")
                 or groups.get("body_prefixed")

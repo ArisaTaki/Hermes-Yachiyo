@@ -1236,7 +1236,7 @@ def test_send_message_executes_natural_calendar_event_without_model(tmp_path, mo
         fake_calendar_create_event,
     )
     try:
-        result = api.send_message("创建明天上午10点开会的日程")
+        result = api.send_message("明天上午10点日历上加一个开会")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
