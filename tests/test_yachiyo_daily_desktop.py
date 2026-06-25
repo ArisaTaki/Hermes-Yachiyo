@@ -110,6 +110,58 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:
+    cases = (
+        (
+            "帮我截个屏",
+            "screen.capture",
+            {"reason": "user asked to capture the screen"},
+        ),
+        (
+            "你能看看现在有哪些按钮吗",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "Can you list the visible buttons?",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "Can you inspect the current UI?",
+            "desktop.ui_elements",
+            {"role_filter": "", "limit": 80},
+        ),
+        (
+            "点击可见的登录按钮",
+            "desktop.click_ui_element",
+            {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+        ),
+        (
+            "Can you click the login button?",
+            "desktop.click_ui_element",
+            {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},
+        ),
+        (
+            "Can you type hello into the search field?",
+            "desktop.type_into_ui_element",
+            {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
+        ),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:
     cases = (
         ("你可以帮我复制一下吗", "desktop.safe_shortcut", {"action": "copy"}),

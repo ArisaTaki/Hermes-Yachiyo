@@ -3291,7 +3291,7 @@ def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch)
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
     try:
-        result = api.send_message("屏幕截一下")
+        result = api.send_message("帮我截个屏")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
@@ -4957,6 +4957,89 @@ def test_send_message_structured_ui_element_recovery_keeps_approval_gate(
         store.close()
 
 
+def test_send_message_routes_ui_element_language_to_approval_gate(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("foreground UI element request should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.click_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("click_ui_element should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.type_into_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("type_into_ui_element should wait for approval")
+        ),
+    )
+    try:
+        cases = (
+            (
+                "Can you click the login button?",
+                "desktop.click_ui_element",
+                {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "点击可见的登录按钮",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "Can you type hello into the search field?",
+                "desktop.type_into_ui_element",
+                {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
+            ),
+        )
+        for prompt, tool_name, input_preview in cases:
+            result = api.send_message(prompt)
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert result["status"] == "waiting_approval"
+            assert result["agent_task"]["status"] == "waiting_approval"
+            assert result["agent_task"]["needs_user_action"] is True
+            assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
+            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["tool"] == tool_name
+            assert run["pending_approval"]["input_preview"] == input_preview
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.tool.approval_required" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)
@@ -5532,6 +5615,34 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         assert "agent.desktop.intent_approval_required" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        visible = api.send_message("Can you list the visible buttons?")
+        visible_task = runtime.state.get_task(visible["task_id"])
+        visible_run = service.get_run(visible["run_id"])
+        visible_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(visible_run["run_id"])["events"]
+        ]
+
+        assert visible["ok"] is True
+        assert visible["status"] == "completed"
+        assert visible["agent_task"]["status"] == "completed"
+        assert visible["agent_task"]["needs_user_action"] is False
+        assert visible["agent_task"]["summary"] == "当前 Google Chrome 界面控件：Button Send（640, 720）。"
+        assert visible["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert visible["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "button",
+            "limit": 80,
+        }
+        assert visible_task is not None
+        assert visible_task.status == TaskStatus.COMPLETED
+        assert ui_calls[-1] == ("button", 80)
+        assert visible_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in visible_event_types
+        assert "agent.tool.call" in visible_event_types
+        assert "agent.desktop.intent_completed" in visible_event_types
+        assert "model.request.started" not in visible_event_types
+        assert "model.requested" not in visible_event_types
     finally:
         service.close()
         store.close()

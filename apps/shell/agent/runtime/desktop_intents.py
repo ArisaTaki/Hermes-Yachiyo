@@ -3472,6 +3472,8 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
             lowered,
         )
         or re.search(r"\b(?:what|which)\b.{0,24}\b(?:buttons|controls|ui elements)\b", lowered)
+        or re.search(r"\b(?:visible|shown|available)\s+(?:buttons|controls|ui elements|text fields)\b", lowered)
+        or re.search(r"\b(?:inspect|list|show|read)\s+(?:the\s+)?(?:current\s+)?(?:ui|interface)\b", lowered)
         or re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered)
     ):
         return None
@@ -3505,7 +3507,7 @@ def _app_scoped_ui_elements_tool_requests(text: str) -> list[dict[str, Any]]:
 def _is_current_ui_elements_request(text: str) -> bool:
     return bool(
         re.search(
-            r"^\s*(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"^\s*(?:你|您)?\s*(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|可以|能)?(?:直接)?"
             r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)?\s*"
             r"(?:当前|现在|这个|前台|该)\s*(?:应用|app|界面|窗口|屏幕)?\s*"
             r"(?:有哪些|有什么|有啥|有哪个|有哪几个|列出|列一下|显示|查看|看看|看一下|读取|识别|的)?\s*"
@@ -3514,9 +3516,16 @@ def _is_current_ui_elements_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"^\s*(?:list|show|read|inspect|what|which)\b.{0,24}\b"
+            r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:list|show|read|inspect|what|which)\b.{0,24}\b"
             r"(?:current|frontmost|foreground|this)\s+"
-            r"(?:app|application|window|interface|screen)\b",
+            r"(?:app|application|window|interface|screen|ui)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:list|show|read|inspect)\s+(?:the\s+)?(?:visible|shown|available)\s+"
+            r"(?:buttons|controls|ui elements|text fields)\b",
             text,
             flags=re.IGNORECASE,
         )
@@ -3832,6 +3841,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
 def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
+    text = _strip_query(text)
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|到|切到|切换到|聚焦|激活)\s*(?P<app>[^。！？!?，,]+?)\s*"
@@ -3852,7 +3862,7 @@ def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
         r"(?P<label3>[^。！？!?，,]+?)"
         r"(?P<kind3>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
         r"(?:一下|一次)?$",
-        r"^(?P<verb_en>double\s+click|click|press|tap)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<verb_en>double\s+click|click|press|tap)\s+"
         r"(?:the\s+)?(?P<label_en>[^.!?]+?)"
         r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|menu item|menu|checkbox))?"
         r"\s+(?:in|on)\s+(?:the\s+)?(?P<app_en>[^.!?]+)$",
@@ -3911,6 +3921,7 @@ def _app_scoped_click_ui_element_request(text: str) -> dict[str, Any] | None:
 def _app_scoped_type_into_ui_element_request(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
+    text = _strip_query(text)
     target_pattern = (
         r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"search\s+field|search\s+box|search\s+bar|message\s+field|message\s+box|"
@@ -3938,14 +3949,17 @@ def _app_scoped_type_into_ui_element_request(text: str) -> dict[str, Any] | None
         r"(?P<app3>[^。！？!?，,\s]+?)\s*(?:的|里|中|内|上)?\s*"
         rf"(?P<target3>{bare_target_pattern})(?:里|中|内|上)?\s*"
         r"(?:输入|填写|键入|打入|填入|写入|写)\s*(?P<text3>[^。！？!?]+)$",
-        r"^(?:type|enter|input)\s+(?P<text_en>[^.!?]+?)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:type|enter|input)\s+(?P<text_en>[^.!?]+?)\s+"
         r"(?:into|in|to)\s+(?:the\s+)?"
         rf"(?P<target_en>{target_pattern})\s+"
         r"(?:in|on)\s+(?:the\s+)?(?P<app_en>[^.!?]+)$",
-        r"^(?:type|enter|input)\s+(?P<text_en2>[^.!?]+?)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:type|enter|input)\s+(?P<text_en2>[^.!?]+?)\s+"
         r"(?:into|in|to)\s+(?:the\s+)?(?P<app_en2>[^.!?]+?)\s+"
         rf"(?P<target_en2>{target_pattern})$",
-        r"^fill\s+(?:the\s+)?(?P<target_en3>[^.!?]+?)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"fill\s+(?:the\s+)?(?P<target_en3>[^.!?]+?)\s+"
         r"(?:in|on)\s+(?:the\s+)?(?P<app_en3>[^.!?]+?)\s+"
         r"with\s+(?P<text_en3>[^.!?]+)$",
     )
@@ -4074,6 +4088,8 @@ def _normalize_app_scoped_ui_action_app(value: str) -> str:
 def _strip_app_scoped_ui_action_target(value: str) -> str:
     target = _strip_desktop_ui_element_label(value)
     target = re.sub(r"^(?:the|a|an)\s+", "", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:visible|shown|available)\s+", "", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:可见|看得到|能看到)(?:的)?\s*", "", target)
     target = re.sub(r"^的\s*", "", target)
     return _strip_query(target)
 
@@ -4121,6 +4137,18 @@ def _looks_like_generic_ui_scope(value: str) -> bool:
         "this",
         "foreground",
         "frontmost",
+        "visible",
+        "shown",
+        "available",
+        "thevisible",
+        "thevisiblebuttons",
+        "visiblebuttons",
+        "shownbuttons",
+        "availablebuttons",
+        "可见",
+        "可见的",
+        "看得到",
+        "能看到",
         "thisapp",
         "thiswindow",
     } or (
@@ -8407,6 +8435,7 @@ def _desktop_type_text(text: str) -> str:
 def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
+    text = _strip_query(text)
     bare_target_pattern = (
         r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"search\s+field|search\s+box|search\s+bar|message\s+field|message\s+box|"
@@ -8427,7 +8456,8 @@ def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
         r"(?:填写|填入|把|将)?\s*(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
         r"(?:上|里|中|内|的|里的|中的)?\s*"
         rf"(?P<target2>{target_pattern})\s*(?:为|成|:|：)\s*(?P<text2>[^。！？!?]+)$",
-        r"^(?:type|enter|fill)\s+(?P<text_en>[^.!?]+?)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:type|enter|fill)\s+(?P<text_en>[^.!?]+?)\s+"
         r"(?:into|in)\s+(?:the\s+)?"
         rf"(?P<target_en>{target_pattern})"
         r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
@@ -8512,6 +8542,7 @@ def _desktop_safe_click(text: str) -> dict[str, Any] | None:
 def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dict[str, Any] | None:
     if _has_browser_page_context(text):
         return None
+    text = _strip_query(text)
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击)|点击|点一下|点按|单击|点|按一下|按)\s*"
@@ -8519,7 +8550,8 @@ def _desktop_click_ui_element(text: str, *, require_context: bool = True) -> dic
         r"(?P<label>[^。！？!?，,]+?)"
         r"(?P<kind>按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框)?"
         r"(?:一下|一次)?$",
-        r"^(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:(?P<double_en>double\s+click)|click|press|tap)\s+"
         r"(?:the\s+)?(?P<label_en>[^.!?]+?)"
         r"(?:\s+(?P<kind_en>button|control|element|field|input|text field|textbox|menu item|menu|checkbox))?"
         r"(?:\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground)\s+(?:window|app|application|ui))?$",
@@ -8555,7 +8587,8 @@ def _desktop_ui_click_has_context(text: str, context: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"\b(?:current|foreground)\s+(?:window|app|application|ui)\b",
+            r"\b(?:current|foreground)\s+(?:window|app|application|ui)\b"
+            r"|\b(?:button|control|element|field|input|text field|textbox|menu item|menu|checkbox)\b",
             text,
             flags=re.IGNORECASE,
         )
@@ -8570,6 +8603,8 @@ def _strip_desktop_ui_element_label(value: str) -> str:
         label,
         flags=re.IGNORECASE,
     )
+    label = re.sub(r"^(?:visible|shown|available)\s+", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"^(?:可见|看得到|能看到)(?:的)?\s*", "", label)
     label = re.sub(
         r"\s*(?:按钮|控件|元素|输入框|文本框|输入栏|菜单项|菜单|复选框|"
         r"搜索框|搜索栏|消息框|聊天框|地址栏|"
@@ -8811,7 +8846,7 @@ def _strip_polite_suffix(value: str) -> str:
 def _is_screen_capture_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
-        re.search(r"(?:截个?图|截图|截屏|屏幕截图|抓屏|拍屏)", text)
+        re.search(r"(?:截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)", text)
         or re.search(r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面).{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)", text)
         or re.search(r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏).{0,8}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)", text)
         or re.search(r"(?:拍一下|拍下|拍一张|拍个).{0,8}(?:屏幕|桌面|界面|画面)", text)

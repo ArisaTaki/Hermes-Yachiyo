@@ -1366,7 +1366,7 @@ def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_fo
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "看看当前界面有哪些按钮",
+        "你能看看现在有哪些按钮吗",
     )
 
     assert calls == [("ui", "button", 80)]
@@ -4425,6 +4425,7 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     assert "agent.desktop.intent_completed" in event_types
 
     for launcher_mode, prompt in (
+        ("bubble", "帮我截个屏"),
         ("bubble", "看一下我现在的界面"),
         ("live2d", "show me the screen"),
     ):
@@ -4444,7 +4445,7 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert len(capture_targets) == 3
+    assert len(capture_targets) == 4
 
 
 def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_model(
@@ -8039,6 +8040,12 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
         ),
     )
     monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.type_into_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("type_into_ui_element should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_submit_foreground",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("submit_foreground should wait for approval")
@@ -8066,6 +8073,21 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
                 "click the search field",
                 "desktop.click_ui_element",
                 {"target": "search", "role_filter": "text", "limit": 80, "click_count": 1},
+            ),
+            (
+                "点击可见的登录按钮",
+                "desktop.click_ui_element",
+                {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "Can you click the login button?",
+                "desktop.click_ui_element",
+                {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},
+            ),
+            (
+                "Can you type hello into the search field?",
+                "desktop.type_into_ui_element",
+                {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
             ),
             (
                 "open Chrome and press command l",
