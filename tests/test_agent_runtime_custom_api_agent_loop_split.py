@@ -677,6 +677,36 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Finder", "action": "new_folder"},
     }
+    assert daily_desktop_intent_tool_request("打开 Finder 重命名选中文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "rename_selected"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 重命名选中文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "rename_selected"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 上一级文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "parent_folder"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 上一级目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "parent_folder"},
+    }
+    assert daily_desktop_intent_tool_request("打开 Finder 复制选中文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "copy"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 复制选中文件", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "copy"},
+    }
     assert daily_desktop_intent_tool_request("Slack按空格", allowed_tools) != {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",
@@ -684,6 +714,8 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
     }
     assert daily_desktop_intent_tool_request("Chrome 新建文件夹", allowed_tools) is None
     assert daily_desktop_intent_tool_request("新建文件夹", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("Finder 删除选中文件", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("Finder 把选中文件移到废纸篓", allowed_tools) is None
     assert daily_desktop_intent_tool_request("打开系统活动监视器", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

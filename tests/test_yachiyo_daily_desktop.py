@@ -141,6 +141,37 @@ def test_daily_desktop_entrypoint_routes_finder_new_folder_to_app_safe_shortcut(
     assert daily_desktop_entrypoint_requests("新建文件夹") == []
 
 
+def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts() -> None:
+    cases = (
+        ("打开 Finder 重命名选中文件", "app.open_and_safe_shortcut", "rename_selected"),
+        ("Finder 重命名选中文件", "app.focus_and_safe_shortcut", "rename_selected"),
+        ("Finder rename selected file", "app.focus_and_safe_shortcut", "rename_selected"),
+        ("打开 Finder 上一级文件夹", "app.open_and_safe_shortcut", "parent_folder"),
+        ("Finder 上一级目录", "app.focus_and_safe_shortcut", "parent_folder"),
+        ("Finder 回到上级目录", "app.focus_and_safe_shortcut", "parent_folder"),
+        ("Finder open parent folder", "app.focus_and_safe_shortcut", "parent_folder"),
+        ("打开 Finder 复制选中文件", "app.open_and_safe_shortcut", "copy"),
+        ("Finder 复制选中文件", "app.focus_and_safe_shortcut", "copy"),
+        ("Finder copy selected file", "app.focus_and_safe_shortcut", "copy"),
+    )
+
+    for prompt, tool_name, action in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Finder", "action": action},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("重命名当前选中的文件") == []
+    assert daily_desktop_entrypoint_requests("Finder 删除选中文件") == []
+    assert daily_desktop_entrypoint_requests("Finder 把选中文件移到废纸篓") == []
+
+
 def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     cases = (
         ("打开备忘录新建", "app.open_and_safe_shortcut", "Notes", "new_note"),

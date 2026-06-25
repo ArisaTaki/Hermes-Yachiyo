@@ -557,23 +557,26 @@ def daily_desktop_intent_tool_requests(
     direct_hotkey = _desktop_hotkey(context)
     if direct_hotkey and not _desktop_safe_key(context) and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", direct_hotkey)]
-    finder_quick_look = _app_open_or_focus_foreground_action_request(context)
+    finder_safe_action = _app_open_or_focus_foreground_action_request(context)
     if (
-        finder_quick_look
-        and str(finder_quick_look.get("tool") or "") in {
+        finder_safe_action
+        and str(finder_safe_action.get("tool") or "") in {
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
         }
     ):
-        finder_input = finder_quick_look.get("input") if isinstance(finder_quick_look.get("input"), dict) else {}
+        finder_input = (
+            finder_safe_action.get("input") if isinstance(finder_safe_action.get("input"), dict) else {}
+        )
         if (
             finder_input.get("app_name") == "Finder"
-            and finder_input.get("action") == "finder_quick_look"
-            and str(finder_quick_look.get("tool") or "") in allowed
+            and finder_input.get("action")
+            in {"finder_quick_look", "new_folder", "rename_selected", "parent_folder", "copy"}
+            and str(finder_safe_action.get("tool") or "") in allowed
         ):
             return [
                 _request(
-                    str(finder_quick_look.get("tool") or ""),
+                    str(finder_safe_action.get("tool") or ""),
                     dict(finder_input),
                 )
             ]
@@ -1532,6 +1535,8 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "new_window": "新建窗口",
         "new_document": "新建文档",
         "new_folder": "新建文件夹",
+        "rename_selected": "重命名 Finder 选中项",
+        "parent_folder": "打开上一级文件夹",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
         "new_event": "新建日程",
@@ -5257,6 +5262,9 @@ def _finder_safe_shortcut_action(app_name: str, followup: str) -> str:
     return (
         _finder_quick_look_shortcut_action(app_name, followup)
         or _finder_new_folder_shortcut_action(app_name, followup)
+        or _finder_rename_selected_shortcut_action(app_name, followup)
+        or _finder_parent_folder_shortcut_action(app_name, followup)
+        or _finder_copy_selected_shortcut_action(app_name, followup)
     )
 
 
@@ -5317,6 +5325,85 @@ def _finder_new_folder_shortcut_action(app_name: str, followup: str) -> str:
         "createnewdirectory",
     }:
         return "new_folder"
+    return ""
+
+
+def _finder_rename_selected_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "重命名",
+        "重命名选中项",
+        "重命名选中文件",
+        "重命名选中的文件",
+        "重命名当前选中项",
+        "重命名当前选中文件",
+        "重命名当前选中的文件",
+        "重命名所选文件",
+        "重命名所选项目",
+        "rename",
+        "renameitem",
+        "renameselected",
+        "renameselecteditem",
+        "renameselectedfile",
+        "renamecurrentselection",
+    }:
+        return "rename_selected"
+    return ""
+
+
+def _finder_parent_folder_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "上一级",
+        "上一级文件夹",
+        "上一级目录",
+        "打开上一级",
+        "打开上一级文件夹",
+        "打开上一级目录",
+        "回到上一级",
+        "回到上一级文件夹",
+        "回到上一级目录",
+        "回到上级目录",
+        "返回上一级",
+        "返回上一级文件夹",
+        "返回上一级目录",
+        "父文件夹",
+        "父目录",
+        "parentfolder",
+        "openparentfolder",
+        "goparentfolder",
+        "gouponefolder",
+        "uponefolder",
+        "enclosingfolder",
+        "openenclosingfolder",
+    }:
+        return "parent_folder"
+    return ""
+
+
+def _finder_copy_selected_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "复制选中项",
+        "复制选中文件",
+        "复制选中的文件",
+        "复制当前选中项",
+        "复制当前选中文件",
+        "复制当前选中的文件",
+        "复制所选文件",
+        "复制所选项目",
+        "copyselected",
+        "copyselecteditem",
+        "copyselectedfile",
+        "copycurrentselection",
+    }:
+        return "copy"
     return ""
 
 
@@ -8620,7 +8707,7 @@ def _strip_known_app_followup_prefix(value: str) -> str:
         flags=re.IGNORECASE,
     )
     followup = re.sub(
-        r"^(?:应用|app|软件|程序)?(?:里|中|内|上(?!滑|滚|翻|一页)|的|里面|界面里|界面中)\s*",
+        r"^(?:应用|app|软件|程序)?(?:里|中|内|上(?!滑|滚|翻|一页|一级)|的|里面|界面里|界面中)\s*",
         "",
         followup,
         flags=re.IGNORECASE,
@@ -8995,6 +9082,8 @@ def _compact_app_alias(value: str) -> str:
 
 
 def _app_focus_name(text: str) -> str:
+    if _looks_like_finder_destructive_file_request(text):
+        return ""
     patterns = (
         r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)\s*(?P<app>[^。！？!?，,]+?)\s*"
@@ -9370,6 +9459,8 @@ def _terminal_command_requires_shell(command: str) -> bool:
 
 
 def _app_open_name(text: str) -> str:
+    if _looks_like_finder_destructive_file_request(text):
+        return ""
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
@@ -9881,6 +9972,23 @@ def _music_app_generic_play_open_name(text: str) -> str:
         if app_name:
             return app_name
     return ""
+
+
+def _looks_like_finder_destructive_file_request(text: str) -> bool:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return False
+    raw_app, app_name, followup = split
+    if (app_name != "Finder" and _normalize_app_name(raw_app) != "Finder") or not followup:
+        return False
+    return bool(
+        re.search(
+            r"(?:删除|删掉|删了|移到废纸篓|移入废纸篓|扔到废纸篓|放到废纸篓|"
+            r"移到垃圾桶|移入垃圾桶|扔到垃圾桶|放到垃圾桶|delete|trash|move\s+to\s+trash)",
+            followup,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _normalize_app_name(value: str) -> str:

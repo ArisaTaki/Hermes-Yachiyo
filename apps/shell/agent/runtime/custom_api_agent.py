@@ -1368,6 +1368,7 @@ class RuntimeCustomApiAgentLoop:
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/copy current page link/select all/undo/redo/find/focus address bar/new tab/new private window/close tab/next tab/previous tab/next window/previous window/app switching/hide other apps/toggle current-window full screen/Mission Control/Application Windows/Spotlight/Emoji picker/Lock Screen/Force Quit dialog/new window/new document/new note/new reminder/new event/refresh/bookmark page/history/DevTools/page zoom/browser back/browser forward/reopen closed tab to desktop.safe_shortcut; "
             "map Finder open/focus followed by new folder/directory to app.open_and_safe_shortcut or app.focus_and_safe_shortcut action=new_folder; "
+            "map Finder open/focus followed by rename selected item, parent folder, or copy selected file to app.open_and_safe_shortcut or app.focus_and_safe_shortcut actions rename_selected, parent_folder, or copy; "
             "map app open/focus followed by explicit safe navigation keys to app.open_and_safe_key or app.focus_and_safe_key; "
             "map app open/focus followed by explicit arbitrary hotkeys to app.open_and_hotkey or app.focus_and_hotkey; "
             "map app open/focus followed by explicit foreground scroll/page requests to app.open_and_safe_scroll or app.focus_and_safe_scroll; "
@@ -2299,6 +2300,8 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "new_window": "新建窗口",
         "new_document": "新建文档",
         "new_folder": "新建文件夹",
+        "rename_selected": "重命名 Finder 选中项",
+        "parent_folder": "打开上一级文件夹",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
         "new_event": "新建日程",

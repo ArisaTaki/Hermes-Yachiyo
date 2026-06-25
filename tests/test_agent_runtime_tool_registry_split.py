@@ -553,6 +553,14 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Finder", "action": "new_folder"},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "rename_selected"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "parent_folder"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
     )
@@ -604,6 +612,16 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "new_folder"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "rename_selected"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "parent_folder"},
         )
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_key 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -684,6 +702,10 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_folder"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "rename_selected"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "parent_folder"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "delete_tab"})
 
@@ -4433,6 +4455,44 @@ def test_desktop_safe_shortcut_new_folder_uses_command_shift_n(monkeypatch) -> N
     assert result["data"]["shortcut_label"] == "new folder"
     assert "keystroke keyName using {command down, shift down}" in calls[0][0][2]
     assert calls[0][0][-1] == "n"
+
+
+def test_desktop_safe_shortcut_finder_item_actions_use_expected_keys(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="finder action\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    rename = desktop_mod.desktop_safe_shortcut("rename_selected")
+    parent = desktop_mod.desktop_safe_shortcut("parent_folder")
+
+    assert rename["ok"] is True
+    assert rename["summary"] == "Executed safe shortcut: rename selected Finder item"
+    assert rename["data"] == {
+        "key": "return",
+        "modifiers": [],
+        "key_code": 36,
+        "shortcut_action": "rename_selected",
+        "shortcut_label": "rename selected Finder item",
+    }
+    assert parent["ok"] is True
+    assert parent["summary"] == "Executed safe shortcut: open parent folder"
+    assert parent["data"] == {
+        "key": "up",
+        "modifiers": ["command"],
+        "key_code": 126,
+        "shortcut_action": "parent_folder",
+        "shortcut_label": "open parent folder",
+    }
+    assert "key code keyCodeValue" in calls[0][0][2]
+    assert " using " not in calls[0][0][2]
+    assert calls[0][0][-1] == "36"
+    assert "key code keyCodeValue using {command down}" in calls[1][0][2]
+    assert calls[1][0][-1] == "126"
 
 
 def test_desktop_safe_shortcut_new_event_uses_command_n(monkeypatch) -> None:
