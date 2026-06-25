@@ -4976,6 +4976,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("打开访达里的下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开下载目录给我看", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
     assert daily_desktop_intent_tool_request("打开下载", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -4990,6 +5000,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("打开我的文稿", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Documents"},
     }
     assert daily_desktop_intent_tool_request("打开回收站", allowed_tools) == {
         "protocol": "json_fallback",

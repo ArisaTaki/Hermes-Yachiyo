@@ -682,6 +682,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~/Downloads"},
         ),
         (
+            "打开访达里的下载文件夹",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "打开下载目录给我看",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
             "打开用户目录",
             "desktop.open_path",
             {"path": "~"},
@@ -695,6 +705,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             "open user directory",
             "desktop.open_path",
             {"path": "~"},
+        ),
+        (
+            "打开我的文稿",
+            "desktop.open_path",
+            {"path": "~/Documents"},
         ),
         (
             "打开 iCloud Drive",

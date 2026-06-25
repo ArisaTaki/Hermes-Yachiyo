@@ -260,13 +260,20 @@ _COMMON_REVEAL_PATHS = {
     "文稿": "~/Documents",
     "文稿文件夹": "~/Documents",
     "文稿目录": "~/Documents",
+    "我的文稿": "~/Documents",
+    "我的文稿文件夹": "~/Documents",
+    "我的文稿目录": "~/Documents",
     "pictures": "~/Pictures",
     "picturesfolder": "~/Pictures",
     "picturesdirectory": "~/Pictures",
     "图片文件夹": "~/Pictures",
     "图片目录": "~/Pictures",
+    "我的图片": "~/Pictures",
+    "我的图片文件夹": "~/Pictures",
     "照片文件夹": "~/Pictures",
     "照片目录": "~/Pictures",
+    "我的照片": "~/Pictures",
+    "我的照片文件夹": "~/Pictures",
     "moviesfolder": "~/Movies",
     "moviesdirectory": "~/Movies",
     "movies文件夹": "~/Movies",
@@ -275,12 +282,16 @@ _COMMON_REVEAL_PATHS = {
     "影片目录": "~/Movies",
     "电影文件夹": "~/Movies",
     "电影目录": "~/Movies",
+    "我的影片": "~/Movies",
+    "我的电影": "~/Movies",
     "musicfolder": "~/Music",
     "musicdirectory": "~/Music",
     "music文件夹": "~/Music",
     "music目录": "~/Music",
     "音乐文件夹": "~/Music",
     "音乐目录": "~/Music",
+    "我的音乐": "~/Music",
+    "我的音乐文件夹": "~/Music",
     "publicfolder": "~/Public",
     "publicdirectory": "~/Public",
     "public文件夹": "~/Public",
@@ -5417,7 +5428,8 @@ def _strip_finder_path_prefix(text: str) -> str:
     return re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启)\s*(?:finder|访达|文件管理器|文件浏览器)|"
-        r"(?:open|launch|start)\s+(?:the\s+)?(?:finder|file\s+manager|file\s+browser))\s*"
+        r"(?:open|launch|start)\s+(?:the\s+)?(?:finder|file\s+manager|file\s+browser))"
+        r"(?:\s*(?:里的|中的|内的|里|中|内))?\s*"
         r"(?:(?:并|然后|后|之后|再)|(?:,?\s*(?:and\s+then|and|then)))?\s*"
         r"(?:(?:看看|看一下|看下|查看|检查|打开|开启|进入)\s*)?",
         "",
@@ -10940,7 +10952,7 @@ def _strip_browser_followup(value: str) -> str:
 
 def _strip_polite_suffix(value: str) -> str:
     return re.sub(
-        r"\s*(?:一下|一下儿|一下子|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|帮我|给我|please|for\s+me)$",
+        r"\s*(?:一下|一下儿|一下子|看一下|看下|看看|给我看一下|给我看下|给我看看|给我看|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|帮我|给我|please|for\s+me)$",
         "",
         str(value or "").strip(),
         flags=re.IGNORECASE,
