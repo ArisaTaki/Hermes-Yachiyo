@@ -1531,6 +1531,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",
         "new_document": "新建文档",
+        "new_folder": "新建文件夹",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
         "new_event": "新建日程",
@@ -5094,7 +5095,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     postposed_open = _app_postposed_open_followup_match(text)
     if postposed_open:
         mode, _raw_app, app_name, followup = postposed_open
-        action = _finder_quick_look_shortcut_action(app_name, followup) or _desktop_safe_shortcut_action(followup)
+        action = _finder_safe_shortcut_action(app_name, followup) or _desktop_safe_shortcut_action(followup)
         if action:
             return {"mode": mode, "app_name": app_name, "action": action}
 
@@ -5103,7 +5104,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         raw_app, app_name, followup = prefix_split
         if not _looks_like_window_target(raw_app) and not _looks_like_common_path_target(raw_app):
             action = (
-                _finder_quick_look_shortcut_action(app_name, followup)
+                _finder_safe_shortcut_action(app_name, followup)
                 or _app_followup_full_screen_shortcut_action(followup)
                 or _desktop_safe_shortcut_action(followup)
             )
@@ -5220,7 +5221,7 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             if compact in _APP_ALIASES:
                 app_name = _normalize_app_name(raw_app)
         action = (
-            _finder_quick_look_shortcut_action(app_name, match.group("action"))
+            _finder_safe_shortcut_action(app_name, match.group("action"))
             or _app_followup_full_screen_shortcut_action(match.group("action"))
             or _desktop_safe_shortcut_action(match.group("action"))
         )
@@ -5252,6 +5253,13 @@ def _app_followup_full_screen_shortcut_action(value: str) -> str:
     return ""
 
 
+def _finder_safe_shortcut_action(app_name: str, followup: str) -> str:
+    return (
+        _finder_quick_look_shortcut_action(app_name, followup)
+        or _finder_new_folder_shortcut_action(app_name, followup)
+    )
+
+
 def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:
     if str(app_name or "").strip() != "Finder":
         return ""
@@ -5280,6 +5288,35 @@ def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:
         "快速查看选中文件",
     }:
         return "finder_quick_look"
+    return ""
+
+
+def _finder_new_folder_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    if phrase in {
+        "新建文件夹",
+        "新文件夹",
+        "新建一个文件夹",
+        "创建文件夹",
+        "创建一个文件夹",
+        "新建目录",
+        "新目录",
+        "创建目录",
+        "创建一个目录",
+        "newfolder",
+        "makeanewfolder",
+        "createanewfolder",
+        "makenewfolder",
+        "createnewfolder",
+        "newdirectory",
+        "makeanewdirectory",
+        "createanewdirectory",
+        "makenewdirectory",
+        "createnewdirectory",
+    }:
+        return "new_folder"
     return ""
 
 
@@ -8303,11 +8340,11 @@ def _app_foreground_action_request(
     app_name: str,
     followup: str,
 ) -> dict[str, Any] | None:
-    finder_quick_look_action = _finder_quick_look_shortcut_action(app_name, followup)
-    if finder_quick_look_action:
+    finder_action = _finder_safe_shortcut_action(app_name, followup)
+    if finder_action:
         return {
             "tool": f"app.{mode}_and_safe_shortcut",
-            "input": {"app_name": app_name, "action": finder_quick_look_action},
+            "input": {"app_name": app_name, "action": finder_action},
         }
     shortcut_action = (
         _app_default_new_shortcut_action(app_name, followup)
@@ -8467,6 +8504,7 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
         followup = _strip_known_app_followup_prefix(followup)
         if followup and (
             _looks_like_known_app_followup(followup)
+            or _finder_safe_shortcut_action(app_name, followup)
             or _app_default_new_shortcut_action(app_name, followup)
             or _app_followup_full_screen_shortcut_action(followup)
         ):

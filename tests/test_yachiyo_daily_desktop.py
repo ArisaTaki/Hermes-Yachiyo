@@ -116,6 +116,31 @@ def test_daily_desktop_entrypoint_routes_finder_quick_look_to_app_safe_shortcut(
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_finder_new_folder_to_app_safe_shortcut() -> None:
+    cases = (
+        ("打开访达新建文件夹", "app.open_and_safe_shortcut"),
+        ("打开 Finder 新建文件夹", "app.open_and_safe_shortcut"),
+        ("Finder 新建文件夹", "app.focus_and_safe_shortcut"),
+        ("Finder 创建目录", "app.focus_and_safe_shortcut"),
+        ("Finder make a new folder", "app.focus_and_safe_shortcut"),
+    )
+
+    for prompt, tool_name in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Finder", "action": "new_folder"},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("Chrome 新建文件夹") == []
+    assert daily_desktop_entrypoint_requests("新建文件夹") == []
+
+
 def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     cases = (
         ("打开备忘录新建", "app.open_and_safe_shortcut", "Notes", "new_note"),

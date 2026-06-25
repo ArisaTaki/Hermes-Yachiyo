@@ -549,6 +549,10 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Finder", "action": "finder_quick_look"},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "new_folder"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
     )
@@ -595,6 +599,11 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "finder_quick_look"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "new_folder"},
         )
     with pytest.raises(AgentRuntimeError, match="app.open_and_safe_key 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload(
@@ -673,6 +682,8 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
 
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_folder"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "delete_tab"})
 
@@ -3181,9 +3192,12 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.ui_elements",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "media.system_control",
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
+        "media.music_app_control",
     ]
     assert result["data"]["missing_permissions"] == {
         "screen_capture": ["screen_recording"],
@@ -4396,6 +4410,28 @@ def test_desktop_safe_shortcut_new_document_uses_command_n(monkeypatch) -> None:
     assert result["data"]["modifiers"] == ["command"]
     assert result["data"]["shortcut_action"] == "new_document"
     assert result["data"]["shortcut_label"] == "new document"
+    assert calls[0][0][-1] == "n"
+
+
+def test_desktop_safe_shortcut_new_folder_uses_command_shift_n(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="new folder\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("new_folder")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Executed safe shortcut: new folder"
+    assert result["data"]["key"] == "n"
+    assert result["data"]["modifiers"] == ["command", "shift"]
+    assert result["data"]["shortcut_action"] == "new_folder"
+    assert result["data"]["shortcut_label"] == "new folder"
+    assert "keystroke keyName using {command down, shift down}" in calls[0][0][2]
     assert calls[0][0][-1] == "n"
 
 

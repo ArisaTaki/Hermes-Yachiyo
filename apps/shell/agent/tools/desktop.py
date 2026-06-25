@@ -137,6 +137,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "force_quit_dialog": ("escape", ("command", "option"), "force quit dialog"),
     "new_window": ("n", ("command",), "new window"),
     "new_document": ("n", ("command",), "new document"),
+    "new_folder": ("n", ("command", "shift"), "new folder"),
     "new_note": ("n", ("command",), "new note"),
     "new_reminder": ("n", ("command",), "new reminder"),
     "new_event": ("n", ("command",), "new calendar event"),

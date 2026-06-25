@@ -148,7 +148,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "browser_forward",
     "reopen_closed_tab",
 )
-APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + ("finder_quick_look",)
+APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + ("finder_quick_look", "new_folder")
 SAFE_KEY_ACTIONS = (
     "escape",
     "tab",
@@ -617,9 +617,9 @@ class ToolDescriptor:
                     f"{self.name} 参数 action 必须是 " + "、".join(APP_SAFE_SHORTCUT_ACTIONS)
                 )
             app_name = str(payload.get("app_name") or "").strip()
-            if action == "finder_quick_look" and app_name != "Finder":
+            if action in {"finder_quick_look", "new_folder"} and app_name != "Finder":
                 raise AgentRuntimeError(
-                    f"{self.name} 参数 action=finder_quick_look 仅支持 app_name=Finder"
+                    f"{self.name} 参数 action={action} 仅支持 app_name=Finder"
                 )
         if self.name in {"app.open_and_safe_key", "app.focus_and_safe_key"}:
             action = str(payload.get("action") or "").strip().lower()
