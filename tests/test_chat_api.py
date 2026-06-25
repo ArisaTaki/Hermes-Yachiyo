@@ -7599,6 +7599,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "new_window": "n",
             "next_window": "`",
             "previous_window": "`",
+            "switch_previous_app": "tab",
+            "switch_next_app": "tab",
             "mission_control": "up",
             "application_windows": "down",
             "spotlight_search": "space",
@@ -7606,7 +7608,11 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "lock_screen": "q",
             "force_quit_dialog": "escape",
         }.get(action, "")
-        modifiers = ["command", "shift"] if action == "previous_window" else ["command"]
+        modifiers = (
+            ["command", "shift"]
+            if action in {"previous_window", "switch_next_app"}
+            else ["command"]
+        )
         if action == "mission_control":
             modifiers = ["control"]
         if action == "application_windows":
@@ -7640,6 +7646,10 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("把当前链接复制给我", "copy_current_page_link", "已复制当前网页链接。"),
             ("切到下一个窗口", "next_window", "已切到下一个窗口。"),
             ("switch to previous window", "previous_window", "已切到上一个窗口。"),
+            ("切换到上一个应用", "switch_previous_app", "已切到上一个应用。"),
+            ("switch to previous app", "switch_previous_app", "已切到上一个应用。"),
+            ("切到下一个应用", "switch_next_app", "已切到下一个应用。"),
+            ("switch to next app", "switch_next_app", "已切到下一个应用。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
             ("显示当前应用窗口", "application_windows", "已显示当前应用窗口。"),
             ("显示当前应用的所有窗口", "application_windows", "已显示当前应用窗口。"),
@@ -7708,10 +7718,14 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "copy",
             "copy_current_page_link",
             "copy_current_page_link",
-            "copy_current_page_link",
-            "next_window",
-            "previous_window",
-            "mission_control",
+                "copy_current_page_link",
+                "next_window",
+                "previous_window",
+                "switch_previous_app",
+                "switch_previous_app",
+                "switch_next_app",
+                "switch_next_app",
+                "mission_control",
             "application_windows",
             "application_windows",
             "application_windows",
@@ -8035,21 +8049,6 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             ),
             ("退出当前应用", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
             ("关闭当前 app", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
-            (
-                "switch to previous app",
-                "desktop.hotkey",
-                {"key": "tab", "modifiers": ["command"]},
-            ),
-            (
-                "切到下一个应用",
-                "desktop.hotkey",
-                {"key": "tab", "modifiers": ["command"]},
-            ),
-            (
-                "switch to next app",
-                "desktop.hotkey",
-                {"key": "tab", "modifiers": ["command"]},
-            ),
             (
                 "Could you open Chrome and press Command L?",
                 "app.open_and_hotkey",

@@ -2278,6 +2278,8 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "previous_tab": "切到上一个标签页",
         "next_window": "切到下一个窗口",
         "previous_window": "切到上一个窗口",
+        "switch_previous_app": "切到上一个应用",
+        "switch_next_app": "切到下一个应用",
         "mission_control": "打开任务控制中心",
         "application_windows": "显示当前应用窗口",
         "spotlight_search": "打开 Spotlight",

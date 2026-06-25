@@ -1505,6 +1505,8 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "previous_tab": "切到上一个标签页",
         "next_window": "切到下一个窗口",
         "previous_window": "切到上一个窗口",
+        "switch_previous_app": "切到上一个应用",
+        "switch_next_app": "切到下一个应用",
         "mission_control": "打开任务控制中心",
         "application_windows": "显示当前应用窗口",
         "spotlight_search": "打开 Spotlight",
@@ -10642,10 +10644,6 @@ def _desktop_hotkey(text: str) -> dict[str, Any] | None:
 def _system_desktop_hotkey_request(text: str) -> dict[str, Any] | None:
     if _is_maximize_current_window_request(text):
         return {"key": "f", "modifiers": ["control", "command"]}
-    if _is_next_app_switch_request(text):
-        return {"key": "tab", "modifiers": ["command"]}
-    if _is_previous_app_switch_request(text):
-        return {"key": "tab", "modifiers": ["command"]}
     return None
 
 
@@ -11057,6 +11055,39 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "previouswindow": "previous_window",
         "switchpreviouswindow": "previous_window",
         "switchtopreviouswindow": "previous_window",
+        "切换到上一个应用": "switch_previous_app",
+        "切换上一个应用": "switch_previous_app",
+        "切到上一个应用": "switch_previous_app",
+        "切回上一个应用": "switch_previous_app",
+        "回到上一个应用": "switch_previous_app",
+        "切换到上个应用": "switch_previous_app",
+        "切到上个应用": "switch_previous_app",
+        "切回上个应用": "switch_previous_app",
+        "回到上个应用": "switch_previous_app",
+        "切换到前一个应用": "switch_previous_app",
+        "切到前一个应用": "switch_previous_app",
+        "回到前一个应用": "switch_previous_app",
+        "switchtopreviousapp": "switch_previous_app",
+        "switchtopreviousapplication": "switch_previous_app",
+        "switchtolastapp": "switch_previous_app",
+        "switchtolastapplication": "switch_previous_app",
+        "gobacktopreviousapp": "switch_previous_app",
+        "returntopreviousapp": "switch_previous_app",
+        "切换到下一个应用": "switch_next_app",
+        "切换下一个应用": "switch_next_app",
+        "切到下一个应用": "switch_next_app",
+        "切去下一个应用": "switch_next_app",
+        "跳到下一个应用": "switch_next_app",
+        "转到下一个应用": "switch_next_app",
+        "切换到下个应用": "switch_next_app",
+        "切到下个应用": "switch_next_app",
+        "切去下个应用": "switch_next_app",
+        "跳到下个应用": "switch_next_app",
+        "转到下个应用": "switch_next_app",
+        "switchtonextapp": "switch_next_app",
+        "switchtonextapplication": "switch_next_app",
+        "gotonextapp": "switch_next_app",
+        "movetonextapp": "switch_next_app",
         "任务控制中心": "mission_control",
         "打开任务控制中心": "mission_control",
         "显示任务控制中心": "mission_control",

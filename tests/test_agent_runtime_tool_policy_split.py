@@ -109,6 +109,24 @@ def test_system_media_control_tool_is_low_risk_and_validates_payload() -> None:
         ToolDescriptorRegistry.validate_payload("media.system_control", {"action": "shuffle"})
 
 
+def test_app_switch_safe_shortcuts_are_low_risk_and_validated() -> None:
+    assert "desktop.safe_shortcut" in LOW_RISK_DESKTOP_TOOL_NAMES
+
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.safe_shortcut",
+        {"action": "switch_previous_app"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.safe_shortcut",
+        {"action": "switch_next_app"},
+    )
+    with pytest.raises(AgentRuntimeError, match="action"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.safe_shortcut",
+            {"action": "switch_random_app"},
+        )
+
+
 def test_write_patch_payload_validation_requires_patch_and_matching_hash_aliases() -> None:
     with pytest.raises(AgentRuntimeError, match="patch"):
         ToolDescriptorRegistry.validate_payload("workspace.write_patch", {"path": "a.txt"})

@@ -119,6 +119,8 @@ SAFE_SHORTCUT_ACTIONS = (
     "previous_tab",
     "next_window",
     "previous_window",
+    "switch_previous_app",
+    "switch_next_app",
     "mission_control",
     "application_windows",
     "spotlight_search",
