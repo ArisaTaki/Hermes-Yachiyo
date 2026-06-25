@@ -428,6 +428,47 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
+    assert daily_desktop_entrypoint_requests("设置剪贴板为 hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("set clipboard to hello") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": "hello"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("复制选中文字并读取剪贴板") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("copy selected text and read clipboard") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+        },
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
 

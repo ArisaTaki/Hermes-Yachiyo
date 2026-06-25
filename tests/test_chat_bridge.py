@@ -4129,6 +4129,26 @@ def test_chat_bridge_quick_message_executes_clipboard_write_for_launcher_entrypo
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    cases = (
+        ("设置剪贴板为 hello", "bubble"),
+        ("set clipboard to hello", "live2d"),
+    )
+    for text, launcher_mode in cases:
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            text,
+            launcher_mode=launcher_mode,
+        )
+
+        assert clipboard_calls[-1] == "hello"
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已复制 5 个字符到剪贴板。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "clipboard.write"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_clipboard_read_for_launcher_entrypoints(
     tmp_path,
@@ -4246,7 +4266,33 @@ def test_chat_bridge_quick_message_copies_and_reads_selected_text_without_model(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
+    for prompt, launcher_mode in (
+        ("复制选中文字并读取剪贴板", "bubble"),
+        ("copy selected text and read clipboard", "live2d"),
+    ):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "clipboard.read",
+        ]
+        assert run["status"] == "completed"
+        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
     assert calls == [
+        ("shortcut", "copy"),
+        ("read", 2000),
+        ("shortcut", "copy"),
+        ("read", 2000),
         ("shortcut", "copy"),
         ("read", 2000),
         ("shortcut", "copy"),

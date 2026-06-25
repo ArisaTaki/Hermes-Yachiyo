@@ -3406,6 +3406,7 @@ def _clipboard_write_text(text: str) -> str:
         r"(?:复制|拷贝|写入)(?:一下|下)?\s*(?P<text>.+?)\s*(?:到|进|至)\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)",
         r"(?:系统)?(?:剪贴板|粘贴板)\s*(?:写入|放入|放进|保存|保存为)\s*(?P<text>.+)$",
+        r"(?:设置|设定|set)\s*(?:系统)?(?:剪贴板|粘贴板|clipboard)\s*(?:为|成|to)\s*(?P<text>.+)$",
         r"(?:复制|拷贝|写入)(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*"
         r"(?P<text>.+)$",
         r"\b(?:copy|write|put)\s+(?P<text>.+?)\s+(?:to|into)\s+(?:the\s+)?"
@@ -3464,11 +3465,21 @@ def _selected_text_read_tool_requests(text: str) -> list[dict[str, Any]]:
 
 def _selected_text_read_request(text: str) -> bool:
     clean = _strip_query(text)
-    if not clean or _clipboard_write_text(clean) or _clipboard_read_request(clean):
+    if not clean or _clipboard_write_text(clean):
+        return False
+    explicit_copy_read = _selected_text_copy_then_read_clipboard_request(clean)
+    if _clipboard_read_request(clean) and not explicit_copy_read:
         return False
     lowered = clean.lower()
     return bool(
-        re.search(
+        explicit_copy_read
+        or re.search(
+            r"(?:复制|拷贝).{0,12}(?:选中|选取|高亮|选择).{0,12}"
+            r"(?:内容|文字|文本|这段|这部分|选区)?.{0,16}"
+            r"(?:读|读取|查看|看看|显示).{0,12}(?:剪贴板|粘贴板)",
+            clean,
+        )
+        or re.search(
             r"(?:读|读取|查看|看看|看一下|看下|显示|告诉我).{0,12}"
             r"(?:选中|选取|高亮|选择).{0,12}"
             r"(?:内容|文字|文本|这段|这部分|选区)",
@@ -3502,6 +3513,30 @@ def _selected_text_read_request(text: str) -> bool:
         or re.search(
             r"\bwhat(?:'s| is)\s+(?:the\s+)?"
             r"(?:selected|highlighted)\s+(?:text|content|selection)\b",
+            lowered,
+        )
+    )
+
+
+def _selected_text_copy_then_read_clipboard_request(text: str) -> bool:
+    clean = _strip_query(text)
+    lowered = clean.lower()
+    return bool(
+        re.search(
+            r"(?:复制|拷贝).{0,12}(?:选中|选取|高亮|选择).{0,12}"
+            r"(?:内容|文字|文本|这段|这部分|选区)?.{0,16}"
+            r"(?:读|读取|查看|看看|显示).{0,12}(?:剪贴板|粘贴板)",
+            clean,
+        )
+        or re.search(
+            r"(?:选中|选取|高亮|选择).{0,12}(?:内容|文字|文本|这段|这部分|选区)?"
+            r".{0,16}(?:复制|拷贝).{0,16}(?:读|读取|查看|看看|显示).{0,12}(?:剪贴板|粘贴板)",
+            clean,
+        )
+        or re.search(
+            r"\bcopy\s+(?:the\s+)?(?:selected|highlighted)\s+"
+            r"(?:text|content|selection)\s+(?:and|then)\s+"
+            r"(?:read|show|display|check)\s+(?:the\s+)?(?:system\s+)?clipboard\b",
             lowered,
         )
     )

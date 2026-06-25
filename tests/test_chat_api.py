@@ -3260,6 +3260,22 @@ def test_send_message_executes_direct_clipboard_write_task(tmp_path, monkeypatch
         assert task.result == "已复制 8 个字符到剪贴板。"
         assert clipboard_calls == ["047e43ac"]
         assert run["status"] == "completed"
+
+        for text in ("设置剪贴板为 hello", "set clipboard to hello"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已复制 5 个字符到剪贴板。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "clipboard.write"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已复制 5 个字符到剪贴板。"
+            assert clipboard_calls[-1] == "hello"
+            assert run["status"] == "completed"
     finally:
         service.close()
         store.close()
@@ -3439,6 +3455,46 @@ def test_send_message_copies_and_reads_selected_text_without_model(tmp_path, mon
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
+
+        for text in ("复制选中文字并读取剪贴板", "copy selected text and read clipboard"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "已复制选中内容。 剪贴板内容：selected text。"
+            assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
+                "desktop.safe_shortcut",
+                "clipboard.read",
+            ]
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已复制选中内容。 剪贴板内容：selected text。"
+            assert assistant is not None
+            assert assistant.content == "已复制选中内容。 剪贴板内容：selected text。"
+            assert run["status"] == "completed"
+            assert event_types.count("agent.desktop.intent_planned") == 2
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert calls == [
+            ("shortcut", "copy"),
+            ("read", 2000),
+            ("shortcut", "copy"),
+            ("read", 2000),
+            ("shortcut", "copy"),
+            ("read", 2000),
+            ("shortcut", "copy"),
+            ("read", 2000),
+        ]
     finally:
         service.close()
         store.close()
