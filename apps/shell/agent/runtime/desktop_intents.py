@@ -450,6 +450,9 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
     ):
         return app_browser_action_sequence
+    foreground_safe_key = _desktop_safe_key(context)
+    if foreground_safe_key and "desktop.safe_key" in allowed:
+        return [_request("desktop.safe_key", foreground_safe_key)]
     desktop_path_request = _desktop_path_tool_request(context)
     if desktop_path_request and str(desktop_path_request.get("tool") or "") in allowed:
         return [desktop_path_request]
@@ -1224,9 +1227,12 @@ def _safe_key_recovery_prompt(recovery_input: Mapping[str, Any]) -> str:
         "end": "End",
         "page_up": "Page Up",
         "page_down": "Page Down",
+        "show_desktop": "显示桌面",
     }.get(action, "")
     if not label:
         return ""
+    if action == "show_desktop":
+        return "显示桌面"
     try:
         repeat_count = int(recovery_input.get("repeat_count") or 1)
     except (TypeError, ValueError):
@@ -8275,6 +8281,8 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
 
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:
     text = _strip_desktop_action_request_shell(text)
+    if _is_show_desktop_request(text):
+        return {"action": "show_desktop", "repeat_count": 1}
     if _is_next_foreground_focus_request(text):
         return {"action": "tab", "repeat_count": 1}
     if _is_previous_foreground_focus_request(text):
@@ -8330,6 +8338,25 @@ def _desktop_safe_key(text: str) -> dict[str, Any] | None:
         if action and repeat_count:
             return {"action": action, "repeat_count": repeat_count}
     return None
+
+
+def _is_show_desktop_request(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:显示|露出|查看|看看|看一下|切到|切换到)\s*"
+            r"(?:当前|现在)?(?:桌面|desktop)"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:show|reveal|switch\s+to|go\s+to)\s+(?:the\s+)?desktop\s*(?:please)?$",
+            lowered,
+        )
+    )
 
 
 def _is_next_foreground_focus_request(text: str) -> bool:

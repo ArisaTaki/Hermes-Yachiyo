@@ -6336,7 +6336,11 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
 
     def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
         pressed.append((action, repeat_count))
-        key_label = {"arrow_down": "Down Arrow", "escape": "Escape"}.get(action, action)
+        key_label = {
+            "arrow_down": "Down Arrow",
+            "escape": "Escape",
+            "show_desktop": "Show Desktop",
+        }.get(action, action)
         return {
             "ok": True,
             "action": "desktop.safe_key",
@@ -6353,6 +6357,7 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
         cases = (
             ("按向下箭头三次", "arrow_down", 3, "已按下箭头（3 次）。"),
             ("Could you press Escape?", "escape", 1, "已按Escape。"),
+            ("show desktop", "show_desktop", 1, "已显示桌面。"),
         )
         for text, action, repeat_count, summary in cases:
             result = api.send_message(text)
@@ -6384,7 +6389,7 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
             assert "model.request.started" not in event_types
             assert pressed[-1] == (action, repeat_count)
 
-        assert pressed == [("arrow_down", 3), ("escape", 1)]
+        assert pressed == [("arrow_down", 3), ("escape", 1), ("show_desktop", 1)]
     finally:
         service.close()
         store.close()

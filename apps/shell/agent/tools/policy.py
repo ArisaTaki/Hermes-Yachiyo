@@ -132,6 +132,7 @@ SAFE_KEY_ACTIONS = (
     "end",
     "page_up",
     "page_down",
+    "show_desktop",
 )
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
@@ -1726,7 +1727,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.safe_key",
         description=(
             "Press a whitelisted foreground navigation key explicitly requested by the user, "
-            "such as Escape, Tab, Shift+Tab, arrow keys, Home, End, Page Up, or Page Down. "
+            "such as Escape, Tab, Shift+Tab, arrow keys, Home, End, Page Up, Page Down, "
+            "or the system Show Desktop key. "
             "This does not accept committing keys like Return or destructive keys like Delete."
         ),
         properties={

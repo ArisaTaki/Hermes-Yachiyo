@@ -137,6 +137,7 @@ _SAFE_KEYS: dict[str, tuple[int, str]] = {
     "end": (119, "End"),
     "page_up": (116, "Page Up"),
     "page_down": (121, "Page Down"),
+    "show_desktop": (103, "Show Desktop"),
 }
 
 _APPLE_MUSIC_MEDIA_KEY_FALLBACKS: dict[str, tuple[int, str, str]] = {

@@ -340,6 +340,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "finder_selection"},
         ),
         (
+            "打开桌面文件夹",
+            "desktop.open_path",
+            {"path": "~/Desktop"},
+        ),
+        (
             "click the first search result",
             "browser.click",
             {"selector": "search-result=1", "click_count": 1},
@@ -403,11 +408,13 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("你可以帮我撤销吗", "desktop.safe_shortcut", {"action": "undo"}),
         ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
         ("你可以帮我按Tab吗", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
+        ("显示桌面", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
         ("Can you copy?", "desktop.safe_shortcut", {"action": "copy"}),
         ("Could you paste?", "desktop.safe_shortcut", {"action": "paste"}),
         ("Would you select all please?", "desktop.safe_shortcut", {"action": "select_all"}),
         ("Could you press Escape?", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
         ("Can you hit Tab?", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
+        ("show desktop", "desktop.safe_key", {"action": "show_desktop", "repeat_count": 1}),
     )
 
     for prompt, tool_name, tool_input in cases:

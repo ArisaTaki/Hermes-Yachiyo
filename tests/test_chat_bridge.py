@@ -5643,8 +5643,10 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
         ("按向下箭头三次", "live2d", "arrow_down", 3, "已按下箭头（3 次）。"),
         ("你能帮我按一下Escape吗", "bubble", "escape", 1, "已按Escape。"),
         ("你可以帮我按Tab吗", "live2d", "tab", 1, "已按Tab。"),
+        ("显示桌面", "bubble", "show_desktop", 1, "已显示桌面。"),
         ("Could you press Escape?", "bubble", "escape", 1, "已按Escape。"),
         ("Can you hit Tab?", "live2d", "tab", 1, "已按Tab。"),
+        ("show desktop", "live2d", "show_desktop", 1, "已显示桌面。"),
     )
     for text, launcher_mode, action, repeat_count, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -5673,8 +5675,10 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
         ("arrow_down", 3),
         ("escape", 1),
         ("tab", 1),
+        ("show_desktop", 1),
         ("escape", 1),
         ("tab", 1),
+        ("show_desktop", 1),
     ]
 
 

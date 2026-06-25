@@ -2226,6 +2226,7 @@ def _safe_key_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> 
         "end": "End",
         "page_up": "Page Up",
         "page_down": "Page Down",
+        "show_desktop": "显示桌面",
     }.get(action, "")
     try:
         repeat_count = int(data.get("repeat_count") or planned_input.get("repeat_count") or 1)
@@ -2233,6 +2234,8 @@ def _safe_key_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> 
         repeat_count = 1
     if not label:
         return ""
+    if action == "show_desktop":
+        return "已显示桌面。"
     suffix = "" if repeat_count == 1 else f"（{repeat_count} 次）"
     return f"已按{label}{suffix}。"
 
