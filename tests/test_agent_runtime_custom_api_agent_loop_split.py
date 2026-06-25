@@ -1077,6 +1077,20 @@ def test_daily_desktop_intent_planner_routes_app_scoped_safe_keys_and_scroll() -
             "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
         }
     ]
+    assert daily_desktop_intent_tool_requests("打开 Finder 然后按下方向键", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Finder", "action": "arrow_down", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("在 Finder 里按上方向键", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Finder", "action": "arrow_up", "repeat_count": 1},
+        }
+    ]
     assert daily_desktop_intent_tool_requests("在 Slack 里按回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -1401,6 +1415,42 @@ def test_daily_desktop_intent_planner_routes_app_scoped_submit_language() -> Non
             "protocol": "json_fallback",
             "tool": "desktop.submit_foreground",
             "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在微信里确认发送", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里提交当前输入", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "submit"},
         },
     ]
 

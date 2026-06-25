@@ -9770,24 +9770,36 @@ def _app_open_or_focus_click_type_tool_requests(text: str) -> list[dict[str, Any
 
 
 def _app_open_or_focus_submit_foreground_tool_requests(text: str) -> list[dict[str, Any]]:
+    matches: list[tuple[str, str, str, str]] = []
     shorthand_match = _app_open_or_focus_known_app_followup_match(text)
     if shorthand_match:
-        mode, _raw_app, app_name, followup = shorthand_match
-    else:
-        split = _known_app_prefix_split(text)
-        if not split:
-            return []
-        _raw_app, app_name, followup = split
-        mode = "focus"
-    if not app_name:
-        return []
-    submit_action = _desktop_submit_foreground_action(followup)
-    if not submit_action:
-        return []
-    return [
-        _request(f"app.{mode}", {"app_name": app_name}),
-        _request("desktop.submit_foreground", {"action": submit_action}),
-    ]
+        matches.append(shorthand_match)
+    split = _known_app_prefix_split(text)
+    if split:
+        raw_app, app_name, followup = split
+        matches.append(("focus", raw_app, app_name, followup))
+    matches.extend(_app_scoped_foreground_action_matches(text))
+
+    seen: set[tuple[str, str, str, str]] = set()
+    for mode, raw_app, app_name, followup in matches:
+        item = (mode, raw_app, app_name, followup)
+        if item in seen:
+            continue
+        seen.add(item)
+        if (
+            not app_name
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+        ):
+            continue
+        submit_action = _desktop_submit_foreground_action(followup)
+        if not submit_action:
+            continue
+        return [
+            _request(f"app.{mode}", {"app_name": app_name}),
+            _request("desktop.submit_foreground", {"action": submit_action}),
+        ]
+    return []
 
 
 def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
@@ -14275,7 +14287,8 @@ def _desktop_safe_key(text: str) -> dict[str, Any] | None:
         r"arrow\s+left|arrow\s+right|up|down|left|right|"
         r"退出|取消|制表键|制表|向上箭头|往上箭头|朝上箭头|向下箭头|往下箭头|朝下箭头|"
         r"向左箭头|往左箭头|朝左箭头|向右箭头|往右箭头|朝右箭头|"
-        r"上箭头|下箭头|左箭头|右箭头|向上键|向下键|向左键|向右键|上|下|左|右|"
+        r"上箭头|下箭头|左箭头|右箭头|上方向键|下方向键|左方向键|右方向键|"
+        r"向上键|向下键|向左键|向右键|上|下|左|右|"
         r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
     )
     patterns = (
@@ -14395,6 +14408,7 @@ def _safe_key_action(value: str) -> str:
         "arrowup": "arrow_up",
         "上": "arrow_up",
         "上箭头": "arrow_up",
+        "上方向键": "arrow_up",
         "向上箭头": "arrow_up",
         "往上箭头": "arrow_up",
         "朝上箭头": "arrow_up",
@@ -14404,6 +14418,7 @@ def _safe_key_action(value: str) -> str:
         "arrowdown": "arrow_down",
         "下": "arrow_down",
         "下箭头": "arrow_down",
+        "下方向键": "arrow_down",
         "向下箭头": "arrow_down",
         "往下箭头": "arrow_down",
         "朝下箭头": "arrow_down",
@@ -14413,6 +14428,7 @@ def _safe_key_action(value: str) -> str:
         "arrowleft": "arrow_left",
         "左": "arrow_left",
         "左箭头": "arrow_left",
+        "左方向键": "arrow_left",
         "向左箭头": "arrow_left",
         "往左箭头": "arrow_left",
         "朝左箭头": "arrow_left",
@@ -14422,6 +14438,7 @@ def _safe_key_action(value: str) -> str:
         "arrowright": "arrow_right",
         "右": "arrow_right",
         "右箭头": "arrow_right",
+        "右方向键": "arrow_right",
         "向右箭头": "arrow_right",
         "往右箭头": "arrow_right",
         "朝右箭头": "arrow_right",

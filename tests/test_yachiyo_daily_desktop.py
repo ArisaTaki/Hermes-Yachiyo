@@ -1276,6 +1276,30 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tool": "app.focus",
         "daily_desktop_tools": ["app.focus", "desktop.submit_foreground"],
     }
+    assert daily_desktop_entrypoint_requests("在 Slack 里发送") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在微信里确认发送") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
 
     app_hotkey_requests = daily_desktop_entrypoint_requests("微信按回车")
 
@@ -2336,6 +2360,20 @@ def test_daily_desktop_entrypoint_routes_app_scoped_safe_keys_and_scroll() -> No
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_key",
             "input": {"app_name": "Slack", "action": "escape", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Finder 然后按下方向键") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Finder", "action": "arrow_down", "repeat_count": 1},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("在 Finder 里按上方向键") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_key",
+            "input": {"app_name": "Finder", "action": "arrow_up", "repeat_count": 1},
         }
     ]
     assert daily_desktop_entrypoint_requests("在 Slack 里按回车") == [
