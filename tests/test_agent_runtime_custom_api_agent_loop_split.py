@@ -5595,6 +5595,20 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"direction": "down", "pages": 1},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开截图工具", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "screenshot_toolbar"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("open screenshot toolbar", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "screenshot_toolbar"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开微信然后截图", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -7214,6 +7228,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"path": "~/Music"},
     }
     assert daily_desktop_intent_tool_request("打开家目录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~"},
+    }
+    assert daily_desktop_intent_tool_request("打开个人主目录", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
         "input": {"path": "~"},

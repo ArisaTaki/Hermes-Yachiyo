@@ -316,6 +316,8 @@ _COMMON_REVEAL_PATHS = {
     "userdirectory": "~",
     "家目录": "~",
     "主目录": "~",
+    "个人主目录": "~",
+    "我的主目录": "~",
     "用户文件夹": "~",
     "用户目录": "~",
     "个人文件夹": "~",
@@ -1753,6 +1755,7 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "application_windows": "显示当前应用窗口",
         "spotlight_search": "打开 Spotlight",
         "emoji_picker": "打开 Emoji 面板",
+        "screenshot_toolbar": "打开截图工具",
         "lock_screen": "锁屏",
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",
@@ -14625,6 +14628,32 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "openemoji": "emoji_picker",
         "showemojipicker": "emoji_picker",
         "openemojipicker": "emoji_picker",
+        "截图工具": "screenshot_toolbar",
+        "打开截图工具": "screenshot_toolbar",
+        "显示截图工具": "screenshot_toolbar",
+        "启动截图工具": "screenshot_toolbar",
+        "截图面板": "screenshot_toolbar",
+        "打开截图面板": "screenshot_toolbar",
+        "显示截图面板": "screenshot_toolbar",
+        "启动截图面板": "screenshot_toolbar",
+        "屏幕截图工具": "screenshot_toolbar",
+        "打开屏幕截图工具": "screenshot_toolbar",
+        "屏幕截图面板": "screenshot_toolbar",
+        "打开屏幕截图面板": "screenshot_toolbar",
+        "screenshottoolbar": "screenshot_toolbar",
+        "openscreenshottoolbar": "screenshot_toolbar",
+        "showscreenshottoolbar": "screenshot_toolbar",
+        "launchscreenshottoolbar": "screenshot_toolbar",
+        "screenshottool": "screenshot_toolbar",
+        "openscreenshottool": "screenshot_toolbar",
+        "screenshotpanel": "screenshot_toolbar",
+        "openscreenshotpanel": "screenshot_toolbar",
+        "screencapturetoolbar": "screenshot_toolbar",
+        "openscreencapturetoolbar": "screenshot_toolbar",
+        "screencapturetool": "screenshot_toolbar",
+        "openscreencapturetool": "screenshot_toolbar",
+        "screencapturepanel": "screenshot_toolbar",
+        "openscreencapturepanel": "screenshot_toolbar",
         "锁屏": "lock_screen",
         "锁一下屏": "lock_screen",
         "锁下屏": "lock_screen",
@@ -16130,6 +16159,8 @@ def _strip_polite_suffix(value: str) -> str:
 
 
 def _is_screen_capture_request(text: str) -> bool:
+    if _is_screenshot_tool_open_request(text):
+        return False
     lowered = text.lower()
     return bool(
         re.search(r"(?:截(?:一下|下)图|截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)", text)
@@ -16144,6 +16175,47 @@ def _is_screen_capture_request(text: str) -> bool:
         or re.search(r"\bscreenshot\s+(?:my|the|this|current)?\s*(?:screen|desktop)?\b", lowered)
         or re.search(r"\b(?:look at|inspect|view|read|show me|show)\s+(?:my|the|this|current)?\s*(?:screen|desktop|interface|ui)\b", lowered)
         or re.search(r"\bwhat(?:'s| is)?\s+on\s+(?:my|the|this|current)?\s*(?:screen|desktop)\b", lowered)
+    )
+
+
+def _is_screenshot_tool_open_request(text: str) -> bool:
+    phrase = _normalize_named_hotkey_phrase(text)
+    if phrase in {
+        "截图工具",
+        "打开截图工具",
+        "显示截图工具",
+        "启动截图工具",
+        "截图面板",
+        "打开截图面板",
+        "显示截图面板",
+        "启动截图面板",
+        "屏幕截图工具",
+        "打开屏幕截图工具",
+        "屏幕截图面板",
+        "打开屏幕截图面板",
+        "screenshottoolbar",
+        "openscreenshottoolbar",
+        "showscreenshottoolbar",
+        "launchscreenshottoolbar",
+        "screenshottool",
+        "openscreenshottool",
+        "screenshotpanel",
+        "openscreenshotpanel",
+        "screencapturetoolbar",
+        "openscreencapturetoolbar",
+        "screencapturetool",
+        "openscreencapturetool",
+        "screencapturepanel",
+        "openscreencapturepanel",
+    }:
+        return True
+    lowered = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    return bool(
+        re.search(
+            r"\b(?:open|show|launch)\s+(?:the\s+)?"
+            r"(?:screenshot|screen\s+capture)\s+(?:toolbar|panel|tool)\b",
+            lowered,
+        )
     )
 
 

@@ -1112,6 +1112,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert "copy" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_document" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert "new_event" in safe_shortcut.input_schema["properties"]["action"]["enum"]
+    assert "screenshot_toolbar" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted common shortcut" in note for note in safe_shortcut.fallback_notes)
     assert safe_key.capability_id == "foreground_input"
     assert safe_key.risk_level == "low"

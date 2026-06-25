@@ -784,6 +784,21 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"reason": "user asked to capture the screen"},
         ),
         (
+            "打开截图工具",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_toolbar"},
+        ),
+        (
+            "打开截图面板",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_toolbar"},
+        ),
+        (
+            "open screenshot toolbar",
+            "desktop.safe_shortcut",
+            {"action": "screenshot_toolbar"},
+        ),
+        (
             "你能看看现在有哪些按钮吗",
             "desktop.ui_elements",
             {"role_filter": "button", "limit": 80},
@@ -2150,6 +2165,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
         ),
         (
             "打开用户目录",
+            "desktop.open_path",
+            {"path": "~"},
+        ),
+        (
+            "打开个人主目录",
             "desktop.open_path",
             {"path": "~"},
         ),
