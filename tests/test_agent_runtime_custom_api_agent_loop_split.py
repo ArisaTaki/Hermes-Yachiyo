@@ -3031,6 +3031,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             },
         },
     ]
+    assert daily_desktop_intent_tool_requests("创建日历 明天上午10点开会", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1000,
+                "end_at": tomorrow_1100,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("创建日历 家庭", allowed_tools) == []
     assert daily_desktop_intent_tool_requests("把明天上午10点开会加到日历", allowed_tools) == [
         {
             "protocol": "json_fallback",

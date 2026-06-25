@@ -8175,6 +8175,10 @@ def _calendar_event_create_body(value: str) -> str:
         r"(?:日历事件|日程|日历日程|calendar event)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日历|calendar)\s+"
+        r"(?P<body_calendar_short>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<body_prefixed>[^。！？!?]+?)\s*(?:的)?(?:日历事件|日程|日历日程|calendar event)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|运行|拉起|开启)?\s*(?:日历|calendar)\s*"
@@ -8210,6 +8214,7 @@ def _calendar_event_create_body(value: str) -> str:
                 return _strip_query(f"{groups['time_first_event']} {groups['title_after_event']}")
             return _strip_query(
                 groups.get("body")
+                or groups.get("body_calendar_short")
                 or groups.get("body_prefixed")
                 or groups.get("body_to_calendar")
                 or groups.get("body_to_calendar_en")
