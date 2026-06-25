@@ -4918,6 +4918,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.open_path",
         "input": {"path": "~/Downloads"},
     }
+    assert daily_desktop_intent_tool_request("把下载文件夹拉起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
+    assert daily_desktop_intent_tool_request("拉起下载文件夹", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.open_path",
+        "input": {"path": "~/Downloads"},
+    }
     assert daily_desktop_intent_tool_request("打开 Finder 并打开下载文件夹", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.open_path",
@@ -6839,6 +6849,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开新标签页", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("打开 ~/Downloads/report.pdf", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("把下载文件夹打开一下", ["app.open"]) is None
+    assert daily_desktop_intent_tool_request("拉起下载文件夹", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("列出正在运行的应用", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("现在开了哪些应用", ["desktop.active_window"]) is None
     assert daily_desktop_intent_tool_request("当前窗口是什么", ["desktop.windows"]) is None

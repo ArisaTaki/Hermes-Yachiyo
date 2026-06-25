@@ -5138,16 +5138,16 @@ def _desktop_open_path(text: str) -> str:
     path_token = r"(?:~|/|\./|\../)[^。！？!?，,]+"
     patterns = (
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-        rf"(?P<path>{path_token})\s*(?:打开|开启)(?:一下|下)?",
+        rf"(?P<path>{path_token})\s*(?:打开|开启|拉起来|拉起)(?:一下|下)?",
         rf"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        rf"(?:打开|开启)\s*(?P<path>{path_token})",
+        rf"(?:打开|开启|拉起来|拉起)\s*(?:一下\s*)?(?P<path>{path_token})",
         rf"\bopen\s+(?P<path>{path_token})\b",
         r"\bopen\s+(?P<path>[^.!?]+)$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-        r"(?P<path>[^。！？!?，,]+?)\s*(?:打开|开启)(?:一下|下)?"
+        r"(?P<path>[^。！？!?，,]+?)\s*(?:打开|开启|拉起来|拉起)(?:一下|下)?"
         r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:打开|开启)\s*(?P<path>[^。！？!?，,]+)",
+        r"(?:打开|开启|拉起来|拉起)\s*(?:一下\s*)?(?P<path>[^。！？!?，,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -8028,6 +8028,8 @@ def _app_open_name(text: str) -> str:
         if _looks_like_local_path(_strip_app_name(raw_app)):
             continue
         if _looks_like_common_path_target(raw_app):
+            continue
+        if match.group("verb") == "拉起" and _looks_like_common_path_target(f"下{raw_app}"):
             continue
         if _normalize_site_name(raw_app):
             continue

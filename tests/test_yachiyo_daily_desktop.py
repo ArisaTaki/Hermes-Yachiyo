@@ -672,6 +672,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~/Desktop"},
         ),
         (
+            "把下载文件夹拉起来",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
+            "拉起下载文件夹",
+            "desktop.open_path",
+            {"path": "~/Downloads"},
+        ),
+        (
             "打开用户目录",
             "desktop.open_path",
             {"path": "~"},
