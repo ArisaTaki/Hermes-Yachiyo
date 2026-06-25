@@ -1794,6 +1794,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.click",
         "input": {"selector": "text=登录", "click_count": 1},
     }
+    assert daily_desktop_intent_tool_request("打开第一个搜索结果", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.click",
+        "input": {"selector": "search-result=1", "click_count": 1},
+    }
     assert daily_desktop_intent_tool_request("点击网页上的 Submit", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.click",
@@ -1985,6 +1990,18 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
     ]
     assert daily_desktop_intent_tool_requests("在搜索框输入 yachiyo 并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开搜索框输入 yachiyo 回车", allowed_tools) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.type_into_ui_element",
@@ -7159,6 +7176,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hotkey",
         "input": {"key": "return", "modifiers": []},
     }
+    assert daily_desktop_intent_tool_request("空格一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.hotkey",
+        "input": {"key": "space", "modifiers": []},
+    }
     assert daily_desktop_intent_tool_request("当前窗口按回车", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.hotkey",
@@ -7178,6 +7200,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "paste"},
+    }
+    assert daily_desktop_intent_tool_request("复制这个", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+    }
+    assert daily_desktop_intent_tool_request("应用窗口都显示一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "application_windows"},
     }
     assert daily_desktop_intent_tool_request("这段文字复制到剪贴板", allowed_tools) is None
     assert daily_desktop_intent_tool_request("恢复这个权限", allowed_tools) is None

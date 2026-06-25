@@ -502,6 +502,13 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
     }
 
+    assert daily_desktop_entrypoint_requests("打开第一个搜索结果") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("在当前输入框输入 hello") == [
         {
             "protocol": "json_fallback",
@@ -529,6 +536,18 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "tool": "desktop.safe_type_text",
             "input": {"text": "hello"},
         }
+    ]
+    assert daily_desktop_entrypoint_requests("打开搜索框输入 yachiyo 回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {"target": "搜索", "text": "yachiyo", "role_filter": "text", "limit": 80},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
     ]
     assert daily_desktop_entrypoint_requests("提交当前搜索") == [
         {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}}
@@ -1288,6 +1307,8 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
     cases = (
         ("你可以帮我复制一下吗", "desktop.safe_shortcut", {"action": "copy"}),
         ("你能帮我粘贴吗", "desktop.safe_shortcut", {"action": "paste"}),
+        ("复制这个", "desktop.safe_shortcut", {"action": "copy"}),
+        ("把这个复制一下", "desktop.safe_shortcut", {"action": "copy"}),
         ("你能帮我全选吗", "desktop.safe_shortcut", {"action": "select_all"}),
         ("你可以帮我撤销吗", "desktop.safe_shortcut", {"action": "undo"}),
         ("切到下一个窗口", "desktop.safe_shortcut", {"action": "next_window"}),
@@ -1295,6 +1316,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("打开任务控制中心", "desktop.safe_shortcut", {"action": "mission_control"}),
         ("显示当前应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("显示前台应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
+        ("应用窗口都显示一下", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("打开聚焦搜索", "desktop.safe_shortcut", {"action": "spotlight_search"}),
         ("打开 Spotlight", "desktop.safe_shortcut", {"action": "spotlight_search"}),
         ("打开 emoji 面板", "desktop.safe_shortcut", {"action": "emoji_picker"}),
@@ -1352,6 +1374,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("当前窗口按回车", {"key": "return", "modifiers": []}),
         ("前台按回车", {"key": "return", "modifiers": []}),
         ("press enter in current window", {"key": "return", "modifiers": []}),
+        ("空格一下", {"key": "space", "modifiers": []}),
     )
     for prompt, tool_input in hotkey_cases:
         requests = daily_desktop_entrypoint_requests(prompt)

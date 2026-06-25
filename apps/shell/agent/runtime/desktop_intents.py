@@ -3220,8 +3220,6 @@ def _looks_like_click_command(text: str) -> bool:
 
 
 def _browser_click_request(text: str) -> dict[str, Any] | None:
-    if not _has_browser_page_context(text):
-        return None
     rank_match = re.search(
         r"(?:点击|点一下|点按|单击|打开|进入|访问)\s*"
         r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
@@ -3240,6 +3238,8 @@ def _browser_click_request(text: str) -> dict[str, Any] | None:
         index = _browser_search_result_rank_index(rank)
         if index:
             return {"selector": f"search-result={index}", "click_count": 1}
+    if not _has_browser_page_context(text):
+        return None
     point = _browser_click_point(text)
     if point:
         return {
@@ -7265,6 +7265,7 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             not raw_app
             or not app_name
             or not followup
+            or _looks_like_foreground_ui_input_open_prefix(raw_app, followup)
             or _looks_like_window_target(raw_app)
             or _looks_like_common_path_target(raw_app)
             or _looks_like_generic_app_open_target(raw_app)
@@ -7276,6 +7277,21 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             continue
         return "open", raw_app, app_name, followup
     return None
+
+
+def _looks_like_foreground_ui_input_open_prefix(raw_app: str, followup: str) -> bool:
+    compact = re.sub(r"[\s._-]+", "", str(raw_app or "").strip().lower())
+    if compact not in {"打", "开", "打开"}:
+        return False
+    return bool(
+        re.match(
+            r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+            r"search\s+field|search\s+box|search\s+bar|message\s+field|message\s+box|"
+            r"chat\s+box|address\s+bar|text\s+field|textbox|input|field)",
+            str(followup or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
@@ -7737,6 +7753,8 @@ def _typed_text_has_return_followup(raw_text: str, target: str) -> bool:
         flags=re.IGNORECASE,
     ):
         return True
+    if target and re.search(r"\s+(?:回车|确认|确定)$", text, flags=re.IGNORECASE):
+        return True
     target_text = str(target or "")
     if not re.search(r"(?:搜索|查找|检索|search|find|query)", target_text, flags=re.IGNORECASE):
         return False
@@ -7941,7 +7959,7 @@ def _app_show_name(text: str) -> str:
         r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|显示一下|显示(?!器)|调出来|叫出来|还原一下|还原|恢复|取消隐藏)",
         r"(?:把|将)\s*(?P<app>[^。！？!?，,]+?)\s*(?:显示出来|调出来|叫出来|还原|恢复|取消隐藏)",
-        r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:显示(?!器)|调出|调出来|叫出|叫出来|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
+        r"^(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:显示(?!器)|调出|调出来|叫出|叫出来|还原|恢复|取消隐藏)\s*(?P<app>[^。！？!?，,]+)",
         r"\b(?:show|unhide|restore)\s+(?P<app>[^.!?]+)",
         r"\bbring\s+back\s+(?P<app>[^.!?]+)",
     )
@@ -9550,6 +9568,8 @@ def _desktop_named_hotkey(text: str) -> dict[str, Any] | None:
         "closecurrenttab": ("w", ("command",)),
         "closethecurrenttab": ("w", ("command",)),
         "closetab": ("w", ("command",)),
+        "空格": ("space", ()),
+        "space": ("space", ()),
         "回车": ("return", ()),
         "确认": ("return", ()),
         "确定": ("return", ()),
@@ -9588,7 +9608,16 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "复制一下选中的文字": "copy",
         "复制一下选中文本": "copy",
         "复制一下选中的文本": "copy",
+        "复制这个": "copy",
+        "复制这": "copy",
+        "复制一下这个": "copy",
+        "复制一下这": "copy",
+        "这个复制": "copy",
+        "把这个复制": "copy",
+        "把这复制": "copy",
         "copy": "copy",
+        "copythis": "copy",
+        "copythat": "copy",
         "copyselection": "copy",
         "copycurrentselection": "copy",
         "copytheselection": "copy",
@@ -9762,8 +9791,11 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "showmissioncontrol": "mission_control",
         "应用窗口": "application_windows",
         "显示应用窗口": "application_windows",
+        "显示所有应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
         "显示前台应用窗口": "application_windows",
+        "应用窗口都显示": "application_windows",
+        "所有应用窗口": "application_windows",
         "当前应用窗口": "application_windows",
         "前台应用窗口": "application_windows",
         "应用expose": "application_windows",
@@ -10575,11 +10607,13 @@ def _desktop_type_into_ui_element(text: str) -> dict[str, Any] | None:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|向|给)?\s*(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
         r"(?:上|里|中|内|的|里的|中的)?\s*"
+        r"(?:(?:打开|点开|点击|点一下|聚焦|选中)\s*)?"
         rf"(?P<target>{target_pattern})(?:里|中|内|上)?\s*"
         r"(?:输入|填写|键入|打入|填入|写入|写)\s*(?P<text>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:填写|填入|把|将)?\s*(?:当前|前台|这个|该)?(?:窗口|界面|应用|app)?"
         r"(?:上|里|中|内|的|里的|中的)?\s*"
+        r"(?:(?:打开|点开|点击|点一下|聚焦|选中)\s*)?"
         rf"(?P<target2>{target_pattern})\s*(?:为|成|:|：)\s*(?P<text2>[^。！？!?]+)$",
         r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
         r"(?:type|enter|fill)\s+(?P<text_en>[^.!?]+?)\s+"
@@ -10669,6 +10703,7 @@ def _desktop_safe_type_text(text: str) -> str:
 def _strip_typed_text(value: str) -> str:
     text = _strip_query(value)
     text = re.sub(r"\s*(?:进去|到当前窗口|到前台|然后回车|并回车)$", "", text)
+    text = re.sub(r"\s+(?:回车|确认|确定)$", "", text, flags=re.IGNORECASE)
     text = re.sub(
         r"\s*(?:然后|并且|并|再|接着)\s*(?:按|执行|开始)?"
         r"(?:回车|确认|确定|搜索|查找|检索|访问|打开|发送|发出|提交)$",
