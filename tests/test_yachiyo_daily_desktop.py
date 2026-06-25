@@ -1800,6 +1800,37 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
         "把 hello 复制一下",
         allowed_tools=("app.focus_and_safe_shortcut",),
     ) == []
+    clipboard_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把剪贴板内容写进备忘录",
+        "把剪贴板内容记到备忘录",
+        "把剪贴板内容放到备忘录",
+        "把剪贴板内容加到笔记",
+        "把剪贴板内容新建成备忘录",
+        "用剪贴板内容新建备忘录",
+        "paste clipboard into a new note",
+        "create a note from clipboard",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == clipboard_note_requests
+        assert daily_desktop_user_metadata(clipboard_note_requests)["daily_desktop_tools"] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
+        ]
+    assert daily_desktop_entrypoint_requests(
+        "把剪贴板内容写进备忘录",
+        allowed_tools=("clipboard.read", "notes.create"),
+    ) == []
     assert daily_desktop_entrypoint_requests("复制选中文字并读取剪贴板") == [
         {
             "protocol": "json_fallback",

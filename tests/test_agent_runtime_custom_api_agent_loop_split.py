@@ -6838,6 +6838,37 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "clipboard.write",
         "input": {"text": "hello"},
     }
+    clipboard_note_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Notes", "action": "new_note"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把剪贴板内容写进备忘录",
+        "把剪贴板内容记到备忘录",
+        "把剪贴板内容放到备忘录",
+        "把剪贴板内容加到笔记",
+        "把剪贴板内容新建成备忘录",
+        "用剪贴板内容新建备忘录",
+        "在备忘录里新建剪贴板内容",
+        "paste clipboard into a new note",
+        "create a note from clipboard",
+    ):
+        assert daily_desktop_intent_tool_requests(prompt, allowed_tools) == clipboard_note_requests
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把剪贴板内容写进备忘录",
+            ["clipboard.read", "notes.create"],
+        )
+        == []
+    )
     assert daily_desktop_intent_tool_request(
         "把 hello 复制一下",
         ["app.focus_and_safe_shortcut"],

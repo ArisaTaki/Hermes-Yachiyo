@@ -514,6 +514,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
     ):
         return communication_compose_sequence
+    clipboard_to_note_sequence = _clipboard_to_note_tool_requests(context)
+    if clipboard_to_note_sequence and all(
+        str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
+    ):
+        return clipboard_to_note_sequence
     english_app_search_sequence = _english_app_scoped_search_tool_requests(context)
     if english_app_search_sequence and all(
         str(request.get("tool") or "") in allowed for request in english_app_search_sequence
@@ -4251,6 +4256,8 @@ def _system_screen_saver_start_request(text: str) -> bool:
 
 
 def _clipboard_write_text(text: str) -> str:
+    if _clipboard_to_note_request(text):
+        return ""
     patterns = (
         r"(?:把|将)?\s*(?:这段话|这段文字|这段文本|以下内容|下面内容|内容)?\s*"
         r"(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
@@ -4282,6 +4289,60 @@ def _clipboard_write_text(text: str) -> str:
     return ""
 
 
+def _clipboard_to_note_tool_requests(text: str) -> list[dict[str, Any]]:
+    if not _clipboard_to_note_request(text):
+        return []
+    return [
+        _request(
+            "app.open_and_safe_shortcut",
+            {"app_name": "Notes", "action": "new_note"},
+        ),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+    ]
+
+
+def _clipboard_to_note_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    clipboard_source = r"(?:当前|系统|这个|这份|我的)?(?:剪贴板|粘贴板)(?:内容)?"
+    note_target = r"(?:备忘录|笔记|note)"
+    return bool(
+        re.search(
+            rf"^(?:把|将)?\s*{clipboard_source}\s*"
+            rf"(?:写进|写入|记到|记入|保存到|存到|放到|放进|加到|添加到|新建成|创建成)\s*"
+            rf"{note_target}(?:里|中|上)?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*{clipboard_source}\s*"
+            rf"(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*{note_target}$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*{note_target}(?:里|中|上)?\s*"
+            rf"(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*{clipboard_source}$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:paste|put|save|write|add)\s+(?:the\s+)?clipboard(?:\s+contents?)?\s+"
+            r"(?:into|to|in)\s+(?:a\s+)?(?:new\s+)?note$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add)\s+(?:a\s+)?(?:new\s+)?note\s+"
+            r"(?:from|with|using)\s+(?:the\s+)?clipboard(?:\s+contents?)?$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_postposed_clipboard_copy_request(text: str) -> bool:
     return bool(
         re.search(
@@ -4293,6 +4354,8 @@ def _looks_like_postposed_clipboard_copy_request(text: str) -> bool:
 
 
 def _clipboard_read_request(text: str) -> bool:
+    if _clipboard_to_note_request(text):
+        return False
     if _clipboard_write_text(text):
         return False
     lowered = str(text or "").strip().lower()
