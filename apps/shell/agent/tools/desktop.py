@@ -117,6 +117,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "next_window": ("`", ("command",), "next window"),
     "previous_window": ("`", ("command", "shift"), "previous window"),
     "mission_control": ("up", ("control",), "mission control"),
+    "application_windows": ("down", ("control",), "application windows"),
     "force_quit_dialog": ("escape", ("command", "option"), "force quit dialog"),
     "new_window": ("n", ("command",), "new window"),
     "new_document": ("n", ("command",), "new document"),
