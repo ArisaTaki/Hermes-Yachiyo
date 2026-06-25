@@ -1729,6 +1729,14 @@ def _desktop_foreground_find_query(text: str) -> str:
     if _desktop_type_into_ui_element(text):
         return ""
     patterns = (
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|find)\s+(?:the\s+)?(?:current|this|active|foreground)\s+"
+        r"(?:page|web\s*page|window|app|application|ui|interface)\s+for\s+"
+        r"(?P<query_current_en>[^.!?]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|find)\s+(?P<query_on_current_en>[^.!?]+?)\s+"
+        r"(?:in|on)\s+(?:the\s+)?(?:current|this|active|foreground)\s+"
+        r"(?:page|web\s*page|window|app|application|ui|interface)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在\s*)?(?:(?:当前|前台|这个|该)\s*)?"
         r"(?:页面|网页|页内|页面内|窗口|应用|app)(?:里|中|内|上)?\s*"
@@ -1744,7 +1752,13 @@ def _desktop_foreground_find_query(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        query = _strip_search_query(match.group("query"))
+        groups = match.groupdict()
+        query = _strip_search_query(
+            groups.get("query")
+            or groups.get("query_current_en")
+            or groups.get("query_on_current_en")
+            or ""
+        )
         if query:
             return query
     return ""
@@ -2610,6 +2624,14 @@ def _browser_search_url(text: str) -> str:
         r"(?P<engine>百度|baidu)\s*(?:搜索|搜一下|搜|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s+(?P<query>[^。！？!?]+)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<engine>百度|baidu)\s*一下\s*(?P<query>[^。！？!?]+)",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|google|look\s+up)\s+(?:in|on|with|using\s+)?"
+        r"(?P<engine_en_app>chrome|google\s+chrome|browser|safari|firefox|edge|arc|brave|google|baidu)\s+"
+        r"(?:for\s+)?(?P<query_en_app>[^.!?]+)",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|google|look\s+up)\s+(?:for\s+)?(?P<query_en_app_suffix>[^.!?]+?)\s+"
+        r"(?:in|on|with|using)\s+"
+        r"(?P<engine_en_app_suffix>chrome|google\s+chrome|browser|safari|firefox|edge|arc|brave|google|baidu)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:打开|启动|运行|拉起|开启|用|在)\s*(?P<engine>浏览器|chrome|google|谷歌|百度|baidu|safari)\s*)?"
         r"(?:[，,；;。]?\s*(?:并且|并|然后|之后|后|再)?\s*)?"
@@ -2621,9 +2643,20 @@ def _browser_search_url(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        query = _strip_search_query(match.group("query"))
+        groups = match.groupdict()
+        query = _strip_search_query(
+            groups.get("query")
+            or groups.get("query_en_app")
+            or groups.get("query_en_app_suffix")
+            or ""
+        )
         if query:
-            engine = str(match.groupdict().get("engine") or "").strip().lower()
+            engine = str(
+                groups.get("engine")
+                or groups.get("engine_en_app")
+                or groups.get("engine_en_app_suffix")
+                or ""
+            ).strip().lower()
             if engine in {"百度", "baidu"}:
                 return f"https://www.baidu.com/s?wd={quote_plus(query)}"
             return f"https://www.google.com/search?q={quote_plus(query)}"
@@ -2936,7 +2969,7 @@ def _strip_search_query(value: str) -> str:
         flags=re.IGNORECASE,
     )
     query = re.sub(
-        r"\s*(?:in|on|with|using)\s+(?:browser|chrome|google|safari)$",
+        r"\s*(?:in|on|with|using)\s+(?:browser|chrome|google\s+chrome|google|safari)$",
         "",
         query,
         flags=re.IGNORECASE,
@@ -3417,6 +3450,8 @@ def _looks_like_schedule_creation_request(text: str) -> bool:
 def _desktop_windows_request(text: str) -> dict[str, str] | None:
     if _is_active_window_request(text):
         return None
+    if _is_current_ui_text_request(text):
+        return None
     app_patterns = (
         r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app>[^.!?]+)",
         r"(?:what|which)\s+(?:open\s+)?windows\s+(?:are\s+)?(?:open\s+)?"
@@ -3454,7 +3489,21 @@ def _desktop_windows_request(text: str) -> dict[str, str] | None:
 def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     lowered = text.lower()
     if not (
-        re.search(
+        _is_current_ui_text_request(text)
+        or re.search(
+            r"(?:读取|阅读|读一下|读下|读一读|读|提取|抓取|获取|查看|看看|看一下|识别)"
+            r".{0,12}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r".{0,12}(?:文字|文本|内容|正文)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:read|inspect|show|extract)\b.{0,16}\b"
+            r"(?:current|this|active|foreground)\s+(?:window|ui|interface|screen)\b"
+            r".{0,16}\b(?:text|content)\b",
+            lowered,
+        )
+        or re.search(
             r"(?:当前|现在|这个|前台)?(?:窗口|界面|屏幕|应用|app)?"
             r".{0,10}(?:有哪些|有什么|列出|列一下|显示|查看|看看|看一下|读取|识别)"
             r".{0,10}(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)",
@@ -3478,7 +3527,11 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     ):
         return None
     role_filter = ""
-    if re.search(r"(?:按钮|button)", text, flags=re.IGNORECASE):
+    if _is_current_ui_text_request(text) or re.search(
+        r"(?:文字|文本|正文|content|text)", text, flags=re.IGNORECASE
+    ):
+        role_filter = "text"
+    elif re.search(r"(?:按钮|button)", text, flags=re.IGNORECASE):
         role_filter = "button"
     elif re.search(r"(?:输入框|文本框|输入栏|text field|textbox|input)", text, flags=re.IGNORECASE):
         role_filter = "text"
@@ -3487,6 +3540,38 @@ def _desktop_ui_elements_request(text: str) -> dict[str, Any] | None:
     elif re.search(r"(?:复选框|checkbox)", text, flags=re.IGNORECASE):
         role_filter = "checkbox"
     return {"role_filter": role_filter, "limit": 80}
+
+
+def _is_current_ui_text_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r".{0,8}(?:文字|文本|内容|正文)"
+            r".{0,8}(?:是什么|是啥|有哪些|有什么|读取|读一下|查看|看看|识别)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:读取|阅读|读一下|读下|读一读|读|查看|看看|识别|提取|抓取|获取)"
+            r".{0,8}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r".{0,8}(?:文字|文本|内容|正文)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bread\b.{0,16}\b"
+            r"(?:current|this|active|foreground)\s+(?:window|ui|interface|screen)\b"
+            r"(?:.{0,16}\b(?:text|content)\b)?",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:inspect|show|extract)\b.{0,16}\b"
+            r"(?:current|this|active|foreground)\s+(?:window|ui|interface|screen)\b"
+            r".{0,16}\b(?:text|content)\b",
+            lowered,
+        )
+    )
 
 
 def _app_scoped_ui_elements_tool_requests(text: str) -> list[dict[str, Any]]:
@@ -8961,6 +9046,8 @@ def _is_active_window_request(text: str) -> bool:
         text,
         flags=re.IGNORECASE,
     ):
+        return False
+    if _is_current_ui_text_request(text):
         return False
     lowered = text.lower()
     return bool(

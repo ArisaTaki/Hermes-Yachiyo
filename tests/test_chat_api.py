@@ -383,6 +383,7 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
     finally:
         service.close()
         store.close()
@@ -2767,6 +2768,8 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("百度 open hanako", "https://www.baidu.com/s?wd=open+hanako"),
             ("百度搜索 OpenAI", "https://www.baidu.com/s?wd=OpenAI"),
             ("打开百度搜索 OpenAI", "https://www.baidu.com/s?wd=OpenAI"),
+            ("Can you search Chrome for weather?", "https://www.google.com/search?q=weather"),
+            ("search weather in Chrome", "https://www.google.com/search?q=weather"),
             ("打开新标签并搜索 OpenAI", "https://www.google.com/search?q=OpenAI"),
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
@@ -5658,6 +5661,33 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         assert "agent.desktop.intent_completed" in visible_event_types
         assert "model.request.started" not in visible_event_types
         assert "model.requested" not in visible_event_types
+
+        text_read = api.send_message("读取当前窗口内容")
+        text_task = runtime.state.get_task(text_read["task_id"])
+        text_run = service.get_run(text_read["run_id"])
+        text_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(text_run["run_id"])["events"]
+        ]
+
+        assert text_read["ok"] is True
+        assert text_read["status"] == "completed"
+        assert text_read["agent_task"]["status"] == "completed"
+        assert text_read["agent_task"]["needs_user_action"] is False
+        assert text_read["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+        assert text_read["agent_task"]["tool_calls"][-1]["input_preview"] == {
+            "role_filter": "text",
+            "limit": 80,
+        }
+        assert text_task is not None
+        assert text_task.status == TaskStatus.COMPLETED
+        assert ui_calls[-1] == ("text", 80)
+        assert text_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in text_event_types
+        assert "agent.tool.call" in text_event_types
+        assert "agent.desktop.intent_completed" in text_event_types
+        assert "model.request.started" not in text_event_types
+        assert "model.requested" not in text_event_types
     finally:
         service.close()
         store.close()
@@ -6052,6 +6082,37 @@ def test_send_message_executes_direct_foreground_find_text_task(tmp_path, monkey
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("search current page for hello")
+        second_task = runtime.state.get_task(second["task_id"])
+        second_run = service.get_run(second["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+        second_assistant = runtime.chat_session.get_assistant_message_for_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已打开查找。 已向前台输入文字（5 个字符）。"
+        assert [call["tool_name"] for call in second["agent_task"]["tool_calls"][-2:]] == [
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert calls[-2:] == [("shortcut", "find"), ("type", "hello")]
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已打开查找。 已向前台输入文字（5 个字符）。"
+        assert second_assistant is not None
+        assert second_assistant.status == MessageStatus.COMPLETED
+        assert second_assistant.content == "已打开查找。 已向前台输入文字（5 个字符）。"
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()

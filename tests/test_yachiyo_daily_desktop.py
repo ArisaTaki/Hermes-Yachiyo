@@ -133,6 +133,16 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             {"role_filter": "", "limit": 80},
         ),
         (
+            "读取当前窗口内容",
+            "desktop.ui_elements",
+            {"role_filter": "text", "limit": 80},
+        ),
+        (
+            "read the current window",
+            "desktop.ui_elements",
+            {"role_filter": "text", "limit": 80},
+        ),
+        (
             "点击可见的登录按钮",
             "desktop.click_ui_element",
             {"target": "登录", "role_filter": "button", "limit": 80, "click_count": 1},
@@ -175,6 +185,40 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
+def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() -> None:
+    search_requests = daily_desktop_entrypoint_requests("Can you search Chrome for weather?")
+
+    assert search_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=weather"},
+        }
+    ]
+
+    find_requests = daily_desktop_entrypoint_requests("search current page for hello")
+
+    assert find_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+        },
+    ]
+    assert daily_desktop_user_metadata(find_requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "daily_desktop_intent",
+        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+        "daily_desktop_tool": "desktop.safe_shortcut",
+        "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
+    }
 
 
 def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:

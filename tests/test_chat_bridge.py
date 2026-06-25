@@ -1384,6 +1384,24 @@ def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_fo
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "读一下当前界面文字",
+    )
+
+    assert calls[-1] == ("ui", "text", 80)
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
+    assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
 
 def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_followup(
     tmp_path,
@@ -3661,6 +3679,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
         ("打开本地 127.0.0.1:5173", "bubble", "http://127.0.0.1:5173"),
         ("打开网页 github.com", "live2d", "https://github.com"),
         ("open 192.168.1.10:8000/status", "live2d", "http://192.168.1.10:8000/status"),
+        ("Can you search Chrome for weather?", "bubble", "https://www.google.com/search?q=weather"),
     )
     for prompt, launcher_mode, url in local_url_cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -3700,6 +3719,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
         "http://127.0.0.1:5173",
         "https://github.com",
         "http://192.168.1.10:8000/status",
+        "https://www.google.com/search?q=weather",
         "https://www.baidu.com/s?wd=open+hanako",
         "https://www.baidu.com/s?wd=open+hanako",
     ]
