@@ -4384,6 +4384,13 @@ def _normalize_app_scoped_ui_action_app(value: str) -> str:
         "帮我",
         "请",
         "麻烦",
+        "点",
+        "点击",
+        "点一下",
+        "按",
+        "按下",
+        "click",
+        "press",
         "cmd",
         "command",
         "ctrl",
@@ -5350,6 +5357,8 @@ def _app_open_or_focus_search_type_tool_requests(text: str) -> list[dict[str, An
     if not shorthand_match:
         return []
     mode, _raw_app, app_name, followup = shorthand_match
+    if app_name not in _BROWSER_APP_NAMES and _looks_like_explicit_text_input_target(followup):
+        return []
     if _looks_like_explicit_text_input_target(followup) and _typed_text_has_return_followup(
         followup,
         "搜索",
@@ -5378,6 +5387,8 @@ def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
         _raw_app, app_name, followup = split
         mode = "focus"
     if not app_name or app_name in _BROWSER_APP_NAMES:
+        return []
+    if _looks_like_explicit_text_input_target(followup):
         return []
     parsed = _app_search_query_from_followup(followup)
     if parsed is None:
@@ -5417,7 +5428,7 @@ def _looks_like_explicit_text_input_target(value: str) -> bool:
 def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
     followup = _strip_query(value)
     patterns = (
-        r"^(?:搜索(?!框|栏)|搜一下|搜|查找(?!框)|查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:搜索(?!框|栏)|搜一下|搜(?!索?(?:框|栏))|查找(?!框)|查一下|查查|检索|找一下|找下(?!载)|找找|找)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:find|search|look\s+for)\s+(?:for\s+)?(?P<query>[^.!?]+)$",
     )
     for pattern in patterns:
@@ -5460,6 +5471,10 @@ def _app_open_or_focus_browser_action_tool_requests(text: str) -> list[dict[str,
     mode, _raw_app, app_name, followup = shorthand_match
     if app_name not in _BROWSER_APP_NAMES:
         return []
+    if _app_followup_safe_key(followup):
+        return []
+    if _app_followup_safe_type_text(followup):
+        return []
     app_request = _request(f"app.{mode}", {"app_name": app_name})
     browser_followup = _browser_context_followup(followup)
 
@@ -5488,6 +5503,10 @@ def _app_prefix_browser_action_tool_requests(text: str) -> list[dict[str, Any]]:
         or _looks_like_window_target(raw_app)
         or _looks_like_common_path_target(raw_app)
     ):
+        return []
+    if _app_followup_safe_key(followup):
+        return []
+    if _app_followup_safe_type_text(followup):
         return []
     app_request = _request("app.focus", {"app_name": app_name})
     browser_followup = _browser_context_followup(followup)
@@ -5549,6 +5568,8 @@ def _app_scoped_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
         return []
     app_name = str(payload.get("app_name") or "").strip()
     if not app_name:
+        return []
+    if app_name not in _BROWSER_APP_NAMES and _looks_like_explicit_text_input_target(text):
         return []
     mode = "open" if tool.startswith("app.open") else "focus"
     return _search_type_requests(
@@ -6188,6 +6209,12 @@ def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
 
 def _strip_known_app_followup_prefix(value: str) -> str:
     followup = _strip_app_foreground_followup_prefix(_strip_query(value))
+    followup = re.sub(
+        r"^(?:在|到)\s*",
+        "",
+        followup,
+        flags=re.IGNORECASE,
+    )
     followup = re.sub(
         r"^(?:应用|app|软件|程序)?(?:里|中|内|上(?!滑|滚|翻|一页)|的|里面|界面里|界面中)\s*",
         "",

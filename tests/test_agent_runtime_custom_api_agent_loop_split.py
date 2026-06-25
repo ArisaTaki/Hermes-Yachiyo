@@ -782,6 +782,31 @@ def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None
     ]
 
 
+def test_daily_desktop_intent_planner_routes_app_search_field_typing_language() -> None:
+    allowed_tools = [
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.hotkey",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ]
+
+    assert daily_desktop_intent_tool_requests("在微信搜索文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+        },
+    ]
+
+
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",
@@ -1774,7 +1799,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {
             "app_name": "Slack",
             "target": "搜索",
-            "role_filter": "",
+            "role_filter": "button",
             "limit": 80,
             "click_count": 1,
         },
@@ -2576,7 +2601,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {
                 "app_name": "Slack",
                 "target": "搜索",
-                "role_filter": "",
+                "role_filter": "button",
                 "limit": 80,
                 "click_count": 1,
             },
@@ -2589,7 +2614,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {
                 "app_name": "Slack",
                 "target": "搜索",
-                "role_filter": "",
+                "role_filter": "button",
                 "limit": 80,
                 "click_count": 1,
             },
@@ -3061,6 +3086,66 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         },
     ]
     assert daily_desktop_intent_tool_requests("打开微信在搜索框输入文件传输助手并回车", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信搜索框输入文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("微信搜索框输入文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
+    assert daily_desktop_intent_tool_requests("微信在搜索框输入文件传输助手", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "打开微信搜索框输入文件传输助手并回车",
+        allowed_tools,
+    ) == [
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_type_into_ui_element",

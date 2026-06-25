@@ -295,6 +295,28 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             "desktop.type_into_ui_element",
             {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
         ),
+        (
+            "打开微信搜索框输入文件传输助手",
+            "app.open_and_type_into_ui_element",
+            {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        ),
+        (
+            "微信在搜索框输入文件传输助手",
+            "app.focus_and_type_into_ui_element",
+            {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "text": "文件传输助手",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        ),
     )
 
     for prompt, tool_name, tool_input in cases:

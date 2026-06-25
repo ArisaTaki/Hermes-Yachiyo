@@ -5536,6 +5536,28 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
                 {"target": "search", "text": "hello", "role_filter": "text", "limit": 80},
             ),
             (
+                "打开微信搜索框输入文件传输助手",
+                "app.open_and_type_into_ui_element",
+                {
+                    "app_name": "WeChat",
+                    "target": "搜索",
+                    "text": "文件传输助手",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+            ),
+            (
+                "微信在搜索框输入文件传输助手",
+                "app.focus_and_type_into_ui_element",
+                {
+                    "app_name": "WeChat",
+                    "target": "搜索",
+                    "text": "文件传输助手",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+            ),
+            (
                 "click login",
                 "desktop.click_ui_element",
                 {"target": "login", "role_filter": "button", "limit": 80, "click_count": 1},

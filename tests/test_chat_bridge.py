@@ -3809,7 +3809,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         store.close()
 
 
-def test_chat_bridge_quick_message_executes_app_scoped_search_field_type_without_approval(
+def test_chat_bridge_quick_message_requires_approval_for_app_scoped_search_field_type(
     tmp_path,
     monkeypatch,
 ):
@@ -3858,30 +3858,29 @@ def test_chat_bridge_quick_message_executes_app_scoped_search_field_type_without
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开微信在搜索框输入文件传输助手",
+        "打开微信搜索框输入文件传输助手",
     )
 
     assert result["ok"] is True
-    assert calls == [
-        ("open", "WeChat"),
-        ("focus", "WeChat"),
-        ("shortcut", "find"),
-        ("type", "文件传输助手"),
+    assert calls == []
+    assert agent_task["status"] == "waiting_approval"
+    assert agent_task["needs_user_action"] is True
+    assert agent_task["pending_approvals"][0]["tool_name"] == "app.open_and_type_into_ui_element"
+    assert agent_task["pending_approvals"][0]["input_preview"] == {
+        "app_name": "WeChat",
+        "target": "搜索",
+        "text": "文件传输助手",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-1:]] == [
+        "app.open_and_type_into_ui_element",
     ]
-    assert agent_task["status"] == "completed"
-    assert agent_task["needs_user_action"] is False
-    assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开 WeChat 并打开查找。 已向前台输入文字（6 个字符）。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-    ]
-    assert run["status"] == "completed"
-    assert run["pending_approval"] == {}
+    assert run["status"] == "approval_required"
+    assert run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
     assert "agent.desktop.intent_planned" in event_types
-    assert "agent.tool.call" in event_types
-    assert "agent.desktop.intent_completed" in event_types
-    assert "agent.desktop.intent_approval_required" not in event_types
+    assert "agent.desktop.intent_approval_required" in event_types
+    assert "agent.tool.approval_required" in event_types
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
