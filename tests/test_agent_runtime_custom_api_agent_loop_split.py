@@ -3440,6 +3440,56 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.quit",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_requests("关闭微信窗口", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信关闭窗口", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("打开微信关闭当前窗口", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Chrome close window", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信关闭窗口", ["desktop.close_window"]) == []
+    assert daily_desktop_intent_tool_requests("关闭微信窗口", ["app.quit"]) == []
     assert daily_desktop_intent_tool_request("把 Slack 关掉", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.quit",

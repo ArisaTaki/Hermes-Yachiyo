@@ -135,6 +135,24 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
+    app_scoped_close_window = daily_desktop_entrypoint_requests("微信关闭窗口")
+    assert app_scoped_close_window == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_user_metadata(app_scoped_close_window)["daily_desktop_tools"] == [
+        "app.focus",
+        "desktop.close_window",
+    ]
+
     assert daily_desktop_entrypoint_requests("当前窗口是什么") == [
         {
             "protocol": "json_fallback",

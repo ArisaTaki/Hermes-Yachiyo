@@ -439,6 +439,11 @@ def daily_desktop_intent_tool_requests(
     system_hotkey = _system_desktop_hotkey_request(context)
     if system_hotkey and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", system_hotkey)]
+    app_close_window_sequence = _app_open_or_focus_close_window_tool_requests(context)
+    if app_close_window_sequence:
+        if all(str(request.get("tool") or "") in allowed for request in app_close_window_sequence):
+            return app_close_window_sequence
+        return []
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -4022,6 +4027,98 @@ def _app_prefix_window_management_tool_request(text: str) -> dict[str, Any] | No
     return None
 
 
+def _app_open_or_focus_close_window_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _app_open_or_focus_close_window_request(text)
+    if not parsed:
+        return []
+    mode, app_name = parsed
+    return [
+        _request(f"app.{mode}", {"app_name": app_name}),
+        _request("desktop.close_window", {}),
+    ]
+
+
+def _app_open_or_focus_close_window_request(text: str) -> tuple[str, str] | None:
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        mode, raw_app, app_name, followup = shorthand_match
+        if (
+            _app_followup_close_window_request(followup)
+            and not _looks_like_window_target(raw_app)
+            and not _looks_like_common_path_target(raw_app)
+        ):
+            return mode, app_name
+
+    prefix_split = _known_app_prefix_split(text)
+    if prefix_split:
+        raw_app, app_name, followup = prefix_split
+        if (
+            _app_followup_close_window_request(followup)
+            and not _looks_like_window_target(raw_app)
+            and not _looks_like_common_path_target(raw_app)
+        ):
+            return "focus", app_name
+
+    preposed = _app_preposed_close_window_request(text)
+    if preposed:
+        return preposed
+    return None
+
+
+def _app_preposed_close_window_request(text: str) -> tuple[str, str] | None:
+    stripped = _strip_query(text)
+    if not stripped:
+        return None
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*"
+        r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*"
+        r"(?:关闭|关掉|关上|关(?:一下|下|了)?)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*"
+        r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)$",
+        r"^(?:please\s+)?(?:close|dismiss)\s+(?P<app>[^.!?]+?)\s+window$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, stripped, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        if (
+            not raw_app
+            or _looks_like_window_target(raw_app)
+            or _looks_like_current_app_scope(raw_app)
+            or _looks_like_common_path_target(raw_app)
+            or _normalize_site_name(raw_app)
+            or _looks_like_composite_action_target(raw_app)
+        ):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if app_name:
+            return "focus", app_name
+    return None
+
+
+def _app_followup_close_window_request(value: str) -> bool:
+    text = _strip_query(value)
+    if not text:
+        return False
+    return bool(
+        _is_close_current_window_request(text)
+        or re.fullmatch(
+            r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*(?:窗口|window)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            r"(?:close|dismiss)\s+(?:the\s+)?window",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _is_app_prefix_hide_followup(value: str) -> bool:
     text = _strip_query(value)
     if not text:
@@ -6330,6 +6427,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_ui_elements_request(followup) is not None
         or _desktop_windows_request(followup) is not None
         or _is_active_window_request(followup)
+        or _app_followup_close_window_request(followup)
         or _is_browser_extract_text_request(followup)
         or _is_browser_screenshot_request(followup)
         or _is_browser_current_page_request(followup)

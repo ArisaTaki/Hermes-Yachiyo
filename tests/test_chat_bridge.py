@@ -9011,6 +9011,31 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             assert waiting_run["status"] == "approval_required"
             assert waiting_run["pending_approval"]["tool"] == tool_name
             assert waiting_run["pending_approval"]["input_preview"] == input_preview
+
+        app_scoped_result = bridge.send_quick_message(
+            "微信关闭窗口",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        app_scoped_task = app_scoped_result["agent_task"]
+        app_scoped_link = service.get_task_run_link(app_scoped_result["task_id"])
+        app_scoped_run = service.get_run(app_scoped_link["run_id"])
+
+        assert app_scoped_result["ok"] is True
+        assert app_scoped_task["status"] == "waiting_approval"
+        assert app_scoped_task["needs_user_action"] is True
+        assert app_scoped_task["tool_calls"][-2]["tool_name"] == "app.focus"
+        assert app_scoped_task["tool_calls"][-2]["input_preview"] == {"app_name": "WeChat"}
+        assert app_scoped_task["tool_calls"][-2]["status"] == "completed"
+        assert app_scoped_task["tool_calls"][-1]["tool_name"] == "desktop.close_window"
+        assert app_scoped_task["tool_calls"][-1]["status"] == "waiting_approval"
+        assert app_scoped_task["pending_approvals"][0]["tool_name"] == "desktop.close_window"
+        assert app_scoped_run["status"] == "approval_required"
+        assert app_scoped_run["pending_approval"]["tool"] == "desktop.close_window"
+        assert app_scoped_run["pending_approval"]["input_preview"] == {}
     finally:
         service.close()
         store.close()
