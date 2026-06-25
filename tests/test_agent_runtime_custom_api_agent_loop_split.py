@@ -851,6 +851,52 @@ def test_daily_desktop_intent_planner_routes_finder_find_language() -> None:
             "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
         },
     ]
+    assert daily_desktop_intent_tool_requests("在 Slack 搜索 Alice 并选择第一个结果", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Slack search Alice then choose first result",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
+        },
+    ]
+    assert (
+        daily_desktop_intent_tool_requests(
+            "在 Slack 搜索 Alice 并选择第一个结果",
+            ["app.focus_and_safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+        )
+        == []
+    )
 
 
 def test_daily_desktop_intent_planner_routes_spotlight_search_language() -> None:

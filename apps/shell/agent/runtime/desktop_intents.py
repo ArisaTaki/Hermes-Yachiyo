@@ -718,10 +718,12 @@ def daily_desktop_intent_tool_requests(
             return app_window_management_sequence
         return []
     app_find_open_first_sequence = _app_open_or_focus_find_open_first_tool_requests(context)
-    if app_find_open_first_sequence and all(
-        str(request.get("tool") or "") in allowed for request in app_find_open_first_sequence
-    ):
-        return app_find_open_first_sequence
+    if app_find_open_first_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed for request in app_find_open_first_sequence
+        ):
+            return app_find_open_first_sequence
+        return []
     if (
         sequence
         and _should_prioritize_foreground_sequence(sequence)
@@ -9661,12 +9663,12 @@ def _find_then_open_first_result(value: str) -> tuple[str, str, int] | None:
         r"^(?:搜索|搜一下|搜|查找|查一下|查查|检索|找一下|找)\s*"
         r"(?P<query>.+?)\s*"
         r"(?:然后|并且|并|之后|随后|再|后)\s*"
-        r"(?P<verb>打开|进入|访问|点击|点一下|点按|单击|点)\s*"
+        r"(?P<verb>打开|进入|访问|点击|点一下|点按|单击|点|选择|选中|选取)\s*"
         r"(?:搜索结果|结果|条目|文件|项目)?(?:中|里|里的|的)?\s*"
         r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*"
         r"(?:搜索结果|结果|条目|文件|项目)?$",
         r"^(?:find|search)\s+(?:for\s+)?(?P<query_en>.+?)\s+"
-        r"(?:and|then)\s+(?P<verb_en>open|click|visit)\s+"
+        r"(?:and|then)\s+(?P<verb_en>open|click|visit|select|choose)\s+"
         r"(?:the\s+)?(?P<rank_en>first|1st)\s+(?:result|item|file)$",
     )
     for pattern in patterns:
@@ -9681,7 +9683,11 @@ def _find_then_open_first_result(value: str) -> tuple[str, str, int] | None:
         if not target:
             continue
         verb = str(groups.get("verb") or groups.get("verb_en") or "").strip().lower()
-        click_count = 1 if re.search(r"^(?:点击|点一下|点按|单击|点|click)$", verb) else 2
+        click_count = (
+            1
+            if re.search(r"^(?:点击|点一下|点按|单击|点|选择|选中|选取|click|select|choose)$", verb)
+            else 2
+        )
         return query, target, click_count
     return None
 
@@ -10386,8 +10392,8 @@ def _app_search_query_from_followup(value: str) -> tuple[str, bool] | None:
         raw_query = match.group("query")
         if re.search(
             r"(?:然后|并且|并|再|接着|and\s+then|then|and)\s*"
-            r"(?:输入|打字|键入|敲入|发送|提交|点击|点|打开|播放|写入|写|粘贴|"
-            r"type|enter\s+text|send|submit|click|open|play|write|paste)\b",
+            r"(?:输入|打字|键入|敲入|发送|提交|点击|点|打开|播放|写入|写|粘贴|选择|选中|选取|"
+            r"(?:type|enter\s+text|send|submit|click|open|play|write|paste|select|choose)\b)",
             raw_query,
             flags=re.IGNORECASE,
         ):

@@ -2368,6 +2368,42 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
             "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
         },
     ]
+    assert daily_desktop_entrypoint_requests("在 Slack 搜索 Alice 并选择第一个结果") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 1},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack search Alice then choose first result") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
+        },
+    ]
     assert daily_desktop_entrypoint_requests("微信打开搜索") == [
         {
             "protocol": "json_fallback",
