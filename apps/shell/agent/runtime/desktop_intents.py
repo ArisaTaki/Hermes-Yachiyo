@@ -8011,9 +8011,9 @@ def _app_open_name(text: str) -> str:
 
     patterns = (
         r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:把|将)?\s*"
-        r"(?P<app>[^。！？!?，,]+?)\s*(?P<verb>打开|启动|运行|拉起|开启|开)\s*(?:一下|下)?"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?P<verb>打开|启动|运行|拉起来|拉起|开启|开)\s*(?:一下|下)?"
         r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
-        r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
+        r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起来|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
         r"(?P<app>[^。！？!?，,]+?)(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
         r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<verb>open|launch|start)\s+"
         r"(?P<app>[^.!?]+?)(?=\s*(?:\b(?:and|then|if)\b|$|[.!?]))",
@@ -8754,6 +8754,8 @@ def _apple_music_search_play_query(text: str) -> str:
 def _music_query(text: str) -> str:
     if _looks_like_window_management_action(text):
         return ""
+    if _looks_like_app_launch_pull_up_request(text):
+        return ""
     if (
         _apple_music_search_play_query(text)
         or _looks_like_generic_music_play_request(text)
@@ -8782,6 +8784,25 @@ def _music_query(text: str) -> str:
         if query and _is_specific_music_query(query):
             return query
     return ""
+
+
+def _looks_like_app_launch_pull_up_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
+            r"(?:直接)?(?:把|将)?\s*[^。！？!?，,\n]+?\s*(?:拉起来|拉起)\s*(?:一下|下)?"
+            r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
+            str(text or "").strip(),
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
+            r"(?:直接)?(?:拉起来|拉起)\s*(?:一下|下)?\s*[^。！？!?，,\n]+?"
+            r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
+            str(text or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _strip_music_query_context(value: str) -> str:

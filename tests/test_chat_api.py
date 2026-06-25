@@ -383,6 +383,7 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
     finally:
         service.close()
         store.close()
@@ -1170,6 +1171,7 @@ def test_send_message_executes_browser_shortcut_search_sequence_without_model(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
     finally:
         service.close()
         store.close()
@@ -2407,6 +2409,18 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = api.send_message("把 Finder 拉起来")
+        second_task = runtime.state.get_task(second["task_id"])
+
+        assert second["ok"] is True
+        assert second["status"] == "completed"
+        assert second["agent_task"]["summary"] == "已打开 Finder。"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert second_task is not None
+        assert second_task.status == TaskStatus.COMPLETED
+        assert second_task.result == "已打开 Finder。"
+        assert open_calls[-1] == "Finder"
     finally:
         service.close()
         store.close()

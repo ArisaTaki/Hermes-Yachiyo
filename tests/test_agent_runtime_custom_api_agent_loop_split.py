@@ -1106,6 +1106,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "WeChat"},
     }
+    assert daily_desktop_intent_tool_request("把 Finder 拉起来", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Finder"},
+    }
+    assert daily_desktop_intent_tool_request("拉起来 Finder", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Finder"},
+    }
     assert daily_desktop_intent_tool_request("open WeChat for me", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open",

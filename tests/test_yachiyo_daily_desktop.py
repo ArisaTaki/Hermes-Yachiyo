@@ -47,6 +47,7 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
     cases = (
         ("你能帮我打开微信吗", "WeChat"),
         ("你能启动一下备忘录吗", "Notes"),
+        ("把 Finder 拉起来", "Finder"),
         ("Could you launch Calendar for me?", "Calendar"),
         ("Would you open Notes please?", "Notes"),
     )
