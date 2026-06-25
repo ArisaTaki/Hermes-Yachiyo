@@ -5145,6 +5145,80 @@ def test_send_message_routes_return_submit_to_approval_without_model(tmp_path, m
         store.close()
 
 
+def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("polite hotkey approval task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_open",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app.open_and_hotkey should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app hotkey should wait for approval")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_hotkey",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hotkey should wait for approval")
+        ),
+    )
+
+    try:
+        cases = (
+            ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+            (
+                "Could you open Chrome and press Command L?",
+                "app.open_and_hotkey",
+                {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            ),
+        )
+        for text, tool_name, input_preview in cases:
+            result = api.send_message(text)
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert result["status"] == "waiting_approval"
+            assert result["agent_task"]["status"] == "waiting_approval"
+            assert result["agent_task"]["needs_user_action"] is True
+            assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
+            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["tool"] == tool_name
+            assert run["pending_approval"]["input_preview"] == input_preview
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.tool.approval_required" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_running_apps_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

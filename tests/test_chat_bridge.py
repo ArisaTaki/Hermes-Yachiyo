@@ -7674,7 +7674,7 @@ def test_chat_bridge_quick_message_approval_executes_and_completes_launcher_task
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
-            "按 Command+L",
+            "你能帮我按Command L吗",
             metadata={
                 "source": "launcher",
                 "launcher_mode": "bubble",
@@ -8050,9 +8050,16 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
                 "app.open_and_hotkey",
                 {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
             ),
+            (
+                "Could you open Chrome and press Command L?",
+                "app.open_and_hotkey",
+                {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            ),
             ("send current message", "desktop.submit_foreground", {"action": "send"}),
             ("发送当前内容", "desktop.submit_foreground", {"action": "send"}),
             ("按回车提交", "desktop.submit_foreground", {"action": "submit"}),
+            ("按 Command+L", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+            ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
             ("敲一下回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("hit enter", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("tap the return key", "desktop.hotkey", {"key": "return", "modifiers": []}),

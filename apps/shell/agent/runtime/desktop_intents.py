@@ -7501,6 +7501,7 @@ def _looks_like_project_or_design_request(text: str) -> bool:
 
 
 def _desktop_hotkey(text: str) -> dict[str, Any] | None:
+    text = _strip_desktop_action_request_shell(text)
     named = _desktop_named_hotkey(text)
     if named:
         return named

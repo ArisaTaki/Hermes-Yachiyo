@@ -110,13 +110,28 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
-    for prompt in ("你能帮我按Command L吗", "Can you press Command L?"):
+    approval_cases = (
+        ("按 Command+L", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+        ("你能帮我按Command L吗", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+        ("Can you press Command L?", "desktop.hotkey", {"key": "l", "modifiers": ["command"]}),
+        (
+            "Could you open Chrome and press Command L?",
+            "app.open_and_hotkey",
+            {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+        ),
+    )
+
+    for prompt, tool_name, tool_input in approval_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
 
-        assert not requests or requests[0]["tool"] not in {
-            "desktop.safe_key",
-            "desktop.safe_shortcut",
-        }
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
 def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
