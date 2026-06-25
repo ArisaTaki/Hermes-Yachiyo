@@ -266,6 +266,74 @@ def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -
     )
 
 
+def test_daily_desktop_entrypoint_routes_command_palette_input_and_execution() -> None:
+    assert daily_desktop_entrypoint_requests("在 VS Code 里打开命令面板输入 Format Document") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("打开 VS Code 命令面板并输入 Format Document") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("在 VS Code 里打开命令面板输入 Format Document 并回车") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Obsidian command palette type Toggle reading view and press enter") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Toggle reading view"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在 VS Code 里执行命令 Format Document",
+            allowed_tools=("app.focus_and_safe_shortcut", "desktop.safe_type_text"),
+        )
+        == []
+    )
+
+
 def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut() -> None:
     cases = (
         ("Chrome 最大化", "app.focus_and_safe_shortcut", "Google Chrome"),

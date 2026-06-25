@@ -1065,6 +1065,110 @@ def test_daily_desktop_intent_planner_routes_app_command_palette_and_preferences
     ) == []
 
 
+def test_daily_desktop_intent_planner_routes_command_palette_input_and_execution() -> None:
+    allowed_tools = [
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+
+    assert daily_desktop_intent_tool_requests(
+        "在 VS Code 里打开命令面板输入 Format Document",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "打开 VS Code 命令面板并输入 Format Document",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 VS Code 里打开命令面板输入 Format Document 并回车",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "VS Code run command Format Document",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "Obsidian command palette type Toggle reading view and press enter",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Toggle reading view"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests(
+        "在 VS Code 里执行命令 Format Document",
+        ["app.focus_and_safe_shortcut", "desktop.safe_type_text"],
+    ) == []
+
+
 def test_daily_desktop_intent_planner_routes_app_scoped_safe_keys_and_scroll() -> None:
     allowed_tools = [
         "app.open_and_safe_key",

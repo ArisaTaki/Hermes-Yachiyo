@@ -473,6 +473,14 @@ def daily_desktop_intent_tool_requests(
         if all(str(request.get("tool") or "") in allowed for request in spotlight_search_sequence):
             return spotlight_search_sequence
         return []
+    app_command_palette_sequence = _app_command_palette_tool_requests(context)
+    if app_command_palette_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in app_command_palette_sequence
+        ):
+            return app_command_palette_sequence
+        return []
     app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
     if app_scoped_low_risk_action:
         low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
@@ -6763,6 +6771,162 @@ def _app_scoped_low_risk_foreground_action_tool_request(text: str) -> dict[str, 
     return None
 
 
+def _app_command_palette_tool_requests(text: str) -> list[dict[str, Any]]:
+    for mode, raw_app, app_name, followup in _app_scoped_foreground_action_matches(text):
+        if (
+            not app_name
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+        ):
+            continue
+        parsed = _app_command_palette_followup(app_name, followup)
+        if not parsed:
+            continue
+        shortcut_action, typed_text, should_submit = parsed
+        requests = [
+            _request(
+                f"app.{mode}_and_safe_shortcut",
+                {"app_name": app_name, "action": shortcut_action},
+            ),
+            _request("desktop.safe_type_text", {"text": typed_text}),
+        ]
+        if should_submit:
+            requests.append(_request("desktop.submit_foreground", {"action": "confirm"}))
+        return requests
+    return []
+
+
+def _app_command_palette_followup(app_name: str, followup: str) -> tuple[str, str, bool] | None:
+    shortcut_action = _app_command_or_preferences_shortcut_action(app_name, "命令面板")
+    if not shortcut_action:
+        return None
+    parsed = _command_palette_followup_text_and_submit(followup)
+    if not parsed:
+        return None
+    command_text, should_submit = parsed
+    if not command_text:
+        return None
+    return shortcut_action, command_text, should_submit
+
+
+def _command_palette_followup_text_and_submit(value: str) -> tuple[str, bool] | None:
+    text = _strip_query(value)
+    if not text:
+        return None
+    if _is_bare_command_palette_open_followup(text):
+        return None
+    palette = r"(?:命令面板|指令面板|命令\s*palette|command\s+palette)"
+    type_verb = r"(?:输入|打字|键入|敲入|打入|打上|搜索|查找|找|type|enter|search|find)"
+    run_verb = r"(?:执行|运行|打开|启动|run|execute|open|launch)"
+    patterns: tuple[tuple[str, bool], ...] = (
+        (
+            rf"^(?:打开|调出|唤起|显示|open|show)?\s*{palette}"
+            rf"\s*(?:(?:并且|并|然后|之后|后(?!退)|再|and\s+then|and|then)\s*)?"
+            rf"{type_verb}\s*(?P<text>[^。！？!?]+)$",
+            False,
+        ),
+        (
+            rf"^{palette}"
+            rf"\s*(?:(?:里|中|内|上|里面|里边|in|from|with)\s*)?"
+            rf"{type_verb}\s*(?P<text>[^。！？!?]+)$",
+            False,
+        ),
+        (
+            rf"^(?:打开|调出|唤起|显示|open|show)?\s*{palette}"
+            rf"\s*(?:(?:并且|并|然后|之后|后(?!退)|再|and\s+then|and|then)\s*)?"
+            rf"{run_verb}\s*(?:命令|指令|command)?\s*(?P<text>[^。！？!?]+)$",
+            True,
+        ),
+        (
+            rf"^(?:{run_verb})\s*(?:命令|指令|command)?\s*(?P<text>[^。！？!?]+)$",
+            True,
+        ),
+        (
+            rf"^{palette}\s+(?:run|execute|open|launch)\s+(?P<text>[^.!?]+)$",
+            True,
+        ),
+    )
+    for pattern, default_submit in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_text = str(match.group("text") or "").strip()
+        should_submit = default_submit or _command_palette_text_has_submit_followup(raw_text)
+        command_text = _strip_command_palette_typed_text(raw_text)
+        if command_text:
+            return command_text, should_submit
+    return None
+
+
+def _is_bare_command_palette_open_followup(value: str) -> bool:
+    phrase = _normalize_named_hotkey_phrase(value)
+    return phrase in {
+        "命令面板",
+        "打开命令面板",
+        "指令面板",
+        "打开指令面板",
+        "命令palette",
+        "commandpalette",
+        "opencommandpalette",
+        "showcommandpalette",
+    }
+
+
+def _strip_command_palette_typed_text(value: str) -> str:
+    text = _strip_typed_text(value)
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|后(?!退)|再|接着)\s*"
+        r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+        r"(?:enter|return|confirm|ok)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return _strip_query(text)
+
+
+def _command_palette_text_has_submit_followup(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        re.search(
+            r"(?:并且|并|然后|之后|后(?!退)|再|接着)\s*"
+            r"(?:按|敲|执行|确认)?(?:回车|enter|return|确认|确定)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:and\s+then|then|and)\s*(?:(?:press|hit)\s*)?"
+            r"(?:enter|return|confirm|ok)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_command_palette_followup(value: str) -> bool:
+    text = _strip_query(value)
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"(?:命令面板|指令面板|命令\s*palette|command\s+palette)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:执行|运行|run|execute)\s*(?:命令|指令|command)?\s+\S+",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _app_scoped_low_risk_action_should_not_fallback(request: dict[str, Any]) -> bool:
     tool = str(request.get("tool") or "")
     if tool.endswith("_and_safe_key") or tool.endswith("_and_safe_scroll"):
@@ -11181,6 +11345,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         or _desktop_submit_foreground_action(followup)
         or _app_followup_safe_type_text(followup)
         or _app_find_shortcut_followup(followup)
+        or _looks_like_command_palette_followup(followup)
         or _app_search_query_from_followup(followup) is not None
         or _desktop_find_query(followup)
         or _browser_click_request(_browser_context_followup(followup)) is not None
