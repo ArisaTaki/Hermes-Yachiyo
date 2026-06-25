@@ -82,6 +82,10 @@ from .policy import (
     is_high_risk_desktop_action,
     task_requires_user_action,
 )
+from .recovery_actions import (
+    RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
+    recovery_retry_context_payload,
+)
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -133,6 +137,8 @@ __all__ = [
     "MemoryTraceSnapshot",
     "PublicRunEvent",
     "ReadinessSnapshot",
+    "RECOVERY_RETRY_CONTEXT_EVENT_TYPE",
+    "recovery_retry_context_payload",
     "RestrictedPluginToolSnapshot",
     "RestrictedToolPluginSnapshot",
     "RerunRunRequest",
