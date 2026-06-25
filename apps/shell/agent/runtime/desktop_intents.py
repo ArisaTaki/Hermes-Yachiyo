@@ -695,6 +695,14 @@ def daily_desktop_intent_tool_requests(
         if "media.apple_music_control" in allowed:
             return [_request("media.apple_music_control", {"action": "play"})]
         return []
+    dynamic_source_find_sequence = _dynamic_source_find_tool_requests(context)
+    if dynamic_source_find_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_find_sequence
+        ):
+            return dynamic_source_find_sequence
+        return []
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
         str(request.get("tool") or "") in allowed for request in foreground_find_sequence
@@ -4967,6 +4975,135 @@ def _browser_dynamic_source_open_tool_requests(text: str) -> list[dict[str, Any]
         ]
     )
     return requests
+
+
+def _dynamic_source_find_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _dynamic_source_find_request(text)
+    if not parsed:
+        return []
+    source, shortcut_tool, shortcut_input = parsed
+    requests: list[dict[str, Any]] = []
+    if source == "selected_text":
+        requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    requests.extend(
+        [
+            _request(shortcut_tool, shortcut_input),
+            _request("desktop.safe_shortcut", {"action": "paste"}),
+        ]
+    )
+    return requests
+
+
+def _dynamic_source_find_request(text: str) -> tuple[str, str, dict[str, Any]] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    return _dynamic_find_request_for_app_scope(
+        clean
+    ) or _dynamic_find_request_for_foreground_scope(clean)
+
+
+def _dynamic_find_request_for_app_scope(
+    text: str,
+) -> tuple[str, str, dict[str, Any]] | None:
+    clean = _strip_query(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|到)\s*(?P<app>[^。！？!?，,\n]+?)(?:里|中|内|上|里面)\s*"
+        r"(?:查找|搜索(?!框)|搜一下|找一下|找|检索)\s*(?P<source>.+)$",
+        r"^(?:find|search)\s+(?:for\s+)?(?P<source>.+?)\s+"
+        r"(?:in|on|inside|within)\s+(?:the\s+)?(?P<app>[^.!?\n]+)$",
+        r"^(?:find|search)\s+(?:in|inside|within)\s+(?:the\s+)?(?P<app>[^.!?\n]+?)\s+"
+        r"(?:for|using)\s+(?:the\s+)?(?P<source>.+)$",
+        r"^(?:find|search)\s+(?P<app>[^.!?\n]+?)\s+for\s+(?:the\s+)?(?P<source>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        source = _dynamic_find_source_kind(match.group("source"))
+        if (
+            not source
+            or not raw_app
+            or _dynamic_find_scope_is_foreground(raw_app)
+            or _looks_like_window_target(raw_app)
+            or _looks_like_common_path_target(raw_app)
+        ):
+            continue
+        app_name = _normalize_app_name(raw_app)
+        if not app_name:
+            continue
+        return (
+            source,
+            "app.focus_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        )
+    return None
+
+
+def _dynamic_find_request_for_foreground_scope(
+    text: str,
+) -> tuple[str, str, dict[str, Any]] | None:
+    clean = _strip_query(text)
+    scope = _dynamic_find_foreground_scope_pattern()
+    patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:在\s*)?(?P<scope>{scope})(?:里|中|内|上|里面)?\s*"
+        rf"(?:查找|搜索(?!框)|搜一下|找一下|找|检索)\s*(?P<source>.+)$",
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:用|拿)?\s*(?P<source>.+?)\s*"
+        rf"(?:查找|搜索(?!框)|搜一下|找一下|找|检索)\s*"
+        rf"(?P<scope>{scope})(?:里|中|内|上|里面)?$",
+        rf"^(?:find|search)\s+(?:for\s+)?(?P<source>.+?)\s+"
+        rf"(?:in|on|inside|within)\s+(?:the\s+)?(?P<scope>{scope})$",
+        rf"^(?:find|search)\s+(?:the\s+)?(?P<scope>{scope})\s+"
+        rf"(?:for|using)\s+(?:the\s+)?(?P<source>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        source = _dynamic_find_source_kind(match.group("source"))
+        if source and _dynamic_find_scope_is_foreground(match.group("scope")):
+            return (
+                source,
+                "desktop.safe_shortcut",
+                {"action": "find"},
+            )
+    return None
+
+
+def _dynamic_find_source_kind(value: str) -> str:
+    clean = _strip_query(value)
+    selected_text_source = _selected_text_source_pattern()
+    clipboard_source = _clipboard_source_pattern()
+    if re.fullmatch(rf"(?:{selected_text_source})", clean, flags=re.IGNORECASE):
+        return "selected_text"
+    if re.fullmatch(rf"(?:{clipboard_source})", clean, flags=re.IGNORECASE):
+        return "clipboard"
+    return ""
+
+
+def _dynamic_find_scope_is_foreground(value: str) -> bool:
+    clean = _strip_query(value)
+    if not clean:
+        return False
+    return bool(
+        re.fullmatch(
+            rf"(?:{_dynamic_find_foreground_scope_pattern()})",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _dynamic_find_foreground_scope_pattern() -> str:
+    return (
+        r"(?:(?:当前|前台|这个|该)?(?:页面|网页|页内|页面内|标签页|窗口|应用|app)|"
+        r"(?:(?:current|this|active|foreground)\s+)?"
+        r"(?:(?:browser\s+)?(?:page|web\s*page|tab)|window|app|application|ui|interface))"
+    )
 
 
 def _browser_dynamic_source_open_request(text: str) -> tuple[str, str] | None:

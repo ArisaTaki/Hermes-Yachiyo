@@ -1669,6 +1669,80 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://www.google.com/search?q=clipboard"},
     }
+    selected_find_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "在当前页面查找选中的内容",
+        "在当前网页查找当前选中文字",
+        "用选中内容查找当前页面",
+        "find selected text on current page",
+        "find current selection in page",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_find_requests
+        )
+    clipboard_find_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "在当前页面查找剪贴板内容",
+        "用剪贴板内容查找当前网页",
+        "find clipboard contents on current page",
+        "find the clipboard in current page",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == clipboard_find_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "在当前页面查找剪贴板内容",
+            ["desktop.safe_type_text"],
+        )
+        == []
+    )
+    assert daily_desktop_intent_tool_requests("在微信里查找选中的内容", allowed_tools) == [
+        selected_find_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        selected_find_requests[2],
+    ]
+    assert daily_desktop_intent_tool_requests("在 Slack 里查找剪贴板内容", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        clipboard_find_requests[1],
+    ]
     selected_open_requests = [
         {
             "protocol": "json_fallback",

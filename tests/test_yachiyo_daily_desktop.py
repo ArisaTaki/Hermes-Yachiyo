@@ -858,6 +858,79 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "daily_desktop_tool": "desktop.safe_shortcut",
         "daily_desktop_tools": ["desktop.safe_shortcut", "desktop.safe_type_text"],
     }
+    selected_find_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "在当前页面查找选中的内容",
+        "在当前网页查找当前选中文字",
+        "用选中内容查找当前页面",
+        "find selected text on current page",
+        "find current selection in page",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == selected_find_requests
+    assert daily_desktop_user_metadata(selected_find_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+    clipboard_find_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "在当前页面查找剪贴板内容",
+        "用剪贴板内容查找当前网页",
+        "find clipboard contents on current page",
+        "find the clipboard in current page",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == clipboard_find_requests
+    assert (
+        daily_desktop_entrypoint_requests(
+            "在当前页面查找剪贴板内容",
+            allowed_tools=("desktop.safe_type_text",),
+        )
+        == []
+    )
+    assert daily_desktop_entrypoint_requests("在微信里查找选中的内容") == [
+        selected_find_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        selected_find_requests[2],
+    ]
+    assert daily_desktop_entrypoint_requests("在 Slack 里查找剪贴板内容") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+        },
+        clipboard_find_requests[1],
+    ]
 
     assert daily_desktop_entrypoint_requests("打开第一个搜索结果") == [
         {
