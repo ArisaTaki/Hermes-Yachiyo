@@ -150,6 +150,12 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
         ("open control center", "app.open", {"app_name": "Control Center"}),
         ("打开通知中心", "app.open", {"app_name": "Notification Center"}),
         ("open notification center", "app.open", {"app_name": "Notification Center"}),
+        ("打开声音设置", "system.settings_open", {"target": "声音"}),
+        ("open sound settings", "system.settings_open", {"target": "声音"}),
+        ("打开键盘设置", "system.settings_open", {"target": "键盘"}),
+        ("open keyboard settings", "system.settings_open", {"target": "键盘"}),
+        ("打开通知设置", "system.settings_open", {"target": "通知"}),
+        ("open notification settings", "system.settings_open", {"target": "通知"}),
     )
 
     for prompt, tool_name, tool_input in cases:

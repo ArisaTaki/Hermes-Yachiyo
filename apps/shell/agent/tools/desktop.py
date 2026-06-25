@@ -206,6 +206,18 @@ _DISPLAY_SETTINGS_URLS = (
     "x-apple.systempreferences:com.apple.Displays-Settings.extension",
     "x-apple.systempreferences:com.apple.preference.displays",
 )
+_SOUND_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Sound-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.sound",
+)
+_KEYBOARD_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.keyboard",
+)
+_NOTIFICATIONS_SETTINGS_URLS = (
+    "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.notifications",
+)
 
 _SYSTEM_SETTINGS_TARGETS = {
     "privacysecurity": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
@@ -232,6 +244,17 @@ _SYSTEM_SETTINGS_TARGETS = {
     "displays": ("Displays", _DISPLAY_SETTINGS_URLS),
     "显示器": ("Displays", _DISPLAY_SETTINGS_URLS),
     "显示": ("Displays", _DISPLAY_SETTINGS_URLS),
+    "sound": ("Sound", _SOUND_SETTINGS_URLS),
+    "sounds": ("Sound", _SOUND_SETTINGS_URLS),
+    "声音": ("Sound", _SOUND_SETTINGS_URLS),
+    "声音设置": ("Sound", _SOUND_SETTINGS_URLS),
+    "keyboard": ("Keyboard", _KEYBOARD_SETTINGS_URLS),
+    "键盘": ("Keyboard", _KEYBOARD_SETTINGS_URLS),
+    "键盘设置": ("Keyboard", _KEYBOARD_SETTINGS_URLS),
+    "notifications": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
+    "notification": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
+    "通知": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
+    "通知设置": ("Notifications", _NOTIFICATIONS_SETTINGS_URLS),
     "accessibility": (
         "Accessibility Permission",
         ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),

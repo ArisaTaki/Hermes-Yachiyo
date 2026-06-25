@@ -2499,6 +2499,82 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         store.close()
 
 
+def test_send_message_executes_system_settings_panes_without_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    settings_calls: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct settings task should not call model")
+        ),
+    )
+
+    def fake_system_settings_open(target: str) -> dict:
+        settings_calls.append(target)
+        return {
+            "ok": True,
+            "action": "system.settings_open",
+            "summary": f"Opened System Settings: {target}",
+            "data": {
+                "target": target,
+                "open_target": "system_settings",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.system_settings_open",
+        fake_system_settings_open,
+    )
+    try:
+        cases = (
+            ("打开声音设置", "声音", "已打开系统设置：声音。"),
+            ("open keyboard settings", "键盘", "已打开系统设置：键盘。"),
+            ("打开通知设置", "通知", "已打开系统设置：通知。"),
+        )
+        for text, target, summary in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.settings_open"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"target": target}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert settings_calls == ["声音", "键盘", "通知"]
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_latest_download_open_path_without_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

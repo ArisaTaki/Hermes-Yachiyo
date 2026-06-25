@@ -2306,6 +2306,43 @@ def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> Non
     assert calls[6][0] == ["open", "-a", "System Settings"]
 
 
+def test_system_settings_open_handles_common_pane_aliases(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    sound = desktop_mod.system_settings_open("声音")
+    keyboard = desktop_mod.system_settings_open("键盘")
+    notifications = desktop_mod.system_settings_open("通知")
+
+    assert sound["ok"] is True
+    assert sound["summary"] == "Opened System Settings: Sound"
+    assert sound["data"]["settings_label"] == "Sound"
+    assert calls[0][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.Sound-Settings.extension",
+    ]
+    assert keyboard["ok"] is True
+    assert keyboard["summary"] == "Opened System Settings: Keyboard"
+    assert keyboard["data"]["settings_label"] == "Keyboard"
+    assert calls[1][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+    ]
+    assert notifications["ok"] is True
+    assert notifications["summary"] == "Opened System Settings: Notifications"
+    assert notifications["data"]["settings_label"] == "Notifications"
+    assert calls[2][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+    ]
+
+
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
     calls = []
 

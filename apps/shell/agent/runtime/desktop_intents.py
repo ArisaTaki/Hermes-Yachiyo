@@ -6831,6 +6831,9 @@ def _bare_system_settings_open_name(text: str) -> str:
         (r"(?:蓝牙|\bbluetooth\b)", "蓝牙"),
         (r"(?:网络|\bnetwork\b)", "网络"),
         (r"(?:显示器|显示设置|\bdisplays?\b|\bdisplay\s+settings?\b)", "显示器"),
+        (r"(?:声音设置|音频设置|\bsound\s+settings?\b|\baudio\s+settings?\b)", "声音"),
+        (r"(?:键盘设置|\bkeyboard\s+settings?\b)", "键盘"),
+        (r"(?:通知设置|\bnotifications?\s+settings?\b)", "通知"),
         (r"(?:隐私与安全性|隐私和安全性|隐私.*安全|隐私|\bprivacy\b|\bsecurity\b)", "隐私与安全性"),
         (r"(?:定位服务|定位|位置服务|\blocation\s+services?\b|\blocation\b)", "定位服务"),
     )
@@ -6875,8 +6878,12 @@ def _system_settings_target_name(text: str) -> str:
         return "隐私与安全性"
     if re.search(r"(?:显示器|显示设置|\bdisplays?\b|\bdisplay\s+settings?\b)", lowered):
         return "显示器"
-    if re.search(r"(?:声音|音量|\bsound\b|\bvolume\b)", lowered):
-        return ""
+    if re.search(r"(?:声音设置|音频设置|\bsound\s+settings?\b|\baudio\s+settings?\b)", lowered):
+        return "声音"
+    if re.search(r"(?:键盘设置|\bkeyboard\s+settings?\b)", lowered):
+        return "键盘"
+    if re.search(r"(?:通知设置|\bnotifications?\s+settings?\b)", lowered):
+        return "通知"
     if re.search(
         r"(?:系统设置|系统偏好|系统偏好设置|设置|偏好|system\s+settings?|system\s+preferences?|settings?|preferences?)",
         lowered,
