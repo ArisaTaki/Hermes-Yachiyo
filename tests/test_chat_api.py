@@ -5331,10 +5331,13 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "next_window": "`",
             "previous_window": "`",
             "mission_control": "up",
+            "force_quit_dialog": "escape",
         }.get(action, "")
         modifiers = ["command", "shift"] if action == "previous_window" else ["command"]
         if action == "mission_control":
             modifiers = ["control"]
+        if action == "force_quit_dialog":
+            modifiers = ["command", "option"]
         return {
             "ok": True,
             "action": "desktop.safe_shortcut",
@@ -5354,6 +5357,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("切到下一个窗口", "next_window", "已切到下一个窗口。"),
             ("switch to previous window", "previous_window", "已切到上一个窗口。"),
             ("show mission control", "mission_control", "已打开任务控制中心。"),
+            ("show force quit applications", "force_quit_dialog", "已打开强制退出窗口。"),
             ("refresh the current page", "refresh", "已刷新。"),
             ("刷新当前页面", "refresh", "已刷新。"),
             ("open a new tab", "new_tab", "已新建标签页。"),
@@ -5398,6 +5402,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "next_window",
             "previous_window",
             "mission_control",
+            "force_quit_dialog",
             "refresh",
             "refresh",
             "new_tab",
