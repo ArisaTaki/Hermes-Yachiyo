@@ -614,6 +614,8 @@ def daily_desktop_intent_tool_requests(
     if _is_apple_music_open_and_play_request(context):
         if "media.apple_music_open_and_play" in allowed:
             return [_request("media.apple_music_open_and_play", {})]
+        if "media.apple_music_control" in allowed:
+            return [_request("media.apple_music_control", {"action": "play"})]
         return []
     foreground_find_sequence = _foreground_find_text_tool_requests(context)
     if foreground_find_sequence and all(
@@ -2464,6 +2466,7 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
 
     if _is_apple_music_open_and_play_request(text):
         candidates.append(_request("media.apple_music_open_and_play", {}))
+        candidates.append(_request("media.apple_music_control", {"action": "play"}))
 
     music_control = _music_control_action(text)
     if music_control:
@@ -8119,10 +8122,6 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?!(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)(?:\s|$))"
         r"(?P<text_short>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
-        r"(?:备忘录|笔记|note)"
-        r"(?P<text_short_inline>[^。！？!?\s][^。！？!?]*)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|到)?\s*(?:备忘录|笔记|note)(?:里|中|上)?\s*"
         r"(?:记一下|记下|记录一下|记录|记上|写下|写入|写)\s*"
         r"(?P<text_note_prefixed>[^。！？!?]+)$",
@@ -8135,6 +8134,15 @@ def _notes_create_and_type_text(value: str) -> str:
         r"(?:(?:新建|创建|添加)\s*(?:一个|一条|一篇|新的?)?\s*(?:备忘录|笔记|note)?\s*)?"
         r"(?:输入|打字|键入|敲入|打入|打上|写入|写下|写上|写|记录|记下|记一下|记上|打)\s*"
         r"(?P<text>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)\s*"
+        r"(?:内容|正文)?(?:是|为|:|：)\s*"
+        r"(?P<text_content>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一篇|新的?)?\s*"
+        r"(?:备忘录|笔记|note)"
+        r"(?P<text_short_inline>[^。！？!?\s][^。！？!?]*)$",
         r"^(?:please\s+)?(?:create|make|open)\s+(?:a\s+)?(?:new\s+)?note\s+"
         r"(?:and\s+)?(?:type|write|enter|record|with|saying)\s+(?P<text_en>[^.!?]+)$",
         r"^(?:please\s+)?(?:add|make|create|take|write|record)\s+(?:a\s+)?(?:new\s+)?note"
@@ -8155,6 +8163,7 @@ def _notes_create_and_type_text(value: str) -> str:
             or groups.get("text_short_inline")
             or groups.get("text_note_prefixed")
             or groups.get("text_memory")
+            or groups.get("text_content")
             or groups.get("text_en_direct")
             or groups.get("text_en_memory")
             or ""

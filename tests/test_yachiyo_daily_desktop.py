@@ -1639,6 +1639,9 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
     ]
     for prompt, body in (
         ("新建备忘录今天要买牛奶", "今天要买牛奶"),
+        ("新建一个备忘录写 hello", "hello"),
+        ("新建备忘录内容是 hello", "hello"),
+        ("新建备忘录正文为 hello", "hello"),
         ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
         ("add a note buy milk", "buy milk"),
         ("make a note to buy milk", "buy milk"),
@@ -1921,6 +1924,17 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
             "daily_desktop_tool": tool_name,
             "daily_desktop_tools": [tool_name],
         }
+
+    assert daily_desktop_entrypoint_requests(
+        "打开 Apple Music 并播放",
+        allowed_tools=["media.apple_music_control"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.apple_music_control",
+            "input": {"action": "play"},
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
