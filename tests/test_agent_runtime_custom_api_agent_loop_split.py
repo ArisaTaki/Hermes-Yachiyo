@@ -3135,6 +3135,72 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"title": "买牛奶"},
         },
     ]
+    selected_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容创建成提醒事项",
+        "把当前选中文字加入提醒事项",
+        "用选中内容新建提醒",
+        "create a reminder from selected text",
+        "add selected text to reminders",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_reminder_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "create a reminder from selected text",
+            ["reminders.create"],
+        )
+        == []
+    )
+    clipboard_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把剪贴板内容创建成提醒事项",
+        "把剪贴板内容加入提醒事项",
+        "用剪贴板内容新建提醒",
+        "create a reminder from clipboard",
+        "create a reminder from the clipboard",
+        "add clipboard contents to reminders",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == clipboard_reminder_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "把剪贴板内容加入提醒事项",
+            ["clipboard.read", "reminders.create"],
+        )
+        == []
+    )
     assert daily_desktop_intent_tool_requests("打开提醒事项添加买牛奶", allowed_tools) == [
         {
             "protocol": "json_fallback",

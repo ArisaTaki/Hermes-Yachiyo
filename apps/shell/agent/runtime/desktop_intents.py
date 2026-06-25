@@ -538,6 +538,14 @@ def daily_desktop_intent_tool_requests(
         ):
             return current_content_to_note_sequence
         return []
+    dynamic_source_to_reminder_sequence = _dynamic_source_to_reminder_tool_requests(context)
+    if dynamic_source_to_reminder_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_to_reminder_sequence
+        ):
+            return dynamic_source_to_reminder_sequence
+        return []
     dynamic_source_search_sequence = _browser_dynamic_source_search_tool_requests(context)
     if dynamic_source_search_sequence:
         if all(
@@ -4576,6 +4584,124 @@ def _current_content_to_note_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+def _dynamic_source_to_reminder_tool_requests(text: str) -> list[dict[str, Any]]:
+    source = _dynamic_source_to_reminder_request(text)
+    if not source:
+        return []
+    requests: list[dict[str, Any]] = []
+    if source == "selected_text":
+        requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    requests.extend(
+        [
+            _request(
+                "app.open_and_safe_shortcut",
+                {"app_name": "Reminders", "action": "new_reminder"},
+            ),
+            _request("desktop.safe_shortcut", {"action": "paste"}),
+        ]
+    )
+    return requests
+
+
+def _dynamic_source_to_reminder_request(text: str) -> str:
+    clean = _strip_query(text)
+    if not clean:
+        return ""
+    if _selected_text_to_reminder_request(clean):
+        return "selected_text"
+    if _clipboard_to_reminder_request(clean):
+        return "clipboard"
+    return ""
+
+
+def _selected_text_to_reminder_request(text: str) -> bool:
+    selected_text_source = _selected_text_source_pattern()
+    reminder_target = _reminder_target_pattern()
+    return bool(
+        re.search(
+            rf"^(?:把|将)?\s*(?:{selected_text_source})\s*"
+            rf"(?:新建成|创建成|设成|设置成|加入|加到|添加到|新增到|放到|放进|"
+            rf"保存到|存到)\s*(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*(?:{selected_text_source})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*(?:{reminder_target})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*(?:{selected_text_source})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add|set)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+            r"(?:from|with|using)\s+(?:the\s+)?"
+            r"(?:selected\s+text|highlighted\s+text|selection|current\s+selection)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:add|save|put)\s+(?:the\s+)?"
+            r"(?:selected\s+text|highlighted\s+text|selection|current\s+selection)\s+"
+            r"(?:to|into|in)\s+reminders?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clipboard_to_reminder_request(text: str) -> bool:
+    clipboard_source = _clipboard_source_pattern()
+    reminder_target = _reminder_target_pattern()
+    return bool(
+        re.search(
+            rf"^(?:把|将)?\s*(?:{clipboard_source})\s*"
+            rf"(?:新建成|创建成|设成|设置成|加入|加到|添加到|新增到|放到|放进|"
+            rf"保存到|存到)\s*(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:用|拿)\s*(?:{clipboard_source})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:{reminder_target})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:在|到)?\s*(?:{reminder_target})\s*"
+            rf"(?:新建|创建|添加|新增|设置)\s*(?:一个|一条|一项|新的?)?\s*"
+            rf"(?:来自|根据|使用|用)?\s*(?:{clipboard_source})$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:create|make|add|set)\s+(?:a\s+)?(?:new\s+)?reminder\s+"
+            r"(?:from|with|using)\s+(?:the\s+)?"
+            r"(?:clipboard(?:\s+contents?)?|the\s+clipboard(?:\s+contents?)?)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:add|save|put)\s+(?:the\s+)?"
+            r"(?:clipboard(?:\s+contents?)?|the\s+clipboard(?:\s+contents?)?)\s+"
+            r"(?:to|into|in)\s+reminders?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _reminder_target_pattern() -> str:
+    return r"(?:提醒事项|提醒|reminder|reminders)"
 
 
 def _browser_dynamic_source_search_tool_requests(text: str) -> list[dict[str, Any]]:

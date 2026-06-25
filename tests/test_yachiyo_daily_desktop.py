@@ -2156,6 +2156,76 @@ def test_daily_desktop_entrypoint_routes_context_sources_to_notes() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_dynamic_sources_to_reminders() -> None:
+    selected_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把选中的内容创建成提醒事项",
+        "把当前选中文字加入提醒事项",
+        "用选中内容新建提醒",
+        "create a reminder from selected text",
+        "add selected text to reminders",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == selected_reminder_requests
+    assert daily_desktop_user_metadata(selected_reminder_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "create a reminder from selected text",
+        allowed_tools=("reminders.create",),
+    ) == []
+
+    clipboard_reminder_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+    ]
+    for prompt in (
+        "把剪贴板内容创建成提醒事项",
+        "把剪贴板内容加入提醒事项",
+        "用剪贴板内容新建提醒",
+        "create a reminder from clipboard",
+        "create a reminder from the clipboard",
+        "add clipboard contents to reminders",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == clipboard_reminder_requests
+    assert daily_desktop_entrypoint_requests(
+        "把剪贴板内容加入提醒事项",
+        allowed_tools=("clipboard.read", "reminders.create"),
+    ) == []
+    assert daily_desktop_entrypoint_requests("新建提醒事项：买牛奶") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶"},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> None:
     today_2000 = f"{date.today().isoformat()}T20:00"
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
