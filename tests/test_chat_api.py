@@ -3763,9 +3763,15 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("search weather in Chrome", "https://www.google.com/search?q=weather"),
             ("打开新标签并搜索 OpenAI", "https://www.google.com/search?q=OpenAI"),
             ("帮我打开 GitHub 官网", "https://github.com"),
+            ("打开 GitHub 首页", "https://github.com"),
+            ("上 GitHub", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
             ("打开浏览器并访问 GitHub", "https://github.com"),
             ("打开推特", "https://x.com"),
+            ("打开推特首页", "https://x.com"),
+            ("打开 B 站首页", "https://www.bilibili.com"),
+            ("上 B 站", "https://www.bilibili.com"),
+            ("打开贴吧", "https://tieba.baidu.com"),
         ]
         for prompt, url in cases:
             result = api.send_message(prompt)

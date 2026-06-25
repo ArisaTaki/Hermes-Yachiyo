@@ -1052,12 +1052,32 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开 GitHub 首页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("上 GitHub", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
     assert daily_desktop_intent_tool_request("把 GitHub 打开一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
     assert daily_desktop_intent_tool_request("打开 B站", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.bilibili.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 B 站首页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.bilibili.com"},
+    }
+    assert daily_desktop_intent_tool_request("上 B 站", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://www.bilibili.com"},
@@ -1071,6 +1091,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "browser.open_url",
         "input": {"url": "https://x.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开推特首页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://x.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开贴吧", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://tieba.baidu.com"},
     }
     assert daily_desktop_intent_tool_request("打开 ChatGPT", allowed_tools) == {
         "protocol": "json_fallback",

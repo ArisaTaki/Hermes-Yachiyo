@@ -2746,7 +2746,7 @@ def _browser_named_site_url(text: str) -> str:
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:用|在)\s*(?:浏览器|chrome|google|谷歌|百度|safari)\s*)?"
-        r"(?:打开|访问|浏览|前往|去)\s*(?P<site>[^。！？!?，,]+)",
+        r"(?:打开|访问|浏览|前往|去|上)\s*(?P<site>[^。！？!?，,]+)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
         r"(?P<site>[^。！？!?，,]+?)\s*(?:打开|访问|浏览|前往)"
         r"(?:一下|下)?(?:吧|吗|嘛|呢)?[?？。！!]*$",
@@ -2768,10 +2768,6 @@ def _browser_named_site_url(text: str) -> str:
 
 
 def _normalize_site_name(value: str) -> str:
-    site = _strip_polite_suffix(_strip_browser_followup(_strip_query(value)))
-    site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site)
-    site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
-    compact = re.sub(r"[\s._-]+", "", site.lower())
     aliases = {
         "google": "https://www.google.com",
         "谷歌": "https://www.google.com",
@@ -2811,8 +2807,24 @@ def _normalize_site_name(value: str) -> str:
         "jd": "https://www.jd.com",
         "jingdong": "https://www.jd.com",
         "京东": "https://www.jd.com",
+        "tieba": "https://tieba.baidu.com",
+        "百度贴吧": "https://tieba.baidu.com",
+        "贴吧": "https://tieba.baidu.com",
     }
-    return aliases.get(compact, "")
+    site = _strip_browser_followup(_strip_query(value))
+    for candidate in (site, _strip_polite_suffix(site)):
+        candidate = re.sub(r"^(?:一下|下|这个|那个)\s*", "", candidate)
+        candidate = re.sub(
+            r"\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页|首页面|site|website|homepage|home\s+page)$",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        compact = re.sub(r"[\s._-]+", "", candidate.lower())
+        url = aliases.get(compact)
+        if url:
+            return url
+    return ""
 
 
 def _has_browser_open_context(text: str) -> bool:

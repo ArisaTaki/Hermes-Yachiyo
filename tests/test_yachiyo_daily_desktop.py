@@ -647,6 +647,36 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"action": "new_tab"},
         ),
         (
+            "打开 GitHub 首页",
+            "browser.open_url",
+            {"url": "https://github.com"},
+        ),
+        (
+            "上 GitHub",
+            "browser.open_url",
+            {"url": "https://github.com"},
+        ),
+        (
+            "打开 B 站首页",
+            "browser.open_url",
+            {"url": "https://www.bilibili.com"},
+        ),
+        (
+            "上 B 站",
+            "browser.open_url",
+            {"url": "https://www.bilibili.com"},
+        ),
+        (
+            "打开推特首页",
+            "browser.open_url",
+            {"url": "https://x.com"},
+        ),
+        (
+            "打开贴吧",
+            "browser.open_url",
+            {"url": "https://tieba.baidu.com"},
+        ),
+        (
             "打开下载目录里的最新文件",
             "desktop.open_path",
             {"path": "latest_download"},
