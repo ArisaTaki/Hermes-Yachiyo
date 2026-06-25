@@ -123,6 +123,12 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   const target = String(input.target || '').trim();
   const path = String(input.path || '').trim();
   if (tool === 'app.open' && appName) return `打开${appName}`;
+  if (tool === 'app.focus' && appName) return `切到${appName}`;
+  if (tool === 'app.focus_window' && appName) return appWindowFocusPrompt(input);
+  if (tool === 'app.show' && appName) return `显示${appName}`;
+  if (tool === 'app.status' && appName) return `检查${appName}是否打开`;
+  const foregroundPrompt = appForegroundActionPrompt(tool, input);
+  if (foregroundPrompt) return foregroundPrompt;
   if (tool === 'browser.open_url' && url) return `打开 ${url}`;
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
@@ -149,6 +155,20 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
 
 function isLowRiskExecutableRecoveryTool(tool: string): boolean {
   return tool === 'app.open'
+    || tool === 'app.focus'
+    || tool === 'app.focus_and_safe_click'
+    || tool === 'app.focus_and_safe_key'
+    || tool === 'app.focus_and_safe_scroll'
+    || tool === 'app.focus_and_safe_shortcut'
+    || tool === 'app.focus_and_safe_type_text'
+    || tool === 'app.focus_window'
+    || tool === 'app.open_and_safe_click'
+    || tool === 'app.open_and_safe_key'
+    || tool === 'app.open_and_safe_scroll'
+    || tool === 'app.open_and_safe_shortcut'
+    || tool === 'app.open_and_safe_type_text'
+    || tool === 'app.show'
+    || tool === 'app.status'
     || tool === 'browser.current_page'
     || tool === 'browser.extract_text'
     || tool === 'browser.open_url'
@@ -186,6 +206,8 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'app.focus_and_safe_type_text' && appName) return `切到${appName}并输入文字`;
   if (tool === 'app.open_and_safe_shortcut' && appName) return `打开${appName}并执行快捷动作`;
   if (tool === 'app.focus_and_safe_shortcut' && appName) return `切到${appName}并执行快捷动作`;
+  const foregroundPrompt = appForegroundActionPrompt(tool, input);
+  if (foregroundPrompt) return foregroundPrompt;
   if (tool === 'app.focus_window' && appName && title) return `切到${appName} ${title}窗口`;
   if (tool === 'app.show' && appName) return `显示${appName}`;
   if (tool === 'app.hide' && appName) return `隐藏${appName}`;
@@ -244,6 +266,29 @@ function systemBrightnessRetryPrompt(action: string): string {
   if (action === 'up') return '屏幕亮一点';
   if (action === 'down') return '屏幕暗一点';
   return '';
+}
+
+function appForegroundActionPrompt(tool: string, input: Record<string, unknown>): string {
+  const appName = String(input.app_name || '').trim();
+  if (!appName) return '';
+  const isOpen = tool.startsWith('app.open_and_');
+  const isFocus = tool.startsWith('app.focus_and_');
+  if (!isOpen && !isFocus) return '';
+  const prefix = isOpen ? `打开${appName}` : `切到${appName}`;
+  let detail = '';
+  if (tool.endsWith('safe_type_text')) detail = desktopSafeTypeTextPrompt(input) || '输入文字';
+  if (tool.endsWith('safe_shortcut')) detail = desktopSafeShortcutPrompt(String(input.action || '').trim());
+  if (tool.endsWith('safe_key')) detail = desktopSafeKeyPrompt(input);
+  if (tool.endsWith('safe_scroll')) detail = desktopSafeScrollPrompt(input);
+  if (tool.endsWith('safe_click')) detail = desktopSafeClickPrompt(input);
+  return detail ? `${prefix}并${detail}` : '';
+}
+
+function appWindowFocusPrompt(input: Record<string, unknown>): string {
+  const appName = String(input.app_name || '').trim();
+  const title = String(input.window_title || input.title_contains || '').trim();
+  if (appName && title) return `切到${appName} ${title}窗口`;
+  return appName ? `切到${appName}窗口` : '';
 }
 
 function desktopSafeShortcutPrompt(action: string): string {

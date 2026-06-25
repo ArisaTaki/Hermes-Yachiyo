@@ -7103,6 +7103,184 @@ def test_chat_bridge_quick_message_executes_safe_foreground_recovery_actions_wit
         store.close()
 
 
+def test_chat_bridge_quick_message_executes_app_foreground_recovery_actions_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-app-foreground-recovery-action.db",
+        workspace_dir=tmp_path / "runtime-app-foreground-recovery-action",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher app foreground recovery action should not call model")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        calls.append(("key", action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": f"Pressed {action}",
+            "data": {"key_action": action, "repeat_count": repeat_count},
+        }
+
+    def fake_safe_scroll(direction: str, *, pages: int = 1) -> dict:
+        calls.append(("scroll", direction, pages))
+        return {
+            "ok": True,
+            "action": "desktop.safe_scroll",
+            "summary": f"Scrolled foreground desktop {direction}",
+            "data": {"direction": direction, "pages": pages},
+        }
+
+    def fake_safe_click(x: int, y: int) -> dict:
+        calls.append(("click", x, y))
+        return {
+            "ok": True,
+            "action": "desktop.safe_click",
+            "summary": f"Clicked explicit foreground coordinate at ({x}, {y})",
+            "data": {"x": x, "y": y, "click_count": 1},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
+    bridge = ChatBridge(runtime)
+    try:
+        cases = (
+            (
+                "打开 Notes 并输入文字",
+                "app.open_and_safe_type_text",
+                {"app_name": "Notes", "text": "hello"},
+                "已打开 Notes 并输入文字（5 个字符）。",
+            ),
+            (
+                "切到 Chrome 并粘贴",
+                "app.focus_and_safe_shortcut",
+                {"app_name": "Google Chrome", "action": "paste"},
+                "已切到 Google Chrome 并粘贴。",
+            ),
+            (
+                "打开 Chrome 并按 Tab",
+                "app.open_and_safe_key",
+                {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+                "已打开 Google Chrome 并按Tab。",
+            ),
+            (
+                "切到 Chrome 并向下滚动",
+                "app.focus_and_safe_scroll",
+                {"app_name": "Google Chrome", "direction": "down", "pages": 2},
+                "已切到 Google Chrome 并向下滚动前台界面（2 页）。",
+            ),
+            (
+                "打开 Chrome 并点击",
+                "app.open_and_safe_click",
+                {"app_name": "Google Chrome", "x": 120, "y": 240},
+                "已打开 Google Chrome 并点击前台位置：120, 240。",
+            ),
+        )
+        for prompt, tool_name, tool_input, expected_summary in cases:
+            result = bridge.send_quick_message(
+                prompt,
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": "live2d",
+                    "launcher_surface": "quick_message",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                    "desktop_permission_recovery": True,
+                    "recovery_tool": tool_name,
+                    "recovery_input": tool_input,
+                    "recovery_permission_target": "foreground_input",
+                    "recovery_risk_level": "low",
+                },
+            )
+            agent_task = result["agent_task"]
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert agent_task["status"] == "completed"
+            assert agent_task["needs_user_action"] is False
+            assert agent_task["pending_approvals"] == []
+            assert agent_task["summary"] == expected_summary
+            assert agent_task["tool_calls"][-1]["tool_name"] == tool_name
+            assert agent_task["tool_calls"][-1]["input_preview"] == tool_input
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+
+        assert ("type", "hello") in calls
+        assert ("shortcut", "paste") in calls
+        assert ("key", "tab", 1) in calls
+        assert ("scroll", "down", 2) in calls
+        assert ("click", 120, 240) in calls
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_recovery_retry_without_model(
     tmp_path,
     monkeypatch,

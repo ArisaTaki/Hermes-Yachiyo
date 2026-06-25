@@ -6012,6 +6012,54 @@ def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
             "desktop_permission_recovery": True,
+            "recovery_tool": "app.focus",
+            "recovery_input": {"app_name": "Google Chrome"},
+            "recovery_risk_level": "low",
+        }
+    ) == "切到Google Chrome"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.focus_window",
+            "recovery_input": {"app_name": "Google Chrome", "window_title": "ChatGPT"},
+            "recovery_risk_level": "low",
+        }
+    ) == "切到Google Chrome ChatGPT窗口"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.show",
+            "recovery_input": {"app_name": "Music"},
+            "recovery_risk_level": "low",
+        }
+    ) == "显示Music"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.status",
+            "recovery_input": {"app_name": "Music"},
+            "recovery_risk_level": "low",
+        }
+    ) == "检查Music是否打开"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.open_and_safe_key",
+            "recovery_input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+            "recovery_risk_level": "low",
+        }
+    ) == "打开Google Chrome并按Tab"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_tool": "app.focus_and_safe_click",
+            "recovery_input": {"app_name": "Google Chrome", "x": 120, "y": 240},
+            "recovery_risk_level": "low",
+        }
+    ) == "切到Google Chrome并点击 120, 240"
+    assert daily_desktop_recovery_prompt(
+        {
+            "desktop_permission_recovery": True,
             "recovery_tool": "browser.open_url",
             "recovery_input": {"url": "https://github.com"},
             "recovery_risk_level": "low",

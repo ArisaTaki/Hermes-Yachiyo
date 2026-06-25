@@ -927,7 +927,21 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         return ""
     recovery_tool = str(metadata.get("recovery_tool") or "").strip()
     if recovery_tool not in {
+        "app.focus",
+        "app.focus_and_safe_click",
+        "app.focus_and_safe_key",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "app.focus_window",
         "app.open",
+        "app.open_and_safe_click",
+        "app.open_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "app.show",
+        "app.status",
         "browser.current_page",
         "browser.extract_text",
         "browser.open_url",
@@ -974,6 +988,26 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
 
 def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mapping[str, Any]) -> str:
     action = str(recovery_input.get("action") or "").strip().lower()
+    if tool_name == "app.focus":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        return f"切到{app_name}" if app_name else ""
+    if tool_name == "app.focus_window":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        title = str(
+            recovery_input.get("window_title") or recovery_input.get("title_contains") or ""
+        ).strip()
+        if app_name and title:
+            return f"切到{app_name} {title}窗口"
+        return f"切到{app_name}窗口" if app_name else ""
+    if tool_name == "app.show":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        return f"显示{app_name}" if app_name else ""
+    if tool_name == "app.status":
+        app_name = str(recovery_input.get("app_name") or "").strip()
+        return f"检查{app_name}是否打开" if app_name else ""
+    app_foreground_prompt = _app_foreground_recovery_prompt(tool_name, recovery_input)
+    if app_foreground_prompt:
+        return app_foreground_prompt
     if tool_name == "media.apple_music_control":
         return {
             "play": "播放音乐",
@@ -1037,6 +1071,43 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
     if tool_name == "browser.extract_text":
         return "读取当前网页正文"
     return ""
+
+
+def _app_foreground_recovery_prompt(tool_name: str, recovery_input: Mapping[str, Any]) -> str:
+    if tool_name not in {
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+    }:
+        return ""
+    app_name = str(recovery_input.get("app_name") or "").strip()
+    if not app_name:
+        return ""
+    prefix = "打开" if tool_name.startswith("app.open") else "切到"
+    action = str(recovery_input.get("action") or "").strip().lower()
+    if tool_name.endswith("safe_type_text"):
+        text = str(recovery_input.get("text") or "").strip()
+        detail = f"输入{text}" if text else "输入文字"
+    elif tool_name.endswith("safe_shortcut"):
+        detail = _safe_shortcut_recovery_prompt(action)
+    elif tool_name.endswith("safe_key"):
+        detail = _safe_key_recovery_prompt(recovery_input)
+    elif tool_name.endswith("safe_scroll"):
+        detail = _safe_scroll_recovery_prompt(recovery_input)
+    elif tool_name.endswith("safe_click"):
+        x = recovery_input.get("x")
+        y = recovery_input.get("y")
+        detail = f"点击 {x}, {y}" if x is not None and y is not None else ""
+    else:
+        detail = ""
+    return f"{prefix}{app_name}并{detail}" if detail else ""
 
 
 def _safe_shortcut_recovery_prompt(action: str) -> str:
