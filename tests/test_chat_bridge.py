@@ -2909,6 +2909,7 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
     runtime.agent_runtime_service = service
     runtime.chat_session.add_user_message("打开 GitHub")
     runtime.chat_session.add_assistant_message("已打开 GitHub。")
+    focus_calls: list[str] = []
     click_calls: list[tuple[str, int]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
@@ -2938,6 +2939,16 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
             },
         }
 
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
     try:
@@ -2979,6 +2990,46 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = bridge.send_quick_message(
+            "Chrome 点登录",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        second_task_id = second["task_id"]
+        second_waiting_task = second["agent_task"]
+        second_link = service.get_task_run_link(second_task_id)
+        second_waiting_run = service.get_run(second_link["run_id"])
+
+        assert second["ok"] is True
+        assert focus_calls == ["Google Chrome"]
+        assert click_calls == [("text=登录", 1)]
+        assert second_waiting_task["status"] == "waiting_approval"
+        assert second_waiting_task["needs_user_action"] is True
+        assert second_waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert second_waiting_task["pending_approvals"][0]["input_preview"] == {
+            "selector": "text=登录",
+            "click_count": 1,
+        }
+        assert second_waiting_run["status"] == "approval_required"
+        assert second_waiting_run["pending_approval"]["tool"] == "browser.click"
+
+        second_approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(second_task_id)
+        second_run = service.get_run(second_link["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+
+        assert click_calls == [("text=登录", 1), ("text=登录", 1)]
+        assert second_approved.status == "completed"
+        assert "agent.desktop.intent_approval_required" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()
@@ -3310,6 +3361,53 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+        second = bridge.send_quick_message(
+            "Slack 点搜索",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+        second_task_id = second["task_id"]
+        second_waiting_task = second["agent_task"]
+        second_link = service.get_task_run_link(second_task_id)
+        second_waiting_run = service.get_run(second_link["run_id"])
+
+        assert second["ok"] is True
+        assert focus_calls == ["Slack"]
+        assert click_calls == [("Send", "button", 80, 1)]
+        assert second_waiting_task["status"] == "waiting_approval"
+        assert second_waiting_task["needs_user_action"] is True
+        assert second_waiting_task["pending_approvals"][0]["tool_name"] == (
+            "app.focus_and_click_ui_element"
+        )
+        assert second_waiting_task["pending_approvals"][0]["input_preview"] == {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        }
+        assert second_waiting_run["status"] == "approval_required"
+        assert second_waiting_run["pending_approval"]["tool"] == "app.focus_and_click_ui_element"
+
+        second_approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(second_task_id)
+        second_run = service.get_run(second_link["run_id"])
+        second_event_types = [
+            event["event_type"]
+            for event in service.list_run_events(second_run["run_id"])["events"]
+        ]
+
+        assert focus_calls == ["Slack", "Slack"]
+        assert click_calls == [("Send", "button", 80, 1), ("搜索", "button", 80, 1)]
+        assert second_approved.status == "completed"
+        assert second_run["status"] == "completed"
+        assert "agent.desktop.intent_approval_required" in second_event_types
+        assert "agent.desktop.intent_completed" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert "model.requested" not in second_event_types
     finally:
         service.close()
         store.close()

@@ -5565,6 +5565,7 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
             assert "agent.tool.approval_required" in event_types
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
+
     finally:
         service.close()
         store.close()
@@ -5582,6 +5583,7 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
         'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
         'input[aria-label*="search" i], input[placeholder*="search" i]'
     )
+    focus_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -5599,6 +5601,17 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
         "apps.shell.chat_api.desktop_permission_missing_by_capability",
         lambda use_cache=True: {},
     )
+
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
         "apps.shell.agent.tools.browser.click",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -5622,6 +5635,11 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
                 "type hello in current webpage search field",
                 "browser.type_text",
                 {"selector": search_selector, "text": "hello"},
+            ),
+            (
+                "Chrome 点登录",
+                "browser.click",
+                {"selector": "text=登录", "click_count": 1},
             ),
         )
         for prompt, tool_name, input_preview in cases:
@@ -5648,6 +5666,7 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
             assert "agent.tool.approval_required" in event_types
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
+        assert focus_calls == ["Google Chrome"]
     finally:
         service.close()
         store.close()

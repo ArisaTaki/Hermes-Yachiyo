@@ -607,6 +607,47 @@ def test_daily_desktop_entrypoint_routes_finder_find_language() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
+    assert daily_desktop_entrypoint_requests("Chrome 点登录") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("Slack 点搜索") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("微信点搜索") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
     assert daily_desktop_entrypoint_requests("设置剪贴板为 hello") == [
         {

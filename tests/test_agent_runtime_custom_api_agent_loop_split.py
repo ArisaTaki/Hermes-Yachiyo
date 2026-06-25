@@ -735,6 +735,53 @@ def test_daily_desktop_intent_planner_routes_browser_extract_text_language() -> 
     ]
 
 
+def test_daily_desktop_intent_planner_routes_app_prefix_click_language() -> None:
+    allowed_tools = [
+        "app.focus",
+        "browser.click",
+        "app.focus_and_click_ui_element",
+    ]
+
+    assert daily_desktop_intent_tool_requests("Chrome 点登录", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=登录", "click_count": 1},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("Slack 点搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("微信点搜索", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "WeChat",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        },
+    ]
+
+
 def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     allowed_tools = [
         "app.open",

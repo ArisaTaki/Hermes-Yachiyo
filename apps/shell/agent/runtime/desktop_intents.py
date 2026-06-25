@@ -503,6 +503,14 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_browser_action_sequence
     ):
         return app_browser_action_sequence
+    app_prefix_browser_action_sequence = _app_prefix_browser_action_tool_requests(context)
+    if app_prefix_browser_action_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_prefix_browser_action_sequence
+    ):
+        return app_prefix_browser_action_sequence
+    app_prefix_foreground_action = _app_prefix_foreground_action_tool_request(context)
+    if app_prefix_foreground_action and str(app_prefix_foreground_action.get("tool") or "") in allowed:
+        return [app_prefix_foreground_action]
     foreground_safe_key = _desktop_safe_key(context)
     if foreground_safe_key and "desktop.safe_key" in allowed:
         return [_request("desktop.safe_key", foreground_safe_key)]
@@ -5468,6 +5476,50 @@ def _app_open_or_focus_browser_action_tool_requests(text: str) -> list[dict[str,
         return requests
 
     return []
+
+
+def _app_prefix_browser_action_tool_requests(text: str) -> list[dict[str, Any]]:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return []
+    raw_app, app_name, followup = split
+    if (
+        app_name not in _BROWSER_APP_NAMES
+        or _looks_like_window_target(raw_app)
+        or _looks_like_common_path_target(raw_app)
+    ):
+        return []
+    app_request = _request("app.focus", {"app_name": app_name})
+    browser_followup = _browser_context_followup(followup)
+
+    click_payload = _browser_click_request(browser_followup)
+    if click_payload:
+        return [app_request, _request("browser.click", click_payload)]
+
+    type_payload = _browser_type_text_request(browser_followup)
+    if type_payload:
+        requests = [app_request, _request("browser.type_text", type_payload)]
+        selector = str(type_payload.get("selector") or "")
+        if _browser_type_text_should_submit(browser_followup, selector):
+            requests.append(_request("desktop.search_submit", {}))
+        return requests
+
+    return []
+
+
+def _app_prefix_foreground_action_tool_request(text: str) -> dict[str, Any] | None:
+    split = _known_app_prefix_split(text)
+    if not split:
+        return None
+    raw_app, app_name, followup = split
+    if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
+        return None
+    if app_name in _BROWSER_APP_NAMES and _app_prefix_browser_action_tool_requests(text):
+        return None
+    request = _app_foreground_action_request("focus", app_name, followup)
+    if not request:
+        return None
+    return _request(str(request["tool"]), dict(request["input"]))
 
 
 def _browser_context_followup(value: str) -> str:
