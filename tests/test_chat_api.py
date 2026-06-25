@@ -5325,7 +5325,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
 
     def fake_safe_shortcut(action: str) -> dict:
         shortcut_calls.append(action)
-        key = {"copy": "c", "new_window": "n"}.get(action, "")
+        key = {"copy": "c", "new_window": "n", "next_window": "`", "previous_window": "`"}.get(action, "")
+        modifiers = ["command", "shift"] if action == "previous_window" else ["command"]
         return {
             "ok": True,
             "action": "desktop.safe_shortcut",
@@ -5333,7 +5334,7 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "data": {
                 "shortcut_action": action,
                 "key": key,
-                "modifiers": ["command"],
+                "modifiers": modifiers,
             },
         }
 
@@ -5342,6 +5343,8 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
         cases = (
             ("打开新窗口", "new_window", "已新建窗口。"),
             ("Can you copy?", "copy", "已复制选中内容。"),
+            ("切到下一个窗口", "next_window", "已切到下一个窗口。"),
+            ("switch to previous window", "previous_window", "已切到上一个窗口。"),
             ("refresh the current page", "refresh", "已刷新。"),
             ("刷新当前页面", "refresh", "已刷新。"),
             ("open a new tab", "new_tab", "已新建标签页。"),
@@ -5380,7 +5383,16 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             assert "model.requested" not in event_types
             assert shortcut_calls[-1] == action
 
-        assert shortcut_calls == ["new_window", "copy", "refresh", "refresh", "new_tab", "new_tab"]
+        assert shortcut_calls == [
+            "new_window",
+            "copy",
+            "next_window",
+            "previous_window",
+            "refresh",
+            "refresh",
+            "new_tab",
+            "new_tab",
+        ]
     finally:
         service.close()
         store.close()

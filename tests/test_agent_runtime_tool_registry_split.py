@@ -634,6 +634,8 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "next_tab"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "previous_tab"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "next_window"})
+    ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "previous_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_window"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_document"})
     ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_note"})
@@ -3979,6 +3981,36 @@ def test_desktop_safe_shortcut_reopen_closed_tab_uses_command_shift_t(monkeypatc
     assert calls[0][0][0:2] == ["osascript", "-e"]
     assert "keystroke keyName using {command down, shift down}" in calls[0][0][2]
     assert calls[0][0][-1] == "t"
+
+
+def test_desktop_safe_shortcut_next_window_uses_grave_key_code(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="hotkey\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_shortcut("next_window")
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_shortcut",
+        "summary": "Executed safe shortcut: next window",
+        "data": {
+            "key": "`",
+            "modifiers": ["command"],
+            "key_code": 50,
+            "shortcut_action": "next_window",
+            "shortcut_label": "next window",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "key code keyCodeValue using {command down}" in calls[0][0][2]
+    assert calls[0][0][-1] == "50"
 
 
 def test_desktop_safe_shortcut_tab_management_uses_whitelisted_shortcuts(monkeypatch) -> None:

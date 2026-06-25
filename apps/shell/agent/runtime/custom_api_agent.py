@@ -2198,6 +2198,8 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "close_tab": "关闭标签页",
         "next_tab": "切到下一个标签页",
         "previous_tab": "切到上一个标签页",
+        "next_window": "切到下一个窗口",
+        "previous_window": "切到上一个窗口",
         "new_window": "新建窗口",
         "new_document": "新建文档",
         "new_note": "新建笔记",
