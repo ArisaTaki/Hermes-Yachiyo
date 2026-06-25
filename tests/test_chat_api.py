@@ -3579,6 +3579,7 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
             ("帮我打开 GitHub 官网", "https://github.com"),
             ("把 GitHub 打开一下", "https://github.com"),
             ("打开浏览器并访问 GitHub", "https://github.com"),
+            ("打开推特", "https://x.com"),
         ]
         for prompt, url in cases:
             result = api.send_message(prompt)
@@ -6523,6 +6524,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             ("重新打开刚才关闭的标签页", "reopen_closed_tab", "已重新打开关闭的标签页。"),
             ("打开一个新窗口", "new_window", "已新建窗口。"),
             ("新建浏览器窗口", "new_window", "已新建窗口。"),
+            ("创建备忘录", "new_note", "已新建笔记。"),
+            ("创建一个提醒", "new_reminder", "已新建提醒事项。"),
+            ("创建一个日程", "new_event", "已新建日程。"),
             ("下一个标签", "next_tab", "已切到下一个标签页。"),
             ("上一个标签", "previous_tab", "已切到上一个标签页。"),
         )
@@ -6582,6 +6586,9 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
             "reopen_closed_tab",
             "new_window",
             "new_window",
+            "new_note",
+            "new_reminder",
+            "new_event",
             "next_tab",
             "previous_tab",
         ]

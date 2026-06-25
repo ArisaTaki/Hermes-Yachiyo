@@ -897,6 +897,13 @@ def test_daily_desktop_entrypoint_routes_app_prefix_click_language() -> None:
 
 
 def test_daily_desktop_entrypoint_routes_app_browser_search_language() -> None:
+    assert daily_desktop_entrypoint_requests("打开推特") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://x.com"},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("Chrome 搜索 OpenAI") == [
         {
             "protocol": "json_fallback",
@@ -1092,6 +1099,9 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("刷新一下这个网页", "desktop.safe_shortcut", {"action": "refresh"}),
         ("打开一个新窗口", "desktop.safe_shortcut", {"action": "new_window"}),
         ("新建浏览器窗口", "desktop.safe_shortcut", {"action": "new_window"}),
+        ("创建备忘录", "desktop.safe_shortcut", {"action": "new_note"}),
+        ("创建一个提醒", "desktop.safe_shortcut", {"action": "new_reminder"}),
+        ("创建一个日程", "desktop.safe_shortcut", {"action": "new_event"}),
         ("下一个标签", "desktop.safe_shortcut", {"action": "next_tab"}),
         ("上一个标签", "desktop.safe_shortcut", {"action": "previous_tab"}),
         ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),

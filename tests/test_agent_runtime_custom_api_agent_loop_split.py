@@ -1066,6 +1066,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://www.xiaohongshu.com"},
     }
+    assert daily_desktop_intent_tool_request("打开推特", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://x.com"},
+    }
     assert daily_desktop_intent_tool_request("打开 ChatGPT", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -6345,7 +6350,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_note"},
     }
+    assert daily_desktop_intent_tool_request("创建备忘录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_note"},
+    }
+    assert daily_desktop_intent_tool_request("创建一个提醒", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_reminder"},
+    }
     assert daily_desktop_intent_tool_request("新建日程", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_event"},
+    }
+    assert daily_desktop_intent_tool_request("创建一个日程", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
         "input": {"action": "new_event"},
