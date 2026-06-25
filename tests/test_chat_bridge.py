@@ -5755,6 +5755,8 @@ def test_chat_bridge_quick_message_executes_app_scoped_safe_shortcut_without_app
         ("Chrome 关闭当前标签页", "close_tab", "已切到 Google Chrome 并关闭标签页。"),
         ("Chrome 切到下一个标签页", "next_tab", "已切到 Google Chrome 并切到下一个标签页。"),
         ("Chrome 切到上一个标签页", "previous_tab", "已切到 Google Chrome 并切到上一个标签页。"),
+        ("Chrome 最大化", "toggle_full_screen", "已切到 Google Chrome 并切换当前窗口全屏。"),
+        ("Chrome 全屏", "toggle_full_screen", "已切到 Google Chrome 并切换当前窗口全屏。"),
     )
     for text, action, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(

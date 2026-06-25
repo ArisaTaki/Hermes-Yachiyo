@@ -147,6 +147,29 @@ def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     ]
 
 
+def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut() -> None:
+    cases = (
+        ("Chrome 最大化", "app.focus_and_safe_shortcut", "Google Chrome"),
+        ("Chrome 全屏", "app.focus_and_safe_shortcut", "Google Chrome"),
+        ("打开 Chrome 并最大化", "app.open_and_safe_shortcut", "Google Chrome"),
+        ("open Chrome and fullscreen", "app.open_and_safe_shortcut", "Google Chrome"),
+        ("切到 Slack 并全屏", "app.focus_and_safe_shortcut", "Slack"),
+        ("focus Slack and maximize", "app.focus_and_safe_shortcut", "Slack"),
+    )
+
+    for prompt, tool_name, app_name in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": app_name, "action": "toggle_full_screen"},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
 def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() -> None:
     cases = (
         ("Chrome 开着吗", "Google Chrome"),

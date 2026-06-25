@@ -6641,6 +6641,18 @@ def test_send_message_executes_structured_app_foreground_recovery_actions_withou
                 "已切到 Google Chrome 并粘贴。",
             ),
             (
+                "打开 Chrome 并最大化",
+                "app.open_and_safe_shortcut",
+                {"app_name": "Google Chrome", "action": "toggle_full_screen"},
+                "已打开 Google Chrome 并切换当前窗口全屏。",
+            ),
+            (
+                "切到 Chrome 并全屏",
+                "app.focus_and_safe_shortcut",
+                {"app_name": "Google Chrome", "action": "toggle_full_screen"},
+                "已切到 Google Chrome 并切换当前窗口全屏。",
+            ),
+            (
                 "打开 Chrome 并按 Tab",
                 "app.open_and_safe_key",
                 {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},

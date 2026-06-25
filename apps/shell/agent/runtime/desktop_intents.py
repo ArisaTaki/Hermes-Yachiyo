@@ -5039,7 +5039,11 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
     if prefix_split:
         raw_app, app_name, followup = prefix_split
         if not _looks_like_window_target(raw_app) and not _looks_like_common_path_target(raw_app):
-            action = _finder_quick_look_shortcut_action(app_name, followup)
+            action = (
+                _finder_quick_look_shortcut_action(app_name, followup)
+                or _app_followup_full_screen_shortcut_action(followup)
+                or _desktop_safe_shortcut_action(followup)
+            )
             if action:
                 return {"mode": "focus", "app_name": app_name, "action": action}
 
@@ -5073,11 +5077,13 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         r"关闭(?:当前|这个|浏览器)?标签页|关掉(?:当前|这个|浏览器)?标签页|"
         r"切(?:换)?到(?:下一个|下个|下一|上一个|上个|上一)标签页|"
         r"(?:下一个|下个|下一|上一个|上个|上一)标签页|"
+        r"最大化(?:一下|下)?|(?:窗口|当前窗口)?全屏(?:一下|下)?|进入全屏(?:模式)?(?:一下|下)?|"
         r"copy|paste|select\s+all|undo|redo|refresh|reload|reopen\s+(?:the\s+)?(?:last\s+)?closed\s+tab|"
         r"restore\s+(?:the\s+)?(?:last\s+)?closed\s+tab|close\s+(?:the\s+)?(?:current\s+)?tab|"
         r"(?:switch\s+to\s+)?next\s+tab|(?:switch\s+to\s+)?previous\s+tab|"
         r"go\s+back|back|"
-        r"go\s+forward|forward|find|new\s+tab|new\s+window|new\s+document|"
+        r"go\s+forward|forward|find|maximize|fullscreen|full\s+screen|enter\s+full\s+screen|"
+        r"new\s+tab|new\s+window|new\s+document|"
         r"new\s+file|new\s+workbook|new\s+spreadsheet|new\s+presentation|new\s+slide|"
         r"new\s+note|new\s+event|new\s+calendar\s+event|"
         r"make\s+a\s+new\s+document|create\s+a\s+new\s+document|"
@@ -5150,10 +5156,37 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
             compact = re.sub(r"[\s._-]+", "", _strip_app_name(raw_app).lower())
             if compact in _APP_ALIASES:
                 app_name = _normalize_app_name(raw_app)
-        action = _finder_quick_look_shortcut_action(app_name, match.group("action")) or _desktop_safe_shortcut_action(match.group("action"))
+        action = (
+            _finder_quick_look_shortcut_action(app_name, match.group("action"))
+            or _app_followup_full_screen_shortcut_action(match.group("action"))
+            or _desktop_safe_shortcut_action(match.group("action"))
+        )
         if app_name and action:
             return {"mode": mode, "app_name": app_name, "action": action}
     return None
+
+
+def _app_followup_full_screen_shortcut_action(value: str) -> str:
+    text = _strip_query(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.search(r"(?:音量|声音|volume|sound|图片|image|photo|字号|font|zoom)", lowered):
+        return ""
+    if re.fullmatch(
+        r"(?:最大化|全屏|进入全屏|进入全屏模式|窗口最大化|窗口全屏|当前窗口最大化|当前窗口全屏)"
+        r"(?:一下|下)?",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "toggle_full_screen"
+    if re.fullmatch(
+        r"(?:maximize|fullscreen|full\s*screen|enter\s+full\s*screen)(?:\s+(?:window|app|application))?",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "toggle_full_screen"
+    return ""
 
 
 def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:
@@ -8176,10 +8209,11 @@ def _app_foreground_action_request(
             "tool": f"app.{mode}_and_safe_shortcut",
             "input": {"app_name": app_name, "action": finder_quick_look_action},
         }
-    shortcut_action = _app_default_new_shortcut_action(
-        app_name,
-        followup,
-    ) or _desktop_safe_shortcut_action(followup)
+    shortcut_action = (
+        _app_default_new_shortcut_action(app_name, followup)
+        or _app_followup_full_screen_shortcut_action(followup)
+        or _desktop_safe_shortcut_action(followup)
+    )
     if shortcut_action:
         return {
             "tool": f"app.{mode}_and_safe_shortcut",
@@ -8297,6 +8331,7 @@ def _app_postposed_open_followup_match(text: str) -> tuple[str, str, str, str] |
             or not (
                 _looks_like_known_app_followup(followup)
                 or _app_default_new_shortcut_action(app_name, followup)
+                or _app_followup_full_screen_shortcut_action(followup)
             )
         ):
             continue
@@ -8333,6 +8368,7 @@ def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
         if followup and (
             _looks_like_known_app_followup(followup)
             or _app_default_new_shortcut_action(app_name, followup)
+            or _app_followup_full_screen_shortcut_action(followup)
         ):
             return raw_app, app_name, followup
     return None
@@ -8460,6 +8496,7 @@ def _looks_like_known_app_followup(value: str) -> bool:
         return False
     return bool(
         _desktop_safe_shortcut_action(followup)
+        or _app_followup_full_screen_shortcut_action(followup)
         or _desktop_safe_scroll(followup)
         or _desktop_safe_click(followup)
         or _desktop_click_ui_element(followup, require_context=False)
