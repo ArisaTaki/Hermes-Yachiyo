@@ -43,6 +43,30 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
+def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> None:
+    for prompt in (
+        "为什么不能打开应用？",
+        "为什么不能读取屏幕？",
+        "为什么不能查看屏幕？",
+    ):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.permissions",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests) == {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_intent",
+            "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+            "daily_desktop_tool": "desktop.permissions",
+            "daily_desktop_tools": ["desktop.permissions"],
+        }
+
+
 def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool() -> None:
     cases = (
         ("你能帮我打开微信吗", "WeChat"),

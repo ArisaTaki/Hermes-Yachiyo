@@ -470,6 +470,10 @@ def daily_desktop_intent_tool_requests(
     system_settings_target = _direct_system_settings_tool_target(context)
     if system_settings_target and "system.settings_open" in allowed:
         return [_request("system.settings_open", {"target": system_settings_target})]
+    if _is_desktop_permissions_request(context):
+        if "desktop.permissions" in allowed:
+            return [_request("desktop.permissions", {})]
+        return []
     direct_volume_payload = _system_volume_request(context)
     if direct_volume_payload is not None:
         if "system.volume" in allowed:
@@ -2608,7 +2612,8 @@ def _is_desktop_permissions_request(text: str) -> bool:
     if re.search(
         r"(?:为什么|为何|为啥|怎么(?:回事)?).{0,24}"
         r"(?:不能|无法|没法|不会).{0,24}"
-        r"(?:控制|操作|执行|打开|启动|播放|点击|输入|截图|截屏|读取窗口)",
+        r"(?:控制|操作|执行|打开|启动|播放|点击|输入|截图|截屏|"
+        r"读取窗口|读取屏幕|读取界面|读屏幕|查看屏幕|观察屏幕|观察界面)",
         text,
     ):
         return True

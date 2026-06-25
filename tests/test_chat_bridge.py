@@ -5569,19 +5569,38 @@ def test_chat_bridge_quick_message_executes_permission_diagnosis_for_launcher_en
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.permissions", fake_permissions)
-    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
-        tmp_path,
-        monkeypatch,
-        "需要什么权限",
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_open",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("permission diagnosis should not open an app")
+        ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.screen_capture",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("permission diagnosis should not capture the screen")
+        ),
+    )
+    for prompt, launcher_mode in (
+        ("需要什么权限", "live2d"),
+        ("为什么不能打开应用？", "bubble"),
+        ("为什么不能读取屏幕？", "live2d"),
+    ):
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
 
-    assert permission_calls == [True]
-    assert agent_task["status"] == "completed"
-    assert agent_task["summary"] == "桌面执行权限已就绪。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.permissions"
-    assert run["status"] == "completed"
-    assert "agent.desktop.intent_completed" in event_types
-    assert "model.request.started" not in event_types
+        assert agent_task["status"] == "completed"
+        assert agent_task["summary"] == "桌面执行权限已就绪。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.permissions"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+
+    assert permission_calls == [True, True, True]
 
 
 def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
