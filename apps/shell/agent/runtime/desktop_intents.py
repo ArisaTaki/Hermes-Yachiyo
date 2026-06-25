@@ -6478,13 +6478,12 @@ def _communication_selected_text_tool_requests(text: str) -> list[dict[str, Any]
 
 def _communication_selected_text_request(text: str) -> tuple[str, str, str] | None:
     app_followup = _communication_app_followup_request(text)
-    if not app_followup:
-        return None
-    mode, app_name, followup = app_followup
-    recipient = _communication_selected_text_recipient(followup)
-    if not recipient:
-        return None
-    return mode, app_name, recipient
+    if app_followup:
+        mode, app_name, followup = app_followup
+        recipient = _communication_selected_text_recipient(followup)
+        if recipient:
+            return mode, app_name, recipient
+    return _communication_selected_text_postposed_request(text)
 
 
 def _communication_selected_text_recipient(text: str) -> str:
@@ -6520,6 +6519,38 @@ def _communication_selected_text_recipient(text: str) -> str:
         if recipient:
             return recipient
     return ""
+
+
+def _communication_selected_text_postposed_request(text: str) -> tuple[str, str, str] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    selected_text_source = (
+        r"(?:当前)?(?:选中|选择)(?:的)?(?:内容|文字|文本)?|"
+        r"(?:selected\s+text|selection|current\s+selection)"
+    )
+    patterns = (
+        rf"^(?:把|将)?\s*(?:复制|拷贝|copy)?\s*(?:{selected_text_source})\s*"
+        rf"(?:(?:并|然后|再)\s*)?"
+        rf"(?:发送|发出|发|分享|转发)\s*(?:给|到|至|向)\s*(?P<target>.+)$",
+        rf"^(?:send|share|forward|message)\s+(?:the\s+)?(?:{selected_text_source})\s+to\s+"
+        rf"(?P<target>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_query(match.group("target"))
+        split = _known_app_prefix_split(target)
+        if not split:
+            continue
+        _raw_app, app_name, followup = split
+        if app_name not in _COMMUNICATION_APP_NAMES:
+            continue
+        recipient = _strip_communication_piece(followup)
+        if recipient:
+            return "focus", app_name, recipient
+    return None
 
 
 def _communication_current_page_link_tool_requests(text: str) -> list[dict[str, Any]]:

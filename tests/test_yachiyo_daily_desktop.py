@@ -1053,6 +1053,15 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "desktop.safe_shortcut",
         "desktop.submit_foreground",
     ]
+    assert (
+        daily_desktop_entrypoint_requests("把当前选中文本发给微信文件传输助手")
+        == comm_selected_requests
+    )
+    assert (
+        daily_desktop_entrypoint_requests("复制当前选中内容发给微信文件传输助手")
+        == comm_selected_requests
+    )
+    assert daily_desktop_entrypoint_requests("把当前选中文件发给微信文件传输助手") == []
 
     comm_link_requests = daily_desktop_entrypoint_requests("把当前网页链接发给微信文件传输助手")
 
