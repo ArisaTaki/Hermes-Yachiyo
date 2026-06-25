@@ -538,6 +538,14 @@ def daily_desktop_intent_tool_requests(
         ):
             return current_content_to_note_sequence
         return []
+    dynamic_source_search_sequence = _browser_dynamic_source_search_tool_requests(context)
+    if dynamic_source_search_sequence:
+        if all(
+            str(request.get("tool") or "") in allowed
+            for request in dynamic_source_search_sequence
+        ):
+            return dynamic_source_search_sequence
+        return []
     clipboard_to_note_sequence = _clipboard_to_note_tool_requests(context)
     if clipboard_to_note_sequence and all(
         str(request.get("tool") or "") in allowed for request in clipboard_to_note_sequence
@@ -4559,6 +4567,146 @@ def _current_content_to_note_request(text: str) -> bool:
             clean,
             flags=re.IGNORECASE,
         )
+    )
+
+
+def _browser_dynamic_source_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _browser_dynamic_source_search_request(text)
+    if not parsed:
+        return []
+    source, app_name = parsed
+    requests: list[dict[str, Any]] = []
+    if source == "selected_text":
+        requests.append(_request("desktop.safe_shortcut", {"action": "copy"}))
+    requests.extend(
+        [
+            _request(
+                "app.open_and_safe_shortcut",
+                {"app_name": app_name, "action": "focus_address_bar"},
+            ),
+            _request("desktop.safe_shortcut", {"action": "paste"}),
+            _request("desktop.search_submit", {}),
+        ]
+    )
+    return requests
+
+
+def _browser_dynamic_source_search_request(text: str) -> tuple[str, str] | None:
+    clean = _strip_query(text)
+    if not clean:
+        return None
+    app_name = _browser_dynamic_search_app_name(clean)
+    if _selected_text_browser_search_request(clean):
+        return "selected_text", app_name
+    if _clipboard_browser_search_request(clean):
+        return "clipboard", app_name
+    return None
+
+
+def _browser_dynamic_search_app_name(text: str) -> str:
+    match = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:用|在|通过)\s*"
+        r"(?P<app>浏览器|chrome|google|google\s*chrome|谷歌|谷歌浏览器|百度|safari|firefox|edge|arc|brave)"
+        r"\s*(?:里|中|上|内|里面)?",
+        _strip_query(text),
+        flags=re.IGNORECASE,
+    )
+    if match:
+        app_name = _normalize_app_name(match.group("app"))
+        if app_name in _BROWSER_APP_NAMES:
+            return app_name
+    return "Google Chrome"
+
+
+def _selected_text_browser_search_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    selected_text_source = _selected_text_source_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:(?:用|在|通过)\s*"
+            rf"(?:浏览器|chrome|google|google\s*chrome|谷歌|谷歌浏览器|百度|safari|firefox|edge|arc|brave)"
+            rf"\s*(?:里|中|上|内|里面)?\s*)?"
+            rf"(?:搜索|搜一下|搜|检索|查一下|查查|查|google|谷歌一下|百度一下)\s*"
+            rf"(?:{selected_text_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:把|将)?\s*(?:{selected_text_source})\s*"
+            rf"(?:拿去|用来|去|帮我)?\s*"
+            rf"(?:搜索|搜一下|搜|检索|查一下|查查|查|google|谷歌一下|百度一下)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:search|google|look\s+up)\s+(?:the\s+)?"
+            r"(?:selected\s+text|highlighted\s+text|selection|current\s+selection)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:search|google|look\s+up)\s+(?:with|using)\s+(?:the\s+)?"
+            r"(?:selected\s+text|highlighted\s+text|selection|current\s+selection)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clipboard_browser_search_request(text: str) -> bool:
+    clean = _strip_query(text)
+    if not clean:
+        return False
+    clipboard_source = _clipboard_source_pattern()
+    return bool(
+        re.search(
+            rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:(?:用|在|通过)\s*"
+            rf"(?:浏览器|chrome|google|google\s*chrome|谷歌|谷歌浏览器|百度|safari|firefox|edge|arc|brave)"
+            rf"\s*(?:里|中|上|内|里面)?\s*)?"
+            rf"(?:搜索|搜一下|搜|检索|查一下|查查|查|google|谷歌一下|百度一下)\s*"
+            rf"(?:{clipboard_source})$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"^(?:把|将)?\s*(?:{clipboard_source})\s*"
+            rf"(?:拿去|用来|去|帮我)?\s*"
+            rf"(?:搜索|搜一下|搜|检索|查一下|查查|查|google|谷歌一下|百度一下)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:search|google|look\s+up)\s+(?:the\s+)?"
+            r"(?:clipboard\s+contents?|the\s+clipboard(?:\s+contents?)?)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:search|google|look\s+up)\s+(?:with|using|from)\s+(?:the\s+)?"
+            r"(?:clipboard\s+contents?|the\s+clipboard(?:\s+contents?)?)$",
+            clean,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _selected_text_source_pattern() -> str:
+    return (
+        r"(?:当前|现在|这个|这段)?(?:选中|选择|高亮)(?:的)?"
+        r"(?:内容|文字|文本|选区)?|"
+        r"(?:selected\s+text|highlighted\s+text|selection|current\s+selection)"
+    )
+
+
+def _clipboard_source_pattern() -> str:
+    return (
+        r"(?:当前|系统|这个|这份|我的)?(?:剪贴板|粘贴板)(?:内容)?|"
+        r"(?:the\s+)?clipboard\s+contents?|the\s+clipboard"
     )
 
 

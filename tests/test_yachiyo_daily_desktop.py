@@ -730,6 +730,88 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"url": "https://www.google.com/search?q=weather"},
         }
     ]
+    selected_search_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "搜索选中的内容",
+        "搜索当前选中文字",
+        "用浏览器搜索选中的内容",
+        "用 Google 搜索选中的内容",
+        "google selected text",
+        "search selected text",
+        "search the current selection",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == selected_search_requests
+    assert daily_desktop_user_metadata(selected_search_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
+    ]
+    assert daily_desktop_entrypoint_requests("用 Safari 搜索选中的内容") == [
+        selected_search_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_search_requests[2],
+        selected_search_requests[3],
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "search selected text",
+        allowed_tools=("browser.open_url",),
+    ) == []
+
+    clipboard_search_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "把剪贴板内容拿去搜索",
+        "搜索剪贴板内容",
+        "用浏览器搜索剪贴板内容",
+        "用 Google 搜索剪贴板内容",
+        "search the clipboard",
+        "search clipboard contents",
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == clipboard_search_requests
+    assert daily_desktop_entrypoint_requests(
+        "搜索剪贴板内容",
+        allowed_tools=("browser.open_url", "clipboard.read"),
+    ) == []
+    assert daily_desktop_entrypoint_requests("google clipboard") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=clipboard"},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("search WeChat for file transfer") == [
         {
             "protocol": "json_fallback",

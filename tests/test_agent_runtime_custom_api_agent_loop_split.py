@@ -1590,6 +1590,85 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "url": "https://www.google.com/search?q=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
         },
     }
+    selected_search_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "搜索选中的内容",
+        "搜索当前选中文字",
+        "用浏览器搜索选中的内容",
+        "用 Google 搜索选中的内容",
+        "google selected text",
+        "search selected text",
+        "search the current selection",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == selected_search_requests
+        )
+    assert daily_desktop_intent_tool_requests("用 Safari 搜索选中的内容", allowed_tools) == [
+        selected_search_requests[0],
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+        },
+        selected_search_requests[2],
+        selected_search_requests[3],
+    ]
+    assert daily_desktop_intent_tool_requests("search selected text", ["browser.open_url"]) == []
+    clipboard_search_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+    ]
+    for prompt in (
+        "把剪贴板内容拿去搜索",
+        "搜索剪贴板内容",
+        "用浏览器搜索剪贴板内容",
+        "用 Google 搜索剪贴板内容",
+        "search the clipboard",
+        "search clipboard contents",
+    ):
+        assert (
+            daily_desktop_intent_tool_requests(prompt, allowed_tools)
+            == clipboard_search_requests
+        )
+    assert (
+        daily_desktop_intent_tool_requests(
+            "搜索剪贴板内容",
+            ["browser.open_url", "clipboard.read"],
+        )
+        == []
+    )
+    assert daily_desktop_intent_tool_request("google clipboard", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://www.google.com/search?q=clipboard"},
+    }
     assert daily_desktop_intent_tool_request("搜索 oha yachiyo 并读一下结果", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",
