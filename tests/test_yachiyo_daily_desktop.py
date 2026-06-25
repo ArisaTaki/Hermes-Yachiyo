@@ -572,6 +572,30 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"url": "https://www.google.com/search?q=weather"},
         }
     ]
+    assert daily_desktop_entrypoint_requests("search WeChat for file transfer") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "file transfer"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("find file transfer in WeChat") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "file transfer"},
+        },
+    ]
 
     find_requests = daily_desktop_entrypoint_requests("search current page for hello")
 

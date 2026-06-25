@@ -1937,6 +1937,38 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert "agent.desktop.intent_completed" in third_event_types
         assert "model.request.started" not in third_event_types
         assert "model.requested" not in third_event_types
+
+        fourth = api.send_message("search WeChat for file transfer")
+        fourth_task = runtime.state.get_task(fourth["task_id"])
+        fourth_link = service.get_task_run_link(fourth["task_id"])
+        fourth_run = service.get_run(fourth_link["run_id"])
+        fourth_events = service.list_run_events(fourth_run["run_id"])["events"]
+        fourth_event_types = [event["event_type"] for event in fourth_events]
+        fourth_assistant = runtime.chat_session.get_assistant_message_for_task(fourth["task_id"])
+
+        assert fourth["ok"] is True
+        assert fourth["status"] == "completed"
+        assert calls[-3:] == [
+            ("focus", "WeChat"),
+            ("shortcut", "find"),
+            ("type", "file transfer"),
+        ]
+        assert fourth["agent_task"]["status"] == "completed"
+        assert fourth["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（13 个字符）。"
+        assert [tool_call["tool_name"] for tool_call in fourth["agent_task"]["tool_calls"][-2:]] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ]
+        assert fourth_task is not None
+        assert fourth_task.status == TaskStatus.COMPLETED
+        assert fourth_assistant is not None
+        assert fourth_assistant.status == MessageStatus.COMPLETED
+        assert fourth_assistant.content == fourth["agent_task"]["summary"]
+        assert fourth_run["status"] == "completed"
+        assert fourth_event_types.count("agent.desktop.intent_planned") == 2
+        assert "agent.desktop.intent_completed" in fourth_event_types
+        assert "model.request.started" not in fourth_event_types
+        assert "model.requested" not in fourth_event_types
     finally:
         service.close()
         store.close()

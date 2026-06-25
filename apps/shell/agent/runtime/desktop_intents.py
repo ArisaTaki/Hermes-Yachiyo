@@ -508,6 +508,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in communication_compose_sequence
     ):
         return communication_compose_sequence
+    english_app_search_sequence = _english_app_scoped_search_tool_requests(context)
+    if english_app_search_sequence and all(
+        str(request.get("tool") or "") in allowed for request in english_app_search_sequence
+    ):
+        return english_app_search_sequence
     browser_shortcut_search_sequence = _app_open_or_focus_browser_shortcut_search_tool_requests(context)
     if browser_shortcut_search_sequence and all(
         str(request.get("tool") or "") in allowed for request in browser_shortcut_search_sequence
@@ -7212,6 +7217,75 @@ def _app_direct_search_type_tool_requests(text: str) -> list[dict[str, Any]]:
     if submit_return:
         requests.append(_request("desktop.search_submit", {}))
     return requests
+
+
+def _english_app_scoped_search_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _english_app_scoped_search(text)
+    if not parsed:
+        return []
+    app_name, query = parsed
+    return [
+        _request(
+            "app.focus_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": query}),
+    ]
+
+
+def _english_app_scoped_search(text: str) -> tuple[str, str] | None:
+    clean = _strip_query(text)
+    patterns = (
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+for)\s+(?P<app>[^.!?]+?)\s+"
+        r"(?:for|with|about)\s+(?P<query>[^.!?]+)$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+for)\s+(?P<query>[^.!?]+?)\s+"
+        r"(?:in|inside|on|with|using)\s+(?P<app>[^.!?]+)$",
+        r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:search|find|look\s+for)\s+(?:in|inside|on|with|using)\s+"
+        r"(?P<app>[^.!?]+?)\s+(?:for|about)?\s*(?P<query>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = _strip_query(match.group("app"))
+        app_name = _normalize_app_name(raw_app)
+        if (
+            not app_name
+            or not _is_known_local_app_name(raw_app, app_name)
+            or app_name in _BROWSER_APP_NAMES
+            or (
+                app_name == "Music"
+                and re.search(
+                    r"\b(?:play|start\s+playing)\b|(?:播放|播|放)",
+                    clean,
+                    flags=re.IGNORECASE,
+                )
+            )
+            or _looks_like_generic_app_open_target(raw_app)
+            or _normalize_site_name(raw_app)
+        ):
+            continue
+        query = _strip_search_query(match.group("query"))
+        if query:
+            return app_name, query
+    return None
+
+
+def _is_known_local_app_name(raw_app: str, app_name: str) -> bool:
+    known_compacts = {
+        _compact_app_alias(alias)
+        for alias in _APP_ALIASES
+    } | {
+        _compact_app_alias(name)
+        for name in _APP_ALIASES.values()
+    }
+    return (
+        _compact_app_alias(raw_app) in known_compacts
+        or _compact_app_alias(app_name) in known_compacts
+    )
 
 
 def _music_app_search_play_tool_requests(text: str) -> list[dict[str, Any]]:
