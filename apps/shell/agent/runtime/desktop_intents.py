@@ -7895,8 +7895,34 @@ def _desktop_safe_shortcut_action(text: str) -> str:
     return mapping.get(phrase, "")
 
 
+def _strip_desktop_action_request_shell(value: str) -> str:
+    phrase = _strip_query(value)
+    phrase = re.sub(
+        r"^(?:你|您)?\s*"
+        r"(?:(?:可不可以|可以|能不能|能否|能|要不要|想不想)?\s*帮我|帮我|请|麻烦|"
+        r"能否|能不能|能(?!不能|否)|可以)?"
+        r"(?:直接)?\s*",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(
+        r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please|for\s+me)$",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
+    return phrase.strip()
+
+
 def _safe_shortcut_action_from_hotkey(text: str) -> str:
-    phrase = _strip_query(text)
+    phrase = _strip_desktop_action_request_shell(text)
     phrase = re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:按一下|按下|按|执行|触发|发送|敲一下|敲下|敲)?\s*",
@@ -7933,6 +7959,7 @@ def _safe_shortcut_action_from_hotkey(text: str) -> str:
 
 
 def _desktop_safe_key(text: str) -> dict[str, Any] | None:
+    text = _strip_desktop_action_request_shell(text)
     if _is_next_foreground_focus_request(text):
         return {"action": "tab", "repeat_count": 1}
     if _is_previous_foreground_focus_request(text):
@@ -8254,14 +8281,19 @@ def _scroll_page_count(value: str | None) -> int:
 
 
 def _normalize_named_hotkey_phrase(text: str) -> str:
-    phrase = _strip_query(text)
+    phrase = _strip_desktop_action_request_shell(text)
     phrase = re.sub(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:按一下|按下|按|执行|触发|发送)?\s*",
         "",
         phrase,
         flags=re.IGNORECASE,
     )
-    phrase = re.sub(r"\s*(?:一下|下|一次|键|快捷键|热键|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
+    phrase = re.sub(
+        r"\s*(?:一下|下|一次|键|快捷键|热键|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please|for\s+me)$",
+        "",
+        phrase,
+        flags=re.IGNORECASE,
+    )
     return re.sub(r"[\s._-]+", "", phrase.lower())
 
 

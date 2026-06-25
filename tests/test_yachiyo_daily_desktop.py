@@ -83,6 +83,42 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
+def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_to_desktop_tools() -> None:
+    cases = (
+        ("你可以帮我复制一下吗", "desktop.safe_shortcut", {"action": "copy"}),
+        ("你能帮我粘贴吗", "desktop.safe_shortcut", {"action": "paste"}),
+        ("你能帮我全选吗", "desktop.safe_shortcut", {"action": "select_all"}),
+        ("你可以帮我撤销吗", "desktop.safe_shortcut", {"action": "undo"}),
+        ("你能帮我按一下Escape吗", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
+        ("你可以帮我按Tab吗", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
+        ("Can you copy?", "desktop.safe_shortcut", {"action": "copy"}),
+        ("Could you paste?", "desktop.safe_shortcut", {"action": "paste"}),
+        ("Would you select all please?", "desktop.safe_shortcut", {"action": "select_all"}),
+        ("Could you press Escape?", "desktop.safe_key", {"action": "escape", "repeat_count": 1}),
+        ("Can you hit Tab?", "desktop.safe_key", {"action": "tab", "repeat_count": 1}),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    for prompt in ("你能帮我按Command L吗", "Can you press Command L?"):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert not requests or requests[0]["tool"] not in {
+            "desktop.safe_key",
+            "desktop.safe_shortcut",
+        }
+
+
 def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
     cases = (
         ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),

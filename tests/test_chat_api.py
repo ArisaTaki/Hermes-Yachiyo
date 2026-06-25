@@ -5035,50 +5035,58 @@ def test_send_message_executes_direct_safe_shortcut_task(tmp_path, monkeypatch):
 
     def fake_safe_shortcut(action: str) -> dict:
         shortcut_calls.append(action)
+        key = {"copy": "c", "new_window": "n"}.get(action, "")
         return {
             "ok": True,
             "action": "desktop.safe_shortcut",
-            "summary": "Executed safe shortcut: new window",
+            "summary": f"Executed safe shortcut: {action}",
             "data": {
                 "shortcut_action": action,
-                "key": "n",
+                "key": key,
                 "modifiers": ["command"],
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     try:
-        result = api.send_message("打开新窗口")
-        task = runtime.state.get_task(result["task_id"])
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        cases = (
+            ("打开新窗口", "new_window", "已新建窗口。"),
+            ("Can you copy?", "copy", "已复制选中内容。"),
+        )
+        for text, action, summary in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已新建窗口。"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
-        assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已新建窗口。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已新建窗口。"
-        assert shortcut_calls == ["new_window"]
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "agent.desktop.intent_approval_required" not in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+            assert shortcut_calls[-1] == action
+
+        assert shortcut_calls == ["new_window", "copy"]
     finally:
         service.close()
         store.close()
@@ -5803,47 +5811,55 @@ def test_send_message_executes_direct_safe_arrow_key_task(tmp_path, monkeypatch)
 
     def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
         pressed.append((action, repeat_count))
+        key_label = {"arrow_down": "Down Arrow", "escape": "Escape"}.get(action, action)
         return {
             "ok": True,
             "action": "desktop.safe_key",
-            "summary": "Pressed Down Arrow",
+            "summary": f"Pressed {key_label}",
             "data": {
                 "key_action": action,
-                "key_label": "Down Arrow",
+                "key_label": key_label,
                 "repeat_count": repeat_count,
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
     try:
-        result = api.send_message("按向下箭头三次")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        events = service.list_run_events(run["run_id"])["events"]
-        event_types = [event["event_type"] for event in events]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+        cases = (
+            ("按向下箭头三次", "arrow_down", 3, "已按下箭头（3 次）。"),
+            ("Could you press Escape?", "escape", 1, "已按Escape。"),
+        )
+        for text, action, repeat_count, summary in cases:
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            events = service.list_run_events(run["run_id"])["events"]
+            event_types = [event["event_type"] for event in events]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "已按下箭头（3 次）。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
-            "action": "arrow_down",
-            "repeat_count": 3,
-        }
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已按下箭头（3 次）。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已按下箭头（3 次）。"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert pressed == [("arrow_down", 3)]
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == summary
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+                "action": action,
+                "repeat_count": repeat_count,
+            }
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == summary
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == summary
+            assert run["status"] == "completed"
+            assert "agent.desktop.intent_completed" in event_types
+            assert "model.request.started" not in event_types
+            assert pressed[-1] == (action, repeat_count)
+
+        assert pressed == [("arrow_down", 3), ("escape", 1)]
     finally:
         service.close()
         store.close()

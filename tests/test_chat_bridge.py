@@ -4948,6 +4948,13 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         ("复制一下选中的内容", "live2d", "copy", "已复制选中内容。"),
         ("复制选中文字", "bubble", "copy", "已复制选中内容。"),
         ("copy current selection", "live2d", "copy", "已复制选中内容。"),
+        ("你可以帮我复制一下吗", "bubble", "copy", "已复制选中内容。"),
+        ("你能帮我粘贴吗", "live2d", "paste", "已粘贴。"),
+        ("你能帮我全选吗", "bubble", "select_all", "已全选。"),
+        ("你可以帮我撤销吗", "live2d", "undo", "已撤销。"),
+        ("Can you copy?", "bubble", "copy", "已复制选中内容。"),
+        ("Could you paste?", "live2d", "paste", "已粘贴。"),
+        ("Would you select all please?", "bubble", "select_all", "已全选。"),
         ("浏览器刷新", "live2d", "refresh", "已刷新。"),
         ("refresh page", "bubble", "refresh", "已刷新。"),
         ("reload page", "live2d", "refresh", "已刷新。"),
@@ -5493,29 +5500,44 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
-    for launcher_mode in ("bubble", "live2d"):
+    cases = (
+        ("按向下箭头三次", "bubble", "arrow_down", 3, "已按下箭头（3 次）。"),
+        ("按向下箭头三次", "live2d", "arrow_down", 3, "已按下箭头（3 次）。"),
+        ("你能帮我按一下Escape吗", "bubble", "escape", 1, "已按Escape。"),
+        ("你可以帮我按Tab吗", "live2d", "tab", 1, "已按Tab。"),
+        ("Could you press Escape?", "bubble", "escape", 1, "已按Escape。"),
+        ("Can you hit Tab?", "live2d", "tab", 1, "已按Tab。"),
+    )
+    for text, launcher_mode, action, repeat_count, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
-            "按向下箭头三次",
+            text,
             launcher_mode=launcher_mode,
         )
 
         assert agent_task["status"] == "completed"
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
-        assert agent_task["summary"] == "已按下箭头（3 次）。"
+        assert agent_task["summary"] == summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
         assert agent_task["tool_calls"][-1]["input_preview"] == {
-            "action": "arrow_down",
-            "repeat_count": 3,
+            "action": action,
+            "repeat_count": repeat_count,
         }
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
 
-    assert pressed == [("arrow_down", 3), ("arrow_down", 3)]
+    assert pressed == [
+        ("arrow_down", 3),
+        ("arrow_down", 3),
+        ("escape", 1),
+        ("tab", 1),
+        ("escape", 1),
+        ("tab", 1),
+    ]
 
 
 def test_chat_bridge_quick_message_executes_next_input_focus_as_safe_tab_key(
