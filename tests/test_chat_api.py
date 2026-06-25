@@ -8039,6 +8039,80 @@ def test_send_message_executes_direct_hide_current_app_task(tmp_path, monkeypatc
         store.close()
 
 
+def test_send_message_executes_direct_show_all_apps_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    show_calls = 0
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct show all apps task should not call model")
+        ),
+    )
+
+    def fake_show_all_apps() -> dict:
+        nonlocal show_calls
+        show_calls += 1
+        return {
+            "ok": True,
+            "action": "desktop.show_all_apps",
+            "summary": "Showed hidden apps",
+            "data": {"shown_app_count": 2},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_show_all_apps", fake_show_all_apps)
+    try:
+        cases = (
+            "显示隐藏的应用",
+            "显示所有隐藏应用",
+            "show all hidden apps",
+        )
+        for index, text in enumerate(cases, start=1):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+            assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["status"] == "completed"
+            assert result["agent_task"]["needs_user_action"] is False
+            assert result["agent_task"]["pending_approvals"] == []
+            assert result["agent_task"]["summary"] == "已显示所有隐藏应用。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.show_all_apps"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "已显示所有隐藏应用。"
+            assert assistant is not None
+            assert assistant.status == MessageStatus.COMPLETED
+            assert assistant.content == "已显示所有隐藏应用。"
+            assert show_calls == index
+            assert run["status"] == "completed"
+            assert run["pending_approval"] == {}
+            assert "agent.desktop.intent_planned" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.desktop.intent_completed" in event_types
+            assert "agent.desktop.intent_approval_required" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

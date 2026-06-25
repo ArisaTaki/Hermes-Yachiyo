@@ -83,6 +83,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.click_ui_element": "点击前台控件",
     "desktop.type_into_ui_element": "填写前台控件",
     "desktop.hide_app": "隐藏当前应用",
+    "desktop.show_all_apps": "显示隐藏应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
     "desktop.hotkey": "发送快捷键",
@@ -481,6 +482,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.safe_click": "桌面点击",
         "desktop.safe_scroll": "桌面滚动",
         "desktop.hide_app": "隐藏当前应用",
+        "desktop.show_all_apps": "显示隐藏应用",
         "desktop.minimize_window": "最小化当前窗口",
         "desktop.close_window": "关闭当前窗口",
     }

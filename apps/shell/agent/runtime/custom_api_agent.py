@@ -76,6 +76,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "browser.screenshot",
     "browser.type_text",
     "desktop.hide_app",
+    "desktop.show_all_apps",
     "desktop.minimize_window",
     "desktop.close_window",
     "terminal.run",
@@ -159,6 +160,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.click_ui_element": "点击前台控件",
     "desktop.type_into_ui_element": "填写前台控件",
     "desktop.hide_app": "隐藏当前应用",
+    "desktop.show_all_apps": "显示隐藏应用",
     "desktop.minimize_window": "最小化当前窗口",
     "desktop.close_window": "关闭当前窗口",
     "terminal.run": "运行终端命令",
@@ -1007,6 +1009,8 @@ class RuntimeCustomApiAgentLoop:
                 return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
             if tool_name == "desktop.hide_app":
                 return "已隐藏当前应用。"
+            if tool_name == "desktop.show_all_apps":
+                return "已显示所有隐藏应用。"
             if tool_name == "desktop.minimize_window":
                 return "已最小化当前窗口。"
             if tool_name == "desktop.close_window":
@@ -1326,7 +1330,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.settings_open, system.volume, system.brightness, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, system.settings_open, system.volume, system.brightness, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.show_all_apps, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed; map generic playback requests for named non-Apple music apps to media.music_app_open_and_play; map macOS System Settings pane or permission page open requests to system.settings_open; map pause/resume/next/previous media "
@@ -1360,6 +1364,7 @@ class RuntimeCustomApiAgentLoop:
             "map 'show/reveal in Finder' requests to desktop.reveal_path and safe local "
             "file or folder open requests to desktop.open_path. "
             "Map explicit current/foreground app hide requests to desktop.hide_app. "
+            "Map explicit show all hidden apps requests to desktop.show_all_apps. "
             "Map explicit current/foreground window minimize requests to desktop.minimize_window. "
             "Map explicit current/foreground window close requests to desktop.close_window. "
             "Map explicit foreground send/submit/confirm requests to desktop.submit_foreground; it is high-risk and Runtime must show approval before pressing Return. "

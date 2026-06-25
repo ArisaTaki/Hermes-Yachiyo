@@ -405,6 +405,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
@@ -3402,6 +3403,49 @@ def desktop_hide_app() -> dict[str, Any]:
     }
 
 
+def desktop_show_all_apps() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.show_all_apps")
+    result = _run_osascript(
+        """
+        on run argv
+            set shownCount to 0
+            tell application "System Events"
+                repeat with processRef in application processes
+                    try
+                        if visible of processRef is false then
+                            set visible of processRef to true
+                            set shownCount to shownCount + 1
+                        end if
+                    end try
+                end repeat
+            end tell
+            return "shown_all|" & shownCount
+        end run
+        """,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.show_all_apps",
+            {
+                **result,
+                "action": "desktop.show_all_apps",
+                "summary": "desktop.show_all_apps failed",
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    parts = stdout.split("|") if stdout else []
+    shown_count = _int_value(parts[1] if len(parts) > 1 else 0)
+    return {
+        "ok": True,
+        "action": "desktop.show_all_apps",
+        "summary": "Showed hidden apps",
+        "data": {"shown_app_count": shown_count},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_minimize_window() -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.minimize_window")
@@ -4743,6 +4787,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],
         "desktop.hide_app": ["accessibility"],
+        "desktop.show_all_apps": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
@@ -4797,6 +4842,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "reminders.create": ["automation"],
         "calendar.create_event": ["automation"],
         "desktop.hide_app": ["accessibility"],
+        "desktop.show_all_apps": ["accessibility"],
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],

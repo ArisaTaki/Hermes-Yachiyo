@@ -902,6 +902,12 @@ class ToolBroker:
             desktop.desktop_hide_app,
         )
 
+    def desktop_show_all_apps(self) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.show_all_apps",
+            desktop.desktop_show_all_apps,
+        )
+
     def desktop_minimize_window(self) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.minimize_window",

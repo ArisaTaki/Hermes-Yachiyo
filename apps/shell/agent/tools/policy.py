@@ -80,6 +80,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.safe_scroll": "desktop_safe_scroll",
     "desktop.search_submit": "desktop_search_submit",
     "desktop.hide_app": "desktop_hide_app",
+    "desktop.show_all_apps": "desktop_show_all_apps",
     "desktop.minimize_window": "desktop_minimize_window",
     "desktop.close_window": "desktop_close_window",
     "desktop.hotkey": "desktop_hotkey",
@@ -190,6 +191,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.safe_scroll",
     "desktop.search_submit",
     "desktop.hide_app",
+    "desktop.show_all_apps",
     "desktop.minimize_window",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
@@ -1724,6 +1726,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Hide the current foreground app using the standard system shortcut. "
             "Low-risk and reversible, but still recorded in the Run Timeline."
+        ),
+        properties={},
+    ),
+    "desktop.show_all_apps": ToolDescriptor(
+        name="desktop.show_all_apps",
+        description=(
+            "Show all hidden local desktop applications. Low-risk and reversible, "
+            "but still recorded in the Run Timeline."
         ),
         properties={},
     ),

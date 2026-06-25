@@ -69,6 +69,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.safe_click",
         "desktop.safe_scroll",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
     }
 )
@@ -257,6 +258,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "foreground_safe_click": ("desktop.safe_click",),
     "foreground_safe_scroll": ("desktop.safe_scroll",),
     "foreground_hide_app": ("desktop.hide_app",),
+    "foreground_show_all_apps": ("desktop.show_all_apps",),
     "foreground_minimize_window": ("desktop.minimize_window",),
     "foreground_click_ui_element": (
         "desktop.click_ui_element",
@@ -441,6 +443,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.safe_click",
         "desktop.safe_scroll",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.hotkey",
@@ -501,6 +504,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",

@@ -986,6 +986,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.type_into_ui_element",
     "desktop.close_window",
     "desktop.hide_app",
+    "desktop.show_all_apps",
     "desktop.hotkey",
     "desktop.minimize_window",
     "desktop.open_path",
@@ -1047,6 +1048,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "app.open_and_type_into_ui_element",
     "app.focus_and_type_into_ui_element",
     "desktop.hide_app",
+    "desktop.show_all_apps",
     "desktop.minimize_window",
     "desktop.safe_click",
     "desktop.safe_key",
@@ -1188,6 +1190,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.safe_scroll",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.show_all_apps",
         "desktop.type_into_ui_element",
         "desktop.ui_elements",
         "desktop.windows",
@@ -1242,6 +1245,8 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
     if tool_name == "app.status":
         app_name = str(recovery_input.get("app_name") or "").strip()
         return f"检查{app_name}是否打开" if app_name else ""
+    if tool_name == "desktop.show_all_apps":
+        return "显示所有隐藏应用"
     app_foreground_prompt = _app_foreground_recovery_prompt(tool_name, recovery_input)
     if app_foreground_prompt:
         return app_foreground_prompt
@@ -2206,6 +2211,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     music_control = _music_control_action(text)
     if music_control:
         candidates.append(_request("media.apple_music_control", {"action": music_control}))
+
+    if _is_show_all_apps_request(text):
+        candidates.append(_request("desktop.show_all_apps", {}))
 
     if _is_hide_current_app_request(text):
         candidates.append(_request("desktop.hide_app", {}))
@@ -7840,6 +7848,8 @@ def _app_focus_name(text: str) -> str:
 
 
 def _app_show_or_open_name(text: str) -> str:
+    if _is_show_all_apps_request(text):
+        return ""
     if _desktop_reveal_path(text) or _desktop_open_path(text):
         return ""
     patterns = (
@@ -7956,6 +7966,7 @@ def _app_show_name(text: str) -> str:
         or _is_running_apps_request(text)
         or _looks_like_app_status_request(text)
         or _desktop_reveal_path(text)
+        or _is_show_all_apps_request(text)
     ):
         return ""
     patterns = (
@@ -11032,6 +11043,8 @@ def _is_minimize_current_window_request(text: str) -> bool:
 
 def _is_hide_current_app_request(text: str) -> bool:
     text = _strip_desktop_action_request_shell(text)
+    if _is_show_all_apps_request(text):
+        return False
     lowered = text.lower()
     hide_verb = r"(?:隐藏|收起|藏起|藏起来)(?:一下|下|起来)?"
     return bool(
@@ -11056,6 +11069,42 @@ def _is_hide_current_app_request(text: str) -> bool:
         or re.search(
             r"\bhide\s+(?:the\s+)?(?:current|foreground|active|this)\s+"
             r"(?:app|application)\b",
+            lowered,
+        )
+    )
+
+
+def _is_show_all_apps_request(text: str) -> bool:
+    text = _strip_desktop_action_request_shell(text)
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:(?:显示|还原|恢复|调出|叫出)\s*"
+            r"(?:所有隐藏|全部隐藏|所有|全部|隐藏的|被隐藏的|藏起来的)\s*"
+            r"(?:应用|app|软件|程序)(?:窗口)?|"
+            r"取消隐藏\s*(?:所有|全部|隐藏的|被隐藏的|藏起来的)?\s*"
+            r"(?:应用|app|软件|程序)(?:窗口)?)"
+            r"(?:出来|一下|下)?[?？。！!]*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?:所有隐藏|全部隐藏|所有|全部|隐藏的|被隐藏的|藏起来的)\s*"
+            r"(?:应用|app|软件|程序)(?:窗口)?\s*"
+            r"(?:显示|还原|恢复|取消隐藏|调出来|叫出来)"
+            r"(?:出来|一下|下)?[?？。！!]*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:show|unhide|restore)\s+"
+            r"(?:all\s+)?(?:hidden\s+)?(?:apps?|applications?)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:show|unhide|restore)\s+(?:all|hidden)\b",
             lowered,
         )
     )

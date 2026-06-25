@@ -1029,6 +1029,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.reveal_path",
         "desktop.open_path",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
@@ -4295,6 +4296,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "desktop.hide_app",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("显示隐藏的应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.show_all_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("显示所有隐藏应用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.show_all_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("show all hidden apps", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.show_all_apps",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("显示隐藏的应用", ["app.show"]) is None
     assert daily_desktop_intent_tool_request("当前应用最小化", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.minimize_window",
@@ -9364,6 +9381,11 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
         {},
         {"ok": True, "summary": "Hid the foreground app"},
     )
+    show_all_apps = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "desktop.show_all_apps",
+        {},
+        {"ok": True, "summary": "Showed hidden apps", "data": {"shown_app_count": 2}},
+    )
     browser_click = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "browser.click",
         {"selector": "text=登录"},
@@ -9460,6 +9482,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert close_window == "已关闭当前窗口。"
     assert minimize_window == "已最小化当前窗口。"
     assert hide_app == "已隐藏当前应用。"
+    assert show_all_apps == "已显示所有隐藏应用。"
     assert browser_click == "已点击网页元素：登录。"
     assert browser_click_point == "已点击网页位置：120, 240。"
     assert browser_type_text == "已在网页元素 input[type=\"search\"]输入文字（7 个字符）。"

@@ -572,6 +572,14 @@ def _desktop_hide_app(
     return broker.desktop_hide_app()
 
 
+def _desktop_show_all_apps(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_show_all_apps()
+
+
 def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     modifiers = payload.get("modifiers")
     return broker.desktop_hotkey(
@@ -788,6 +796,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "calendar.create_event": _calendar_create_event,
     "desktop.safe_shortcut": _desktop_safe_shortcut,
     "desktop.hide_app": _desktop_hide_app,
+    "desktop.show_all_apps": _desktop_show_all_apps,
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,

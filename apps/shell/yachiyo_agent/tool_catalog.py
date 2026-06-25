@@ -417,6 +417,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.hide_app": [
             "Requires Accessibility permission and hides the current foreground app without closing it.",
         ],
+        "desktop.show_all_apps": [
+            "Requires Accessibility permission and shows all hidden desktop apps without launching or closing apps.",
+        ],
         "desktop.minimize_window": [
             "Requires Accessibility permission and minimizes the current foreground window without closing it.",
         ],
