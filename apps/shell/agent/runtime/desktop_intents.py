@@ -374,14 +374,14 @@ _MUSIC_APP_COMPACTS = {
 
 _APP_STATUS_PATTERNS = (
     r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)?\s*"
-    r"(?P<app>[^。！？!?，,]+?)\s*(?:开了没|开着没|打开没|打开了没|启动没|启动了没)"
+    r"(?P<app>[^。！？!?，,]+?)\s*(?:开没开|开了没|开着没|打开没|打开了没|启动没|启动了没)"
     r"\s*(?:吗|嘛|呢)?$",
     r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)?\s*"
     r"(?P<app>[^。！？!?，,]+?)\s*(?:是否|有没有|是不是)?\s*"
-    r"(?:开着|打开着|打开了|开了吗|打开了吗|在运行|正在运行|运行着|启动了|启动着)\s*(?:吗|嘛|呢)?$",
-    r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)\s*"
+    r"(?:开着|打开着|打开了|开了吗|打开了吗|在运行|正在运行|运行|运行着|启动了|启动着)\s*(?:吗|嘛|呢)?$",
+    r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)(?:一下|下)?\s*"
     r"(?P<app>[^。！？!?，,]+?)\s*(?:是否|有没有|是不是)?\s*"
-    r"(?:开着|打开着|打开了|在运行|正在运行|运行着|启动了|启动着)",
+    r"(?:开没开|开了没|开着没|打开没|打开了没|开着|打开着|打开了|在运行|正在运行|运行|运行着|启动了|启动着)",
     r"(?:is|check if|whether|see if)\s+(?P<app>[^.!?]+?)\s+(?:is\s+)?(?:running|open)",
     r"(?P<app>[^.!?]+?)\s+(?:running|open)\?",
 )
@@ -457,6 +457,9 @@ def daily_desktop_intent_tool_requests(
     apple_music_search_play = _apple_music_search_play_query(context)
     if apple_music_search_play and "media.apple_music_play" in allowed:
         return [_request("media.apple_music_play", {"query": apple_music_search_play})]
+    app_status_name = _app_status_name(context)
+    if app_status_name and "app.status" in allowed:
+        return [_request("app.status", {"app_name": app_status_name})]
     browser_open_request = _browser_open_url_tool_request(context, allowed)
     if browser_open_request:
         return [browser_open_request]

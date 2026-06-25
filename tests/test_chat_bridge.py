@@ -1649,6 +1649,37 @@ def test_chat_bridge_quick_message_executes_app_status_without_model(
     assert "model.request.started" not in event_types
     assert "model.requested" not in event_types
 
+    cases = (
+        ("Google Chrome 在运行吗", "bubble", "Google Chrome"),
+        ("检查一下 Slack 是否运行", "live2d", "Slack"),
+        ("Finder 是否运行", "bubble", "Finder"),
+    )
+    for prompt, launcher_mode, app_name in cases:
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert result["ok"] is True
+        assert status_calls[-1] == app_name
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert agent_task["summary"] == f"{app_name} 当前正在运行。"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "app.status"
+        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert agent_task["tool_calls"][-1]["input_preview"]["app_name"] == app_name
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
 
 def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
     tmp_path,

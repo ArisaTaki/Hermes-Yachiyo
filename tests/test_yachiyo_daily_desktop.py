@@ -64,6 +64,28 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
 
 
+def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() -> None:
+    cases = (
+        ("Chrome 开着吗", "Google Chrome"),
+        ("Google Chrome 在运行吗", "Google Chrome"),
+        ("检查一下 Slack 是否运行", "Slack"),
+        ("看看 Slack 开没开", "Slack"),
+        ("Finder 是否运行", "Finder"),
+    )
+
+    for prompt, app_name in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.status",
+                "input": {"app_name": app_name},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.status"
+
+
 def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools() -> None:
     cases = (
         ("你能帮我切到Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
