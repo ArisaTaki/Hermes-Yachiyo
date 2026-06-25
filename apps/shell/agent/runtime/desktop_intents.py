@@ -865,6 +865,7 @@ def _should_prioritize_foreground_sequence(requests: list[dict[str, Any]]) -> bo
     tools = {str(request.get("tool") or "") for request in requests}
     priority_tools = {
         "desktop.hotkey",
+        "desktop.submit_foreground",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "app.open_and_hotkey",
@@ -1521,7 +1522,7 @@ def _split_daily_desktop_sequence(text: str) -> list[str]:
         r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|"
         r"\s+and\s+(?=(?:press|type|enter|click|scroll|send|submit|confirm|"
         r"paste|copy|search|find|look\s+up)\b)|"
-        r"(?:然后|接着|之后|随后|并且|并)\s*)",
+        r"(?:然后|接着|之后|随后|并且|并|后(?!退))\s*)",
         protected_text,
         flags=re.IGNORECASE,
     )
@@ -1534,7 +1535,7 @@ def _split_daily_desktop_sequence(text: str) -> list[str]:
 
 def _strip_sequence_clause_prefix(text: str) -> str:
     return re.sub(
-        r"^(?:再|然后|接着|之后|随后|并且|并|and then|then)\s*",
+        r"^(?:再|然后|接着|之后|随后|并且|并|后(?!退)|and then|then)\s*",
         "",
         str(text or "").strip(),
         flags=re.IGNORECASE,
@@ -4896,6 +4897,9 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
 
     shortcut_pattern = (
         r"(?:复制(?:一下|下)?(?:选中(?:的)?(?:内容|文字))?|"
+        r"(?:把|将)?(?:剪贴板|粘贴板)(?:内容)?粘贴(?:一下|下)?|"
+        r"(?:当前输入框|当前文本框|当前输入栏|前台|当前窗口|前台输入框|前台文本框|前台输入栏)"
+        r"粘贴(?:一下|下)?|"
         r"粘贴(?:一下|下)?(?:(?:到|进|在)?(?:这(?:里)?|当前输入框|输入框|当前窗口|前台))?|"
         r"全选|撤销|重做|"
         r"(?:浏览器|网页|当前网页|当前页)刷新(?:一下|下)?|"
@@ -4979,6 +4983,14 @@ def _app_scoped_safe_shortcut_request(text: str) -> dict[str, Any] | None:
         if re.search(r"(?:剪贴板|粘贴板|clipboard)", raw_app, flags=re.IGNORECASE):
             continue
         if re.sub(r"[\s._-]+", "", str(raw_app or "").strip().lower()) in {"switchto", "switch"}:
+            continue
+        raw_app_compact = re.sub(r"[\s._-]+", "", str(raw_app or "").strip().lower())
+        raw_action = str(match.group("action") or "")
+        if raw_app_compact in {"把", "将"} and re.search(
+            r"(?:剪贴板|粘贴板|clipboard)",
+            raw_action,
+            flags=re.IGNORECASE,
+        ):
             continue
         if mode == "focus" and re.match(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|运行|拉起|开启|开)",
@@ -10091,8 +10103,26 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "粘贴": "paste",
         "粘贴剪贴板": "paste",
         "粘贴剪贴板内容": "paste",
+        "剪贴板粘贴": "paste",
+        "把剪贴板粘贴": "paste",
+        "将剪贴板粘贴": "paste",
+        "粘贴板粘贴": "paste",
+        "把粘贴板粘贴": "paste",
+        "将粘贴板粘贴": "paste",
         "剪贴板内容粘贴": "paste",
         "把剪贴板内容粘贴": "paste",
+        "将剪贴板内容粘贴": "paste",
+        "粘贴板内容粘贴": "paste",
+        "把粘贴板内容粘贴": "paste",
+        "将粘贴板内容粘贴": "paste",
+        "当前输入框粘贴": "paste",
+        "当前文本框粘贴": "paste",
+        "当前输入栏粘贴": "paste",
+        "前台粘贴": "paste",
+        "当前窗口粘贴": "paste",
+        "前台输入框粘贴": "paste",
+        "前台文本框粘贴": "paste",
+        "前台输入栏粘贴": "paste",
         "把剪贴板内容粘贴到当前输入框": "paste",
         "把剪贴板内容粘贴到输入框": "paste",
         "剪贴板内容粘贴到当前输入框": "paste",

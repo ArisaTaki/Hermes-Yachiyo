@@ -9647,6 +9647,105 @@ def test_send_message_prepares_app_safe_type_text_then_waits_for_send_approval(
         store.close()
 
 
+def test_send_message_prepares_paste_then_waits_for_send_approval(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("paste send approval task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("submit_foreground should wait for approval")
+        ),
+    )
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    try:
+        cases = (
+            (
+                "当前输入框粘贴并发送",
+                [("shortcut", "paste")],
+                "desktop.safe_shortcut",
+            ),
+            (
+                "打开微信粘贴后发送",
+                [("open", "WeChat"), ("focus", "WeChat"), ("shortcut", "paste")],
+                "app.open_and_safe_shortcut",
+            ),
+        )
+        for prompt, expected_calls, first_tool in cases:
+            calls.clear()
+            result = api.send_message(prompt)
+            run = service.get_run(result["run_id"])
+            event_types = [
+                event["event_type"]
+                for event in service.list_run_events(run["run_id"])["events"]
+            ]
+
+            assert result["ok"] is True
+            assert result["status"] == "waiting_approval"
+            assert calls == expected_calls
+            assert result["agent_task"]["status"] == "waiting_approval"
+            assert result["agent_task"]["needs_user_action"] is True
+            assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {"action": "send"}
+            assert any(
+                tool_call["tool_name"] == first_tool and tool_call["status"] == "completed"
+                for tool_call in result["agent_task"]["tool_calls"]
+            )
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.submit_foreground"
+            assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
+            assert run["pending_approval"]["input_preview"] == {"action": "send"}
+            assert "agent.desktop.intent_approval_required" in event_types
+            assert "agent.desktop.intent_completed" not in event_types
+            assert "model.request.started" not in event_types
+            assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_routes_permission_diagnosis_questions_without_model(
     tmp_path,
     monkeypatch,

@@ -677,6 +677,24 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"action": "submit"},
         }
     ]
+    paste_send_requests = daily_desktop_entrypoint_requests("当前输入框粘贴并发送")
+
+    assert paste_send_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(paste_send_requests)["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
 
     app_submit_requests = daily_desktop_entrypoint_requests("微信按回车发送")
 
