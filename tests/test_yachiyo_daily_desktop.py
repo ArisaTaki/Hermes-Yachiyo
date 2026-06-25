@@ -579,6 +579,42 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
             "input": {"text": "hello"},
         }
     ]
+    send_requests = daily_desktop_entrypoint_requests("微信输入 hello 并发送")
+
+    assert send_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "WeChat", "text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(send_requests)["daily_desktop_tools"] == [
+        "app.focus_and_safe_type_text",
+        "desktop.submit_foreground",
+    ]
+    open_send_requests = daily_desktop_entrypoint_requests("打开微信发送 hello")
+
+    assert open_send_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "WeChat", "text": "hello"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+        },
+    ]
+    assert daily_desktop_user_metadata(open_send_requests)["daily_desktop_tools"] == [
+        "app.open_and_safe_type_text",
+        "desktop.submit_foreground",
+    ]
     assert daily_desktop_entrypoint_requests("打开搜索框输入 yachiyo 回车") == [
         {
             "protocol": "json_fallback",

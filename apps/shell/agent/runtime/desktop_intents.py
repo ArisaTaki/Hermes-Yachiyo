@@ -655,6 +655,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in app_prefix_browser_action_sequence
     ):
         return app_prefix_browser_action_sequence
+    app_prefix_safe_type_text_sequence = _app_prefix_safe_type_text_tool_requests(context)
+    if app_prefix_safe_type_text_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_prefix_safe_type_text_sequence
+    ):
+        return app_prefix_safe_type_text_sequence
     app_prefix_click_ui_element = _app_prefix_click_ui_element_tool_request(context)
     if app_prefix_click_ui_element and str(app_prefix_click_ui_element.get("tool") or "") in allowed:
         return [app_prefix_click_ui_element]
@@ -739,6 +744,12 @@ def daily_desktop_intent_tool_requests(
         return foreground_search_type_sequence
     if sequence and all(str(request.get("tool") or "") in allowed for request in sequence):
         return sequence
+    app_open_or_focus_safe_type_text_sequence = _app_open_or_focus_safe_type_text_tool_requests(context)
+    if app_open_or_focus_safe_type_text_sequence and all(
+        str(request.get("tool") or "") in allowed
+        for request in app_open_or_focus_safe_type_text_sequence
+    ):
+        return app_open_or_focus_safe_type_text_sequence
     app_find_sequence = _app_open_or_focus_find_text_tool_requests(context)
     if app_find_sequence and all(str(request.get("tool") or "") in allowed for request in app_find_sequence):
         return app_find_sequence
@@ -751,9 +762,11 @@ def daily_desktop_intent_tool_requests(
     app_safe_click = _app_prefix_safe_click_tool_request(context)
     if app_safe_click and str(app_safe_click.get("tool") or "") in allowed:
         return [app_safe_click]
-    app_safe_type_text = _app_prefix_safe_type_text_tool_request(context)
-    if app_safe_type_text and str(app_safe_type_text.get("tool") or "") in allowed:
-        return [app_safe_type_text]
+    app_safe_type_text_sequence = _app_prefix_safe_type_text_tool_requests(context)
+    if app_safe_type_text_sequence and all(
+        str(request.get("tool") or "") in allowed for request in app_safe_type_text_sequence
+    ):
+        return app_safe_type_text_sequence
     app_window_management = _app_prefix_window_management_tool_request(context)
     if app_window_management and str(app_window_management.get("tool") or "") in allowed:
         return [app_window_management]
@@ -4611,6 +4624,12 @@ def _app_prefix_safe_type_text_tool_request(text: str) -> dict[str, Any] | None:
     raw_app, app_name, followup = split
     if _looks_like_window_target(raw_app) or _looks_like_common_path_target(raw_app):
         return None
+    if (
+        _app_followup_safe_key(followup)
+        or _desktop_safe_shortcut_action(followup)
+        or _desktop_hotkey(followup)
+    ):
+        return None
     typed_text = _app_followup_safe_type_text(followup)
     if not typed_text:
         return None
@@ -4618,6 +4637,17 @@ def _app_prefix_safe_type_text_tool_request(text: str) -> dict[str, Any] | None:
         "app.focus_and_safe_type_text",
         {"app_name": app_name, "text": typed_text},
     )
+
+
+def _app_prefix_safe_type_text_tool_requests(text: str) -> list[dict[str, Any]]:
+    request = _app_prefix_safe_type_text_tool_request(text)
+    if not request:
+        return []
+    split = _known_app_prefix_split(text)
+    if not split:
+        return [request]
+    _raw_app, _app_name, followup = split
+    return _safe_type_text_followup_tool_requests(request, followup)
 
 
 def _app_prefix_window_management_tool_request(text: str) -> dict[str, Any] | None:
@@ -5775,6 +5805,81 @@ def _app_open_or_focus_foreground_action_request(text: str) -> dict[str, Any] | 
         mode, _raw_app, app_name, followup = shorthand_match
         return _app_foreground_action_request(mode, app_name, followup)
     return None
+
+
+def _app_open_or_focus_safe_type_text_tool_requests(text: str) -> list[dict[str, Any]]:
+    payload = _app_open_or_focus_foreground_action_request(text)
+    if not payload:
+        return []
+    tool = str(payload.get("tool") or "")
+    if tool not in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"}:
+        return []
+    payload_input = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+    request = _request(tool, dict(payload_input))
+    followup = _app_open_or_focus_foreground_action_followup(text)
+    if not followup:
+        return [request]
+    return _safe_type_text_followup_tool_requests(request, followup)
+
+
+def _app_open_or_focus_foreground_action_followup(text: str) -> str:
+    open_match = _app_foreground_action_match(
+        text,
+        (
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+            r"(?:open|launch|start)\s+(?P<app>[^.!?]+?)\s+(?:and|then)\s+(?P<followup>.+)$",
+        ),
+    )
+    if open_match:
+        _raw_app, followup = open_match
+        return followup
+    focus_match = _app_foreground_action_match(
+        text,
+        (
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:并且|并|然后|之后|后(?!退)|再)\s*(?P<followup>.+)$",
+            r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+?)\s+"
+            r"(?:and|then)\s+(?P<followup>.+)$",
+        ),
+    )
+    if focus_match:
+        _raw_app, followup = focus_match
+        return followup
+    shorthand_match = _app_open_or_focus_known_app_followup_match(text)
+    if shorthand_match:
+        _mode, _raw_app, _app_name, followup = shorthand_match
+        return followup
+    return ""
+
+
+def _safe_type_text_followup_tool_requests(
+    request: dict[str, Any],
+    followup: str,
+) -> list[dict[str, Any]]:
+    requests = [request]
+    if _typed_text_has_return_followup(followup, ""):
+        requests.append(_request("desktop.hotkey", {"key": "return", "modifiers": []}))
+    elif _typed_text_has_submit_followup(followup) or _safe_type_text_followup_has_send_intent(followup):
+        requests.append(_request("desktop.submit_foreground", {"action": "send"}))
+    return requests
+
+
+def _safe_type_text_followup_has_send_intent(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.match(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:发送|发出|发|说)\s*(?:消息|信息|message)?\s*\S+",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.match(r"^(?:send|say)\s+\S+", text, flags=re.IGNORECASE)
+    )
 
 
 def _communication_compose_tool_requests(text: str) -> list[dict[str, Any]]:

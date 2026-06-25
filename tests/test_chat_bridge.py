@@ -6039,7 +6039,7 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "打开微信发你好",
+        "打开微信输入你好",
     )
 
     assert calls[-3:] == [("open", "WeChat"), ("focus", "WeChat"), ("type", "你好")]
@@ -6735,6 +6735,91 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_type_text_without_mo
         ("focus", "Google Chrome"),
         ("type", "hello"),
     ]
+
+
+def test_chat_bridge_quick_message_prepares_app_safe_type_text_then_waits_for_send_approval(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": "Typed user-provided text into the foreground app",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("submit_foreground should wait for approval")
+        ),
+    )
+    cases = (
+        (
+            "微信输入 hello 并发送",
+            "bubble",
+            [("focus", "WeChat"), ("type", "hello")],
+            "app.focus_and_safe_type_text",
+        ),
+        (
+            "打开微信发送 hello",
+            "live2d",
+            [("open", "WeChat"), ("focus", "WeChat"), ("type", "hello")],
+            "app.open_and_safe_type_text",
+        ),
+        (
+            "打开微信发你好",
+            "bubble",
+            [("open", "WeChat"), ("focus", "WeChat"), ("type", "你好")],
+            "app.open_and_safe_type_text",
+        ),
+    )
+    for prompt, launcher_mode, expected_calls, first_tool in cases:
+        calls.clear()
+        _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+            launcher_mode=launcher_mode,
+        )
+
+        assert calls == expected_calls
+        assert agent_task["status"] == "waiting_approval"
+        assert agent_task["needs_user_action"] is True
+        assert agent_task["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
+        assert agent_task["pending_approvals"][0]["input_preview"] == {"action": "send"}
+        assert any(
+            tool_call["tool_name"] == first_tool and tool_call["status"] == "completed"
+            for tool_call in agent_task["tool_calls"]
+        )
+        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.submit_foreground"
+        assert agent_task["tool_calls"][-1]["status"] == "waiting_approval"
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
+        assert run["pending_approval"]["input_preview"] == {"action": "send"}
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" not in event_types
+        assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
