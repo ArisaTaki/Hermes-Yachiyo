@@ -2494,6 +2494,23 @@ def test_send_message_executes_common_folder_with_open_path(tmp_path, monkeypatc
         assert reveal_calls == []
         assert app_open_calls == []
         assert run["status"] == "completed"
+
+        result = api.send_message("打开垃圾桶")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已打开文件夹：~/.Trash。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.open_path"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已打开文件夹：~/.Trash。"
+        assert open_path_calls[-1] == "~/.Trash"
+        assert reveal_calls == []
+        assert app_open_calls == []
+        assert run["status"] == "completed"
     finally:
         service.close()
         store.close()
@@ -3122,17 +3139,18 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
 
     def fake_system_volume(action: str, *, level=None, step=None) -> dict:
         volume_calls.append((action, level, step))
+        reported_level = 35 if action == "status" else level
         return {
             "ok": True,
             "action": "system.volume",
-            "summary": "System volume set to 35%",
+            "summary": "System volume is 35%" if action == "status" else "System volume set to 35%",
             "data": {
                 "requested_action": action,
                 "old_level": 20,
                 "old_muted": False,
-                "level": level,
+                "level": reported_level,
                 "muted": False,
-                "changed": True,
+                "changed": action != "status",
             },
         }
 
@@ -3153,6 +3171,23 @@ def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
             assert task.status == TaskStatus.COMPLETED
             assert task.result == "已把系统音量调到 35%。"
             assert volume_calls == [("set", 35, None)] * index
+            assert run["status"] == "completed"
+
+        for text in ("查看当前音量", "show current volume"):
+            result = api.send_message(text)
+            task = runtime.state.get_task(result["task_id"])
+            link = service.get_task_run_link(result["task_id"])
+            run = service.get_run(link["run_id"])
+
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["agent_task"]["summary"] == "当前系统音量是 35%。"
+            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "system.volume"
+            assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"action": "status"}
+            assert task is not None
+            assert task.status == TaskStatus.COMPLETED
+            assert task.result == "当前系统音量是 35%。"
+            assert volume_calls[-1] == ("status", None, None)
             assert run["status"] == "completed"
     finally:
         service.close()

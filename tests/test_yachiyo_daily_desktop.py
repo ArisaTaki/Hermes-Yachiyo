@@ -392,6 +392,16 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~"},
         ),
         (
+            "打开垃圾桶",
+            "desktop.open_path",
+            {"path": "~/.Trash"},
+        ),
+        (
+            "open trash folder",
+            "desktop.open_path",
+            {"path": "~/.Trash"},
+        ),
+        (
             "click the first search result",
             "browser.click",
             {"selector": "search-result=1", "click_count": 1},
@@ -426,6 +436,8 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    assert daily_desktop_entrypoint_requests("清空垃圾桶") == []
 
 
 def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
@@ -628,6 +640,8 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         ("set sound to 35", {"action": "set", "level": 35}),
         ("sound up", {"action": "up"}),
         ("sound down", {"action": "down"}),
+        ("查看当前音量", {"action": "status"}),
+        ("show current volume", {"action": "status"}),
     )
 
     for prompt, tool_input in cases:

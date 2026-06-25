@@ -304,6 +304,16 @@ _COMMON_REVEAL_PATHS = {
     "应用程序": "/Applications",
     "应用程序文件夹": "/Applications",
     "应用程序目录": "/Applications",
+    "trash": "~/.Trash",
+    "trashfolder": "~/.Trash",
+    "trashdirectory": "~/.Trash",
+    "bin": "~/.Trash",
+    "垃圾桶": "~/.Trash",
+    "废纸篓": "~/.Trash",
+    "垃圾桶文件夹": "~/.Trash",
+    "废纸篓文件夹": "~/.Trash",
+    "垃圾桶目录": "~/.Trash",
+    "废纸篓目录": "~/.Trash",
 }
 _MUSIC_APP_COMPACTS = {
     "applemusic",
@@ -3329,9 +3339,22 @@ def _system_volume_request(text: str) -> dict[str, Any] | None:
         lowered,
     ):
         return {"action": "down"}
-    if re.search(r"(?:当前|现在|系统)?(?:音量|声音).{0,6}(?:多少|是多少|状态)", text) or re.search(
-        r"\b(?:current\s+)?(?:system\s+)?volume(?:\s+level|\s+status)?\??$",
-        lowered,
+    if (
+        re.search(
+            r"(?:查看|看看|看下|读取|显示|告诉我).{0,8}"
+            r"(?:当前|现在|系统)?(?:音量|声音)(?!设置)(?:大小|级别|状态)?",
+            text,
+        )
+        or re.search(r"(?:当前|现在|系统)?(?:音量|声音).{0,6}(?:多少|是多少|状态)", text)
+        or re.search(
+            r"\b(?:check|show|read|tell\s+me)\s+(?:the\s+)?(?:current\s+)?"
+            r"(?:system\s+)?(?:volume|sound)(?:\s+(?:level|status))?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:current\s+)?(?:system\s+)?volume(?:\s+level|\s+status)?\??$",
+            lowered,
+        )
     ):
         return {"action": "status"}
     return None

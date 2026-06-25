@@ -4043,6 +4043,10 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
             old_level = 50
             new_level = 40
             summary = "System volume decreased from 50% to 40%"
+        elif action == "status":
+            old_level = 50
+            new_level = 50
+            summary = "System volume is 50%"
         else:
             old_level = 40
             new_level = 50
@@ -4069,6 +4073,8 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
         ("sound up", "live2d", "up", "已把系统音量从 40% 调高到 50%。"),
         ("make it quieter", "bubble", "down", "已把系统音量从 50% 调低到 40%。"),
         ("sound down", "live2d", "down", "已把系统音量从 50% 调低到 40%。"),
+        ("查看当前音量", "bubble", "status", "当前系统音量是 50%。"),
+        ("show current volume", "live2d", "status", "当前系统音量是 50%。"),
     )
     for prompt, launcher_mode, action, summary in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -4093,6 +4099,8 @@ def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoin
         ("up", None, None),
         ("down", None, None),
         ("down", None, None),
+        ("status", None, None),
+        ("status", None, None),
     ]
 
 
@@ -4349,6 +4357,8 @@ def test_chat_bridge_quick_message_executes_open_path_for_launcher_entrypoints(
         ("打开 Music 文件夹", "live2d", "~/Music"),
         ("打开用户目录", "bubble", "~"),
         ("open user directory", "live2d", "~"),
+        ("打开垃圾桶", "bubble", "~/.Trash"),
+        ("open trash folder", "live2d", "~/.Trash"),
     )
     for prompt, launcher_mode, expected_path in cases:
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
