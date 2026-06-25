@@ -6918,6 +6918,19 @@ def test_chat_bridge_quick_message_prepares_paste_then_waits_for_send_approval(
             ],
             "app.focus_and_safe_shortcut",
         ),
+        (
+            "微信给文件传输助手发送选中的内容",
+            "bubble",
+            [
+                ("shortcut", "copy"),
+                ("focus", "WeChat"),
+                ("shortcut", "find"),
+                ("type", "文件传输助手"),
+                ("search_submit", ""),
+                ("shortcut", "paste"),
+            ],
+            "app.focus_and_safe_shortcut",
+        ),
     )
     for prompt, launcher_mode, expected_calls, first_tool in cases:
         calls.clear()

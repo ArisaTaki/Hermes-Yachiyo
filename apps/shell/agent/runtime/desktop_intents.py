@@ -488,6 +488,11 @@ def daily_desktop_intent_tool_requests(
         str(request.get("tool") or "") in allowed for request in selected_text_read_sequence
     ):
         return selected_text_read_sequence
+    communication_selected_text_sequence = _communication_selected_text_tool_requests(context)
+    if communication_selected_text_sequence and all(
+        str(request.get("tool") or "") in allowed for request in communication_selected_text_sequence
+    ):
+        return communication_selected_text_sequence
     communication_paste_sequence = _communication_paste_tool_requests(context)
     if communication_paste_sequence and all(
         str(request.get("tool") or "") in allowed for request in communication_paste_sequence
@@ -5963,6 +5968,70 @@ def _safe_type_text_followup_has_send_intent(value: str) -> bool:
     )
 
 
+def _communication_selected_text_tool_requests(text: str) -> list[dict[str, Any]]:
+    parsed = _communication_selected_text_request(text)
+    if not parsed:
+        return []
+    mode, app_name, recipient = parsed
+    return [
+        _request("desktop.safe_shortcut", {"action": "copy"}),
+        _request(
+            f"app.{mode}_and_safe_shortcut",
+            {"app_name": app_name, "action": "find"},
+        ),
+        _request("desktop.safe_type_text", {"text": recipient}),
+        _request("desktop.search_submit", {}),
+        _request("desktop.safe_shortcut", {"action": "paste"}),
+        _request("desktop.submit_foreground", {"action": "send"}),
+    ]
+
+
+def _communication_selected_text_request(text: str) -> tuple[str, str, str] | None:
+    app_followup = _communication_app_followup_request(text)
+    if not app_followup:
+        return None
+    mode, app_name, followup = app_followup
+    recipient = _communication_selected_text_recipient(followup)
+    if not recipient:
+        return None
+    return mode, app_name, recipient
+
+
+def _communication_selected_text_recipient(text: str) -> str:
+    followup = _strip_query(text)
+    if not followup or _looks_like_explicit_text_input_target(followup):
+        return ""
+    selected_text_source = (
+        r"(?:当前)?(?:选中|选择)(?:的)?(?:内容|文字|文本)?|"
+        r"(?:selected\s+text|selection|current\s+selection)"
+    )
+    patterns = (
+        rf"^(?:给|向)\s*(?P<recipient_to>.+?)\s*(?:发送|发出|发)\s*"
+        rf"(?:{selected_text_source})$",
+        rf"^(?:发送|发出|发)\s*(?:{selected_text_source})\s*(?:给|向)\s*"
+        rf"(?P<recipient_send>.+)$",
+        rf"^(?:send|message)\s+(?:the\s+)?(?:{selected_text_source})\s+to\s+"
+        rf"(?P<recipient_selected_to>.+)$",
+        rf"^(?:send|message)\s+(?P<recipient_with_selected>.+?)\s+"
+        rf"(?:with\s+)?(?:the\s+)?(?:{selected_text_source})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _strip_communication_piece(
+            groups.get("recipient_to")
+            or groups.get("recipient_send")
+            or groups.get("recipient_selected_to")
+            or groups.get("recipient_with_selected")
+            or ""
+        )
+        if recipient:
+            return recipient
+    return ""
+
+
 def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
     parsed = _communication_paste_request(text)
     if not parsed:
@@ -5983,6 +6052,18 @@ def _communication_paste_tool_requests(text: str) -> list[dict[str, Any]]:
 
 
 def _communication_paste_request(text: str) -> tuple[str, str, str, bool] | None:
+    app_followup = _communication_app_followup_request(text)
+    if not app_followup:
+        return None
+    mode, app_name, followup = app_followup
+    parsed = _communication_paste_recipient(followup)
+    if not parsed:
+        return None
+    recipient, should_submit = parsed
+    return mode, app_name, recipient, should_submit
+
+
+def _communication_app_followup_request(text: str) -> tuple[str, str, str] | None:
     stripped = _strip_query(text)
     if not stripped:
         return None
@@ -6031,12 +6112,7 @@ def _communication_paste_request(text: str) -> tuple[str, str, str, bool] | None
     _raw_app, app_name, followup = split
     if app_name not in _COMMUNICATION_APP_NAMES:
         return None
-
-    parsed = _communication_paste_recipient(followup)
-    if not parsed:
-        return None
-    recipient, should_submit = parsed
-    return mode, app_name, recipient, should_submit
+    return mode, app_name, followup
 
 
 def _communication_paste_recipient(text: str) -> tuple[str, bool] | None:
