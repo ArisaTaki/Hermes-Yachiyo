@@ -2217,6 +2217,31 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"path": "~/Downloads"},
         ),
         (
+            "open Applications folder",
+            "desktop.open_path",
+            {"path": "/Applications"},
+        ),
+        (
+            "打开实用工具文件夹",
+            "desktop.open_path",
+            {"path": "/Applications/Utilities"},
+        ),
+        (
+            "open Utilities folder",
+            "desktop.open_path",
+            {"path": "/Applications/Utilities"},
+        ),
+        (
+            "打开资源库文件夹",
+            "desktop.open_path",
+            {"path": "~/Library"},
+        ),
+        (
+            "open Library folder",
+            "desktop.open_path",
+            {"path": "~/Library"},
+        ),
+        (
             "打开用户目录",
             "desktop.open_path",
             {"path": "~"},
@@ -2275,6 +2300,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             "show Downloads folder in Finder",
             "desktop.reveal_path",
             {"path": "~/Downloads"},
+        ),
+        (
+            "在 Finder 中显示实用工具文件夹",
+            "desktop.reveal_path",
+            {"path": "/Applications/Utilities"},
         ),
         (
             "打开当前工作区",

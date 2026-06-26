@@ -408,6 +408,26 @@ _COMMON_REVEAL_PATHS = {
     "应用程序": "/Applications",
     "应用程序文件夹": "/Applications",
     "应用程序目录": "/Applications",
+    "utilities": "/Applications/Utilities",
+    "utilitiesfolder": "/Applications/Utilities",
+    "utilitiesdirectory": "/Applications/Utilities",
+    "utilityfolder": "/Applications/Utilities",
+    "utilitydirectory": "/Applications/Utilities",
+    "应用程序实用工具": "/Applications/Utilities",
+    "应用程序实用工具文件夹": "/Applications/Utilities",
+    "应用程序实用工具目录": "/Applications/Utilities",
+    "实用工具": "/Applications/Utilities",
+    "实用工具文件夹": "/Applications/Utilities",
+    "实用工具目录": "/Applications/Utilities",
+    "library": "~/Library",
+    "libraryfolder": "~/Library",
+    "librarydirectory": "~/Library",
+    "资源库": "~/Library",
+    "资源库文件夹": "~/Library",
+    "资源库目录": "~/Library",
+    "用户资源库": "~/Library",
+    "用户资源库文件夹": "~/Library",
+    "用户资源库目录": "~/Library",
     "trash": "~/.Trash",
     "trashfolder": "~/.Trash",
     "trashdirectory": "~/.Trash",
@@ -6565,6 +6585,8 @@ def _normalize_clipboard_text(value: str) -> str:
 
 def _is_running_apps_request(text: str) -> bool:
     lowered = text.lower()
+    if re.search(r"\bopen\s+(?:the\s+)?applications?\s+(?:folder|directory)\b", lowered):
+        return False
     return bool(
         re.search(
             r"(?:现在|当前|桌面|电脑|系统|前台|后台)?.{0,8}"

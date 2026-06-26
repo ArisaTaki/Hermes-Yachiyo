@@ -2299,6 +2299,26 @@ def test_app_open_handles_common_finder_folder_aliases(monkeypatch) -> None:
     }
     assert calls[0][0] == ["open", str(desktop_mod.Path.home() / "Downloads")]
 
+    utilities = desktop_mod.app_open("Utilities folder")
+    library = desktop_mod.app_open("Library folder")
+
+    assert utilities["ok"] is True
+    assert utilities["summary"] == "Opened Utilities"
+    assert utilities["data"] == {
+        "app_name": "Utilities folder",
+        "path": "/Applications/Utilities",
+        "open_target": "folder",
+    }
+    assert calls[1][0] == ["open", "/Applications/Utilities"]
+    assert library["ok"] is True
+    assert library["summary"] == "Opened Library"
+    assert library["data"] == {
+        "app_name": "Library folder",
+        "path": str(desktop_mod.Path.home() / "Library"),
+        "open_target": "folder",
+    }
+    assert calls[2][0] == ["open", str(desktop_mod.Path.home() / "Library")]
+
 
 def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> None:
     calls = []
