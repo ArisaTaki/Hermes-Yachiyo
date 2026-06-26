@@ -309,6 +309,151 @@ def safe_shortcut_hint(text: str) -> dict[str, str] | None:
     return {"action": action} if action else None
 
 
+def safe_key_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    lowered = value.lower()
+    if _looks_like_show_desktop_request(value, lowered):
+        return {"action": "show_desktop", "repeat_count": 1}
+    if _looks_like_next_focus_request(value, lowered):
+        return {"action": "tab", "repeat_count": 1}
+    if _looks_like_previous_focus_request(value, lowered):
+        return {"action": "shift_tab", "repeat_count": 1}
+    count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
+    key = (
+        r"(?P<{name}>esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right|"
+        r"退出|取消|制表键|制表|向上箭头|向下箭头|向左箭头|向右箭头|"
+        r"上箭头|下箭头|左箭头|右箭头|上方向键|下方向键|左方向键|右方向键|"
+        r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
+    )
+    patterns = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:按一下|按下|按|发送|触发)\s*"
+            rf"(?:{count.format(name='count_before')}\s*(?:次|下)\s*)?"
+            rf"{key.format(name='key')}"
+            rf"(?:\s*{count.format(name='count_after')}\s*(?:次|下))?"
+            r"\s*(?:键)?(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            r"^(?:please\s+)?(?:press|send|hit)\s+(?:the\s+)?"
+            rf"{key.format(name='key_en')}"
+            rf"(?:\s+{count.format(name='count_en')}\s*(?:times?)?)?\s*$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        action = _safe_key_action(
+            groups.get("key") or groups.get("key_en") or ""
+        )
+        repeat_count = _bounded_count(
+            groups.get("count_before") or groups.get("count_after") or groups.get("count_en"),
+            default=1,
+            maximum=20,
+        )
+        if action and repeat_count:
+            return {"action": action, "repeat_count": repeat_count}
+    return None
+
+
+def safe_scroll_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
+    zh_prefix = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|把|将)?\s*(?:当前|前台|这个|该)?"
+        r"(?:窗口|界面|应用|app|网页|页面|屏幕)?(?:上|里|中|内)?\s*"
+    )
+    patterns = (
+        (
+            zh_prefix
+            + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)(?:到|至)?\s*"
+            + r"(?P<extent>页面底部|页面顶部|底部|底端|最底下|最下面|顶部|顶端|最上面|最上方)"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            zh_prefix
+            + r"(?P<direction>向下|往下|朝下|下|向上|往上|朝上|上)"
+            + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)"
+            + rf"(?:\s*{count.format(name='count')}\s*(?:页|屏|次))?"
+            + r"(?:一点|点|一些|一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            zh_prefix
+            + r"(?P<direction_phrase>下滑|上滑|下滚|上滚|下翻|上翻|下一页|上一页)"
+            + rf"(?:\s*{count.format(name='count_phrase')}\s*(?:页|屏|次))?"
+            + r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            r"^(?:please\s+)?(?:scroll|page)\s+"
+            r"(?P<direction_en>down|up)"
+            + rf"(?:\s+{count.format(name='count_en')}\s*(?:pages?|times?)?)?"
+            + r"\s*$"
+        ),
+        (
+            r"^(?:please\s+)?(?:scroll|page)\s+(?:to\s+)?(?:the\s+)?"
+            r"(?P<extent_en>bottom|top)\s*$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        direction = (
+            groups.get("extent")
+            or groups.get("direction")
+            or groups.get("direction_phrase")
+            or groups.get("direction_en")
+            or groups.get("extent_en")
+            or ""
+        )
+        pages = (
+            10
+            if groups.get("extent") or groups.get("extent_en")
+            else _bounded_count(
+                groups.get("count") or groups.get("count_phrase") or groups.get("count_en"),
+                default=1,
+                maximum=10,
+            )
+        )
+        if direction and pages:
+            return {"direction": "up" if _scroll_direction_is_up(direction) else "down", "pages": pages}
+    if re.search(
+        zh_prefix + r"(?:滚动|滚|滑动|滑|翻页|翻|拉)(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(r"^(?:please\s+)?(?:scroll|page)(?:\s+(?:a\s+)?(?:little|bit))?\s*$", value, flags=re.IGNORECASE):
+        return {"direction": "down", "pages": 1}
+    return None
+
+
+def safe_click_hint(text: str) -> dict[str, int | float] | None:
+    value = clean(text)
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:点击|点一下|点按|单击|点|click)\s*"
+        r"(?:屏幕坐标|屏幕|坐标|位置)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|到)\s*(?:屏幕坐标|屏幕|坐标|位置)?\s*"
+        r"(?P<x2>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y2>\d+(?:\.\d+)?)\s*"
+        r"(?:点击|点一下|点按|单击|点|click)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        x = match.groupdict().get("x") or match.groupdict().get("x2") or ""
+        y = match.groupdict().get("y") or match.groupdict().get("y2") or ""
+        return {"x": _numeric_value(x), "y": _numeric_value(y)}
+    return None
+
+
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
     return {
@@ -954,6 +1099,156 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "focusaddressbar": "focus_address_bar",
     }
     return mapping.get(normalized, "")
+
+
+def _looks_like_show_desktop_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:显示|露出|查看|看看|看一下|切到|切换到|回到|返回到|回)\s*"
+            r"(?:当前|现在)?(?:桌面|desktop)"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"^(?:show|reveal|switch\s+to|go\s+to)\s+(?:the\s+)?desktop\s*(?:please)?$", lowered)
+    )
+
+
+def _looks_like_next_focus_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到)?\s*"
+            r"(?:下一个|下一项|下个|next)\s*"
+            r"(?:输入框|文本框|输入栏|字段|控件|元素|项目)?"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"^(?:focus|move|go|jump|tab)\s+(?:to\s+)?(?:the\s+)?next\s+(?:field|input|control|element)\s*$", lowered)
+    )
+
+
+def _looks_like_previous_focus_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到)?\s*"
+            r"(?:上一个|上一项|上个|previous|prev)\s*"
+            r"(?:输入框|文本框|输入栏|字段|控件|元素|项目)?"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"^(?:focus|move|go|jump)\s+(?:to\s+)?(?:the\s+)?(?:previous|prev)\s+(?:field|input|control|element)\s*$", lowered)
+    )
+
+
+def _safe_key_action(value: str) -> str:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    return {
+        "esc": "escape",
+        "escape": "escape",
+        "退出": "escape",
+        "取消": "escape",
+        "tab": "tab",
+        "制表": "tab",
+        "制表键": "tab",
+        "up": "arrow_up",
+        "uparrow": "arrow_up",
+        "arrowup": "arrow_up",
+        "上箭头": "arrow_up",
+        "上方向键": "arrow_up",
+        "向上箭头": "arrow_up",
+        "down": "arrow_down",
+        "downarrow": "arrow_down",
+        "arrowdown": "arrow_down",
+        "下箭头": "arrow_down",
+        "下方向键": "arrow_down",
+        "向下箭头": "arrow_down",
+        "left": "arrow_left",
+        "leftarrow": "arrow_left",
+        "arrowleft": "arrow_left",
+        "左箭头": "arrow_left",
+        "左方向键": "arrow_left",
+        "向左箭头": "arrow_left",
+        "right": "arrow_right",
+        "rightarrow": "arrow_right",
+        "arrowright": "arrow_right",
+        "右箭头": "arrow_right",
+        "右方向键": "arrow_right",
+        "向右箭头": "arrow_right",
+        "home": "home",
+        "home键": "home",
+        "end": "end",
+        "end键": "end",
+        "pageup": "page_up",
+        "上一页键": "page_up",
+        "上一页": "page_up",
+        "pagedown": "page_down",
+        "下一页键": "page_down",
+        "下一页": "page_down",
+    }.get(compact, "")
+
+
+def _scroll_direction_is_up(value: str) -> bool:
+    direction = str(value or "").strip().lower()
+    return direction in {
+        "向上",
+        "往上",
+        "朝上",
+        "上",
+        "上滑",
+        "上滚",
+        "上翻",
+        "上一页",
+        "页面顶部",
+        "顶部",
+        "顶端",
+        "最上面",
+        "最上方",
+        "up",
+        "top",
+    }
+
+
+def _bounded_count(value: str | None, *, default: int, maximum: int) -> int:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return default
+    if raw.isdigit():
+        count = int(raw)
+    else:
+        count = {
+            "一": 1,
+            "二": 2,
+            "两": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+            "十": 10,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+        }.get(raw, 0)
+    return count if 1 <= count <= maximum else 0
+
+
+def _numeric_value(value: str) -> int | float:
+    number = float(str(value or "0"))
+    return int(number) if number.is_integer() else number
 
 
 def _normalize_hotkey_token(value: str) -> str:

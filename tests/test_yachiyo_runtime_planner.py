@@ -582,6 +582,54 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     ]
 
 
+def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> None:
+    key_decision = RuntimePlanner().decision(
+        "按下一页键",
+        allowed_tools=["desktop.active_window", "desktop.safe_key"],
+    )
+    scroll_decision = RuntimePlanner().decision(
+        "向下滚动两页",
+        allowed_tools=["desktop.active_window", "desktop.safe_scroll"],
+    )
+    click_decision = RuntimePlanner().decision(
+        "点击坐标 120, 240",
+        allowed_tools=["desktop.active_window", "desktop.safe_click"],
+    )
+
+    key_step = _step_by_id(key_decision, "operate-foreground-ui")
+    assert key_decision.selected_intent.inputs["operation_hint"] == "safe_key"
+    assert key_decision.selected_intent.inputs["safe_key_hint"] == {
+        "action": "page_down",
+        "repeat_count": 1,
+    }
+    assert key_step.tool_name == "desktop.safe_key"
+    assert key_step.input_preview == {"action": "page_down", "repeat_count": 1}
+    assert key_step.risk_level == "low"
+    assert key_step.approval_required is False
+
+    scroll_step = _step_by_id(scroll_decision, "operate-foreground-ui")
+    assert scroll_decision.selected_intent.inputs["operation_hint"] == "safe_scroll"
+    assert scroll_decision.selected_intent.inputs["safe_scroll_hint"] == {
+        "direction": "down",
+        "pages": 2,
+    }
+    assert scroll_step.tool_name == "desktop.safe_scroll"
+    assert scroll_step.input_preview == {"direction": "down", "pages": 2}
+    assert scroll_step.risk_level == "low"
+    assert scroll_step.approval_required is False
+
+    click_step = _step_by_id(click_decision, "operate-foreground-ui")
+    assert click_decision.selected_intent.inputs["operation_hint"] == "safe_click"
+    assert click_decision.selected_intent.inputs["safe_click_hint"] == {
+        "x": 120,
+        "y": 240,
+    }
+    assert click_step.tool_name == "desktop.safe_click"
+    assert click_step.input_preview == {"x": 120, "y": 240}
+    assert click_step.risk_level == "low"
+    assert click_step.approval_required is False
+
+
 def test_runtime_planner_verifies_desktop_open_result() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge",
@@ -1379,6 +1427,89 @@ def test_planner_tool_requests_prefers_safe_shortcut_for_whitelisted_hotkey() ->
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }
+    ]
+
+
+def test_planner_tool_requests_maps_safe_key_scroll_and_click() -> None:
+    assert planner_tool_requests(
+        "按下一页键",
+        allowed_tools=["desktop.active_window", "desktop.safe_key"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "page_down", "repeat_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_tool_requests(
+        "向上滚动三页",
+        allowed_tools=["desktop.active_window", "desktop.safe_scroll"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_scroll",
+            "input": {"direction": "up", "pages": 3},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_tool_requests(
+        "点击坐标 120, 240",
+        allowed_tools=["desktop.active_window", "desktop.safe_click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_click",
+            "input": {"x": 120, "y": 240},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
     ]
 
 

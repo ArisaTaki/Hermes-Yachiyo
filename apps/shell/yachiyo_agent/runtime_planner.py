@@ -38,6 +38,9 @@ from .desktop_plan_hints import (
     hotkey_hint,
     media_playback_hint,
     media_tool_preview,
+    safe_click_hint,
+    safe_key_hint,
+    safe_scroll_hint,
     safe_type_text_hint,
     safe_shortcut_hint,
     screen_capture_hint,
@@ -164,6 +167,9 @@ class TaskIntentRouter:
         app_management = app_management_hint(text)
         foreground_management = foreground_management_hint(text)
         safe_shortcut = safe_shortcut_hint(text)
+        safe_key = safe_key_hint(text)
+        safe_scroll = safe_scroll_hint(text)
+        safe_click = safe_click_hint(text)
         score = _score_terms(
             text,
             [
@@ -216,6 +222,11 @@ class TaskIntentRouter:
                 "新建标签页",
                 "new tab",
                 "refresh",
+                "滚动",
+                "滑动",
+                "scroll",
+                "page down",
+                "page up",
             ],
         )
         if (
@@ -226,6 +237,9 @@ class TaskIntentRouter:
             and app_management is None
             and foreground_management is None
             and safe_shortcut is None
+            and safe_key is None
+            and safe_scroll is None
+            and safe_click is None
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -258,6 +272,12 @@ class TaskIntentRouter:
             inputs["foreground_management_hint"] = foreground_management
         if safe_shortcut is not None:
             inputs["safe_shortcut_hint"] = safe_shortcut
+        if safe_key is not None:
+            inputs["safe_key_hint"] = safe_key
+        if safe_scroll is not None:
+            inputs["safe_scroll_hint"] = safe_scroll
+        if safe_click is not None:
+            inputs["safe_click_hint"] = safe_click
         risk_level = (
             "medium"
             if operation_hint
@@ -271,6 +291,9 @@ class TaskIntentRouter:
                 "minimize_app",
                 "minimize_window",
                 "safe_shortcut",
+                "safe_key",
+                "safe_scroll",
+                "safe_click",
             }
             and _looks_like_ui_operation(text)
             else "low"
@@ -719,6 +742,9 @@ class RuntimePlanner:
         app_management = app_management_hint(intent.user_goal)
         foreground_management = foreground_management_hint(intent.user_goal)
         safe_shortcut = safe_shortcut_hint(intent.user_goal)
+        safe_key = safe_key_hint(intent.user_goal)
+        safe_scroll = safe_scroll_hint(intent.user_goal)
+        safe_click = safe_click_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -740,6 +766,9 @@ class RuntimePlanner:
             allowed=allowed,
             click_target=click_target,
             safe_shortcut=safe_shortcut,
+            safe_key=safe_key,
+            safe_scroll=safe_scroll,
+            safe_click=safe_click,
             hotkey=hotkey,
             type_target=type_target,
             safe_type_text=safe_type_text,
@@ -985,7 +1014,7 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
-        if _looks_like_ui_operation(intent.user_goal) or safe_shortcut:
+        if _looks_like_ui_operation(intent.user_goal) or safe_shortcut or safe_key or safe_scroll or safe_click:
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
@@ -1474,7 +1503,12 @@ def _desktop_operation_action(tool_name: str | None) -> str:
 
 def _desktop_operation_risk_level(tool_name: str | None) -> str:
     clean_tool = str(tool_name or "")
-    if "safe_shortcut" in clean_tool or "safe_key" in clean_tool or "safe_scroll" in clean_tool:
+    if (
+        "safe_shortcut" in clean_tool
+        or "safe_key" in clean_tool
+        or "safe_scroll" in clean_tool
+        or "safe_click" in clean_tool
+    ):
         return "low"
     return "medium"
 
@@ -1888,6 +1922,12 @@ def _desktop_operation_hint(text: str) -> str:
         return str(foreground_management.get("action") or "")
     if safe_shortcut_hint(text):
         return "safe_shortcut"
+    if safe_key_hint(text):
+        return "safe_key"
+    if safe_scroll_hint(text):
+        return "safe_scroll"
+    if safe_click_hint(text):
+        return "safe_click"
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"
@@ -1917,6 +1957,9 @@ def _desktop_operation_tool_preview(
     click_target: dict[str, Any] | None,
     hotkey: dict[str, Any] | None,
     safe_shortcut: dict[str, str] | None,
+    safe_key: dict[str, Any] | None,
+    safe_scroll: dict[str, Any] | None,
+    safe_click: dict[str, Any] | None,
     type_target: dict[str, Any] | None,
     safe_type_text: str,
     allow_app_tools: bool = True,
@@ -1929,6 +1972,30 @@ def _desktop_operation_tool_preview(
         shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
         if shortcut_tool:
             return shortcut_tool, dict(safe_shortcut)
+    if safe_key:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_key"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_key}
+        key_tool = _first_allowed(("desktop.safe_key",), allowed)
+        if key_tool:
+            return key_tool, dict(safe_key)
+    if safe_scroll:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_scroll"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_scroll}
+        scroll_tool = _first_allowed(("desktop.safe_scroll",), allowed)
+        if scroll_tool:
+            return scroll_tool, dict(safe_scroll)
+    if safe_click:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_click"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_click}
+        click_tool = _first_allowed(("desktop.safe_click",), allowed)
+        if click_tool:
+            return click_tool, dict(safe_click)
     if hotkey:
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
