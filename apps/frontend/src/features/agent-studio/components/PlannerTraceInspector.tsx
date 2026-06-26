@@ -117,26 +117,24 @@ export function PlannerTraceInspector({
             </div>
             <div className="studio-tool-pill-row">
               {visibleCapabilityIds.map((capabilityId) => (
-                <span
-                  className={missingCapabilities.includes(capabilityId) ? 'studio-tool-permission missing' : 'studio-tool-permission'}
-                  data-capability-id={capabilityId}
-                  data-capability-state={missingCapabilities.includes(capabilityId) ? 'missing' : capabilityState(capabilityId, requiredCapabilities, preferredCapabilities)}
+                <PlannerCapabilityPill
+                  capabilityById={capabilityById}
+                  capabilityId={capabilityId}
                   key={capabilityId}
-                >
-                  {capabilityLabel(capabilityId, capabilityById)}
-                </span>
+                  missing={missingCapabilities.includes(capabilityId)}
+                  state={missingCapabilities.includes(capabilityId) ? 'missing' : capabilityState(capabilityId, requiredCapabilities, preferredCapabilities)}
+                />
               ))}
               {missingCapabilities
                 .filter((capabilityId) => !visibleCapabilityIds.includes(capabilityId))
                 .map((capabilityId) => (
-                  <span
-                    className="studio-tool-permission missing"
-                    data-capability-id={capabilityId}
-                    data-capability-state="missing"
+                  <PlannerCapabilityPill
+                    capabilityById={capabilityById}
+                    capabilityId={capabilityId}
                     key={capabilityId}
-                  >
-                    {capabilityLabel(capabilityId, capabilityById)}
-                  </span>
+                    missing
+                    state="missing"
+                  />
                 ))}
             </div>
           </section>
@@ -192,6 +190,36 @@ export function PlannerTraceInspector({
         ) : null}
       </div>
     </details>
+  );
+}
+
+function PlannerCapabilityPill({
+  capabilityById,
+  capabilityId,
+  missing,
+  state,
+}: {
+  capabilityById: Map<string, CapabilitySnapshot>;
+  capabilityId: string;
+  missing: boolean;
+  state: string;
+}) {
+  const capability = capabilityById.get(capabilityId);
+  const discoveryActions = uniqueStrings(capability?.discovery_actions || []);
+  const executionActions = uniqueStrings(capability?.execution_actions || []);
+  const actionSummary = capabilityActionSummary(discoveryActions, executionActions);
+  return (
+    <span
+      className={missing ? 'studio-tool-permission missing' : 'studio-tool-permission'}
+      data-capability-discovery-actions={discoveryActions.join(',')}
+      data-capability-execution-actions={executionActions.join(',')}
+      data-capability-id={capabilityId}
+      data-capability-state={state}
+      title={actionSummary || undefined}
+    >
+      {capabilityLabel(capabilityId, capabilityById)}
+      {actionSummary ? ` (${actionSummary})` : ''}
+    </span>
   );
 }
 
@@ -363,4 +391,14 @@ function capabilityLabel(
 ): string {
   const title = capabilityById.get(capabilityId)?.title || '';
   return title && title !== capabilityId ? `${title} · ${capabilityId}` : capabilityId;
+}
+
+function capabilityActionSummary(
+  discoveryActions: string[],
+  executionActions: string[],
+): string {
+  const parts: string[] = [];
+  if (discoveryActions.length) parts.push(`discover: ${discoveryActions.slice(0, 3).join(', ')}`);
+  if (executionActions.length) parts.push(`execute: ${executionActions.slice(0, 3).join(', ')}`);
+  return parts.join('; ');
 }
