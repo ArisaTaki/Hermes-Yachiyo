@@ -119,6 +119,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "desktop.safe_type_text",
             "desktop.safe_click",
             "desktop.safe_scroll",
+            "desktop.search_submit",
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
             "desktop.hotkey",
@@ -127,7 +128,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         risk_level="medium",
         approval_required=True,
         discovery_actions=("read_ui", "capture"),
-        execution_actions=("click", "type", "shortcut", "scroll", "verify"),
+        execution_actions=("click", "type", "shortcut", "scroll", "submit", "verify"),
         output_kinds=("desktop_state",),
     ),
     CapabilityDefinition(

@@ -551,7 +551,14 @@ def test_runtime_planner_routes_current_page_find_actions() -> None:
     assert global_search.selected_intent.inputs == {
         "url_hint": "",
         "context_source": "selection",
+        "browser_action": "open_search",
     }
+    assert [step.step_id for step in global_search.plan.tool_plan.steps] == [
+        "copy-selected-browser-context",
+        "focus-browser-address-bar",
+        "paste-browser-context",
+        "submit-browser-context",
+    ]
 
 
 def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
@@ -697,29 +704,69 @@ def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
 def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     decision = RuntimePlanner().decision(
         "search selected text",
-        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     )
 
     assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.required_capabilities == ["desktop.ui_operation"]
     assert decision.selected_intent.inputs == {
         "url_hint": "",
         "context_source": "selection",
+        "browser_action": "open_search",
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "copy-selected-web-context",
-        "read-web-context",
-        "open-or-read-web-from-context",
+        "copy-selected-browser-context",
+        "focus-browser-address-bar",
+        "paste-browser-context",
+        "submit-browser-context",
     ]
-    assert _step_by_id(decision, "copy-selected-web-context").input_preview == {
+    assert _step_by_id(decision, "copy-selected-browser-context").input_preview == {
         "action": "copy"
     }
-    read_step = _step_by_id(decision, "read-web-context")
-    assert read_step.tool_name == "clipboard.read"
-    assert read_step.action == "read_clipboard"
-    web_step = _step_by_id(decision, "open-or-read-web-from-context")
-    assert web_step.tool_name == "browser.open_url"
-    assert web_step.input_preview == {"body_source": "selection"}
-    assert web_step.depends_on == ["copy-selected-web-context", "read-web-context"]
+    assert _step_by_id(decision, "focus-browser-address-bar").input_preview == {
+        "action": "focus_address_bar"
+    }
+    assert _step_by_id(decision, "paste-browser-context").input_preview == {
+        "action": "paste"
+    }
+    assert _step_by_id(decision, "submit-browser-context").tool_name == "desktop.search_submit"
+
+
+def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
+    selected = RuntimePlanner().decision(
+        "打开选中的链接",
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit"],
+    )
+
+    assert selected.selected_intent.kind == "web_research"
+    assert selected.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "selection",
+        "browser_action": "open_url",
+    }
+    assert [step.step_id for step in selected.plan.tool_plan.steps] == [
+        "copy-selected-browser-context",
+        "focus-browser-address-bar",
+        "paste-browser-context",
+        "submit-browser-context",
+    ]
+
+    clipboard = RuntimePlanner().decision(
+        "open clipboard link",
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit"],
+    )
+
+    assert clipboard.selected_intent.kind == "web_research"
+    assert clipboard.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "clipboard",
+        "browser_action": "open_url",
+    }
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
+        "focus-browser-address-bar",
+        "paste-browser-context",
+        "submit-browser-context",
+    ]
 
 
 def test_runtime_planner_report_generation_prefers_workspace_list_for_context() -> None:
@@ -3065,22 +3112,35 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ]
     assert planner_tool_requests(
         "search selected text",
-        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     ) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "copy"},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         },
         {
             "protocol": "json_fallback",
-            "tool": "clipboard.read",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
-            "continue_to_model": True,
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         },
     ]
 
@@ -3219,38 +3279,64 @@ def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> No
     ]
 
 
-def test_planner_tool_requests_prefetches_dynamic_web_context() -> None:
+def test_planner_tool_requests_maps_dynamic_web_context_actions() -> None:
     assert planner_tool_requests(
         "search selected text",
-        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     ) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "copy"},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         },
         {
             "protocol": "json_fallback",
-            "tool": "clipboard.read",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
-            "continue_to_model": True,
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         },
     ]
     assert planner_tool_requests(
         "open clipboard link",
-        allowed_tools=["clipboard.read", "browser.open_url"],
+        allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "clipboard.read",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
-            "continue_to_model": True,
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         }
     ]
 
@@ -3594,7 +3680,13 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
 
     web_selection = planner_first_direct_tool_selection(
         "open clipboard link",
-        ["clipboard.read", "browser.open_url", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        [
+            "clipboard.read",
+            "browser.open_url",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.search_submit",
+        ],
         legacy_tool_requests=legacy_requests,
     )
 
@@ -3604,12 +3696,25 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
     assert web_selection.requests == [
         {
             "protocol": "json_fallback",
-            "tool": "clipboard.read",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
-            "continue_to_model": True,
-        }
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
     ]
 
 

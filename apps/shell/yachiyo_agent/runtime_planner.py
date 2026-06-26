@@ -176,6 +176,7 @@ class TaskIntentRouter:
         safe_scroll = safe_scroll_hint(text)
         safe_click = safe_click_hint(text)
         desktop_discovery = _desktop_discovery_hint(text)
+        context_source = context_source_hint(text)
         score = _score_terms(
             text,
             [
@@ -276,7 +277,20 @@ class TaskIntentRouter:
         )
         operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
         if (
-            context_source_hint(text)
+            context_source in {"selection", "clipboard"}
+            and _dynamic_context_browser_action_hint(text, context_source)
+            and ui_inspection is None
+            and screen_capture is None
+            and app_management is None
+            and foreground_management is None
+            and safe_shortcut is None
+            and safe_key is None
+            and safe_scroll is None
+            and safe_click is None
+        ):
+            return _empty_intent("desktop_operation", text)
+        if (
+            context_source
             and not app_name_hint
             and operation_hint == "open"
             and ui_inspection is None
@@ -430,6 +444,7 @@ class TaskIntentRouter:
         browser_action = (
             _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
+            or _dynamic_context_browser_action_hint(text, dynamic_source)
             or _browser_url_action_hint(text, dynamic_source)
             or _web_search_hint(text, dynamic_source)
         )
@@ -469,9 +484,13 @@ class TaskIntentRouter:
         if dynamic_source and browser_action_name != "find_current_page":
             inputs["context_source"] = dynamic_source
         inputs.update(browser_action)
+        uses_dynamic_browser_context = (
+            dynamic_source in {"selection", "clipboard"}
+            and browser_action_name in {"open_search", "open_url"}
+        )
         required_capabilities = (
             ["desktop.ui_operation"]
-            if browser_action_name == "find_current_page"
+            if browser_action_name == "find_current_page" or uses_dynamic_browser_context
             else ["browser.research"]
         )
         return TaskIntentSnapshot(
@@ -486,7 +505,7 @@ class TaskIntentRouter:
             required_capabilities=required_capabilities,
             preferred_capabilities=[
                 *(
-                    ["clipboard.read_write", "desktop.ui_operation"]
+                    ["clipboard.read_write", "browser.research", "desktop.ui_operation"]
                     if dynamic_source
                     else []
                 ),
@@ -1395,6 +1414,14 @@ class RuntimePlanner:
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
         if browser_action == "find_current_page":
             return _current_page_find_steps(intent, allowed)
+        context_source = str(intent.inputs.get("context_source") or "").strip()
+        url = str(intent.inputs.get("url_hint") or "").strip()
+        if (
+            browser_action in {"open_search", "open_url"}
+            and context_source in {"selection", "clipboard"}
+            and not url
+        ):
+            return _dynamic_context_browser_steps(intent, allowed)
         if browser_action:
             tool_name = {
                 "current_page": "browser.current_page",
@@ -1415,7 +1442,6 @@ class RuntimePlanner:
                 "open_url_extract",
                 "open_url_screenshot",
             }:
-                url = str(intent.inputs.get("url_hint") or "").strip()
                 if url:
                     input_preview["url"] = url
             return [
@@ -1447,8 +1473,6 @@ class RuntimePlanner:
                     reason="Use the explicit current-page browser tool instead of desktop screen automation.",
                 )
             ]
-        url = str(intent.inputs.get("url_hint") or "").strip()
-        context_source = str(intent.inputs.get("context_source") or "").strip()
         if context_source and not url:
             context_steps = _context_source_steps(
                 intent,
@@ -2079,6 +2103,74 @@ def _current_page_find_steps(
     return steps
 
 
+def _dynamic_context_browser_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> list[ToolPlanStepSnapshot]:
+    source = str(intent.inputs.get("context_source") or "").strip()
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    steps: list[ToolPlanStepSnapshot] = []
+
+    if source == "selection":
+        steps.append(
+            _step(
+                intent,
+                "copy-selected-browser-context",
+                "Copy selected browser context",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                action="shortcut",
+                reason="Copy the explicit selection before searching or opening it in the browser.",
+            )
+        )
+
+    focus_depends_on = ["copy-selected-browser-context"] if source == "selection" else []
+    steps.append(
+        _step(
+            intent,
+            "focus-browser-address-bar",
+            "Focus browser address bar",
+            "desktop.ui_operation",
+            shortcut_tool,
+            input_preview={"action": "focus_address_bar"},
+            depends_on=focus_depends_on,
+            action="shortcut",
+            reason="Use the foreground browser address bar so selected or clipboard text can be opened or searched.",
+        )
+    )
+    steps.append(
+        _step(
+            intent,
+            "paste-browser-context",
+            "Paste browser context",
+            "desktop.ui_operation",
+            shortcut_tool,
+            input_preview={"action": "paste"},
+            depends_on=["focus-browser-address-bar"],
+            action="shortcut",
+            reason="Paste the selected or clipboard text into the browser address bar.",
+        )
+    )
+    steps.append(
+        _step(
+            intent,
+            "submit-browser-context",
+            "Submit browser context",
+            "desktop.ui_operation",
+            submit_tool,
+            input_preview={},
+            depends_on=["paste-browser-context"],
+            action="submit",
+            risk_level="low",
+            approval_required=False,
+            reason="Submit the browser address bar query with the dedicated safe search submit tool.",
+        )
+    )
+    return steps
+
+
 def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
     if tool_name == "desktop.ui_elements":
         return {"role_filter": "text", "limit": 80}
@@ -2109,6 +2201,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if step_key.startswith("operate-foreground-ui"):
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
+        return "submit"
+    if step_key == "submit-browser-context":
         return "submit"
     if capability_id == "desktop.app_discovery":
         return _desktop_discovery_action(tool_name)
@@ -2876,6 +2970,82 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
+
+
+def _dynamic_context_browser_action_hint(text: str, context_source: str) -> dict[str, Any]:
+    if context_source not in {"selection", "clipboard"}:
+        return {}
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if _looks_like_browser_current_page_find(value, lowered):
+        return {}
+    if _looks_like_dynamic_context_url_open(value, lowered):
+        return {"browser_action": "open_url"}
+    if _looks_like_dynamic_context_web_search(value, lowered):
+        return {"browser_action": "open_search"}
+    return {}
+
+
+def _looks_like_dynamic_context_url_open(value: str, lowered: str) -> bool:
+    if not _contains_any(value, ("open", "visit", "go to", "browse", "打开", "访问", "浏览器")):
+        return False
+    return bool(
+        _contains_any(
+            value,
+            (
+                "selected link",
+                "selected url",
+                "current selection link",
+                "current selection url",
+                "clipboard link",
+                "clipboard url",
+                "link in clipboard",
+                "url in clipboard",
+                "选中链接",
+                "选中网址",
+                "选中的链接",
+                "选中的网址",
+                "剪贴板链接",
+                "剪贴板网址",
+                "剪贴板里的链接",
+                "剪贴板里的网址",
+                "链接",
+                "网址",
+            ),
+        )
+        or re.search(
+            r"\bopen\s+(?:the\s+)?(?:selected|highlighted|clipboard|current\s+selection)"
+            r"(?:\s+(?:link|url|contents?))?\b",
+            lowered,
+        )
+    )
+
+
+def _looks_like_dynamic_context_web_search(value: str, lowered: str) -> bool:
+    return bool(
+        (
+            _contains_any(value, ("search", "google", "查找", "搜索", "检索"))
+            and _contains_any(
+                value,
+                (
+                    "selected",
+                    "selection",
+                    "highlighted",
+                    "clipboard",
+                    "选中",
+                    "选取",
+                    "高亮",
+                    "剪贴板",
+                    "粘贴板",
+                ),
+            )
+        )
+        or re.search(
+            r"\b(?:search|google|look\s+up)\s+(?:the\s+)?"
+            r"(?:selected|highlighted|clipboard|current\s+selection)",
+            lowered,
+        )
+    )
 
 
 def _explicit_browser_url_hint(text: str) -> str:

@@ -367,6 +367,8 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     if browser_action == "find_current_page":
         return _current_page_find_tool_requests(decision, allowed)
+    if _dynamic_context_browser_action(decision):
+        return _dynamic_context_browser_tool_requests(decision, allowed)
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(
         decision.selected_intent.inputs.get("url_hint") or ""
     ).strip():
@@ -474,6 +476,54 @@ def _current_page_find_tool_requests(decision: Any, allowed: set[str]) -> list[d
                 tool_name,
                 _desktop_request_payload(tool_name, payload),
                 planning_reason="planner_fallback_current_page_find",
+            )
+        )
+    return requests
+
+
+def _dynamic_context_browser_action(decision: Any) -> bool:
+    inputs = decision.selected_intent.inputs
+    browser_action = str(inputs.get("browser_action") or "").strip()
+    source = str(inputs.get("context_source") or "").strip()
+    url_hint = str(inputs.get("url_hint") or "").strip()
+    return browser_action in {"open_search", "open_url"} and source in {"selection", "clipboard"} and not url_hint
+
+
+def _dynamic_context_browser_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    source = str(decision.selected_intent.inputs.get("context_source") or "").strip()
+    if source == "selection":
+        required_step_ids = (
+            "copy-selected-browser-context",
+            "focus-browser-address-bar",
+            "paste-browser-context",
+            "submit-browser-context",
+        )
+    elif source == "clipboard":
+        required_step_ids = (
+            "focus-browser-address-bar",
+            "paste-browser-context",
+            "submit-browser-context",
+        )
+    else:
+        return []
+
+    steps_by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in decision.plan.tool_plan.steps
+    }
+    requests: list[dict[str, Any]] = []
+    for step_id in required_step_ids:
+        step = steps_by_id.get(step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason="planner_fallback_dynamic_browser_context",
             )
         )
     return requests
