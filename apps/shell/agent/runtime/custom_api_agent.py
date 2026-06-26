@@ -287,10 +287,20 @@ class RuntimeCustomApiAgentLoop:
             planned_tool_requests = (
                 [direct_planned_tool_request]
                 if direct_planned_tool_request
-                else daily_desktop_intent_tool_requests(planning_context, allowed_tools)
+                else self._runtime_planner_desktop_tool_requests(
+                    planning_context,
+                    allowed_tools,
+                )
             )
+            if planned_tool_requests and not direct_planned_tool_request:
+                daily_planned_tool_requests = daily_desktop_intent_tool_requests(
+                    planning_context,
+                    allowed_tools,
+                )
+                if len(daily_planned_tool_requests) > len(planned_tool_requests):
+                    planned_tool_requests = daily_planned_tool_requests
             if not planned_tool_requests and not direct_planned_tool_request:
-                planned_tool_requests = self._runtime_planner_desktop_tool_requests(
+                planned_tool_requests = daily_desktop_intent_tool_requests(
                     planning_context,
                     allowed_tools,
                 )

@@ -13065,6 +13065,8 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
             "protocol": "json_fallback",
             "tool": "media.apple_music_open_and_play",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
@@ -13074,8 +13076,8 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         "detail": "media.apple_music_open_and_play",
         "tool": "media.apple_music_open_and_play",
         "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_media_playback",
         "input_preview": {},
     }
 
@@ -14137,6 +14139,8 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
             "protocol": "json_fallback",
             "tool": "media.apple_music_play",
             "input": {"query": "超时空辉夜姬"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-music"
@@ -14146,8 +14150,8 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
         "detail": "media.apple_music_play",
         "tool": "media.apple_music_play",
         "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_media_playback",
         "input_preview": {"query": "超时空辉夜姬"},
     }
     assert appended_events == [
@@ -14157,8 +14161,8 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
             "payload": {
                 "tool": "media.apple_music_play",
                 "status": "planned",
-                "source": "daily_desktop_intent",
-                "planning_reason": "clear_daily_desktop_intent",
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
                 "input_preview": {"query": "超时空辉夜姬"},
             },
         },
@@ -14169,7 +14173,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
                 "tool": "media.apple_music_play",
                 "status": "allowed",
                 "decision": "allow",
-                "source": "daily_desktop_intent",
+                "source": "runtime_planner",
                 "reason": "agent_tool_policy",
                 "policy_scope": "daily_desktop",
                 "policy_overlay": False,
@@ -14179,7 +14183,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
                     "screen.capture",
                     "desktop.active_window",
                 ],
-                "planning_reason": "clear_daily_desktop_intent",
+                "planning_reason": "planner_fallback_media_playback",
             },
         },
     ]
