@@ -679,6 +679,12 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
     if clean_app_name and target.lower().startswith(clean_app_name.lower()):
         target = target[len(clean_app_name):].strip()
     target = re.sub(r"^(?:的|里|中|上|in|inside)\s*", "", target, flags=re.IGNORECASE)
+    target = re.sub(
+        r"^(?:点击|点一下|点按|单击|按一下|按|click|press|tap)\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
     return target.strip(" .，,。") or clean_target(value)
 
 

@@ -1527,6 +1527,59 @@ def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> 
     assert "app.open_and_click_ui_element" in ui_capability.tools
 
 
+def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
+    type_decision = RuntimePlanner().decision(
+        "Slack 点击搜索框输入 Alice 并回车",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+        ],
+    )
+    click_decision = RuntimePlanner().decision(
+        "微信点击搜索",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    foreground_click = RuntimePlanner().decision(
+        "点击发送按钮",
+        allowed_tools=["desktop.click_ui_element"],
+    )
+
+    assert type_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert type_decision.selected_intent.inputs["operation_hint"] == "click"
+    type_step = _step_by_id(type_decision, "operate-foreground-ui")
+    assert type_step.tool_name == "app.open_and_type_into_ui_element"
+    assert type_step.input_preview == {
+        "app_name": "Slack",
+        "target": "搜索框",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(type_decision, "submit-foreground-ui").approval_required is True
+
+    assert click_decision.selected_intent.inputs["app_name_hint"] == "微信"
+    assert click_decision.selected_intent.inputs["operation_hint"] == "click"
+    click_step = _step_by_id(click_decision, "operate-foreground-ui")
+    assert click_step.tool_name == "app.open_and_click_ui_element"
+    assert click_step.input_preview == {
+        "app_name": "微信",
+        "target": "搜索",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+
+    assert foreground_click.selected_intent.inputs["app_name_hint"] == ""
+    assert _step_by_id(foreground_click, "operate-foreground-ui").tool_name == (
+        "desktop.click_ui_element"
+    )
+
+
 def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     decision = RuntimePlanner().decision(
         "刷新当前页面",
