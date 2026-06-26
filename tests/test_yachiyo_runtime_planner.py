@@ -4287,6 +4287,36 @@ def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
     ]
 
 
+def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> None:
+    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        raise AssertionError("planner-owned app UI observation should not consult legacy")
+
+    app_ui = planner_first_direct_tool_selection(
+        "Slack 有哪些按钮",
+        ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+        legacy_tool_requests=fail_legacy,
+    )
+
+    assert app_ui.selected_source == "runtime_planner"
+    assert app_ui.event_payload["legacy_request_count"] == 0
+    assert app_ui.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
     requests = planner_tool_requests(
         "把 hello 复制到剪贴板",

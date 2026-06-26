@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -121,6 +122,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
         return False
+    if _runtime_planner_desktop_observation_owns_selection(requests):
+        return False
     if _runtime_planner_system_settings_owns_selection(requests):
         return False
     if any(bool(request.get("continue_to_model")) for request in requests):
@@ -191,6 +194,50 @@ def _runtime_planner_desktop_discovery_owns_selection(requests: list[dict[str, A
         if isinstance(request, dict)
     }
     return tools == {"desktop.ui_elements"}
+
+
+def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    if reasons != {"planner_fallback_desktop_operation"}:
+        return False
+    tools = [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    ]
+    if len(tools) != 2 or tools[1] != "desktop.ui_elements":
+        return False
+    if tools[0] not in {"app.open", "app.focus", "app.focus_window"}:
+        return False
+    first_request = requests[0] if isinstance(requests[0], dict) else {}
+    first_input = first_request.get("input")
+    if not isinstance(first_input, Mapping):
+        return False
+    app_name = str(first_input.get("app_name") or "").strip()
+    return _runtime_observation_app_name_is_specific(app_name)
+
+
+def _runtime_observation_app_name_is_specific(app_name: str) -> bool:
+    if not app_name:
+        return False
+    if not re.search(r"[A-Za-z]", app_name):
+        return False
+    compact = re.sub(r"[\W_]+", "", app_name, flags=re.UNICODE).lower()
+    return compact not in {
+        "me",
+        "my",
+        "now",
+        "current",
+        "this",
+        "foreground",
+        "active",
+    }
 
 
 def _runtime_planner_system_settings_owns_selection(requests: list[dict[str, Any]]) -> bool:
