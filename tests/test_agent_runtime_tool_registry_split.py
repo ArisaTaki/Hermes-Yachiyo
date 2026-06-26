@@ -134,6 +134,31 @@ def test_tool_broker_call_analyzes_data_file_and_writes_requested_artifacts(tmp_
     ).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_tool_broker_call_analyzes_markdown_table_file(tmp_path) -> None:
+    (tmp_path / "sales.md").write_text(
+        "| region | revenue |\n"
+        "| --- | ---: |\n"
+        "| East | 10 |\n"
+        "| West | 20 |\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.md", "artifact_path": "reports/sales-table.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "text_table"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "revenue"]
+    content = (tmp_path / "artifacts" / "reports" / "sales-table.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mean=15.0" in content
+
+
 def test_tool_broker_call_analyzes_xlsx_file(tmp_path) -> None:
     workbook = tmp_path / "sales.xlsx"
     with zipfile.ZipFile(workbook, "w") as archive:

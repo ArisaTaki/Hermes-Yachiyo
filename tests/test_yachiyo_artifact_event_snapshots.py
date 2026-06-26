@@ -142,6 +142,69 @@ def test_tool_completed_event_artifact_result_projects_to_public_artifact() -> N
     assert artifacts[0].source_tool == "screen.capture"
 
 
+def test_tool_completed_event_artifacts_result_projects_all_public_artifacts() -> None:
+    event = PublicRunEvent(
+        event_id="evt-data-artifacts",
+        run_id="run-data",
+        sequence=5,
+        event_type="tool.completed",
+        detail="data.analyze",
+        payload={
+            "tool": "data.analyze",
+            "status": "completed",
+            "result": {
+                "ok": True,
+                "artifact": {
+                    "path": "analysis-report.md",
+                    "kind": "markdown",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 111,
+                },
+                "artifacts": [
+                    {
+                        "path": "analysis-report.md",
+                        "kind": "markdown",
+                        "mime_type": "text/markdown",
+                        "size_bytes": 111,
+                    },
+                    {
+                        "path": "analysis-summary.csv",
+                        "kind": "csv",
+                        "mime_type": "text/csv",
+                        "size_bytes": 222,
+                    },
+                    {
+                        "path": "analysis-chart.png",
+                        "kind": "image",
+                        "mime_type": "image/png",
+                        "size_bytes": 333,
+                    },
+                ],
+            },
+        },
+        created_at="2026-06-22T00:00:01Z",
+    )
+
+    payload = artifact_payload_from_event(event)
+    artifacts = artifact_snapshots_from_events([event])
+
+    assert payload["path"] == "analysis-report.md"
+    assert [artifact.path for artifact in artifacts] == [
+        "analysis-report.md",
+        "analysis-summary.csv",
+        "analysis-chart.png",
+    ]
+    assert [artifact.source_tool for artifact in artifacts] == [
+        "data.analyze",
+        "data.analyze",
+        "data.analyze",
+    ]
+    assert artifacts[1].kind == "csv"
+    assert artifacts[1].mime_type == "text/csv"
+    assert artifacts[2].kind == "image"
+    assert artifacts[2].mime_type == "image/png"
+
+
 def test_group_artifact_events_default_titles_and_group_context() -> None:
     artifacts = artifact_snapshots_from_events(
         [

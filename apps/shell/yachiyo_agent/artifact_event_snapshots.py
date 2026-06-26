@@ -16,16 +16,60 @@ def artifact_snapshots_from_events(events: list[PublicRunEvent]) -> list[Artifac
     for event in events:
         if _public_run_event_is_secret(event):
             continue
-        artifact_payload = artifact_payload_from_event(event)
-        if artifact_payload:
+        if event.event_type in {"tool.completed", "agent.tool.completed"}:
+            artifact_payloads = artifact_payloads_from_tool_completed_event(event)
+        else:
+            artifact_payload = artifact_payload_from_event(event)
+            artifact_payloads = [artifact_payload] if artifact_payload else []
+        for artifact_payload in artifact_payloads:
             artifacts.append(
                 artifact_snapshot_from_payload(artifact_payload, run_id=event.run_id)
             )
     return artifacts
 
 
+def artifact_payloads_from_tool_completed_event(event: PublicRunEvent) -> list[dict[str, Any]]:
+    payload = dict(event.payload)
+    result = payload.get("result")
+    result_payload = dict(result) if isinstance(result, Mapping) else {}
+    raw_artifacts = result_payload.get("artifacts")
+    artifact_payloads: list[dict[str, Any]] = []
+    if isinstance(raw_artifacts, list):
+        artifact_payloads.extend(
+            dict(artifact)
+            for artifact in raw_artifacts
+            if isinstance(artifact, Mapping)
+        )
+    else:
+        artifact = result_payload.get("artifact")
+        if isinstance(artifact, Mapping):
+            artifact_payloads.append(dict(artifact))
+
+    normalized: list[dict[str, Any]] = []
+    for artifact_payload in artifact_payloads:
+        artifact_payload.setdefault("kind", artifact_payload.get("kind") or "tool_artifact")
+        artifact_payload.setdefault(
+            "source_tool",
+            payload.get("tool_name") or payload.get("tool") or event.detail,
+        )
+        artifact_payload.setdefault(
+            "title",
+            artifact_payload.get("title")
+            or artifact_payload.get("path")
+            or payload.get("tool_name")
+            or payload.get("tool")
+            or "Tool Artifact",
+        )
+        _finalize_event_artifact_payload(artifact_payload, payload, event)
+        normalized.append(artifact_payload)
+    return normalized
+
+
 def artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
+    if event.event_type in {"tool.completed", "agent.tool.completed"}:
+        payloads = artifact_payloads_from_tool_completed_event(event)
+        return payloads[0] if payloads else {}
     if event.event_type in {"artifact.created", "agent.artifact.write"}:
         artifact = payload.get("artifact")
         artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
@@ -135,6 +179,14 @@ def artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         )
     else:
         return {}
+    return _finalize_event_artifact_payload(artifact_payload, payload, event)
+
+
+def _finalize_event_artifact_payload(
+    artifact_payload: dict[str, Any],
+    payload: dict[str, Any],
+    event: PublicRunEvent,
+) -> dict[str, Any]:
     _merge_artifact_trace_context(artifact_payload, payload)
     artifact_payload.setdefault("source_run_id", event.run_id)
     artifact_payload.setdefault("run_id", event.run_id)

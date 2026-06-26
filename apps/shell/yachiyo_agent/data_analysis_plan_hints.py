@@ -14,7 +14,7 @@ def data_source_hint(text: str, metadata: Mapping[str, Any] | None = None) -> st
         if value:
             return value
     match = re.search(
-        r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))",
+        r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt|md|markdown))",
         text,
         flags=re.IGNORECASE,
     )
@@ -31,6 +31,7 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
         ((".xls",), "xls"),
         ((".json",), "json"),
         ((".parquet",), "parquet"),
+        ((".md", ".markdown"), "text_table"),
         ((".txt",), "text"),
     )
     for endings, kind in suffixes:

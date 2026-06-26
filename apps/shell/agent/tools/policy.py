@@ -1032,9 +1032,9 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "data.analyze": ToolDescriptor(
         name="data.analyze",
         description=(
-            "Analyze a workspace CSV, TSV, JSON, XLSX, or text table with the built-in "
-            "local parser and write a markdown report artifact. Prefer this before "
-            "terminal.run for straightforward data summaries."
+            "Analyze a workspace CSV, TSV, JSON, XLSX, Markdown table, or text table "
+            "with the built-in local parser and write a markdown report artifact. Prefer this "
+            "before terminal.run for straightforward data summaries."
         ),
         properties={
             "path": {"type": "string", "description": "Relative data file path."},
