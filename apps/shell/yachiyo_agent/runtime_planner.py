@@ -32,12 +32,14 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    focus_window_hint,
     hotkey_hint,
     media_playback_hint,
     media_tool_preview,
     safe_type_text_hint,
     submit_action_hint,
     type_into_ui_hint,
+    window_list_hint,
 )
 from .schedule_plan_hints import schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
@@ -183,6 +185,22 @@ class TaskIntentRouter:
         )
         if score <= 0 and not metadata.get("daily_desktop_intent"):
             return _empty_intent("desktop_operation", text)
+        focus_window = focus_window_hint(text)
+        window_list = window_list_hint(text)
+        app_name_hint = str(
+            (focus_window or {}).get("app_name")
+            or (window_list or {}).get("app_name")
+            or _app_name_hint(text)
+            or ""
+        ).strip()
+        inputs: dict[str, Any] = {
+            "app_name_hint": app_name_hint,
+            "operation_hint": _desktop_operation_hint(text),
+        }
+        if window_list is not None:
+            inputs["window_list_hint"] = window_list
+        if focus_window:
+            inputs["focus_window_hint"] = focus_window
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "desktop_operation", text),
             kind="desktop_operation",
@@ -190,7 +208,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.95, 0.42 + score),
             description="Discover and operate local desktop apps through runtime tools.",
-            inputs={"app_name_hint": _app_name_hint(text), "operation_hint": _desktop_operation_hint(text)},
+            inputs=inputs,
             expected_outputs=["desktop_state"],
             required_capabilities=["desktop.app_discovery"],
             preferred_capabilities=["desktop.app_control", "desktop.ui_operation"],
@@ -618,7 +636,14 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
-        app_name = str(intent.inputs.get("app_name_hint") or "").strip()
+        focus_window = focus_window_hint(intent.user_goal)
+        window_list = window_list_hint(intent.user_goal)
+        app_name = str(
+            (focus_window or {}).get("app_name")
+            or (window_list or {}).get("app_name")
+            or intent.inputs.get("app_name_hint")
+            or ""
+        ).strip()
         mode = app_control_mode(intent.user_goal)
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
@@ -633,6 +658,7 @@ class RuntimePlanner:
             hotkey=hotkey,
             type_target=type_target,
             safe_type_text=safe_type_text,
+            allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
         discovery_tool = _first_allowed(
@@ -667,7 +693,48 @@ class RuntimePlanner:
                 reason=discovery_reason,
             )
         ]
-        if app_name and not operation_uses_app_tool:
+        if window_list is not None and not focus_window and not _looks_like_ui_operation(intent.user_goal):
+            steps.append(
+                _step(
+                    intent,
+                    "list-app-windows",
+                    "List app windows",
+                    "desktop.app_discovery",
+                    _first_allowed(("desktop.windows",), allowed),
+                    input_preview=window_list,
+                    depends_on=["discover-desktop-state"],
+                    reason="List matching desktop windows through runtime discovery.",
+                )
+            )
+            return steps
+        focus_step_added = False
+        if focus_window:
+            steps.append(
+                _step(
+                    intent,
+                    "list-app-windows",
+                    "List app windows",
+                    "desktop.app_discovery",
+                    _first_allowed(("desktop.windows",), allowed),
+                    input_preview={"app_name": app_name} if app_name else {},
+                    depends_on=["discover-desktop-state"],
+                    reason="Inspect matching app windows before raising one by title.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "focus-app-window",
+                    "Focus app window",
+                    "desktop.app_control",
+                    _first_allowed(("app.focus_window",), allowed),
+                    input_preview=focus_window,
+                    depends_on=["list-app-windows"],
+                    reason="Raise the matching app window by title substring after discovery.",
+                )
+            )
+            focus_step_added = True
+        if app_name and not operation_uses_app_tool and not focus_step_added:
             steps.append(
                 _step(
                     intent,
@@ -681,6 +748,11 @@ class RuntimePlanner:
                 )
             )
         if _looks_like_ui_operation(intent.user_goal):
+            operation_depends_on = ["discover-desktop-state"]
+            if focus_step_added:
+                operation_depends_on = ["focus-app-window"]
+            elif not operation_uses_app_tool and app_name:
+                operation_depends_on = ["open-or-focus-app"]
             steps.append(
                 _step(
                     intent,
@@ -701,11 +773,7 @@ class RuntimePlanner:
                     input_preview=operation_preview,
                     risk_level="medium",
                     approval_required=True,
-                    depends_on=(
-                        ["discover-desktop-state"]
-                        if operation_uses_app_tool or not app_name
-                        else ["open-or-focus-app"]
-                    ),
+                    depends_on=operation_depends_on,
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
@@ -729,6 +797,8 @@ class RuntimePlanner:
             verify_depends_on = ["submit-foreground-ui"]
         elif any(step.step_id == "operate-foreground-ui" for step in steps):
             verify_depends_on = ["operate-foreground-ui"]
+        elif any(step.step_id == "focus-app-window" for step in steps):
+            verify_depends_on = ["focus-app-window"]
         elif any(step.step_id == "open-or-focus-app" for step in steps):
             verify_depends_on = ["open-or-focus-app"]
         if verify_depends_on:
@@ -1110,6 +1180,10 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "list_apps"
     if step_key == "open-or-focus-app":
         return "focus_app" if tool_name == "app.focus" else "open_app"
+    if step_key == "list-app-windows":
+        return "list_windows"
+    if step_key == "focus-app-window":
+        return "focus_window"
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
     if step_key == "operate-foreground-ui":
@@ -1518,6 +1592,10 @@ def _clean_app_name_hint(value: str) -> str:
 
 
 def _desktop_operation_hint(text: str) -> str:
+    if focus_window_hint(text):
+        return "focus_window"
+    if window_list_hint(text) is not None:
+        return "list_windows"
     if _contains_any(text, ["click", "点击"]):
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):
@@ -1545,27 +1623,40 @@ def _desktop_operation_tool_preview(
     hotkey: dict[str, Any] | None,
     type_target: dict[str, Any] | None,
     safe_type_text: str,
+    allow_app_tools: bool = True,
 ) -> tuple[str | None, dict[str, Any]]:
     if hotkey:
-        if app_name:
+        if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
             if app_tool:
                 return app_tool, {"app_name": app_name, **hotkey}
         return _first_allowed(("desktop.hotkey",), allowed), dict(hotkey)
     if app_name and type_target:
-        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "type_into_ui_element"), allowed)
-        if app_tool:
-            return app_tool, {"app_name": app_name, **type_target, "limit": 80}
+        if allow_app_tools:
+            app_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "type_into_ui_element"),
+                allowed,
+            )
+            if app_tool:
+                return app_tool, {"app_name": app_name, **type_target, "limit": 80}
         return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
     if app_name and safe_type_text:
-        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_type_text"), allowed)
-        if app_tool:
-            return app_tool, {"app_name": app_name, "text": safe_type_text}
+        if allow_app_tools:
+            app_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "safe_type_text"),
+                allowed,
+            )
+            if app_tool:
+                return app_tool, {"app_name": app_name, "text": safe_type_text}
         return _first_allowed(("desktop.safe_type_text",), allowed), {"text": safe_type_text}
     if app_name and click_target:
-        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "click_ui_element"), allowed)
-        if app_tool:
-            return app_tool, {"app_name": app_name, **click_target, "limit": 80}
+        if allow_app_tools:
+            app_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "click_ui_element"),
+                allowed,
+            )
+            if app_tool:
+                return app_tool, {"app_name": app_name, **click_target, "limit": 80}
         return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
     if type_target:
         return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}

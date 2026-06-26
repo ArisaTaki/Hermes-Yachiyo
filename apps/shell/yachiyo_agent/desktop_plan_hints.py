@@ -101,6 +101,77 @@ def submit_action_hint(text: str) -> str:
     return ""
 
 
+def window_list_hint(text: str) -> dict[str, str] | None:
+    value = clean(text)
+    if not re.search(r"(?:窗口|windows?)", value, flags=re.IGNORECASE):
+        return None
+    patterns = (
+        r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app_en>[^.!?]+)",
+        r"(?:what|which)\s+(?:open\s+)?windows\s+(?:are\s+)?(?:open\s+)?"
+        r"(?:in|for|of)\s+(?P<app_en_question>[^.!?]+)",
+        r"(?:list|show|read)\s+(?P<app_en2>[^.!?]+?)\s+windows",
+        r"(?P<app_en3>[^.!?]+?)\s+windows\?",
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*(?:窗口|windows?)\s*(?:列表|清单|list)$",
+        r"(?P<app_question>[^。！？!?，,]+?)\s*(?:有|打开了|开了|正在显示)?"
+        r"(?:哪些|什么|几个|多少).{0,4}(?:窗口|window)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:列出|查看|看看|看一下|看下|显示|读取)\s*"
+        r"(?P<app2>[^。！？!?，,]{1,40}?)\s*(?:的)?\s*(?:窗口|windows?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app_name = _clean_window_app_name_hint(raw_app)
+        return {"app_name": app_name} if app_name else {}
+    if re.search(
+        r"(?:列出|查看|看看|看一下|看下|显示|读取).{0,12}(?:窗口|windows?)|"
+        r"(?:窗口|windows?).{0,8}(?:列表|清单|列出|列一下|列下)|"
+        r"\b(?:list|show|read)\s+(?:open\s+)?windows\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {}
+    return None
+
+
+def focus_window_hint(text: str) -> dict[str, str] | None:
+    value = clean(text)
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"
+        r"\s*的\s*(?:标题(?:包含|为)?|名为|叫)?\s*"
+        r"(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"
+        r"\s*(?:标题(?:包含|为)?|名为|叫)\s*"
+        r"(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,\s]+?)"
+        r"\s+(?P<title>[^。！？!?，,]+?)\s*(?:窗口|window)$",
+        r"\b(?:focus|activate|switch to)\s+(?P<app_en>.+?)\s+window\s+"
+        r"(?:(?:titled|called|matching|containing)\s+)?(?P<title_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.groupdict().get("app") or match.groupdict().get("app_en") or ""
+        raw_title = match.groupdict().get("title") or match.groupdict().get("title_en") or ""
+        app_name = _clean_window_app_name_hint(raw_app)
+        title = _clean_window_title_hint(raw_title)
+        if app_name and title:
+            return {"app_name": app_name, "title_contains": title}
+    return None
+
+
 def hotkey_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     if not contains_any(
@@ -285,6 +356,58 @@ def role_filter(value: str) -> str:
     if contains_any(lowered, ["输入框", "文本框", "输入栏", "field", "input", "text"]):
         return "text"
     return ""
+
+
+def _clean_window_app_name_hint(value: str) -> str:
+    app = clean(value)
+    app = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|"
+        r"list|show|read|the)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
+    app = re.sub(
+        r"\s*(?:有|打开了|开了|正在显示|open|opened|running)?\s*"
+        r"(?:哪些|什么|几个|多少|all|open)?\s*(?:窗口|windows?)?$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    app = app.strip(" .，,。")
+    generic = {
+        "",
+        "app",
+        "application",
+        "desktop",
+        "window",
+        "windows",
+        "current",
+        "active",
+        "foreground",
+        "all",
+        "应用",
+        "应用程序",
+        "桌面",
+        "窗口",
+        "所有",
+        "全部",
+        "当前",
+        "前台",
+    }
+    return "" if app.lower() in generic else app
+
+
+def _clean_window_title_hint(value: str) -> str:
+    title = clean(value)
+    title = re.sub(
+        r"^(?:标题(?:包含|为)?|名为|叫|titled|called|matching|containing)\s*",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    title = re.sub(r"\s*(?:窗口|window)$", "", title, flags=re.IGNORECASE)
+    return title.strip(" .，,。")
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:

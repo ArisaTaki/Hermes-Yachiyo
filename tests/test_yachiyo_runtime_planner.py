@@ -256,6 +256,78 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 
+def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
+    decision = RuntimePlanner().decision(
+        "显示微信窗口列表",
+        allowed_tools=["desktop.list_apps", "desktop.windows"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "微信"
+    assert decision.selected_intent.inputs["operation_hint"] == "list_windows"
+    assert decision.selected_intent.inputs["window_list_hint"] == {"app_name": "微信"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "list-app-windows",
+    ]
+    discover = _step_by_id(decision, "discover-desktop-state")
+    assert discover.tool_name == "desktop.list_apps"
+    assert discover.input_preview == {"query": "微信", "limit": 20}
+    list_windows = _step_by_id(decision, "list-app-windows")
+    assert list_windows.tool_name == "desktop.windows"
+    assert list_windows.action == "list_windows"
+    assert list_windows.input_preview == {"app_name": "微信"}
+    assert list_windows.depends_on == ["discover-desktop-state"]
+
+    question_decision = RuntimePlanner().decision(
+        "微信有哪些窗口",
+        allowed_tools=["desktop.list_apps", "desktop.windows"],
+    )
+    assert question_decision.selected_intent.inputs["app_name_hint"] == "微信"
+    assert _step_by_id(question_decision, "list-app-windows").input_preview == {
+        "app_name": "微信",
+    }
+
+
+def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "切到 Slack 的 general 窗口",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.windows",
+            "app.focus_window",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert decision.selected_intent.inputs["operation_hint"] == "focus_window"
+    assert decision.selected_intent.inputs["focus_window_hint"] == {
+        "app_name": "Slack",
+        "title_contains": "general",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "list-app-windows",
+        "focus-app-window",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Slack",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "list-app-windows").input_preview == {
+        "app_name": "Slack",
+    }
+    focus = _step_by_id(decision, "focus-app-window")
+    assert focus.tool_name == "app.focus_window"
+    assert focus.action == "focus_window"
+    assert focus.input_preview == {"app_name": "Slack", "title_contains": "general"}
+    assert focus.depends_on == ["list-app-windows"]
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == ["focus-app-window"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -747,6 +819,49 @@ def test_planner_desktop_tool_requests_prefers_combined_app_foreground_tool() ->
                 "limit": 80,
                 "click_count": 1,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_focus_window_sequence() -> None:
+    requests = planner_desktop_tool_requests(
+        "切到 Slack 的 general 窗口",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.windows",
+            "app.focus_window",
+            "desktop.active_window",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_window",
+            "input": {"app_name": "Slack", "title_contains": "general"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
