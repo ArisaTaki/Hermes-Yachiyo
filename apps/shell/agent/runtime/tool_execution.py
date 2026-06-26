@@ -59,12 +59,21 @@ def _discovered_app_name_for_query(
         if not _app_lookups_related(input_preview.get("query"), clean_query):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
-        for app in _apps_from_list_apps_result(result):
-            if not isinstance(app, dict):
-                continue
+        discovered_apps = [
+            app
+            for app in _apps_from_list_apps_result(result)
+            if isinstance(app, dict) and str(app.get("name") or "").strip()
+        ]
+        for app in discovered_apps:
             app_name = str(app.get("name") or "").strip()
-            if app_name:
+            if _normalized_app_lookup(app_name) == clean_query:
                 return app_name
+        for app in discovered_apps:
+            app_name = str(app.get("name") or "").strip()
+            if _app_lookups_related(app_name, clean_query):
+                return app_name
+        for app in discovered_apps:
+            return str(app.get("name") or "").strip()
     return ""
 
 
