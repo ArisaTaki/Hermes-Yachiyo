@@ -24,6 +24,7 @@ from .legacy_group_orchestration import (
     normalized_group_mode as _normalized_group_mode,
 )
 from .legacy_runs import LegacyRunPayloadProjector
+from .planner_projection import planner_run_event_payloads, runtime_planner_decision
 
 
 def start_legacy_group_run(
@@ -147,6 +148,12 @@ def start_legacy_group_run(
                 index,
             ),
         )
+        append_group_member_planner_events(
+            runtime,
+            child_run,
+            objective,
+            member,
+        )
         child_status = str(child_run.get("status") or "").strip()
         if child_status in {"approval_required", "waiting_approval"}:
             append_group_member_event(
@@ -256,6 +263,40 @@ def start_legacy_group_run(
         "created_at": run_group.get("created_at") or "",
         "updated_at": run_group.get("updated_at") or "",
     }
+
+
+def append_group_member_planner_events(
+    runtime: Any,
+    child_run: dict[str, Any],
+    objective: str,
+    member: dict[str, Any],
+) -> None:
+    append_run_event = getattr(runtime, "append_run_event", None)
+    run_id = str(child_run.get("run_id") or "").strip()
+    if not callable(append_run_event) or not run_id:
+        return
+    decision = runtime_planner_decision(
+        objective,
+        allowed_tools=_member_allowed_tools(member),
+        metadata={"runnable_kind": "group", "agent_id": member.get("agent_id")},
+    )
+    for event_type, payload in planner_run_event_payloads(decision):
+        try:
+            append_run_event(run_id, event_type, payload)
+        except Exception:
+            continue
+
+
+def _member_allowed_tools(member: dict[str, Any]) -> list[str] | None:
+    tool_policy = member.get("tool_policy") if isinstance(member.get("tool_policy"), dict) else {}
+    allowed_tools = tool_policy.get("allowed_tools") if isinstance(tool_policy, dict) else None
+    if not isinstance(allowed_tools, list):
+        return None
+    return [
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    ]
 
 
 def group_orchestration_plan(

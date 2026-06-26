@@ -88,6 +88,12 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.member.started",
         "group.member.started",
     ]
+    child_event_types = [event["event_type"] for event in runtime.events["run-1"]]
+    first_planner_index = child_event_types.index("agent.intent.selected")
+    assert child_event_types[first_planner_index - 1] == "group.member.started"
+    assert runtime.events["run-1"][first_planner_index]["payload"]["source"] == "runtime_planner"
+    assert runtime.events["run-1"][first_planner_index + 1]["event_type"] == "agent.plan.created"
+    assert runtime.events["run-1"][first_planner_index + 2]["event_type"] == "agent.plan.step"
     started = group_run["events"][0]
     assert started["run_id"] == "run-1"
     assert started["payload"]["group_run_id"] == "group-run-1"
@@ -125,8 +131,20 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
         "group.member.started",
         "group.member.cancelled",
     ]
-    assert group_run["events"][3]["payload"]["status"] == "failed"
-    assert group_run["events"][5]["payload"]["status"] == "cancelled"
+    assert [event["event_type"] for event in runtime.events["run-1"]].count(
+        "agent.intent.selected"
+    ) == 1
+    assert [event["event_type"] for event in runtime.events["run-2"]].count(
+        "agent.intent.selected"
+    ) == 1
+    failed_event = next(
+        event for event in group_run["events"] if event["event_type"] == "group.member.failed"
+    )
+    cancelled_event = next(
+        event for event in group_run["events"] if event["event_type"] == "group.member.cancelled"
+    )
+    assert failed_event["payload"]["status"] == "failed"
+    assert cancelled_event["payload"]["status"] == "cancelled"
 
 
 def test_legacy_studio_port_forwards_run_event_page_cursor_to_runtime() -> None:
