@@ -216,6 +216,16 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert user.metadata["daily_desktop_tools"] == ["media.apple_music_open_and_play"]
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
+        assert "agent.intent.selected" in event_types
+        assert "agent.plan.created" in event_types
+        assert "agent.plan.selection" in event_types
+        selection_event = next(
+            event for event in events if event["event_type"] == "agent.plan.selection"
+        )
+        assert selection_event["payload"]["selection_source"] == "runtime_planner"
+        assert selection_event["payload"]["selected_tools"] == [
+            "media.apple_music_open_and_play",
+        ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -400,6 +410,16 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
+        assert "agent.intent.selected" in event_types
+        assert "agent.plan.created" in event_types
+        assert "agent.plan.selection" in event_types
+        selection_event = next(
+            event for event in events if event["event_type"] == "agent.plan.selection"
+        )
+        assert selection_event["payload"]["selection_source"] == "runtime_planner"
+        assert selection_event["payload"]["selected_tools"] == [
+            "media.apple_music_open_and_play",
+        ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
