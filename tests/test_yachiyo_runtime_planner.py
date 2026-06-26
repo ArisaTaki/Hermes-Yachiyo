@@ -545,6 +545,46 @@ def test_runtime_planner_routes_current_page_find_actions() -> None:
     }
 
 
+def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
+    decision = RuntimePlanner().decision(
+        "Can you search Chrome for weather?",
+        allowed_tools=["browser.open_url", "browser.open_url_and_extract_text"],
+    )
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=weather",
+        "browser_action": "open_search",
+        "query": "weather",
+    }
+    step = _step_by_id(decision, "open-web-search")
+    assert step.tool_name == "browser.open_url"
+    assert step.input_preview == {"url": "https://www.google.com/search?q=weather"}
+
+    chinese = RuntimePlanner().decision(
+        "搜索天气",
+        allowed_tools=["browser.open_url"],
+    )
+
+    assert chinese.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=%E5%A4%A9%E6%B0%94",
+        "browser_action": "open_search",
+        "query": "天气",
+    }
+    assert _step_by_id(chinese, "open-web-search").tool_name == "browser.open_url"
+
+    app_search = RuntimePlanner().decision(
+        "search WeChat for file transfer",
+        allowed_tools=["browser.open_url", "app.focus_and_safe_shortcut"],
+    )
+
+    assert app_search.selected_intent.inputs.get("browser_action") != "open_search"
+    assert planner_tool_requests(
+        "search WeChat for file transfer",
+        allowed_tools=["browser.open_url", "app.focus_and_safe_shortcut"],
+    ) == []
+
+
 def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     decision = RuntimePlanner().decision(
         "search selected text",
@@ -2635,6 +2675,49 @@ def test_planner_tool_requests_maps_current_page_find_actions() -> None:
             "input": {"action": "paste"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_current_page_find",
+        },
+    ]
+
+
+def test_planner_tool_requests_maps_static_web_search() -> None:
+    allowed = ["browser.open_url", "browser.open_url_and_extract_text"]
+
+    assert planner_tool_requests("Can you search Chrome for weather?", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=weather"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("搜索天气", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=%E5%A4%A9%E6%B0%94"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests(
+        "search selected text",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+            "continue_to_model": True,
         },
     ]
 

@@ -386,6 +386,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 "read-current-page",
                 "extract-current-page-text",
                 "capture-current-page",
+                "open-web-search",
             }
         ),
         None,

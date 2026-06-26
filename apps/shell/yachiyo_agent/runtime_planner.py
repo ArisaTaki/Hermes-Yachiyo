@@ -12,6 +12,7 @@ import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
 from .capability_registry import capability_snapshots
@@ -419,6 +420,7 @@ class TaskIntentRouter:
         browser_action = (
             _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
+            or _web_search_hint(text, dynamic_source)
         )
         score = _score_terms(
             text,
@@ -1359,11 +1361,16 @@ class RuntimePlanner:
                 "current_page": "browser.current_page",
                 "extract_text": "browser.extract_text",
                 "screenshot": "browser.screenshot",
+                "open_search": "browser.open_url",
             }.get(browser_action)
             input_preview: dict[str, Any] = {}
             reason = str(intent.inputs.get("reason") or "").strip()
             if browser_action == "screenshot" and reason:
                 input_preview["reason"] = reason
+            if browser_action == "open_search":
+                url = str(intent.inputs.get("url_hint") or "").strip()
+                if url:
+                    input_preview["url"] = url
             return [
                 _step(
                     intent,
@@ -1371,11 +1378,13 @@ class RuntimePlanner:
                         "current_page": "read-current-page",
                         "extract_text": "extract-current-page-text",
                         "screenshot": "capture-current-page",
+                        "open_search": "open-web-search",
                     }.get(browser_action, "read-current-page"),
                     {
                         "current_page": "Read current page",
                         "extract_text": "Extract current page text",
                         "screenshot": "Capture current page",
+                        "open_search": "Open web search",
                     }.get(browser_action, "Read current page"),
                     "browser.research",
                     _first_allowed((tool_name,), allowed) if tool_name else None,
@@ -2636,6 +2645,103 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
+    if context_source in {"selection", "clipboard"}:
+        return {}
+    value = _clean_prompt(text)
+    query = _web_search_query(value)
+    if not query:
+        return {}
+    return {
+        "browser_action": "open_search",
+        "query": query,
+        "url_hint": f"https://www.google.com/search?q={quote_plus(query)}",
+    }
+
+
+def _web_search_query(text: str) -> str:
+    if _url_hint(text):
+        return ""
+    search_surface = _web_search_surface_hint(text)
+    if search_surface and not _is_browser_or_search_app_name(search_surface):
+        return ""
+    app_name = _app_name_hint(text)
+    if app_name and not _is_browser_or_search_app_name(app_name):
+        return ""
+    lowered = text.lower()
+    patterns = (
+        r"\b(?:can\s+you\s+)?search\s+(?:google\s+chrome|chrome|safari|browser|web|google)\s+for\s+(.+)$",
+        r"\b(?:can\s+you\s+)?search\s+for\s+(.+)$",
+        r"\b(?:google|search)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            query = _clean_web_search_query(match.group(1))
+            if query:
+                return query
+
+    chinese_patterns = (
+        r"(?:用\s*)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
+        r"(?:搜索|查找|检索)\s*(.+)$",
+    )
+    for pattern in chinese_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            query = _clean_web_search_query(match.group(1))
+            if query:
+                return query
+    return ""
+
+
+def _web_search_surface_hint(text: str) -> str:
+    match = re.search(
+        r"\b(?:can\s+you\s+)?search\s+(?P<surface>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+for\s+.+$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return str(match.group("surface") or "").strip()
+
+
+def _is_browser_or_search_app_name(app_name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
+    return normalized in {
+        "browser",
+        "chrome",
+        "google chrome",
+        "safari",
+        "firefox",
+        "edge",
+        "microsoft edge",
+        "brave",
+        "google",
+        "谷歌",
+        "浏览器",
+    }
+
+
+def _clean_web_search_query(query: str) -> str:
+    value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
+    value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
+    value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
+    if not value:
+        return ""
+    if _contains_any(
+        value,
+        (
+            "selected text",
+            "current selection",
+            "剪贴板内容",
+            "选中的内容",
+            "当前选中文字",
+        ),
+    ):
+        return ""
+    return value
 
 
 def _browser_current_page_find_hint(text: str, context_source: str) -> dict[str, Any]:
