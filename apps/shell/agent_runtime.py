@@ -64,6 +64,16 @@ _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
 _SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
+_SKILL_INSTALL_PATH_CANDIDATES = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin",
+    "~/.local/bin",
+    "~/.npm-global/bin",
+    "~/.volta/bin",
+    "~/.asdf/shims",
+    "~/.local/share/mise/shims",
+)
 _UNSET = object()
 _DEFAULT_AGENT_IDS = {
     "agent_yachiyo_orchestrator",
@@ -74,6 +84,71 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
+
+
+def _path_entries(value: str | None) -> list[str]:
+    return [entry for entry in str(value or "").split(os.pathsep) if entry]
+
+
+def _dedupe_path_entries(entries: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        clean_entry = str(entry or "").strip()
+        if not clean_entry or clean_entry in seen:
+            continue
+        seen.add(clean_entry)
+        deduped.append(clean_entry)
+    return deduped
+
+
+def _existing_dir(path: str | Path) -> str:
+    try:
+        expanded = Path(path).expanduser()
+        if expanded.is_dir():
+            return str(expanded)
+    except OSError:
+        return ""
+    return ""
+
+
+def _version_manager_node_bin_dirs() -> list[str]:
+    home = Path.home()
+    candidates: list[Path] = []
+    for root in (
+        home / ".nvm" / "versions" / "node",
+        home / ".asdf" / "installs" / "nodejs",
+        home / ".local" / "share" / "mise" / "installs" / "node",
+    ):
+        try:
+            candidates.extend(path / "bin" for path in sorted(root.iterdir(), reverse=True) if path.is_dir())
+        except OSError:
+            continue
+    for root in (
+        home / ".fnm" / "node-versions",
+        home / ".local" / "share" / "fnm" / "node-versions",
+    ):
+        try:
+            candidates.extend(path / "installation" / "bin" for path in sorted(root.iterdir(), reverse=True) if path.is_dir())
+        except OSError:
+            continue
+    return [resolved for candidate in candidates if (resolved := _existing_dir(candidate))]
+
+
+def _skill_install_subprocess_env(hermes_home: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(hermes_home)
+    configured_node_bin = _existing_dir(env.get("HERMES_YACHIYO_NODE_BIN", ""))
+    candidate_dirs = [configured_node_bin] if configured_node_bin else []
+    candidate_dirs.extend(_existing_dir(path) for path in _SKILL_INSTALL_PATH_CANDIDATES)
+    candidate_dirs.extend(_version_manager_node_bin_dirs())
+    env["PATH"] = os.pathsep.join(
+        _dedupe_path_entries([
+            *_path_entries(env.get("PATH")),
+            *(path for path in candidate_dirs if path),
+        ])
+    )
+    return env
 
 
 def _is_active_run_status(status: str) -> bool:
@@ -1928,8 +2003,7 @@ class AgentRuntimeService:
         target_folder_id = self._normalize_skill_folder_id(folder_id)
         source_ref = self._skill_install_source_ref(argv, installer)
         started_at = _now()
-        env = os.environ.copy()
-        env["HERMES_HOME"] = str(self.skill_installs_hermes_home)
+        env = _skill_install_subprocess_env(self.skill_installs_hermes_home)
         try:
             completed = subprocess.run(
                 argv,
@@ -1941,6 +2015,11 @@ class AgentRuntimeService:
                 check=False,
             )
         except FileNotFoundError as exc:
+            if argv[0] == "npx":
+                raise AgentRuntimeError(
+                    "找不到安装命令：npx。Yachiyo 已尝试补充 Homebrew、nvm、fnm、Volta、asdf 和 mise 的常见 PATH；"
+                    "请确认 Node.js/npm 已安装，或将 npx 所在目录写入 HERMES_YACHIYO_NODE_BIN 后重启应用。"
+                ) from exc
             raise AgentRuntimeError(f"找不到安装命令：{argv[0]}") from exc
         except subprocess.TimeoutExpired as exc:
             raise AgentRuntimeError("Skill 安装命令超时") from exc

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import zipfile
@@ -813,6 +814,49 @@ def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypa
         assert skill["source_type"] == "npx_skills"
         assert skill["source_ref"] == "https://github.com/owner/repo/blob/main/skills/dev/installed-skill/SKILL.md"
         assert "/skill-installs/.hermes/skills/" in skill["local_path"]
+    finally:
+        service.close()
+
+
+def test_skill_install_command_augments_gui_path_with_node_manager_bins(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    home = tmp_path / "home"
+    nvm_bin = home / ".nvm" / "versions" / "node" / "v20.19.0" / "bin"
+    nvm_bin.mkdir(parents=True)
+    recorded: dict[str, dict[str, str] | list[str]] = {}
+
+    def fake_run(argv, **kwargs):
+        recorded["argv"] = list(argv)
+        recorded["env"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="install failed")
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    try:
+        result = service.install_skill_command("npx skills add owner/repo")
+        env = recorded["env"]
+        path_entries = str(env["PATH"]).split(os.pathsep)
+
+        assert result["ok"] is False
+        assert recorded["argv"] == ["npx", "skills", "add", "owner/repo", "-a", "hermes-agent", "--copy", "-y"]
+        assert path_entries[0] == "/usr/bin"
+        assert str(nvm_bin) in path_entries
+        assert env["HERMES_HOME"] == str(service.skill_installs_hermes_home)
+    finally:
+        service.close()
+
+
+def test_skill_install_command_npx_not_found_mentions_node_bin_override(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+
+    def fake_run(*_args, **_kwargs):
+        raise FileNotFoundError("npx")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    try:
+        with pytest.raises(AgentRuntimeError, match="HERMES_YACHIYO_NODE_BIN"):
+            service.install_skill_command("npx skills add owner/repo")
     finally:
         service.close()
 
