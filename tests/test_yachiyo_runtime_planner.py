@@ -1220,6 +1220,38 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     ]
 
 
+def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
+    cases = [
+        ("refresh the current page", "refresh"),
+        ("open a new tab", "new_tab"),
+        ("新开一个标签页", "new_tab"),
+        ("关闭当前标签页", "close_tab"),
+        ("切到下一个标签页", "next_tab"),
+        ("打开浏览器历史记录", "show_history"),
+        ("打开开发者工具", "open_devtools"),
+        ("把当前网页加入书签", "bookmark_page"),
+    ]
+
+    for prompt, action in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.active_window",
+                "desktop.safe_shortcut",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs.get("app_name_hint", "") == ""
+        assert "app_management_hint" not in decision.selected_intent.inputs
+        assert decision.selected_intent.inputs["operation_hint"] == "safe_shortcut"
+        assert decision.selected_intent.inputs["safe_shortcut_hint"] == {"action": action}
+        operation = _step_by_id(decision, "operate-foreground-ui")
+        assert operation.tool_name == "desktop.safe_shortcut"
+        assert operation.input_preview == {"action": action}
+
+
 def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
     decision = RuntimePlanner().decision(
         "打开 Notes，输入 hello，再复制",
@@ -2028,6 +2060,35 @@ def test_planner_direct_tool_requests_omits_discover_and_verify_steps() -> None:
     ]
 
 
+def test_planner_direct_tool_requests_maps_foreground_browser_safe_shortcuts() -> None:
+    cases = [
+        ("刷新当前网页", "refresh"),
+        ("open a new tab", "new_tab"),
+        ("关闭当前标签页", "close_tab"),
+        ("把当前网页加入书签", "bookmark_page"),
+    ]
+
+    for prompt, action in cases:
+        requests = planner_direct_tool_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.active_window",
+                "desktop.safe_shortcut",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+
 def test_entrypoint_selection_uses_legacy_when_single_app_plan_is_less_specific() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [
@@ -2110,6 +2171,43 @@ def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> N
             "planning_reason": "planner_fallback_current_page_find",
         },
     ]
+
+
+def test_entrypoint_selection_keeps_runtime_planner_for_matching_safe_shortcuts() -> None:
+    actions_by_prompt = {
+        "刷新当前网页": "refresh",
+        "open a new tab": "new_tab",
+        "关闭当前标签页": "close_tab",
+        "把当前网页加入书签": "bookmark_page",
+    }
+
+    def legacy_requests(prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": actions_by_prompt[prompt]},
+            }
+        ]
+
+    for prompt, action in actions_by_prompt.items():
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            ["desktop.active_window", "desktop.safe_shortcut", "desktop.ui_elements"],
+            legacy_tool_requests=legacy_requests,
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["selection_source"] == "runtime_planner"
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> None:

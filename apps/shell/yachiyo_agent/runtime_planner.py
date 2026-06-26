@@ -264,6 +264,9 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
+        if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint):
+            app_management = None
+            app_name_hint = ""
         if desktop_discovery is not None:
             app_name_hint = ""
         operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
@@ -916,6 +919,9 @@ class RuntimePlanner:
             or intent.inputs.get("app_name_hint")
             or ""
         ).strip()
+        if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
+            app_management = None
+            app_name = ""
         if desktop_discovery:
             app_name = ""
         mode = app_control_mode(intent.user_goal)
@@ -2475,6 +2481,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
         score += 0.08
+    if (
+        intent.kind == "desktop_operation"
+        and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
+    ):
+        score += 0.24
     if intent.kind == "media_playback" and _contains_any(
         text,
         ["music", "song", "songs", "音乐", "歌曲", "歌"],
@@ -2493,6 +2504,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.06
     if intent.kind == "web_research" and _contains_any(text, _UI_CONTROL_TERMS):
         score -= 0.24
+    if (
+        intent.kind == "web_research"
+        and not str(intent.inputs.get("url_hint") or "").strip()
+        and not str(intent.inputs.get("context_source") or "").strip()
+        and not str(intent.inputs.get("browser_action") or "").strip()
+        and _foreground_safe_shortcut_hint(safe_shortcut_hint(text))
+    ):
+        score -= 0.36
     if (
         intent.kind == "web_research"
         and str(intent.inputs.get("browser_action") or "").strip() == "find_current_page"
@@ -2661,6 +2680,113 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
+    if not isinstance(hint, Mapping):
+        return False
+    return str(hint.get("action") or "").strip() in {
+        "refresh",
+        "new_tab",
+        "new_window",
+        "new_private_window",
+        "close_tab",
+        "next_tab",
+        "previous_tab",
+        "reopen_closed_tab",
+        "browser_forward",
+        "browser_back",
+        "bookmark_page",
+        "show_history",
+        "open_devtools",
+        "focus_address_bar",
+    }
+
+
+def _safe_shortcut_targets_foreground(
+    text: str,
+    hint: Mapping[str, Any] | None,
+    app_name_hint: str,
+) -> bool:
+    if not _foreground_safe_shortcut_hint(hint):
+        return False
+    return not _safe_shortcut_has_explicit_app_scope(text, app_name_hint)
+
+
+def _safe_shortcut_has_explicit_app_scope(text: str, app_name_hint: str) -> bool:
+    app_name = str(app_name_hint or "").strip()
+    if not app_name:
+        return False
+    normalized = _normalized_shortcut_target_name(app_name)
+    generic_targets = {
+        "anewtab",
+        "newtab",
+        "tab",
+        "currenttab",
+        "thistab",
+        "anewwindow",
+        "newwindow",
+        "privatewindow",
+        "incognitowindow",
+        "incogni",
+        "currentpage",
+        "thispage",
+        "page",
+        "browserhistory",
+        "browsinghistory",
+        "history",
+        "dev",
+        "devtools",
+        "developertools",
+        "addressbar",
+        "urlbar",
+        "一个新窗口",
+        "新窗口",
+        "标签页",
+        "新标签页",
+        "当前标签页",
+        "当前网页",
+        "网页",
+        "浏览器历史记录",
+        "历史记录",
+        "开发者工具",
+        "当前网页开发者工具",
+        "当前网页的开发者工具",
+        "地址栏",
+    }
+    if normalized in generic_targets:
+        return False
+    return bool(
+        re.search(
+            rf"(?:把|将)\s*{re.escape(app_name)}\s*(?:打开|启动|开启|切到|聚焦)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"(?:open|launch|focus|start|activate)\s+(?:the\s+)?{re.escape(app_name)}\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"(?:bring|switch)\s+{re.escape(app_name)}\s+(?:to\s+(?:the\s+)?(?:front|foreground)|forward)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"(?:在|用|通过)\s*{re.escape(app_name)}(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"(?:in|inside|within|using|with)\s+{re.escape(app_name)}\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _normalized_shortcut_target_name(value: str) -> str:
+    return re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
 
 
 def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
