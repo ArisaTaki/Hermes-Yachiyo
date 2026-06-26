@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
+from apps.shell.agent.runtime.hotkeys import parse_hotkey_combo
 from apps.shell.agent.runtime.media_apps import (
     compact_music_app_name,
     is_known_music_app_compact,
@@ -15807,71 +15808,7 @@ def _normalize_named_hotkey_phrase(text: str) -> str:
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
-    parts = [
-        part.strip()
-        for part in re.split(r"(?:\s*\+\s*|\s*-\s*|\s+)", str(value or "").strip())
-        if part.strip()
-    ]
-    if not parts:
-        return None
-    modifier_aliases = {
-        "command": "command",
-        "cmd": "command",
-        "⌘": "command",
-        "shift": "shift",
-        "⇧": "shift",
-        "option": "option",
-        "alt": "option",
-        "⌥": "option",
-        "control": "control",
-        "ctrl": "control",
-        "⌃": "control",
-    }
-    key_aliases = {
-        "enter": "return",
-        "return": "return",
-        "回车": "return",
-        "确认": "return",
-        "确定": "return",
-        "换行": "return",
-        "escape": "escape",
-        "esc": "escape",
-        "退出": "escape",
-        "tab": "tab",
-        "space": "space",
-        "空格": "space",
-        "delete": "delete",
-        "删除": "delete",
-        "backspace": "backspace",
-        "退格": "backspace",
-        "up": "up",
-        "上箭头": "up",
-        "down": "down",
-        "下箭头": "down",
-        "left": "left",
-        "左箭头": "left",
-        "right": "right",
-        "右箭头": "right",
-    }
-    modifiers: list[str] = []
-    key = ""
-    for raw_part in parts:
-        part = re.sub(r"键$", "", raw_part.lower())
-        modifier = modifier_aliases.get(part)
-        if modifier:
-            if modifier not in modifiers:
-                modifiers.append(modifier)
-            continue
-        if part == "fn":
-            continue
-        candidate = key_aliases.get(part, part)
-        if re.fullmatch(r"[a-z0-9]", candidate) or candidate in key_aliases.values():
-            key = candidate
-        else:
-            return None
-    if not key:
-        return None
-    return {"key": key, "modifiers": modifiers}
+    return parse_hotkey_combo(value)
 
 
 def _desktop_type_text(text: str) -> str:

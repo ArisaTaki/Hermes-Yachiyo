@@ -6,6 +6,10 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.hotkeys import (
+    normalize_hotkey_token,
+    parse_hotkey_combo,
+)
 from apps.shell.agent.runtime.media_apps import music_app_name_from_text
 
 _GENERIC_MUSIC_QUERIES = {
@@ -1134,25 +1138,8 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
     combo = re.sub(r"\s*(?:吗|嘛|呢|please)$", "", combo, flags=re.IGNORECASE).strip()
     if re.search(r"(?:to\s+send|发送|提交|确认)", combo, flags=re.IGNORECASE):
         return None
-    combo = re.sub(r"\bkey\b|键", " ", combo, flags=re.IGNORECASE)
-    combo = combo.replace("+", " ").replace("-", " ")
-    tokens = [token for token in re.split(r"\s+", combo.strip()) if token]
-    if not tokens:
-        return None
-    modifiers: list[str] = []
-    key = ""
-    for token in tokens:
-        normalized = _normalize_hotkey_token(token)
-        if not normalized:
-            continue
-        if normalized in {"command", "control", "option", "shift"}:
-            if normalized not in modifiers:
-                modifiers.append(normalized)
-            continue
-        key = normalized
-    if not key:
-        return None
-    return {"key": key, "modifiers": modifiers}
+    combo = re.sub(r"\bkey\b", " ", combo, flags=re.IGNORECASE)
+    return parse_hotkey_combo(combo)
 
 
 def _safe_shortcut_action_from_hotkey_hint(value: str) -> str:
@@ -1490,27 +1477,7 @@ def _numeric_value(value: str) -> int | float:
 
 
 def _normalize_hotkey_token(value: str) -> str:
-    token = clean(value).lower().strip(" .，,。?？!！")
-    aliases = {
-        "cmd": "command",
-        "command": "command",
-        "⌘": "command",
-        "ctrl": "control",
-        "control": "control",
-        "option": "option",
-        "opt": "option",
-        "alt": "option",
-        "shift": "shift",
-        "return": "return",
-        "enter": "return",
-        "回车": "return",
-        "esc": "escape",
-        "escape": "escape",
-        "tab": "tab",
-        "space": "space",
-        "空格": "space",
-    }
-    return aliases.get(token, token if re.fullmatch(r"[a-z0-9]", token) else "")
+    return normalize_hotkey_token(value)
 
 
 def clean(value: str) -> str:

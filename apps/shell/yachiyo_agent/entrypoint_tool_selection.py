@@ -58,7 +58,7 @@ def planner_first_direct_tool_selection(
     selected_source = "runtime_planner" if planner_requests else ""
     selected_reason = "runtime_planner_direct"
     selected_requests = planner_requests
-    if _should_consult_legacy(planner_requests):
+    if _should_consult_legacy(prompt, planner_requests):
         legacy_requests = _legacy_requests(
             prompt,
             allowed,
@@ -112,14 +112,20 @@ def planner_first_direct_tool_selection(
     )
 
 
-def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
+def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return True
     tools = _request_tools(requests)
     if _runtime_planner_model_followup_owns_selection(requests):
         return False
+    if _prompt_contains_shortcut_or_window_followup(prompt) and (
+        "media.system_control" in _request_tool_set(requests)
+    ):
+        return True
     if _runtime_planner_media_playback_owns_selection(requests):
         return False
+    if _prompt_contains_foreground_paste(prompt) and "clipboard.read" in _request_tool_set(requests):
+        return True
     if _runtime_planner_clipboard_owns_selection(requests):
         return False
     if _runtime_planner_web_research_owns_selection(requests):
@@ -128,10 +134,14 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
         return False
-    if _runtime_planner_app_launch_owns_selection(requests):
+    if _runtime_planner_app_launch_owns_selection(requests, prompt=prompt):
         return False
     if _runtime_planner_desktop_observation_owns_selection(requests):
         return False
+    if _prompt_contains_shortcut_or_window_followup(prompt) and (
+        _request_tool_set(requests) & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS
+    ):
+        return True
     if _runtime_planner_system_control_owns_selection(requests):
         return False
     if _runtime_planner_file_access_owns_selection(requests):
@@ -249,8 +259,14 @@ _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(
 )
 
 
-def _runtime_planner_app_launch_owns_selection(requests: list[dict[str, Any]]) -> bool:
+def _runtime_planner_app_launch_owns_selection(
+    requests: list[dict[str, Any]],
+    *,
+    prompt: str = "",
+) -> bool:
     if not requests:
+        return False
+    if _prompt_contains_shortcut_or_window_followup(prompt):
         return False
     reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_desktop_operation"}:
@@ -265,6 +281,38 @@ def _runtime_planner_app_launch_owns_selection(requests: list[dict[str, Any]]) -
         if not _runtime_app_name_is_specific(str(request_input.get("app_name") or "")):
             return False
     return True
+
+
+def _prompt_contains_shortcut_or_window_followup(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:全选|复制|粘贴|撤销|重做|查找|刷新|"
+            r"新建标签页|新开(?:一个)?标签页|关闭当前标签页|"
+            r"下一个窗口|上一个窗口|下一个标签页|上一个标签页|"
+            r"下一个应用|上一个应用|切换到下一个应用|切换到上一个应用|"
+            r"最大化|全屏|任务控制中心|当前应用窗口|聚焦搜索|emoji\s*面板|强制退出|"
+            r"select\s+all|copy|paste|undo|redo|find|refresh|reload|"
+            r"new\s+tab|close\s+tab|next\s+window|previous\s+window|"
+            r"next\s+app|previous\s+app|"
+            r"next\s+tab|previous\s+tab|mission\s+control|app\s+windows|"
+            r"spotlight|emoji\s+picker|force\s+quit)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or bool(re.search(r"\b(?:go\s+)?(?:back|forward)(?:\s+(?:one\s+)?page)?\b", lowered))
+    )
+
+
+def _prompt_contains_foreground_paste(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:粘贴|paste).*(?:当前|前台|输入框|文本框|输入栏|current|foreground|input|field)",
+            str(prompt or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str, Any]]) -> bool:

@@ -528,6 +528,152 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_consults_legacy_for_shortcut_followups() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        if "全选复制" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open_and_safe_shortcut",
+                    "input": {"app_name": "WeChat", "action": "select_all"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                },
+            ]
+        if "最大化" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
+                }
+            ]
+        if "应用" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "switch_next_app"},
+                }
+            ]
+        if "go back" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "browser_back"},
+                }
+            ]
+        if "粘贴" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "paste"},
+                }
+            ]
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "next_window"},
+            }
+        ]
+
+    open_shortcut_selection = planner_first_direct_tool_selection(
+        "打开微信然后全选复制",
+        ["desktop.list_apps", "app.open", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    window_selection = planner_first_direct_tool_selection(
+        "切到下一个窗口",
+        ["desktop.list_apps", "app.focus", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    app_switch_selection = planner_first_direct_tool_selection(
+        "切到下一个应用",
+        ["desktop.list_apps", "app.focus", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    maximize_selection = planner_first_direct_tool_selection(
+        "Chrome 最大化",
+        ["system.volume", "app.focus_and_safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    browser_back_selection = planner_first_direct_tool_selection(
+        "go back one page",
+        ["media.system_control", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    paste_selection = planner_first_direct_tool_selection(
+        "把剪贴板内容粘贴到当前输入框",
+        ["clipboard.read", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert open_shortcut_selection.selected_source == "daily_desktop_intent"
+    assert open_shortcut_selection.event_payload["legacy_request_count"] == 2
+    assert [request["tool"] for request in open_shortcut_selection.requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+    assert window_selection.selected_source == "daily_desktop_intent"
+    assert window_selection.event_payload["legacy_request_count"] == 1
+    assert window_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "next_window"},
+        }
+    ]
+    assert app_switch_selection.selected_source == "daily_desktop_intent"
+    assert app_switch_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "switch_next_app"},
+        }
+    ]
+    assert maximize_selection.selected_source == "daily_desktop_intent"
+    assert maximize_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
+        }
+    ]
+    assert browser_back_selection.selected_source == "daily_desktop_intent"
+    assert browser_back_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "browser_back"},
+        }
+    ]
+    assert paste_selection.selected_source == "daily_desktop_intent"
+    assert paste_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+        }
+    ]
+    assert [call["prompt"] for call in legacy_calls] == [
+        "打开微信然后全选复制",
+        "切到下一个窗口",
+        "切到下一个应用",
+        "Chrome 最大化",
+        "go back one page",
+        "把剪贴板内容粘贴到当前输入框",
+    ]
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
