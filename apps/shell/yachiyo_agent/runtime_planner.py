@@ -50,6 +50,7 @@ from .desktop_plan_hints import (
     ui_inspection_hint,
     window_list_hint,
 )
+from .file_access_plan_hints import file_access_hint
 from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
 
@@ -72,6 +73,7 @@ class TaskIntentRouter:
             self._data_analysis_intent(text, metadata),
             self._media_playback_intent(text, metadata),
             self._system_control_intent(text, metadata),
+            self._file_access_intent(text, metadata),
             self._desktop_operation_intent(text, metadata),
             self._web_research_intent(text, metadata),
             self._report_generation_intent(text, metadata),
@@ -538,6 +540,24 @@ class TaskIntentRouter:
             risk_level="high" if destructive else "medium",
         )
 
+    def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        hint = file_access_hint(text)
+        if not hint:
+            return _empty_intent("file_access", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "file_access", text),
+            kind="file_access",
+            title="File Access",
+            user_goal=text,
+            confidence=0.86,
+            description="Open a local path or reveal it in Finder through desktop file tools.",
+            inputs=hint,
+            expected_outputs=["desktop_state"],
+            required_capabilities=["file.desktop_access"],
+            preferred_capabilities=["desktop.app_discovery"],
+            risk_level="low",
+        )
+
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         if score <= 0 and metadata.get("runnable_kind") != "workflow":
@@ -756,6 +776,8 @@ class RuntimePlanner:
             return self._report_steps(intent, allowed)
         if intent.kind == "code_task":
             return self._code_steps(intent, allowed)
+        if intent.kind == "file_access":
+            return self._file_access_steps(intent, allowed)
         if intent.kind == "file_organization":
             return self._file_organization_steps(intent, allowed)
         if intent.kind == "schedule":
@@ -1458,6 +1480,27 @@ class RuntimePlanner:
             ),
         ]
 
+    def _file_access_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        action = str(intent.inputs.get("action") or "").strip()
+        path = str(intent.inputs.get("path") or "").strip()
+        reveal = action == "reveal_path"
+        tool_name = "desktop.reveal_path" if reveal else "desktop.open_path"
+        return [
+            _step(
+                intent,
+                "reveal-local-path" if reveal else "open-local-path",
+                "Reveal local path in Finder" if reveal else "Open local path",
+                "file.desktop_access",
+                _first_allowed((tool_name,), allowed),
+                input_preview={"path": path} if path else {},
+                reason="Use the dedicated local file tool instead of treating paths as apps.",
+            )
+        ]
+
     def _schedule_steps(
         self,
         intent: TaskIntentSnapshot,
@@ -1865,6 +1908,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "write_artifact"
     if capability_id in {"file.workspace_read", "file.organization"}:
         return "inspect_paths" if capability_id == "file.organization" else "read_file"
+    if capability_id == "file.desktop_access":
+        return "reveal_path" if tool_name == "desktop.reveal_path" else "open_path"
     if capability_id == "browser.research":
         if _is_context_source_tool(tool_name):
             return _context_source_action(tool_name)

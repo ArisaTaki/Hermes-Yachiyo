@@ -86,6 +86,7 @@ def _json(model) -> dict:
 def test_task_intent_kind_contract_covers_runtime_planner_routes() -> None:
     assert {
         "system_control",
+        "file_access",
         "file_organization",
         "clipboard_operation",
     }.issubset(set(get_args(TaskIntentKind)))

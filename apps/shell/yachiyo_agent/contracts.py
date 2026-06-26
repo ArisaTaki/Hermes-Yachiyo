@@ -25,6 +25,7 @@ TaskIntentKind = Literal[
     "report_generation",
     "web_research",
     "file_operation",
+    "file_access",
     "file_organization",
     "communication",
     "schedule",

@@ -10,6 +10,7 @@ from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
 from .desktop_plan_hints import media_tool_preview
+from .file_access_plan_hints import file_access_tool_preview
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
 from .system_plan_hints import system_tool_preview
@@ -107,6 +108,8 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             step_ids=("inspect-file-scope",),
             planning_reason="planner_prefetch_file_scope",
         )
+    if decision.selected_intent.kind == "file_access":
+        return _file_access_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "communication":
         context_requests = _context_source_tool_requests(
             decision,
@@ -350,6 +353,13 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
             planning_reason="planner_fallback_system_control",
         )
     ]
+
+
+def _file_access_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = file_access_tool_preview(inputs, allowed)
+    if not tool_name:
+        return []
+    return [_request(tool_name, payload, planning_reason="planner_fallback_file_access")]
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

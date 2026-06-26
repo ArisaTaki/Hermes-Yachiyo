@@ -2418,6 +2418,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type SkillSnapshot",
             "export type SkillFolderSnapshot",
             "export type SkillSourceRootSnapshot",
+            "| 'file_access'",
             "| 'file_organization'",
             "| 'system_control'",
             "| 'clipboard_operation'",

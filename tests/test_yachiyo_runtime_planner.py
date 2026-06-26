@@ -352,6 +352,42 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert apply_step.approval_required is True
 
 
+def test_runtime_planner_routes_local_file_access_to_desktop_file_tools() -> None:
+    open_decision = RuntimePlanner().decision(
+        "打开当前选中的 Finder 文件",
+        allowed_tools=["desktop.open_path", "desktop.reveal_path"],
+    )
+
+    assert open_decision.selected_intent.kind == "file_access"
+    assert open_decision.selected_intent.inputs == {
+        "action": "open_path",
+        "path": "finder_selection",
+    }
+    open_step = _step_by_id(open_decision, "open-local-path")
+    assert open_step.capability_id == "file.desktop_access"
+    assert open_step.tool_name == "desktop.open_path"
+    assert open_step.action == "open_path"
+    assert open_step.input_preview == {"path": "finder_selection"}
+    assert open_decision.plan.route_to_studio is False
+
+    reveal_decision = RuntimePlanner().decision(
+        "在 Finder 中显示 iCloud 云盘",
+        allowed_tools=["desktop.open_path", "desktop.reveal_path"],
+    )
+
+    assert reveal_decision.selected_intent.kind == "file_access"
+    assert reveal_decision.selected_intent.inputs == {
+        "action": "reveal_path",
+        "path": "~/Library/Mobile Documents/com~apple~CloudDocs",
+    }
+    reveal_step = _step_by_id(reveal_decision, "reveal-local-path")
+    assert reveal_step.tool_name == "desktop.reveal_path"
+    assert reveal_step.action == "reveal_path"
+    assert reveal_step.input_preview == {
+        "path": "~/Library/Mobile Documents/com~apple~CloudDocs"
+    }
+
+
 def test_runtime_planner_requires_file_location_for_file_organization() -> None:
     decision = RuntimePlanner().decision(
         "整理文件并删除重复项",
@@ -2236,6 +2272,33 @@ def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
             "input": {"url": "https://example.com"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_local_file_access_plan() -> None:
+    assert planner_tool_requests(
+        "打开下载目录里的最新文件",
+        allowed_tools=["desktop.open_path", "desktop.reveal_path"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "latest_download"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
+    assert planner_tool_requests(
+        "显示当前选中文件",
+        allowed_tools=["desktop.open_path", "desktop.reveal_path"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.reveal_path",
+            "input": {"path": "finder_selection"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
         }
     ]
 

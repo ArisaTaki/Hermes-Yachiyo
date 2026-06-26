@@ -139,6 +139,15 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         output_kinds=("text", "table", "source_file"),
     ),
     CapabilityDefinition(
+        capability_id="file.desktop_access",
+        title="Open Or Reveal Local Files",
+        category="file",
+        description="Open safe local paths or reveal them in Finder through desktop file tools.",
+        tools=("desktop.open_path", "desktop.reveal_path"),
+        execution_actions=("open_path", "reveal_path"),
+        output_kinds=("desktop_state",),
+    ),
+    CapabilityDefinition(
         capability_id="file.organization",
         title="Organize Files",
         category="file",
@@ -327,6 +336,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "communication.compose": ("communication.", "mail.", "messages.", "email."),
     "clipboard.read_write": ("clipboard.",),
     "terminal.execution": ("terminal.",),
+    "file.desktop_access": ("file.",),
     "file.organization": ("file.",),
     "workflow.orchestration": ("workflow.",),
     "group.multi_agent": ("group.",),
@@ -335,6 +345,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "data.analysis": ("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
+    "file.desktop_access": ("desktop.open_path", "desktop.reveal_path"),
     "file.organization": ("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
     "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
     "information.capture": (
