@@ -390,6 +390,12 @@ class RuntimeCustomApiAgentLoop:
                         timeline,
                         run_id=run_id,
                         presentation=presentation,
+                        source=str(
+                            planned_tool_requests[0].get("source") or "daily_desktop_intent"
+                        ),
+                        planning_reason=str(
+                            planned_tool_requests[0].get("planning_reason") or ""
+                        ),
                     )
                 else:
                     direct_result = self._direct_daily_desktop_sequence_result(
@@ -683,6 +689,8 @@ class RuntimeCustomApiAgentLoop:
         timeline: list[dict[str, Any]],
         run_id: str = "",
         presentation: str = "",
+        source: str = "daily_desktop_intent",
+        planning_reason: str = "",
     ) -> str:
         if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
             return ""
@@ -705,11 +713,14 @@ class RuntimeCustomApiAgentLoop:
             return ""
         event_payload = {
             "tool": planned_tool,
-            "source": "daily_desktop_intent",
+            "source": str(source or "daily_desktop_intent"),
             "input_preview": planned_input,
             "result": result,
             "summary": summary,
         }
+        clean_planning_reason = str(planning_reason or "").strip()
+        if clean_planning_reason:
+            event_payload["planning_reason"] = clean_planning_reason
         if clean_presentation:
             event_payload["presentation"] = clean_presentation
         timeline.append(
@@ -807,6 +818,15 @@ class RuntimeCustomApiAgentLoop:
         if not summary:
             return ""
         last_step = completed_steps[-1]
+        clean_source = str(
+            (planned_tool_requests[0].get("source") if planned_tool_requests else "")
+            or "daily_desktop_intent"
+        )
+        planning_reasons = {
+            str(request.get("planning_reason") or "").strip()
+            for request in planned_tool_requests
+            if str(request.get("planning_reason") or "").strip()
+        }
         event_payload = {
             "tool": str(last_step.get("tool") or ""),
             "tools": [str(request.get("tool") or "") for request in planned_tool_requests],
@@ -814,10 +834,12 @@ class RuntimeCustomApiAgentLoop:
                 last_step.get("input_preview") if isinstance(last_step.get("input_preview"), dict) else {}
             ),
             "result": last_step.get("result") if isinstance(last_step.get("result"), dict) else {},
-            "source": "daily_desktop_intent",
+            "source": clean_source,
             "steps": completed_steps,
             "summary": summary,
         }
+        if len(planning_reasons) == 1:
+            event_payload["planning_reason"] = next(iter(planning_reasons))
         presentation = str(last_step.get("presentation") or "").strip()
         if presentation:
             event_payload["presentation"] = presentation
