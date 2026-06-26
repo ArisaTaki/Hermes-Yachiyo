@@ -14,6 +14,7 @@ const DAILY_DESKTOP_INTENT_TOOL_EVENTS = new Set([
   'agent.desktop.permission_recovery',
   'agent.desktop.intent_unavailable',
 ]);
+const TOOL_INPUT_RESOLUTION_EVENT_TYPE = 'agent.tool.input_resolved';
 
 export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
   const calls: ToolCallSnapshot[] = [];
@@ -271,12 +272,15 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     || publicRunEventPayloadString(payload, 'tool')
     || event.detail
     || 'tool';
+  const baseInputPreview = objectPreview(payload.input_preview)
+    || objectPreview(payload.input)
+    || objectPreview(payload.arguments)
+    || objectPreview(payload.args)
+    || {};
   const inputPreview = toolCallInputPreviewWithTraceContext(
-    objectPreview(payload.input_preview)
-      || objectPreview(payload.input)
-      || objectPreview(payload.arguments)
-      || objectPreview(payload.args)
-      || {},
+    event.event_type === TOOL_INPUT_RESOLUTION_EVENT_TYPE
+      ? toolInputResolutionPreview(payload, baseInputPreview)
+      : baseInputPreview,
     {
       approval_id: approvalId,
       risk_level: riskLevel,
@@ -594,6 +598,7 @@ function isToolRunEvent(eventType: string): boolean {
   return [
     'agent.tool.call',
     'agent.tool.denied',
+    TOOL_INPUT_RESOLUTION_EVENT_TYPE,
     'agent.tool.started',
     'agent.tool.failed',
     'agent.tool.skipped',
@@ -624,6 +629,7 @@ function isToolRunEvent(eventType: string): boolean {
 
 function toolStatusFromRunEvent(eventType: string): string {
   if (eventType === 'tool.requested') return 'requested';
+  if (eventType === TOOL_INPUT_RESOLUTION_EVENT_TYPE) return 'resolved';
   if (eventType === 'tool.started' || eventType === 'agent.tool.started') return 'running';
   if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
   if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved' || eventType === 'tool.approval_approved') return 'approved';
@@ -749,11 +755,14 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'agent_id',
     'agent_name',
     'approval_id',
+    'app_resolution_source',
     'group_id',
     'group_run_id',
     'member_agent_id',
     'member_agent_name',
     'policy_reason',
+    'requested_app_name',
+    'resolved_app_name',
     'risk_level',
     'run_id',
     'run_group_id',
@@ -774,6 +783,27 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
   );
+}
+
+function toolInputResolutionPreview(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+): Record<string, unknown> {
+  const preview = { ...inputPreview };
+  const resolvedAppName = publicRunEventPayloadString(payload, 'resolved_app_name');
+  const requestedAppName = publicRunEventPayloadString(payload, 'requested_app_name');
+  const sourceTool = publicRunEventPayloadString(payload, 'source_tool');
+  if (resolvedAppName) {
+    if (!preview.app_name) preview.app_name = resolvedAppName;
+    if (!preview.resolved_app_name) preview.resolved_app_name = resolvedAppName;
+  }
+  if (requestedAppName && !preview.requested_app_name) {
+    preview.requested_app_name = requestedAppName;
+  }
+  if (sourceTool && !preview.app_resolution_source) {
+    preview.app_resolution_source = sourceTool;
+  }
+  return preview;
 }
 
 function toolCallInputPreviewWithTraceContext(

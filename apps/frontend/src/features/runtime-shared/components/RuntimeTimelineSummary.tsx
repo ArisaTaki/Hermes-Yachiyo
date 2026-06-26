@@ -116,6 +116,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') return '工具策略决策';
+  if (type === 'agent.tool.input_resolved') return '工具输入解析';
   if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';
   if (type === 'agent.tool.skipped' || type === 'tool.skipped') return '工具已跳过';

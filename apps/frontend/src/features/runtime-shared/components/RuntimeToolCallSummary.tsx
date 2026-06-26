@@ -249,6 +249,7 @@ function normalizeRuntimeToolStatus(status: string): string {
   const knownStatuses = [
     'queued',
     'planned',
+    'resolved',
     'running',
     'waiting_approval',
     'approved',
@@ -290,6 +291,7 @@ function objectPayload(payload: Record<string, unknown> | undefined, key: string
 function runtimeToolStatusLabel(status: string): string {
   if (status === 'queued') return '已请求';
   if (status === 'planned') return '已规划';
+  if (status === 'resolved') return '已解析';
   if (status === 'running') return '执行中';
   if (status === 'waiting_approval') return '待审批';
   if (status === 'approved') return '已批准';

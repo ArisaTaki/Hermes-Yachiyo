@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from apps.shell.yachiyo_agent.contracts import PublicRunEvent
 from apps.shell.yachiyo_agent.tool_call_event_snapshots import (
+    tool_call_snapshots_from_events,
     tool_call_payload_from_event,
     tool_status_from_event_type,
 )
@@ -107,3 +108,48 @@ def test_tool_call_status_from_event_type_covers_terminal_approval_aliases() -> 
     assert tool_status_from_event_type("agent.tool.approval_cancelled") == "cancelled"
     assert tool_status_from_event_type("agent.tool.denied") == "denied"
     assert tool_status_from_event_type("agent.tool.completed") == "completed"
+
+
+def test_tool_call_snapshots_merge_input_resolution_with_followup_call() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-app-resolution",
+                sequence=1,
+                event_type="agent.tool.input_resolved",
+                detail="app.open",
+                created_at="2026-06-27T00:00:00Z",
+                payload={
+                    "tool": "app.open",
+                    "field": "app_name",
+                    "requested_app_name": "Apple Music",
+                    "resolved_app_name": "Music",
+                    "source_tool": "desktop.list_apps",
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-app-resolution",
+                sequence=2,
+                event_type="agent.tool.call",
+                detail="app.open",
+                created_at="2026-06-27T00:00:01Z",
+                payload={
+                    "tool": "app.open",
+                    "input_preview": {"app_name": "Music"},
+                    "result": {"ok": True, "opened": True},
+                },
+            ),
+        ]
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call.tool_name == "app.open"
+    assert call.status == "completed"
+    assert call.input_preview == {
+        "app_name": "Music",
+        "requested_app_name": "Apple Music",
+        "resolved_app_name": "Music",
+        "app_resolution_source": "desktop.list_apps",
+    }
+    assert call.output_preview == {"ok": True, "opened": True}

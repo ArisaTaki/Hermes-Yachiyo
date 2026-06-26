@@ -20,6 +20,7 @@ _DAILY_DESKTOP_INTENT_TOOL_EVENTS = {
     "agent.desktop.intent_completed",
     "agent.desktop.intent_unavailable",
 }
+_TOOL_INPUT_RESOLUTION_EVENT_TYPE = "agent.tool.input_resolved"
 
 
 def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -69,6 +70,8 @@ def tool_call_payloads_from_event(event: PublicRunEvent) -> list[dict[str, Any]]
 
 def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
+    if event.event_type == _TOOL_INPUT_RESOLUTION_EVENT_TYPE:
+        payload = tool_input_resolution_payload(payload)
     approval = _nested_mapping(payload, "pending_approval") or _nested_mapping(payload, "approval")
     approval_id = (
         _text(payload.get("approval_id"))
@@ -299,6 +302,7 @@ def is_tool_event(event_type: str) -> bool:
     return event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS or event_type in {
         "agent.tool.call",
         "agent.tool.denied",
+        _TOOL_INPUT_RESOLUTION_EVENT_TYPE,
         "agent.tool.started",
         "agent.tool.failed",
         "agent.tool.skipped",
@@ -339,6 +343,8 @@ def tool_name_from_event(event: PublicRunEvent) -> str:
 def tool_status_from_event_type(event_type: str) -> str:
     if event_type in {"tool.requested"}:
         return "requested"
+    if event_type == _TOOL_INPUT_RESOLUTION_EVENT_TYPE:
+        return "resolved"
     if event_type in {"tool.started", "agent.tool.started"}:
         return "running"
     if event_type in {"tool.approval_required", "agent.tool.approval_required"}:
@@ -400,6 +406,25 @@ def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) 
     return tool_status_from_event_type(event_type)
 
 
+def tool_input_resolution_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    resolved_app_name = _text(payload.get("resolved_app_name"))
+    requested_app_name = _text(payload.get("requested_app_name"))
+    source_tool = _text(payload.get("source_tool"))
+    input_preview = _nested_mapping(payload, "input_preview")
+    if resolved_app_name:
+        input_preview.setdefault("app_name", resolved_app_name)
+        input_preview.setdefault("resolved_app_name", resolved_app_name)
+    if requested_app_name:
+        input_preview.setdefault("requested_app_name", requested_app_name)
+    if source_tool:
+        input_preview.setdefault("app_resolution_source", source_tool)
+    normalized = dict(payload)
+    if input_preview:
+        normalized["input_preview"] = input_preview
+    normalized.setdefault("status", "resolved")
+    return normalized
+
+
 def daily_desktop_intent_output_preview(
     event_type: str,
     payload: Mapping[str, Any],
@@ -448,6 +473,9 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "member_agent_id",
         "member_agent_name",
         "policy_reason",
+        "app_resolution_source",
+        "requested_app_name",
+        "resolved_app_name",
         "risk_level",
         "run_id",
         "run_group_id",

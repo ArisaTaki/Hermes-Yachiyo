@@ -62,6 +62,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     return policyDecisionTitle(event, detail);
   }
+  if (name === 'agent.tool.input_resolved') return detail ? `工具输入解析 · ${detail}` : '工具输入解析';
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.started') return detail ? `工具执行中 · ${detail}` : '工具执行中';
   if (name === 'agent.tool.skipped' || name === 'tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
