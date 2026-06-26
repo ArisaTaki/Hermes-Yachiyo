@@ -103,8 +103,11 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if tool_name in {"desktop.running_apps", "desktop.active_window", "screen.capture"}:
+    if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
+    if tool_name == "screen.capture":
+        reason = str(payload.get("reason") or "").strip()
+        return {"reason": reason} if reason else {}
     if tool_name == "desktop.ui_elements":
         return {
             key: payload[key]

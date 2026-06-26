@@ -187,6 +187,20 @@ def ui_inspection_hint(text: str) -> dict[str, Any] | None:
     return payload
 
 
+def screen_capture_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    lowered = value.lower()
+    if re.search(r"(?:截图工具|截图面板|屏幕截图工具|screenshot\s*(?:tool|toolbar|panel))", value, flags=re.IGNORECASE):
+        return None
+    if not _looks_like_screen_capture_request(value, lowered):
+        return None
+    payload: dict[str, Any] = {"reason": "user asked to capture the screen"}
+    app_name = _screen_capture_app_name_hint(value)
+    if app_name:
+        payload["app_name"] = app_name
+    return payload
+
+
 def hotkey_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     if not contains_any(
@@ -585,6 +599,69 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "前台",
     }
     return "" if app.lower().strip(" .，,。") in generic else app.strip(" .，,。")
+
+
+def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(r"(?:截(?:一下|下)图|截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)", value)
+        or re.search(
+            r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)"
+            r".{0,8}(?:截图|截屏|截一下|截个图|抓屏|拍屏)",
+            value,
+        )
+        or re.search(
+            r"(?:截取|截图|截屏|截一下|截个图|截|抓屏|拍屏)"
+            r".{0,8}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)",
+            value,
+        )
+        or re.search(r"(?:拍一下|拍下|拍一张|拍个).{0,8}(?:屏幕|桌面|界面|画面)", value)
+        or re.search(
+            r"(?:看一下|看看|看下|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)"
+            r".{0,12}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)",
+            value,
+        )
+        or re.search(
+            r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)"
+            r".{0,8}(?:是什么|是啥|内容|画面|有什么|有啥)",
+            value,
+        )
+        or "take a screenshot" in lowered
+        or "capture the screen" in lowered
+        or "screen capture" in lowered
+        or re.search(r"\bscreenshot\s+(?:my|the|this|current)?\s*(?:screen|desktop)?\b", lowered)
+        or re.search(
+            r"\b(?:look at|inspect|view|read|show me|show)\s+"
+            r"(?:my|the|this|current)?\s*(?:screen|desktop|interface|ui)\b",
+            lowered,
+        )
+        or re.search(r"\bwhat(?:'s| is)?\s+on\s+(?:my|the|this|current)?\s*(?:screen|desktop)\b", lowered)
+    )
+
+
+def _screen_capture_app_name_hint(value: str) -> str:
+    patterns = (
+        r"(?:看一下|看看|看下|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:界面|画面)",
+        r"(?P<app2>[^。！？!?，,]+?)\s*(?:界面|画面).{0,8}(?:截图|截屏|看一下|看看|查看|观察)",
+        r"\b(?:look at|inspect|view|show me|show)\s+(?P<app_en>.+?)\s+"
+        r"(?:screen|interface|ui)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app_name = _clean_ui_app_name_hint(raw_app)
+        if app_name:
+            return app_name
+    return ""
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:

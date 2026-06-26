@@ -37,6 +37,7 @@ from .desktop_plan_hints import (
     media_playback_hint,
     media_tool_preview,
     safe_type_text_hint,
+    screen_capture_hint,
     submit_action_hint,
     type_into_ui_hint,
     ui_inspection_hint,
@@ -156,6 +157,7 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         ui_inspection = ui_inspection_hint(text)
+        screen_capture = screen_capture_hint(text)
         score = _score_terms(
             text,
             [
@@ -186,9 +188,19 @@ class TaskIntentRouter:
                 "界面",
                 "控件",
                 "按钮",
+                "屏幕",
+                "截图",
+                "截屏",
+                "screenshot",
+                "screen capture",
             ],
         )
-        if score <= 0 and not metadata.get("daily_desktop_intent") and ui_inspection is None:
+        if (
+            score <= 0
+            and not metadata.get("daily_desktop_intent")
+            and ui_inspection is None
+            and screen_capture is None
+        ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
         window_list = window_list_hint(text)
@@ -196,6 +208,7 @@ class TaskIntentRouter:
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
+            or (screen_capture or {}).get("app_name")
             or _app_name_hint(text)
             or ""
         ).strip()
@@ -210,9 +223,11 @@ class TaskIntentRouter:
             inputs["focus_window_hint"] = focus_window
         if ui_inspection is not None:
             inputs["ui_inspection_hint"] = ui_inspection
+        if screen_capture is not None:
+            inputs["screen_capture_hint"] = screen_capture
         risk_level = (
             "medium"
-            if operation_hint not in {"focus_window", "list_windows", "read_ui"}
+            if operation_hint not in {"focus_window", "list_windows", "read_ui", "capture_screen"}
             and _looks_like_ui_operation(text)
             else "low"
         )
@@ -654,10 +669,12 @@ class RuntimePlanner:
         focus_window = focus_window_hint(intent.user_goal)
         window_list = window_list_hint(intent.user_goal)
         ui_inspection = ui_inspection_hint(intent.user_goal)
+        screen_capture = screen_capture_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
+            or (screen_capture or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or ""
         ).strip()
@@ -786,6 +803,44 @@ class RuntimePlanner:
                         else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
                     ),
                     reason="Read visible UI controls or text as a discovery step before any action.",
+                )
+            )
+            return steps
+        if screen_capture is not None and not any(
+            item for item in (hotkey, type_target, safe_type_text, submit_action) if item
+        ):
+            capture_payload = {
+                key: screen_capture[key]
+                for key in ("reason",)
+                if key in screen_capture and screen_capture[key] not in (None, "")
+            }
+            if app_name and not focus_step_added:
+                steps.append(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        input_preview={"app_name": app_name},
+                        depends_on=["discover-desktop-state"],
+                        reason="Focus the requested app before capturing its visible state.",
+                    )
+                )
+            steps.append(
+                _step(
+                    intent,
+                    "capture-screen",
+                    "Capture screen",
+                    "desktop.app_discovery",
+                    _first_allowed(("screen.capture",), allowed),
+                    input_preview=capture_payload,
+                    depends_on=(
+                        ["focus-app-window"]
+                        if focus_step_added
+                        else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
+                    ),
+                    reason="Capture visible desktop state for visual inspection before any action.",
                 )
             )
             return steps
@@ -1241,6 +1296,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "focus_window"
     if step_key == "read-foreground-ui":
         return "read_ui"
+    if step_key == "capture-screen":
+        return "capture_screen"
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
     if step_key == "operate-foreground-ui":
@@ -1655,6 +1712,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "list_windows"
     if ui_inspection_hint(text) is not None:
         return "read_ui"
+    if screen_capture_hint(text) is not None:
+        return "capture_screen"
     if _contains_any(text, ["click", "点击"]):
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):

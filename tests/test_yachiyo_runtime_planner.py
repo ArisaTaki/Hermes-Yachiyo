@@ -383,6 +383,52 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert read_ui.depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_routes_screen_capture_to_desktop_discovery() -> None:
+    decision = RuntimePlanner().decision(
+        "看一下当前屏幕",
+        allowed_tools=["desktop.active_window", "screen.capture"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["operation_hint"] == "capture_screen"
+    assert decision.selected_intent.inputs["screen_capture_hint"] == {
+        "reason": "user asked to capture the screen",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "capture-screen",
+    ]
+    capture = _step_by_id(decision, "capture-screen")
+    assert capture.tool_name == "screen.capture"
+    assert capture.action == "capture_screen"
+    assert capture.input_preview == {"reason": "user asked to capture the screen"}
+    assert capture.depends_on == ["discover-desktop-state"]
+    assert capture.approval_required is False
+
+
+def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
+    decision = RuntimePlanner().decision(
+        "看一下 Slack 界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert decision.selected_intent.inputs["operation_hint"] == "capture_screen"
+    assert decision.selected_intent.inputs["screen_capture_hint"] == {
+        "reason": "user asked to capture the screen",
+        "app_name": "Slack",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "capture-screen",
+    ]
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(decision, "capture-screen").depends_on == ["open-or-focus-app"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -948,6 +994,37 @@ def test_planner_desktop_tool_requests_maps_app_scoped_ui_inspection() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_app_scoped_screen_capture() -> None:
+    requests = planner_desktop_tool_requests(
+        "看一下 Slack 界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
