@@ -265,16 +265,29 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let routeToStudio: boolean | undefined;
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
+  const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
 
   for (const event of events) {
     if (publicRunEventIsSecret(event)) continue;
     const eventType = String(event.event_type || '').trim();
-    if (!eventType.startsWith('agent.plan.') && eventType !== 'agent.intent.selected') continue;
     const payload = objectRecord(event.payload);
+    const isPlannerEvent = eventType.startsWith('agent.plan.') || eventType === 'agent.intent.selected';
+    const isRuntimePlannerDesktopIntentEvent = eventType === 'agent.desktop.intent_planned'
+      && runtimePlannerDesktopIntentPayload(payload);
+    if (!isPlannerEvent && !isRuntimePlannerDesktopIntentEvent) continue;
     eventCount += 1;
-    source = stringValue(payload.source) || source;
+    source = stringValue(payload.source) || source || (isRuntimePlannerDesktopIntentEvent ? 'runtime_planner' : '');
     decisionId = stringValue(payload.decision_id) || decisionId;
     planId = stringValue(payload.plan_id) || planId;
+
+    if (isRuntimePlannerDesktopIntentEvent) {
+      if (!plan && !toolPlan) {
+        const step = desktopIntentPlanStepFromPayload(payload, desktopFallbackStepById.size + 1);
+        if (step) addPlannerStep(desktopFallbackStepById, step);
+        routeToStudio = booleanValue(payload.route_to_studio, routeToStudio);
+      }
+      continue;
+    }
 
     if (eventType === 'agent.intent.selected') {
       intent = taskIntentSnapshot(payload.intent) || intent;
@@ -305,24 +318,122 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     }
   }
 
-  if (!intent && !plan && !stepById.size) return null;
+  const fallbackSteps = Array.from(desktopFallbackStepById.values());
+  const fallbackToolPlan = !toolPlan && fallbackSteps.length
+    ? desktopIntentFallbackToolPlan(fallbackSteps, planId, source)
+    : null;
+  const effectiveIntent = intent || (fallbackSteps.length ? desktopIntentFallbackIntent(fallbackSteps, source) : null);
+  const effectiveToolPlan = toolPlan || fallbackToolPlan;
+  const steps = stepById.size ? Array.from(stepById.values()) : fallbackSteps;
+  const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
+
+  if (!effectiveIntent && !plan && !steps.length) return null;
   return {
     candidateIntents,
     decisionId,
     eventCount,
-    intent,
+    intent: effectiveIntent,
     plan,
-    planId,
+    planId: effectivePlanId,
     routeToStudio,
     source,
-    steps: Array.from(stepById.values()),
-    toolPlan,
+    steps,
+    toolPlan: effectiveToolPlan,
   };
 }
 
 function addPlannerStep(stepById: Map<string, ToolPlanStepSnapshot>, step: ToolPlanStepSnapshot) {
   const key = step.step_id || `${step.capability_id}:${step.tool_name || step.title}`;
   stepById.set(key, step);
+}
+
+function runtimePlannerDesktopIntentPayload(payload: Record<string, unknown>): boolean {
+  const source = stringValue(payload.source);
+  const planningReason = stringValue(payload.planning_reason);
+  return source === 'runtime_planner' || planningReason.startsWith('planner_');
+}
+
+function desktopIntentPlanStepFromPayload(
+  payload: Record<string, unknown>,
+  ordinal: number,
+): ToolPlanStepSnapshot | null {
+  const toolName = stringValue(payload.tool);
+  const detail = stringValue(payload.detail);
+  const planningReason = stringValue(payload.planning_reason) || stringValue(payload.reason);
+  if (!toolName && !detail && !planningReason) return null;
+  const inputPreview = objectRecord(payload.input_preview);
+  return {
+    step_id: `desktop-intent-${ordinal}-${slugValue(toolName || detail || planningReason || 'tool')}`,
+    title: desktopPlannedStepTitle(toolName, detail),
+    capability_id: desktopCapabilityForTool(toolName),
+    action: planningReason || toolName || 'desktop_intent',
+    tool_name: toolName || null,
+    input_preview: Object.keys(inputPreview).length ? inputPreview : undefined,
+    risk_level: stringValue(payload.risk_level) || 'medium',
+    approval_required: booleanValue(payload.approval_required, false),
+    reason: planningReason || 'runtime planner desktop intent event',
+    status: stringValue(payload.status) || 'planned',
+  };
+}
+
+function desktopIntentFallbackToolPlan(
+  steps: ToolPlanStepSnapshot[],
+  planId: string,
+  source: string,
+): ToolPlanSnapshot {
+  return {
+    plan_id: planId || 'runtime-planner-desktop-fallback',
+    title: 'Runtime Planner Desktop Plan',
+    steps,
+    required_capabilities: uniqueStrings(steps.map((step) => step.capability_id)),
+    missing_capabilities: [],
+    approvals_required: steps
+      .filter((step) => step.approval_required)
+      .map((step) => step.step_id),
+    artifacts_expected: [],
+    open_questions: [],
+    source: source || 'runtime_planner',
+  };
+}
+
+function desktopIntentFallbackIntent(
+  steps: ToolPlanStepSnapshot[],
+  source: string,
+): TaskIntentSnapshot {
+  return {
+    intent_id: 'runtime-planner-desktop-intent',
+    kind: 'desktop_operation',
+    title: 'Desktop Operation',
+    description: 'Reconstructed from runtime planner desktop intent events.',
+    confidence: 0,
+    required_capabilities: uniqueStrings(steps.map((step) => step.capability_id)),
+    preferred_capabilities: [],
+    missing_inputs: [],
+    risk_level: steps.some((step) => step.risk_level === 'high') ? 'high' : 'medium',
+    source: source || 'runtime_planner',
+  };
+}
+
+function desktopPlannedStepTitle(toolName: string, detail: string): string {
+  if (detail) return detail;
+  if (toolName) return `Use ${toolName}`;
+  return 'Desktop operation';
+}
+
+function desktopCapabilityForTool(toolName: string): string {
+  if (toolName.includes('list_apps') || toolName.includes('running_apps') || toolName.includes('active_window') || toolName.includes('windows')) {
+    return 'desktop.app_discovery';
+  }
+  if (toolName.includes('open_app') || toolName.includes('focus_app') || toolName.includes('app.open') || toolName.includes('app.focus')) {
+    return 'desktop.app_control';
+  }
+  if (toolName.includes('read_ui') || toolName.includes('ui_elements') || toolName.includes('capture')) {
+    return 'desktop.app_discovery';
+  }
+  if (toolName.includes('click') || toolName.includes('type') || toolName.includes('shortcut') || toolName.includes('key') || toolName.includes('hotkey')) {
+    return 'desktop.ui_operation';
+  }
+  return 'desktop.app_control';
 }
 
 function taskIntentSnapshot(value: unknown): TaskIntentSnapshot | null {
@@ -355,6 +466,11 @@ function arrayRecords(value: unknown): Array<Record<string, unknown>> {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function slugValue(value: string): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  return slug || 'tool';
 }
 
 function booleanValue(value: unknown, fallback?: boolean): boolean | undefined {
