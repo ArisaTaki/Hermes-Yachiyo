@@ -16,6 +16,8 @@ def clipboard_operation_hint(prompt: str) -> dict[str, Any]:
     write_text = _clipboard_write_text(text)
     if write_text:
         return {"action": "write", "text": write_text}
+    if _clipboard_paste_to_foreground_request(text):
+        return {}
     if _selected_text_read_request(text):
         return {"action": "copy_selection_read"}
     if _clipboard_read_request(text):
@@ -34,6 +36,23 @@ def clipboard_tool_preview(
     if action in {"read", "copy_selection_read"}:
         return _first_allowed(("clipboard.read",), allowed), {}
     return None, {}
+
+
+def _clipboard_paste_to_foreground_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:剪贴板|粘贴板|clipboard).{0,16}(?:粘贴|paste).{0,16}"
+            r"(?:当前|前台|输入框|文本框|输入栏|current|foreground|input|field)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:粘贴|paste).{0,16}(?:剪贴板|粘贴板|clipboard).{0,16}"
+            r"(?:当前|前台|输入框|文本框|输入栏|current|foreground|input|field)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _clipboard_write_text(text: str) -> str:

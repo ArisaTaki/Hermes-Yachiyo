@@ -135,6 +135,8 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
         return False
+    if _runtime_planner_safe_shortcut_owns_selection(requests):
+        return False
     if _runtime_planner_app_launch_owns_selection(requests, prompt=prompt):
         return False
     if _runtime_planner_desktop_observation_owns_selection(requests):
@@ -245,6 +247,24 @@ def _runtime_planner_desktop_discovery_owns_selection(requests: list[dict[str, A
         return False
     tools = _request_tool_set(requests)
     return bool(tools) and tools <= _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS
+
+
+def _runtime_planner_safe_shortcut_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 1:
+        return False
+    request = requests[0]
+    if not isinstance(request, Mapping):
+        return False
+    if str(request.get("tool") or "").strip() != "desktop.safe_shortcut":
+        return False
+    reasons = _request_planning_reasons(requests)
+    if reasons not in (
+        {"planner_fallback_desktop_operation"},
+        {"planner_fallback_desktop_hotkey"},
+    ):
+        return False
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(str(request_input.get("action") or "").strip())
 
 
 _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(

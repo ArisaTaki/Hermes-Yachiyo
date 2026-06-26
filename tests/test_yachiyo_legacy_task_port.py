@@ -528,7 +528,7 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert legacy_calls == []
 
 
-def test_planner_first_direct_selection_consults_legacy_for_shortcut_followups() -> None:
+def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
     def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
@@ -623,21 +623,26 @@ def test_planner_first_direct_selection_consults_legacy_for_shortcut_followups()
         "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
     ]
-    assert window_selection.selected_source == "daily_desktop_intent"
-    assert window_selection.event_payload["legacy_request_count"] == 1
+    assert window_selection.selected_source == "runtime_planner"
+    assert window_selection.event_payload["legacy_request_count"] == 0
     assert window_selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "next_window"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
-    assert app_switch_selection.selected_source == "daily_desktop_intent"
+    assert app_switch_selection.selected_source == "runtime_planner"
+    assert app_switch_selection.event_payload["legacy_request_count"] == 0
     assert app_switch_selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "switch_next_app"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
     assert maximize_selection.selected_source == "daily_desktop_intent"
@@ -648,29 +653,31 @@ def test_planner_first_direct_selection_consults_legacy_for_shortcut_followups()
             "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
         }
     ]
-    assert browser_back_selection.selected_source == "daily_desktop_intent"
+    assert browser_back_selection.selected_source == "runtime_planner"
+    assert browser_back_selection.event_payload["legacy_request_count"] == 0
     assert browser_back_selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "browser_back"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
-    assert paste_selection.selected_source == "daily_desktop_intent"
+    assert paste_selection.selected_source == "runtime_planner"
+    assert paste_selection.event_payload["legacy_request_count"] == 0
     assert paste_selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
     assert [call["prompt"] for call in legacy_calls] == [
         "打开微信然后全选复制",
-        "切到下一个窗口",
-        "切到下一个应用",
         "Chrome 最大化",
-        "go back one page",
-        "把剪贴板内容粘贴到当前输入框",
     ]
 
 
