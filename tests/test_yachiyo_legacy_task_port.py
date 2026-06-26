@@ -65,6 +65,34 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     ]
 
 
+def test_legacy_runtime_port_appends_media_planner_events() -> None:
+    runtime = _PlannerEventFakeRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "能否帮我播放 Apple Music?",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert task["task_id"] == "task-1"
+    assert [event[1]["event_type"] for event in planner_events] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert planner_events[0][1]["payload"]["intent"]["kind"] == "media_playback"
+    plan = planner_events[1][1]["payload"]["plan"]
+    capabilities = {
+        capability["capability_id"]: capability
+        for capability in plan["capabilities"]
+    }
+    assert "media.playback" in capabilities
+    assert plan["tool_plan"]["steps"][0]["tool_name"] == "media.apple_music_open_and_play"
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
