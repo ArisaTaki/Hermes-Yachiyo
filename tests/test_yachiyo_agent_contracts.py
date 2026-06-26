@@ -59,6 +59,7 @@ from apps.shell.yachiyo_agent import (
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
+    ToolPlanStepSnapshot,
     UpdateRestrictedToolPluginRequest,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
@@ -78,6 +79,35 @@ from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 
 def _json(model) -> dict:
     return json.loads(model.model_dump_json())
+
+
+def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
+    snapshot = ToolPlanStepSnapshot(
+        step_id="discover-desktop-state",
+        title="Discover desktop state",
+        capability_id="desktop.app_discovery",
+        action="list_apps",
+        tool_name="desktop.running_apps",
+        reason="Inspect before acting.",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "step_id",
+        "title",
+        "capability_id",
+        "action",
+        "tool_name",
+        "input_preview",
+        "risk_level",
+        "approval_required",
+        "depends_on",
+        "reason",
+        "fallback_tools",
+        "status",
+    ]
+    assert payload["action"] == "list_apps"
 
 
 def test_agent_task_snapshot_json_shape_is_stable() -> None:

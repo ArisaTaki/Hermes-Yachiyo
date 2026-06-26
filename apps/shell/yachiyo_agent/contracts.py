@@ -189,6 +189,7 @@ class ToolPlanStepSnapshot(_PublicSnapshot):
     step_id: str
     title: str
     capability_id: str
+    action: str = ""
     tool_name: str | None = None
     input_preview: dict[str, Any] = Field(default_factory=dict)
     risk_level: DesktopExecutionRisk | str = "low"

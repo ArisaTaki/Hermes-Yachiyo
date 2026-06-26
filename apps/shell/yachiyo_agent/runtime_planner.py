@@ -1038,11 +1038,13 @@ def _step(
     depends_on: list[str] | None = None,
     reason: str = "",
     fallback_tools: list[str] | None = None,
+    action: str = "",
 ) -> ToolPlanStepSnapshot:
     return ToolPlanStepSnapshot(
         step_id=step_key,
         title=title,
         capability_id=capability_id,
+        action=action or _step_action(step_key, capability_id, tool_name),
         tool_name=tool_name,
         input_preview=input_preview or {},
         risk_level=risk_level,
@@ -1063,6 +1065,7 @@ def _service_step(
         step_id=capability_id.replace(".", "-"),
         title=title,
         capability_id=capability_id,
+        action=_service_action(capability_id),
         reason="Handled by Agent Studio service orchestration rather than a model-visible tool.",
     )
 
@@ -1072,6 +1075,61 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
         if allowed is None or tool in allowed:
             return tool
     return None
+
+
+def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> str:
+    if step_key == "discover-desktop-state":
+        return "list_apps"
+    if step_key == "open-or-focus-app":
+        return "focus_app" if tool_name == "app.focus" else "open_app"
+    if step_key == "verify-desktop-result":
+        return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
+    if step_key == "operate-foreground-ui":
+        return _desktop_operation_action(tool_name)
+    if step_key == "submit-foreground-ui":
+        return "submit"
+    if capability_id == "data.analysis":
+        return "analyze_data_file" if tool_name == "data.analyze" else "run_python_analysis"
+    if capability_id == "artifact.write":
+        return "write_artifact"
+    if capability_id in {"file.workspace_read", "file.organization"}:
+        return "inspect_paths" if capability_id == "file.organization" else "read_file"
+    if capability_id == "browser.research":
+        return "extract_text" if tool_name and "extract_text" in tool_name else "open_url"
+    if capability_id == "media.playback":
+        return "play"
+    if capability_id == "system.control":
+        return "control_system"
+    if capability_id == "schedule.reminder":
+        return "schedule_task"
+    if capability_id == "communication.compose":
+        return "draft_message"
+    if capability_id == "clipboard.read_write":
+        return "read_clipboard" if tool_name == "clipboard.read" else "write_clipboard"
+    return ""
+
+
+def _desktop_operation_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if "click" in clean_tool:
+        return "click"
+    if "type" in clean_tool:
+        return "type"
+    if "shortcut" in clean_tool or "hotkey" in clean_tool:
+        return "shortcut"
+    if "scroll" in clean_tool:
+        return "scroll"
+    if "key" in clean_tool:
+        return "key"
+    return "operate_ui"
+
+
+def _service_action(capability_id: str) -> str:
+    if capability_id == "workflow.orchestration":
+        return "start_workflow"
+    if capability_id == "group.multi_agent":
+        return "start_group_run"
+    return ""
 
 
 def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:

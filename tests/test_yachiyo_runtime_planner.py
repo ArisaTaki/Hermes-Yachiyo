@@ -67,6 +67,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
         "analyze-data-file"
     ]
     step = _step_by_id(decision, "analyze-data-file")
+    assert step.action == "analyze_data_file"
     assert step.tool_name == "data.analyze"
     assert step.input_preview == {
         "path": "sales.csv",
@@ -223,13 +224,17 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+    assert _step_by_id(decision, "discover-desktop-state").action == "list_apps"
     assert _step_by_id(decision, "discover-desktop-state").tool_name == "desktop.running_apps"
     assert _step_by_id(decision, "open-or-focus-app").input_preview == {
         "app_name": "SuperData Studio",
     }
+    assert _step_by_id(decision, "open-or-focus-app").action == "open_app"
     assert _step_by_id(decision, "operate-foreground-ui").tool_name == "desktop.click_ui_element"
+    assert _step_by_id(decision, "operate-foreground-ui").action == "click"
     assert _step_by_id(decision, "operate-foreground-ui").approval_required is True
     assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
+    assert _step_by_id(decision, "verify-desktop-result").action == "read_ui"
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["operate-foreground-ui"]
 
 

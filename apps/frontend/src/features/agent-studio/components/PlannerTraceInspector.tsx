@@ -233,6 +233,7 @@ function PlannerTraceStepRow({
   return (
     <div
       className="studio-planner-step"
+      data-action={step.action || ''}
       data-approval-required={String(Boolean(step.approval_required))}
       data-capability-id={step.capability_id}
       data-planner-step-id={step.step_id}
@@ -243,6 +244,7 @@ function PlannerTraceStepRow({
     >
       <div>
         <strong>{index + 1}. {step.title}</strong>
+        {step.action ? <span>action: {step.action}</span> : null}
         {step.capability_id ? <span>capability: {step.capability_id}</span> : null}
         {step.tool_name ? <span>tool: {step.tool_name}</span> : null}
         {step.reason ? <span>{step.reason}</span> : null}

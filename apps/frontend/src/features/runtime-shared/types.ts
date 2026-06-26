@@ -135,6 +135,7 @@ export type ToolPlanStepSnapshot = {
   step_id: string;
   title: string;
   capability_id: string;
+  action?: string;
   tool_name?: string | null;
   input_preview?: Record<string, unknown>;
   risk_level?: DesktopExecutionRisk | string;
