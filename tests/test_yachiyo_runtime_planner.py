@@ -1738,6 +1738,37 @@ def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
     ]
 
 
+def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
+    decision = RuntimePlanner().decision(
+        "打开微信然后全选复制",
+        allowed_tools=["desktop.list_apps", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "微信",
+        "operation_hint": "safe_shortcut_sequence",
+        "safe_shortcut_sequence_hint": [{"action": "select_all"}, {"action": "copy"}],
+        "safe_shortcut_hint": {"action": "select_all"},
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup",
+        "verify-desktop-result",
+    ]
+    first = _step_by_id(decision, "operate-foreground-ui")
+    assert first.tool_name == "app.open_and_safe_shortcut"
+    assert first.input_preview == {"app_name": "微信", "action": "select_all"}
+    followup = _step_by_id(decision, "operate-foreground-ui-followup")
+    assert followup.tool_name == "desktop.safe_shortcut"
+    assert followup.input_preview == {"action": "copy"}
+    assert followup.depends_on == ["operate-foreground-ui"]
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui-followup"
+    ]
+
+
 def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() -> None:
     decision = RuntimePlanner().decision(
         "打开 Notes，输入 hello，再复制",

@@ -47,6 +47,7 @@ from .desktop_plan_hints import (
     safe_scroll_hint,
     safe_type_text_hint,
     safe_shortcut_hint,
+    safe_shortcut_sequence_hint,
     screen_capture_hint,
     submit_action_hint,
     type_into_ui_hint,
@@ -175,6 +176,9 @@ class TaskIntentRouter:
         app_management = app_management_hint(text)
         foreground_management = foreground_management_hint(text)
         safe_shortcut = safe_shortcut_hint(text)
+        safe_shortcut_sequence = safe_shortcut_sequence_hint(text)
+        if safe_shortcut_sequence:
+            safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
         safe_click = safe_click_hint(text)
@@ -258,6 +262,7 @@ class TaskIntentRouter:
             and app_management is None
             and foreground_management is None
             and safe_shortcut is None
+            and not safe_shortcut_sequence
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
@@ -309,6 +314,7 @@ class TaskIntentRouter:
             and app_management is None
             and foreground_management is None
             and safe_shortcut is None
+            and not safe_shortcut_sequence
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
@@ -323,6 +329,7 @@ class TaskIntentRouter:
             and app_management is None
             and foreground_management is None
             and safe_shortcut is None
+            and not safe_shortcut_sequence
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
@@ -350,6 +357,8 @@ class TaskIntentRouter:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
         if foreground_management is not None:
             inputs["foreground_management_hint"] = foreground_management
+        if safe_shortcut_sequence:
+            inputs["safe_shortcut_sequence_hint"] = safe_shortcut_sequence
         if safe_shortcut is not None:
             inputs["safe_shortcut_hint"] = safe_shortcut
         if safe_key is not None:
@@ -992,6 +1001,9 @@ class RuntimePlanner:
         app_management = app_management_hint(intent.user_goal)
         foreground_management = foreground_management_hint(intent.user_goal)
         safe_shortcut = safe_shortcut_hint(intent.user_goal)
+        safe_shortcut_sequence = safe_shortcut_sequence_hint(intent.user_goal)
+        if safe_shortcut_sequence:
+            safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         safe_click = safe_click_hint(intent.user_goal)
@@ -1054,6 +1066,9 @@ class RuntimePlanner:
         if click_target and not any((type_target, safe_type_text, app_search)):
             submit_action = ""
         followup_safe_shortcut = safe_shortcut if safe_type_text and safe_shortcut else None
+        followup_safe_shortcut_sequence = [
+            dict(item) for item in safe_shortcut_sequence[1:] if isinstance(item, Mapping)
+        ]
         primary_safe_shortcut = None if followup_safe_shortcut else safe_shortcut
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
@@ -1525,19 +1540,31 @@ class RuntimePlanner:
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
-        if followup_safe_shortcut and any(step.step_id == "operate-foreground-ui" for step in steps):
-            steps.append(
-                _step(
-                    intent,
-                    "operate-foreground-ui-followup",
-                    "Operate foreground UI",
-                    "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_shortcut",), allowed),
-                    input_preview=dict(followup_safe_shortcut),
-                    depends_on=["operate-foreground-ui"],
-                    reason="Run the requested follow-up safe shortcut after the explicit foreground input.",
+        followup_safe_shortcuts = []
+        if followup_safe_shortcut:
+            followup_safe_shortcuts.append(dict(followup_safe_shortcut))
+        followup_safe_shortcuts.extend(followup_safe_shortcut_sequence)
+        if followup_safe_shortcuts and any(step.step_id == "operate-foreground-ui" for step in steps):
+            previous_step_id = "operate-foreground-ui"
+            for index, followup in enumerate(followup_safe_shortcuts):
+                followup_step_id = (
+                    "operate-foreground-ui-followup"
+                    if index == 0
+                    else f"operate-foreground-ui-followup-{index + 1}"
                 )
-            )
+                steps.append(
+                    _step(
+                        intent,
+                        followup_step_id,
+                        "Operate foreground UI",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_shortcut",), allowed),
+                        input_preview=dict(followup),
+                        depends_on=[previous_step_id],
+                        reason="Run the requested follow-up safe shortcut after the previous foreground operation.",
+                    )
+                )
+                previous_step_id = followup_step_id
         if submit_action and any(step.step_id == "operate-foreground-ui" for step in steps):
             steps.append(
                 _step(
@@ -1556,13 +1583,19 @@ class RuntimePlanner:
         verify_depends_on = []
         if any(step.step_id == "submit-foreground-ui" for step in steps):
             verify_depends_on = ["submit-foreground-ui"]
-        elif any(step.step_id == "operate-foreground-ui-followup" for step in steps):
-            verify_depends_on = ["operate-foreground-ui-followup"]
-        elif any(step.step_id == "operate-foreground-ui" for step in steps):
+        else:
+            followup_step_ids = [
+                step.step_id
+                for step in steps
+                if step.step_id.startswith("operate-foreground-ui-followup")
+            ]
+            if followup_step_ids:
+                verify_depends_on = [followup_step_ids[-1]]
+        if not verify_depends_on and any(step.step_id == "operate-foreground-ui" for step in steps):
             verify_depends_on = ["operate-foreground-ui"]
-        elif any(step.step_id == "focus-app-window" for step in steps):
+        elif not verify_depends_on and any(step.step_id == "focus-app-window" for step in steps):
             verify_depends_on = ["focus-app-window"]
-        elif any(step.step_id == "open-or-focus-app" for step in steps):
+        elif not verify_depends_on and any(step.step_id == "open-or-focus-app" for step in steps):
             verify_depends_on = ["open-or-focus-app"]
         if verify_depends_on:
             verify_tools = _desktop_verify_tool_candidates(verify_depends_on)
@@ -3253,6 +3286,8 @@ def _desktop_operation_hint(text: str) -> str:
     safe_key = safe_key_hint(text)
     if safe_key:
         return "safe_key"
+    if safe_shortcut_sequence_hint(text):
+        return "safe_shortcut_sequence"
     safe_shortcut = safe_shortcut_hint(text)
     if str((safe_shortcut or {}).get("action") or "").strip() == "application_windows":
         return "safe_shortcut"

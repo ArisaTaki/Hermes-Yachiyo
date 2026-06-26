@@ -343,6 +343,28 @@ def safe_shortcut_hint(text: str) -> dict[str, str] | None:
     return {"action": action} if action else None
 
 
+def safe_shortcut_sequence_hint(text: str) -> list[dict[str, str]]:
+    value = clean(text)
+    actions: list[str] = []
+    for part in [
+        item.strip()
+        for item in re.split(r"(?:然后|再|接着|之后|and\s+then|then|[,，。])", value)
+        if item.strip()
+    ]:
+        compound_actions = _compound_safe_shortcut_actions(part)
+        if compound_actions:
+            actions.extend(compound_actions)
+            continue
+        action = (
+            _safe_shortcut_action_from_hotkey_hint(part)
+            or _safe_shortcut_action_from_phrase(part)
+            or _safe_shortcut_action_from_trailing_phrase(part)
+        )
+        if action:
+            actions.append(action)
+    return [{"action": action} for action in actions] if len(actions) > 1 else []
+
+
 def safe_key_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     lowered = value.lower()
@@ -1389,6 +1411,21 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         "enterfullscreen",
     )
     return "toggle_full_screen" if any(normalized.endswith(suffix) for suffix in full_screen_suffixes) else ""
+
+
+def _compound_safe_shortcut_actions(value: str) -> list[str]:
+    normalized = re.sub(r"[\s._·-]+", "", clean(value).lower())
+    if not normalized:
+        return []
+    if "全选" in normalized and "复制" in normalized and normalized.index("全选") < normalized.index("复制"):
+        return ["select_all", "copy"]
+    if (
+        "selectall" in normalized
+        and "copy" in normalized
+        and normalized.index("selectall") < normalized.index("copy")
+    ):
+        return ["select_all", "copy"]
+    return []
 
 
 def _looks_like_show_desktop_request(value: str, lowered: str) -> bool:

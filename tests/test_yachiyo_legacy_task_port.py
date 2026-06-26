@@ -617,11 +617,23 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         legacy_tool_requests=legacy_requests,
     )
 
-    assert open_shortcut_selection.selected_source == "daily_desktop_intent"
-    assert open_shortcut_selection.event_payload["legacy_request_count"] == 2
-    assert [request["tool"] for request in open_shortcut_selection.requests] == [
-        "app.open_and_safe_shortcut",
-        "desktop.safe_shortcut",
+    assert open_shortcut_selection.selected_source == "runtime_planner"
+    assert open_shortcut_selection.event_payload["legacy_request_count"] == 0
+    assert open_shortcut_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "微信", "action": "select_all"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
     ]
     assert window_selection.selected_source == "runtime_planner"
     assert window_selection.event_payload["legacy_request_count"] == 0
@@ -678,9 +690,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
-    assert [call["prompt"] for call in legacy_calls] == [
-        "打开微信然后全选复制",
-    ]
+    assert legacy_calls == []
 
 
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:

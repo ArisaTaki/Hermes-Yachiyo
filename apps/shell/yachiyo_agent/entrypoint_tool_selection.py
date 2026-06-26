@@ -250,17 +250,7 @@ def _runtime_planner_desktop_discovery_owns_selection(requests: list[dict[str, A
 
 
 def _runtime_planner_safe_shortcut_owns_selection(requests: list[dict[str, Any]]) -> bool:
-    if len(requests) != 1:
-        return False
-    request = requests[0]
-    if not isinstance(request, Mapping):
-        return False
-    tool_name = str(request.get("tool") or "").strip()
-    if tool_name not in {
-        "desktop.safe_shortcut",
-        "app.open_and_safe_shortcut",
-        "app.focus_and_safe_shortcut",
-    }:
+    if not requests:
         return False
     reasons = _request_planning_reasons(requests)
     if reasons not in (
@@ -268,12 +258,24 @@ def _runtime_planner_safe_shortcut_owns_selection(requests: list[dict[str, Any]]
         {"planner_fallback_desktop_hotkey"},
     ):
         return False
-    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    if tool_name != "desktop.safe_shortcut" and not _runtime_app_name_is_specific(
-        str(request_input.get("app_name") or "")
-    ):
-        return False
-    return bool(str(request_input.get("action") or "").strip())
+    for request in requests:
+        if not isinstance(request, Mapping):
+            return False
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in {
+            "desktop.safe_shortcut",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+        }:
+            return False
+        request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if tool_name != "desktop.safe_shortcut" and not _runtime_app_name_is_specific(
+            str(request_input.get("app_name") or "")
+        ):
+            return False
+        if not str(request_input.get("action") or "").strip():
+            return False
+    return True
 
 
 _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(
