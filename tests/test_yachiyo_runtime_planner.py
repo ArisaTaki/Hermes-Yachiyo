@@ -174,6 +174,8 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     }
     assert _step_by_id(decision, "operate-foreground-ui").tool_name == "desktop.click_ui_element"
     assert _step_by_id(decision, "operate-foreground-ui").approval_required is True
+    assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == ["operate-foreground-ui"]
 
 
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
@@ -189,6 +191,7 @@ def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> 
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "operate-foreground-ui",
+        "verify-desktop-result",
     ]
     operation = _step_by_id(decision, "operate-foreground-ui")
     assert operation.tool_name == "app.open_and_click_ui_element"
@@ -200,8 +203,25 @@ def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> 
         "limit": 80,
     }
     assert operation.depends_on == ["discover-desktop-state"]
+    assert _step_by_id(decision, "verify-desktop-result").status == "unavailable"
     ui_capability = _capability_by_id(decision, "desktop.ui_operation")
     assert "app.open_and_click_ui_element" in ui_capability.tools
+
+
+def test_runtime_planner_verifies_desktop_open_result() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=["desktop.running_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.active_window"
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == ["open-or-focus-app"]
 
 
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:

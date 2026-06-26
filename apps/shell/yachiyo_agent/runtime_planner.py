@@ -621,6 +621,24 @@ class RuntimePlanner:
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
+        verify_depends_on = []
+        if any(step.step_id == "operate-foreground-ui" for step in steps):
+            verify_depends_on = ["operate-foreground-ui"]
+        elif any(step.step_id == "open-or-focus-app" for step in steps):
+            verify_depends_on = ["open-or-focus-app"]
+        if verify_depends_on:
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    _first_allowed(("desktop.active_window", "desktop.windows", "desktop.ui_elements", "screen.capture"), allowed),
+                    input_preview={"app_name": app_name} if app_name else {},
+                    depends_on=verify_depends_on,
+                    reason="Observe the foreground state after desktop execution.",
+                )
+            )
         return steps
 
     def _media_playback_steps(
