@@ -155,16 +155,17 @@ def _settings_inspect_ui_request(text: str) -> bool:
 
 def _volume_payload(text: str) -> dict[str, Any]:
     lowered = text.lower()
+    has_volume_context = _contains_any(text, ["音量", "声音", "volume", "sound"])
     level_match = re.search(r"(?P<level>\d{1,3})\s*%?", text)
     if _contains_any(text, ["取消静音", "解除静音", "恢复声音"]) or re.search(r"\bunmute\b", lowered):
         return {"action": "unmute"}
     if _contains_any(text, ["静音", "关闭声音", "关掉声音", "别出声"]) or re.search(r"\bmute\b", lowered):
         return {"action": "mute"}
-    if _contains_any(text, ["一半", "半"]):
+    if has_volume_context and _contains_any(text, ["一半", "半"]):
         return {"action": "set", "level": 50}
-    if _contains_any(text, ["最大", "满格", "拉满"]):
+    if has_volume_context and _contains_any(text, ["最大", "满格", "拉满"]):
         return {"action": "set", "level": 100}
-    if level_match and _contains_any(text, ["音量", "声音", "volume", "sound"]):
+    if level_match and has_volume_context:
         level = int(level_match.group("level"))
         if 0 <= level <= 100:
             return {"action": "set", "level": level}

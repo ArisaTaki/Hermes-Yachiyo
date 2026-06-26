@@ -255,7 +255,12 @@ def _runtime_planner_safe_shortcut_owns_selection(requests: list[dict[str, Any]]
     request = requests[0]
     if not isinstance(request, Mapping):
         return False
-    if str(request.get("tool") or "").strip() != "desktop.safe_shortcut":
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
         return False
     reasons = _request_planning_reasons(requests)
     if reasons not in (
@@ -264,6 +269,10 @@ def _runtime_planner_safe_shortcut_owns_selection(requests: list[dict[str, Any]]
     ):
         return False
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if tool_name != "desktop.safe_shortcut" and not _runtime_app_name_is_specific(
+        str(request_input.get("app_name") or "")
+    ):
+        return False
     return bool(str(request_input.get("action") or "").strip())
 
 

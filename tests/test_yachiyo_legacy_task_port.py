@@ -645,12 +645,15 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
-    assert maximize_selection.selected_source == "daily_desktop_intent"
+    assert maximize_selection.selected_source == "runtime_planner"
+    assert maximize_selection.event_payload["legacy_request_count"] == 0
     assert maximize_selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
+            "input": {"app_name": "Chrome", "action": "toggle_full_screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
     assert browser_back_selection.selected_source == "runtime_planner"
@@ -677,7 +680,6 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
     ]
     assert [call["prompt"] for call in legacy_calls] == [
         "打开微信然后全选复制",
-        "Chrome 最大化",
     ]
 
 

@@ -1904,6 +1904,32 @@ def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> Non
     assert "Read foreground UI" in verify.reason
 
 
+def test_runtime_planner_routes_app_scoped_fullscreen_shortcut_to_desktop_operation() -> None:
+    decision = RuntimePlanner().decision(
+        "Chrome 最大化",
+        allowed_tools=[
+            "system.volume",
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "Chrome",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "toggle_full_screen"},
+    }
+    discover = _step_by_id(decision, "discover-desktop-state")
+    assert discover.tool_name == "desktop.list_apps"
+    assert discover.input_preview == {"query": "Chrome", "limit": 20}
+    operate = _step_by_id(decision, "operate-foreground-ui")
+    assert operate.tool_name == "app.focus_and_safe_shortcut"
+    assert operate.input_preview == {"app_name": "Chrome", "action": "toggle_full_screen"}
+    assert all(step.tool_name != "system.volume" for step in decision.plan.tool_plan.steps)
+
+
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
     for prompt in (
         "能否帮我播放 Apple Music?",
@@ -1975,6 +2001,10 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
         "把系统音量调到 50%",
         allowed_tools=["system.volume"],
     )
+    max_volume = RuntimePlanner().decision(
+        "把音量调到最大",
+        allowed_tools=["system.volume"],
+    )
 
     assert decision.selected_intent.kind == "system_control"
     assert decision.selected_intent.inputs == {
@@ -1985,6 +2015,11 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
     assert step.capability_id == "system.control"
     assert step.tool_name == "system.volume"
     assert step.input_preview == {"action": "set", "level": 50}
+    assert max_volume.selected_intent.kind == "system_control"
+    assert max_volume.selected_intent.inputs == {
+        "kind": "volume",
+        "payload": {"action": "set", "level": 100},
+    }
 
 
 def test_runtime_planner_routes_brightness_and_display_controls() -> None:

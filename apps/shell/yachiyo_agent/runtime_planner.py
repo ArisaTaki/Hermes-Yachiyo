@@ -181,6 +181,7 @@ class TaskIntentRouter:
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
         score = _score_terms(
             text,
@@ -281,6 +282,7 @@ class TaskIntentRouter:
             or (screen_capture or {}).get("app_name")
             or (app_management or {}).get("app_name")
             or _app_name_hint(text)
+            or app_scoped_safe_shortcut_app
             or ""
         ).strip()
         if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint):
@@ -1023,6 +1025,7 @@ class RuntimePlanner:
             or (app_management or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or app_search.get("app_name")
+            or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             or ""
         ).strip()
         if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
@@ -1038,6 +1041,11 @@ class RuntimePlanner:
             or ""
         ).strip()
         mode = app_control_mode(intent.user_goal)
+        if app_name and safe_shortcut and not _contains_any(
+            intent.user_goal,
+            ["打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "],
+        ):
+            mode = "focus"
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
@@ -3212,6 +3220,35 @@ def _clean_app_name_hint(value: str) -> str:
     return "" if app.lower() in generic else app
 
 
+def _app_scoped_safe_shortcut_app_name_hint(
+    text: str,
+    safe_shortcut: Mapping[str, Any] | None = None,
+) -> str:
+    hint = safe_shortcut or safe_shortcut_hint(text)
+    if str((hint or {}).get("action") or "").strip() != "toggle_full_screen":
+        return ""
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:把|将)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:窗口)?"
+        r"(?:最大化|全屏|进入全屏(?:模式)?)"
+        r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        r"^(?:please\s+)?(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:maximize|fullscreen|full\s*screen)(?:\s+(?:window|app))?(?:\s+please)?$",
+        r"^(?:please\s+)?(?:maximize|fullscreen|full\s*screen|enter\s+full\s*screen)\s+"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:window|app))?(?:\s+please)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app = _clean_app_name_hint(match.group("app"))
+        if not app or _contains_any(app, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
+            continue
+        return app
+    return ""
+
+
 def _desktop_operation_hint(text: str) -> str:
     safe_key = safe_key_hint(text)
     if safe_key:
@@ -3587,6 +3624,9 @@ def _clean_communication_hint_text(value: str) -> str:
 
 
 def _app_scoped_desktop_operation_hint(text: str) -> bool:
+    safe_shortcut = safe_shortcut_hint(text)
+    if _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut):
+        return True
     app_name = _app_name_hint(text)
     if app_name and _is_browser_or_search_app_name(app_name):
         return False

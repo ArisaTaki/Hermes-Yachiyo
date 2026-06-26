@@ -338,6 +338,8 @@ def safe_shortcut_hint(text: str) -> dict[str, str] | None:
             action = _safe_shortcut_action_from_phrase(part)
             if action:
                 break
+    if not action:
+        action = _safe_shortcut_action_from_trailing_phrase(value)
     return {"action": action} if action else None
 
 
@@ -1341,6 +1343,19 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "showappwindows": "application_windows",
         "showapplicationwindows": "application_windows",
         "applicationwindows": "application_windows",
+        "最大化": "toggle_full_screen",
+        "窗口最大化": "toggle_full_screen",
+        "当前窗口最大化": "toggle_full_screen",
+        "全屏": "toggle_full_screen",
+        "窗口全屏": "toggle_full_screen",
+        "当前窗口全屏": "toggle_full_screen",
+        "进入全屏": "toggle_full_screen",
+        "进入全屏模式": "toggle_full_screen",
+        "maximize": "toggle_full_screen",
+        "maximizewindow": "toggle_full_screen",
+        "fullscreen": "toggle_full_screen",
+        "fullscreencurrentwindow": "toggle_full_screen",
+        "enterfullscreen": "toggle_full_screen",
         "聚焦地址栏": "focus_address_bar",
         "打开地址栏": "focus_address_bar",
         "选中地址栏": "focus_address_bar",
@@ -1349,6 +1364,31 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "addressbar": "focus_address_bar",
     }
     return mapping.get(normalized, "")
+
+
+def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
+    normalized = re.sub(r"[\s._·-]+", "", clean(value).lower())
+    if not normalized:
+        return ""
+    if contains_any(normalized, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
+        return ""
+    full_screen_suffixes = (
+        "窗口最大化",
+        "当前窗口最大化",
+        "最大化",
+        "窗口全屏",
+        "当前窗口全屏",
+        "进入全屏模式",
+        "进入全屏",
+        "全屏",
+        "maximizewindow",
+        "maximize",
+        "fullscreencurrentwindow",
+        "fullscreenwindow",
+        "fullscreen",
+        "enterfullscreen",
+    )
+    return "toggle_full_screen" if any(normalized.endswith(suffix) for suffix in full_screen_suffixes) else ""
 
 
 def _looks_like_show_desktop_request(value: str, lowered: str) -> bool:
