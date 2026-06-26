@@ -266,6 +266,45 @@ def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_file_access_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    open_selection = planner_first_direct_tool_selection(
+        "打开下载目录里的最新文件",
+        ["desktop.open_path", "desktop.reveal_path"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    reveal_selection = planner_first_direct_tool_selection(
+        "显示当前选中文件",
+        ["desktop.open_path", "desktop.reveal_path"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert open_selection.selected_source == "runtime_planner"
+    assert open_selection.event_payload["legacy_request_count"] == 0
+    assert open_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "latest_download"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
+    assert reveal_selection.selected_source == "runtime_planner"
+    assert reveal_selection.event_payload["legacy_request_count"] == 0
+    assert reveal_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.reveal_path",
+            "input": {"path": "finder_selection"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()

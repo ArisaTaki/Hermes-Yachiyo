@@ -132,6 +132,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_system_control_owns_selection(requests):
         return False
+    if _runtime_planner_file_access_owns_selection(requests):
+        return False
     if any(bool(request.get("continue_to_model")) for request in requests):
         return True
     if any(tool == "desktop.submit_foreground" for tool in tools):
@@ -286,6 +288,16 @@ def _runtime_planner_system_control_owns_selection(requests: list[dict[str, Any]
     return bool(tool_set & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS) and tool_set <= (
         _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS | {"desktop.ui_elements"}
     )
+
+
+def _runtime_planner_file_access_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = _request_planning_reasons(requests)
+    if reasons != {"planner_fallback_file_access"}:
+        return False
+    tools = _request_tool_set(requests)
+    return bool(tools) and tools <= {"desktop.open_path", "desktop.reveal_path"}
 
 
 def _request_tools(requests: list[dict[str, Any]]) -> list[str]:
