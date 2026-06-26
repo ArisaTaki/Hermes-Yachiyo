@@ -28,7 +28,14 @@ _GENERIC_MUSIC_QUERIES = {
 
 
 def app_control_mode(text: str) -> str:
-    return "focus" if contains_any(text, ["切到", "聚焦", "focus", "switch to"]) else "open"
+    return (
+        "focus"
+        if contains_any(
+            text,
+            ["切到", "聚焦", "focus", "switch to", "switch ", "activate ", "bring "],
+        )
+        else "open"
+    )
 
 
 def app_control_tool_candidates(mode: str) -> tuple[str, ...]:

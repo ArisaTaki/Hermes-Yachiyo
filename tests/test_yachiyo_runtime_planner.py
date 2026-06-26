@@ -479,6 +479,36 @@ def test_runtime_planner_keeps_postposed_app_name_for_app_scoped_shortcut() -> N
     }
 
 
+def test_runtime_planner_extracts_english_focus_and_app_prefixes() -> None:
+    cases = (
+        ("bring Slack to front", "Slack", "app.focus"),
+        ("bring Slack forward", "Slack", "app.focus"),
+        ("activate Slack", "Slack", "app.focus"),
+        ("switch Slack to front", "Slack", "app.focus"),
+        ("open the app Raycast", "Raycast", "app.open"),
+        ("start the app Linear", "Linear", "app.open"),
+        ("focus Obsidian app", "Obsidian", "app.focus"),
+        ("launch Arc Browser app", "Arc Browser", "app.open"),
+    )
+
+    for prompt, expected_app_name, expected_tool in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.active_window"],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app_name
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": expected_app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").tool_name == expected_tool
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app_name,
+        }
+
+
 def test_runtime_planner_treats_music_app_open_as_desktop_open() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music",
