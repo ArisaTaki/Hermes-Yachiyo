@@ -2129,6 +2129,57 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
     ]
 
 
+def test_planner_selection_does_not_steal_app_search_send_sequence() -> None:
+    selection = planner_first_direct_tool_selection(
+        "微信搜索文件传输助手并发送 hello",
+        [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.active_window",
+            "app.open_and_safe_type_text",
+        ],
+        legacy_tool_requests=lambda _prompt, _allowed_tools: [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": "WeChat", "action": "find"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "文件传输助手"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.submit_foreground",
+                "input": {"action": "send"},
+            },
+        ],
+    )
+
+    assert selection.selected_source == "daily_desktop_intent"
+    assert selection.event_payload["intent_kind"] == "communication"
+    assert selection.event_payload["selected_tools"] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+
+
 def test_planner_desktop_tool_requests_preserves_discover_operate_verify_steps() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",

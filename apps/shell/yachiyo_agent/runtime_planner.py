@@ -3151,6 +3151,8 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
 
 
 def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
+    if _contains_any(text, _COMMUNICATION_ACTION_TERMS):
+        return {}
     if _looks_like_app_search_field_input(text):
         return {}
     app = str(app_name or "").strip()
