@@ -9,6 +9,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
+from apps.shell.agent.runtime.web_destinations import known_web_destination_url
+
 
 _APP_ALIASES = {
     "applemusic": "Music",
@@ -3496,60 +3498,9 @@ def _browser_named_site_url(text: str) -> str:
 
 
 def _normalize_site_name(value: str) -> str:
-    aliases = {
-        "google": "https://www.google.com",
-        "谷歌": "https://www.google.com",
-        "github": "https://github.com",
-        "youtube": "https://www.youtube.com",
-        "yt": "https://www.youtube.com",
-        "youtubemusic": "https://music.youtube.com",
-        "bilibili": "https://www.bilibili.com",
-        "b站": "https://www.bilibili.com",
-        "哔哩哔哩": "https://www.bilibili.com",
-        "百度": "https://www.baidu.com",
-        "baidu": "https://www.baidu.com",
-        "gmail": "https://mail.google.com",
-        "googledrive": "https://drive.google.com",
-        "googledocs": "https://docs.google.com",
-        "chatgpt": "https://chatgpt.com",
-        "claude": "https://claude.ai",
-        "perplexity": "https://www.perplexity.ai",
-        "twitter": "https://x.com",
-        "推特": "https://x.com",
-        "x": "https://x.com",
-        "reddit": "https://www.reddit.com",
-        "xiaohongshu": "https://www.xiaohongshu.com",
-        "小红书": "https://www.xiaohongshu.com",
-        "rednote": "https://www.xiaohongshu.com",
-        "weibo": "https://weibo.com",
-        "微博": "https://weibo.com",
-        "zhihu": "https://www.zhihu.com",
-        "知乎": "https://www.zhihu.com",
-        "douban": "https://www.douban.com",
-        "豆瓣": "https://www.douban.com",
-        "douyin": "https://www.douyin.com",
-        "抖音": "https://www.douyin.com",
-        "tiktok": "https://www.tiktok.com",
-        "taobao": "https://www.taobao.com",
-        "淘宝": "https://www.taobao.com",
-        "jd": "https://www.jd.com",
-        "jingdong": "https://www.jd.com",
-        "京东": "https://www.jd.com",
-        "tieba": "https://tieba.baidu.com",
-        "百度贴吧": "https://tieba.baidu.com",
-        "贴吧": "https://tieba.baidu.com",
-    }
     site = _strip_browser_followup(_strip_query(value))
     for candidate in (site, _strip_polite_suffix(site)):
-        candidate = re.sub(r"^(?:一下|下|这个|那个)\s*", "", candidate)
-        candidate = re.sub(
-            r"\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页|首页面|site|website|homepage|home\s+page)$",
-            "",
-            candidate,
-            flags=re.IGNORECASE,
-        )
-        compact = re.sub(r"[\s._-]+", "", candidate.lower())
-        url = aliases.get(compact)
+        url = known_web_destination_url(candidate)
         if url:
             return url
     return ""
