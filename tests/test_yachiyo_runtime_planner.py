@@ -284,6 +284,19 @@ def test_runtime_planner_verifies_desktop_open_result() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
+    decision = RuntimePlanner().decision(
+        "可以帮我打开 Word 吗",
+        allowed_tools=["desktop.running_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Word"
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Word",
+    }
+
+
 def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 搜索框输入 hello 并回车",
