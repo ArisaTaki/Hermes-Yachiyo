@@ -334,6 +334,10 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert "discover -> act -> verify" in calls[0]["messages"][0]["content"]
     assert "choose capabilities before app-specific rules" in calls[0]["messages"][0]["content"]
     assert "Daily entrypoint operating manual" in calls[0]["messages"][0]["content"]
+    assert "planner decisions, tool attempts, approvals, artifacts, failures" in calls[0]["messages"][0]["content"]
+    assert "approval cards and pause/resume execution" in calls[0]["messages"][0]["content"]
+    assert "After a failed tool result, read the error and hint" in calls[0]["messages"][0]["content"]
+    assert "do not retry the same unchanged failing request" in calls[0]["messages"][0]["content"]
     assert "not as fixed branches that must be prewritten" in calls[0]["messages"][0]["content"]
     assert (
         "Do not answer with recipes like 'you can open the app yourself'"
@@ -420,6 +424,8 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
     assert "Daily entrypoint operating manual" in system_prompt
     assert "intent to capabilities before choosing concrete tools" in system_prompt
     assert "Treat mounted Skills as execution manuals" in system_prompt
+    assert "After a failed tool result, read the error and hint" in system_prompt
+    assert "approval cards and pause/resume execution" in system_prompt
     assert "legacy tool mapping in the Chat prompt is compatibility reference only" in system_prompt
     assert "not as fixed branches that must be prewritten" in system_prompt
     assert "selected intent=data_analysis" in system_prompt
