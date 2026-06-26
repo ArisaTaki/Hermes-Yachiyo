@@ -1486,22 +1486,45 @@ class RuntimeCustomApiAgentLoop:
             return ""
         if decision.selected_intent.kind == "general":
             return ""
+        steps = list(decision.plan.tool_plan.steps)
         tool_path = [
             str(step.tool_name or step.capability_id or "").strip()
-            for step in decision.plan.tool_plan.steps
+            for step in steps
             if str(step.tool_name or step.capability_id or "").strip()
         ]
         if not tool_path:
             return ""
         missing = ", ".join(decision.plan.tool_plan.missing_capabilities) or "none"
         outputs = ", ".join(decision.selected_intent.expected_outputs) or "unspecified"
+        artifacts = ", ".join(decision.plan.tool_plan.artifacts_expected) or "none"
+        route_to_studio = "yes" if decision.plan.route_to_studio else "no"
+        step_guidance = []
+        for index, step in enumerate(steps, start=1):
+            tool_or_capability = str(step.tool_name or step.capability_id or "").strip()
+            if not tool_or_capability:
+                continue
+            approval = "approval required" if step.approval_required else "approval not preflagged"
+            reason = str(step.reason or "").strip()
+            reason_text = f"; reason={reason}" if reason else ""
+            step_guidance.append(
+                f"{index}. {step.title}: {tool_or_capability} "
+                f"(capability={step.capability_id}; status={step.status}; "
+                f"risk={step.risk_level}; {approval}{reason_text})"
+            )
+        steps_text = " ".join(step_guidance)
         return (
             "Runtime planner guidance: "
             f"selected intent={decision.selected_intent.kind}; "
             f"expected outputs={outputs}; "
             f"planned tool path={' -> '.join(tool_path)}; "
-            f"missing required capabilities={missing}. "
-            "Use this plan as guidance only; existing tool policy and approval gates still apply. "
+            f"missing required capabilities={missing}; "
+            f"artifact expected={artifacts}; "
+            f"route to Studio={route_to_studio}. "
+            f"Plan steps: {steps_text}. "
+            "Use available tools to execute the request when the plan names an allowed tool; do not provide "
+            "only manual instructions unless required capabilities are missing, user constraints forbid tools, "
+            "or policy blocks execution. If a required step is unavailable, explain the missing capability "
+            "instead of fabricating execution. Existing tool policy and approval gates still apply. "
         )
 
 

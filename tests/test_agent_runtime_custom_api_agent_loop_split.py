@@ -312,7 +312,7 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert timeline[-1] == {"event": "agent.model.response", "detail": "final answer"}
 
 
-def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysis() -> None:
+def _runtime_planner_guidance_prompt(prompt: str, allowed_tools: list[str]) -> str:
     budget = FakeBudget()
     calls: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -323,11 +323,7 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
             "model": "test-model",
             "api_key": "key",
         },
-        compile_agent_runtime=lambda _agent: {
-            "tool_policy": {
-                "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"],
-            },
-        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
         run_budget=lambda _run_id, _timeline_value: budget,
         check_context_budget=lambda _budget, _messages: None,
         tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
@@ -353,19 +349,59 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
     )
 
     result = loop.run(
-        {"name": "Analyst"},
-        "请分析 sales.csv 并输出数据分析报告",
+        {"name": "Planner"},
+        prompt,
         broker=object(),
         timeline=timeline,
         artifacts=[],
-        run_id="run-data-plan",
+        run_id="run-planner-guidance",
     )
 
-    system_prompt = calls[0][0]["content"]
     assert str(result) == "final answer"
+    return calls[0][0]["content"]
+
+
+def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysis() -> None:
+    system_prompt = _runtime_planner_guidance_prompt(
+        "请分析 sales.csv 并输出数据分析报告",
+        ["workspace.read", "terminal.run", "artifact.write"],
+    )
+
     assert "Runtime planner guidance" in system_prompt
     assert "selected intent=data_analysis" in system_prompt
     assert "workspace.read -> terminal.run -> artifact.write" in system_prompt
+    assert "artifact expected=analysis-report.md" in system_prompt
+    assert "route to Studio=yes" in system_prompt
+    assert "2. Run reproducible data analysis: terminal.run" in system_prompt
+    assert "approval required" in system_prompt
+    assert "approval gates still apply" in system_prompt
+
+
+def test_custom_api_agent_loop_guides_report_generation_toward_artifacts() -> None:
+    system_prompt = _runtime_planner_guidance_prompt(
+        "请根据现有文档写一份项目报告",
+        ["workspace.list", "artifact.write"],
+    )
+
+    assert "selected intent=report_generation" in system_prompt
+    assert "workspace.list -> artifact.write" in system_prompt
+    assert "artifact expected=report.md" in system_prompt
+    assert "1. Gather available context: workspace.list" in system_prompt
+    assert "2. Write report artifact: artifact.write" in system_prompt
+    assert "Use available tools to execute the request" in system_prompt
+
+
+def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() -> None:
+    system_prompt = _runtime_planner_guidance_prompt(
+        "请检查这个仓库代码并运行测试",
+        ["workspace.list", "terminal.run", "artifact.write"],
+    )
+
+    assert "selected intent=code_task" in system_prompt
+    assert "workspace.list -> terminal.run -> artifact.write" in system_prompt
+    assert "route to Studio=yes" in system_prompt
+    assert "2. Run code command: terminal.run" in system_prompt
+    assert "risk=high; approval required" in system_prompt
     assert "approval gates still apply" in system_prompt
 
 
