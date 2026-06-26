@@ -359,6 +359,7 @@ def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> Non
     verify = _step_by_id(decision, "verify-desktop-result")
     assert verify.tool_name == "desktop.ui_elements"
     assert verify.action == "read_ui"
+    assert verify.input_preview == {"role_filter": "text", "limit": 80}
     assert verify.depends_on == ["submit-foreground-ui"]
     assert "Read foreground UI" in verify.reason
 
@@ -644,7 +645,7 @@ def test_planner_desktop_tool_requests_preserves_discover_operate_verify_steps()
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
@@ -692,7 +693,7 @@ def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

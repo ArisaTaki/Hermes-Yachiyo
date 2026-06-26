@@ -733,14 +733,19 @@ class RuntimePlanner:
             verify_depends_on = ["open-or-focus-app"]
         if verify_depends_on:
             verify_tools = _desktop_verify_tool_candidates(verify_depends_on)
+            verify_tool = _first_allowed(verify_tools, allowed)
             steps.append(
                 _step(
                     intent,
                     "verify-desktop-result",
                     "Verify desktop result",
                     "desktop.app_discovery",
-                    _first_allowed(verify_tools, allowed),
-                    input_preview={"app_name": app_name} if app_name else {},
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=app_name,
+                        operation_preview=operation_preview,
+                    ),
                     depends_on=verify_depends_on,
                     reason=_desktop_verify_reason(verify_depends_on),
                 )
@@ -1157,6 +1162,24 @@ def _desktop_verify_reason(depends_on: list[str]) -> str:
     if any(step_id in {"operate-foreground-ui", "submit-foreground-ui"} for step_id in depends_on):
         return "Read foreground UI or windows after the UI action to verify the visible result."
     return "Observe the foreground state after desktop execution."
+
+
+def _desktop_verify_input_preview(
+    tool_name: str | None,
+    *,
+    app_name: str,
+    operation_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    if tool_name == "desktop.windows":
+        return {"app_name": app_name} if app_name else {}
+    if tool_name != "desktop.ui_elements":
+        return {}
+    preview = {
+        key: operation_preview[key]
+        for key in ("role_filter", "limit")
+        if key in operation_preview and operation_preview[key] not in (None, "")
+    }
+    return preview
 
 
 def _service_action(capability_id: str) -> str:
