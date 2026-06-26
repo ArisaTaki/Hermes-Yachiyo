@@ -210,8 +210,8 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
         assert user.metadata["daily_desktop_intent"] is True
-        assert user.metadata["daily_desktop_source"] == "daily_desktop_intent"
-        assert user.metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user.metadata["daily_desktop_source"] == "runtime_planner"
+        assert user.metadata["daily_desktop_planning_reason"] == "planner_fallback_media_playback"
         assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert user.metadata["daily_desktop_tools"] == ["media.apple_music_open_and_play"]
         assert open_and_play_calls == 1
@@ -11731,7 +11731,7 @@ def test_selected_runnable_executes_daily_desktop_intent_before_model(tmp_path, 
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert planned_event["payload"]["source"] == "daily_desktop_intent"
+        assert planned_event["payload"]["source"] == "runtime_planner"
         assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
         assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert assistant["metadata"]["run_status"] == "completed"
@@ -12042,7 +12042,7 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert planned_event["payload"]["source"] == "daily_desktop_intent"
+        assert planned_event["payload"]["source"] == "runtime_planner"
         assert policy_event["payload"]["reason"] == "daily_desktop_policy_overlay"
         assert policy_event["payload"]["policy_overlay"] is True
         assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"

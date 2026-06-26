@@ -16,6 +16,14 @@ _GENERIC_MUSIC_QUERIES = {
     "播放器",
     "音乐播放器",
     "apple",
+    "个",
+    "一下",
+    "一首",
+    "首",
+    "some music",
+    "a song",
+    "song",
+    "songs",
 }
 
 
@@ -471,6 +479,7 @@ def media_playback_hint(text: str) -> dict[str, str]:
         "action": action,
         "app_name": music_app_name_hint(text),
         "query": media_query_hint(text) if action == "play" else "",
+        "control_only": "true" if media_control_only_hint(text, action=action) else "",
     }
 
 
@@ -482,6 +491,7 @@ def media_tool_preview(
     action = str(inputs.get("action") or "").strip() or "play"
     app_name = str(inputs.get("app_name") or "").strip()
     query = str(inputs.get("query") or "").strip()
+    control_only = str(inputs.get("control_only") or "").strip().lower() == "true"
     is_apple_music = not app_name or app_name == "Music"
     if action == "status":
         return _first_allowed(("media.apple_music_status",), allowed), {}
@@ -494,11 +504,17 @@ def media_tool_preview(
         payload = {"app_name": app_name, "action": action} if tool_name == "media.music_app_control" else {"action": action}
         return tool_name, payload
     if action == "play":
+        if control_only and not app_name:
+            tool_name = _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
+            return tool_name, {"action": "play"} if tool_name else {}
         tool_name = _first_allowed(
             ("media.apple_music_open_and_play", "media.apple_music_control", "media.system_control"),
             allowed,
         )
         return tool_name, {"action": "play"} if tool_name in {"media.apple_music_control", "media.system_control"} else {}
+    if not app_name:
+        tool_name = _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
+        return tool_name, {"action": action} if tool_name else {}
     tool_name = _first_allowed(("media.apple_music_control", "media.system_control"), allowed)
     return tool_name, {"action": action} if tool_name else {}
 
@@ -507,17 +523,33 @@ def media_action_hint(text: str) -> str:
     lowered = str(text or "").lower()
     if contains_any(lowered, ["当前播放", "现在播放", "正在播放", "播放什么", "status", "currently playing"]):
         return "status"
-    if contains_any(lowered, ["下一首", "下一曲", "next"]):
+    if contains_any(lowered, ["下一首", "下一曲", "下首", "切歌", "换歌", "跳过", "next", "skip"]):
         return "next"
     if contains_any(lowered, ["上一首", "上一曲", "previous", "back"]):
         return "previous"
-    if contains_any(lowered, ["暂停", "停止播放", "pause", "stop playing"]):
+    if contains_any(
+        lowered,
+        ["暂停", "停一下", "停止", "停止播放", "别放了", "关掉", "pause", "stop playing"],
+    ):
         return "pause"
     if contains_any(lowered, ["继续", "恢复播放", "resume", "continue"]):
+        return "play"
+    if re.search(r"\bput\s+.+\s+on\s+(?:apple\s*music|music)\b", lowered):
+        return "play"
+    if contains_any(lowered, ["来点", "听点", "听一首", "听首"]):
         return "play"
     if contains_any(lowered, ["播放", "播", "放", "play"]):
         return "play"
     return ""
+
+
+def media_control_only_hint(text: str, *, action: str = "") -> bool:
+    lowered = str(text or "").lower()
+    if action in {"next", "previous", "pause"}:
+        return not re.search(r"apple\s*music|苹果音乐|spotify|网易云|qq\s*音乐|qq music", lowered)
+    if action == "play":
+        return contains_any(lowered, ["继续", "恢复播放", "resume", "continue"])
+    return False
 
 
 def music_app_name_hint(text: str) -> str:
@@ -528,7 +560,7 @@ def music_app_name_hint(text: str) -> str:
         return "网易云音乐"
     if re.search(r"qq\s*音乐|qq music", lowered):
         return "QQ 音乐"
-    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app)?", lowered):
+    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app)", lowered):
         return "Music"
     return ""
 
@@ -536,14 +568,29 @@ def music_app_name_hint(text: str) -> str:
 def media_query_hint(text: str) -> str:
     value = clean(text)
     patterns = (
-        r"(?:播放|播|放)(?:一下|一首|首)?\s*(?P<query>[^。！？!?，,]+)",
+        r"(?:put|play)\s+(?P<query_put>.+?)\s+(?:on|in|with)\s+(?:apple\s*music|music)",
+        r"(?:search|find)\s+(?:apple\s*music|music)\s+for\s+(?P<query_search>.+?)\s+(?:and\s+)?(?:play|start)",
+        r"(?:open|launch|start)\s+(?:apple\s*music|music)\s+(?:and\s+)?(?:search|find)\s+(?P<query_open_search>.+?)\s+(?:and\s+)?(?:play|start)",
+        r"(?:搜索|查找|找)\s*(?P<query_zh_search>[^。！？!?，,]+?)(?:并|然后|再)?(?:播放|播|放)(?:一下)?",
+        r"(?P<query_zh_suffix>[^。！？!?，,]+?)(?:播放|播|放)(?:一下)?$",
+        r"(?:播放|播|放)(?:一下|一首|首|个|点)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:play|start playing)\s+(?P<query_en>[^.!?,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        query = match.groupdict().get("query") or match.groupdict().get("query_en") or ""
+        groups = match.groupdict()
+        query = (
+            groups.get("query_put")
+            or groups.get("query_search")
+            or groups.get("query_open_search")
+            or groups.get("query_zh_search")
+            or groups.get("query_zh_suffix")
+            or groups.get("query")
+            or groups.get("query_en")
+            or ""
+        )
         query = _clean_media_query(query)
         if query:
             return query
@@ -552,8 +599,9 @@ def media_query_hint(text: str) -> str:
 
 def _clean_media_query(value: str) -> str:
     query = clean(value)
+    query = re.sub(r"^some\s+(?=[a-z])", "", query)
     query = re.sub(
-        r"(?:用|在|打开|启动|通过)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)?|spotify|网易云音乐?|qq\s*音乐|qq music)",
+        r"(?:用|在|打开|启动|通过)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)|spotify|网易云音乐?|qq\s*音乐|qq music)",
         "",
         query,
         flags=re.IGNORECASE,

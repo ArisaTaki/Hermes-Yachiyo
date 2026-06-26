@@ -339,6 +339,8 @@ class TaskIntentRouter:
             ],
         )
         hint = media_playback_hint(text)
+        if not hint.get("action") and not hint.get("query"):
+            return _empty_intent("media_playback", text)
         if score <= 0 and not hint.get("action"):
             return _empty_intent("media_playback", text)
         return TaskIntentSnapshot(
@@ -1831,6 +1833,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     ):
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
+        score += 0.08
+    if intent.kind == "media_playback" and _contains_any(
+        text,
+        ["music", "song", "songs", "音乐", "歌曲", "歌"],
+    ):
+        score += 0.08
+    if intent.kind == "media_playback" and str(intent.inputs.get("query") or "").strip():
         score += 0.08
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06

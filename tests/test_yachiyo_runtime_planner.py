@@ -356,6 +356,19 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 
+def test_runtime_planner_treats_music_app_open_as_desktop_open() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music",
+        allowed_tools=["desktop.list_apps", "app.open", "media.apple_music_open_and_play"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    discover = _step_by_id(decision, "discover-desktop-state")
+    assert discover.tool_name == "desktop.list_apps"
+    assert discover.input_preview == {"query": "Apple Music", "limit": 20}
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
+
+
 def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
     decision = RuntimePlanner().decision(
         "显示微信窗口列表",
@@ -879,35 +892,69 @@ def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> Non
 
 
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
-    decision = RuntimePlanner().decision(
+    for prompt in (
         "能否帮我播放 Apple Music?",
-        allowed_tools=["media.apple_music_open_and_play"],
-    )
+        "能不能直接播个 Apple Music",
+        "can you play some music?",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.apple_music_open_and_play"],
+        )
 
-    assert decision.selected_intent.kind == "media_playback"
-    assert decision.selected_intent.inputs == {
-        "action": "play",
-        "app_name": "Music",
-        "query": "",
-    }
-    step = _step_by_id(decision, "control-media-playback")
-    assert step.tool_name == "media.apple_music_open_and_play"
-    assert step.input_preview == {}
-    media_capability = _capability_by_id(decision, "media.playback")
-    assert "media.apple_music_open_and_play" in media_capability.tools
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs["action"] == "play"
+        assert decision.selected_intent.inputs["query"] == ""
+        step = _step_by_id(decision, "control-media-playback")
+        assert step.tool_name == "media.apple_music_open_and_play"
+        assert step.input_preview == {}
+        media_capability = _capability_by_id(decision, "media.playback")
+        assert "media.apple_music_open_and_play" in media_capability.tools
 
 
 def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None:
-    decision = RuntimePlanner().decision(
-        "播放超时空辉夜姬",
-        allowed_tools=["media.apple_music_play"],
-    )
+    for prompt, query in (
+        ("播放超时空辉夜姬", "超时空辉夜姬"),
+        ("放点周杰伦", "周杰伦"),
+        ("播点轻音乐", "轻音乐"),
+        ("play some jazz", "jazz"),
+        ("play Some Nights", "Some Nights"),
+        ("put some jazz on Apple Music", "jazz"),
+        ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
+        ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
+        ("超时空辉夜姬播放", "超时空辉夜姬"),
+        ("周杰伦播放一下", "周杰伦"),
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.apple_music_play"],
+        )
 
-    assert decision.selected_intent.kind == "media_playback"
-    assert decision.selected_intent.inputs["query"] == "超时空辉夜姬"
-    step = _step_by_id(decision, "control-media-playback")
-    assert step.tool_name == "media.apple_music_play"
-    assert step.input_preview == {"query": "超时空辉夜姬"}
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs["query"] == query
+        step = _step_by_id(decision, "control-media-playback")
+        assert step.tool_name == "media.apple_music_play"
+        assert step.input_preview == {"query": query}
+
+
+def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
+    cases = (
+        ("切歌", "next"),
+        ("跳过这首", "next"),
+        ("别放了", "pause"),
+    )
+    for prompt, action in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.system_control", "desktop.running_apps"],
+            metadata={"daily_desktop_intent": True},
+        )
+
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs["action"] == action
+        step = _step_by_id(decision, "control-media-playback")
+        assert step.tool_name == "media.system_control"
+        assert step.input_preview == {"action": action}
 
 
 def test_runtime_planner_routes_system_volume_to_system_control() -> None:

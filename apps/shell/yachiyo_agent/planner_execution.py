@@ -134,7 +134,41 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
                 planning_reason=_desktop_step_planning_reason(step, tool_name),
             )
         )
+    if _weak_desktop_discovery_plan(decision, requests):
+        return []
     return requests
+
+
+def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 1:
+        return False
+    if str(requests[0].get("tool") or "") not in {
+        "desktop.running_apps",
+        "desktop.active_window",
+        "screen.capture",
+    }:
+        return False
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if not isinstance(inputs, Mapping):
+        return False
+    if str(inputs.get("app_name_hint") or "").strip():
+        return False
+    if str(inputs.get("operation_hint") or "").strip():
+        return False
+    hint_keys = {
+        "window_list_hint",
+        "focus_window_hint",
+        "ui_inspection_hint",
+        "screen_capture_hint",
+        "app_management_hint",
+        "foreground_management_hint",
+        "safe_shortcut_hint",
+        "safe_key_hint",
+        "safe_scroll_hint",
+        "safe_click_hint",
+    }
+    return not any(inputs.get(key) for key in hint_keys)
 
 
 def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:

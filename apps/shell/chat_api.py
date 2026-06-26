@@ -45,10 +45,14 @@ from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_allowed_tools,
+    daily_desktop_direct_metadata_request,
     daily_desktop_entrypoint_requests,
     daily_desktop_user_metadata,
+    main_chat_entrypoint_allowed_tools,
 )
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
+from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
 
@@ -696,9 +700,40 @@ class ChatAPI:
         text: str,
         metadata: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
+        return self._daily_desktop_entrypoint_requests(text, metadata=metadata)
+
+    def _daily_desktop_entrypoint_requests(
+        self,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
+            self._agent_runtime_service(),
+            fallback=allowed_daily_desktop_tools,
+        )
+        direct_tool_request = daily_desktop_direct_metadata_request(
+            metadata,
+            allowed_tools=allowed_daily_desktop_tools,
+        )
+        if direct_tool_request:
+            return [direct_tool_request]
+        try:
+            planner_requests = planner_tool_requests(
+                text,
+                allowed_entrypoint_tools,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.debug("Chat runtime planner daily desktop candidates unavailable", exc_info=True)
+            planner_requests = []
+        if planner_requests:
+            return planner_requests
         return daily_desktop_entrypoint_requests(
             text,
             metadata=metadata,
+            allowed_tools=allowed_daily_desktop_tools,
         )
 
     def _daily_desktop_followup_goal_text(
@@ -1100,7 +1135,7 @@ class ChatAPI:
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
             task_text = self._daily_desktop_followup_goal_text(task_text, current_context)
-            daily_desktop_requests = daily_desktop_entrypoint_requests(
+            daily_desktop_requests = self._daily_desktop_entrypoint_requests(
                 task_text,
                 metadata=metadata,
             )
