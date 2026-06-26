@@ -1733,6 +1733,60 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert _step_by_id(scoped_search, "open-or-focus-app").tool_name == "app.focus"
 
+    first_result = RuntimePlanner().decision(
+        "在 Slack 搜索 Alice 并选择第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert first_result.selected_intent.inputs["app_search_hint"] == {
+        "query": "Alice",
+        "target": "搜索",
+    }
+    result_click = _step_by_id(first_result, "select-app-search-result")
+    assert result_click.tool_name == "desktop.click_ui_element"
+    assert result_click.input_preview == {
+        "target": "第一个结果",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert result_click.approval_required is True
+    assert _step_by_id(first_result, "verify-desktop-result").depends_on == [
+        "select-app-search-result"
+    ]
+
+    arrow_confirm = RuntimePlanner().decision(
+        "在 Slack 搜索 Alice 后按下箭头再确认",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert arrow_confirm.selected_intent.inputs["app_search_hint"] == {
+        "query": "Alice",
+        "target": "搜索",
+    }
+    assert _step_by_id(arrow_confirm, "select-app-search-result-with-key").input_preview == {
+        "action": "arrow_down",
+        "repeat_count": 1,
+    }
+    confirm = _step_by_id(arrow_confirm, "confirm-app-search-result")
+    assert confirm.tool_name == "desktop.submit_foreground"
+    assert confirm.input_preview == {"action": "confirm"}
+    assert confirm.approval_required is True
+
 
 def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> None:
     decision = RuntimePlanner().decision(
@@ -2659,6 +2713,56 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    first_result_requests = planner_direct_tool_requests(
+        "Slack search Alice then choose first result",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert first_result_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

@@ -1426,6 +1426,7 @@ class RuntimePlanner:
         if app_search:
             search_query = str(app_search.get("query") or "").strip()
             search_target = str(app_search.get("target") or "").strip() or "Search"
+            search_followup = _app_search_followup_hint(intent.user_goal)
             search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
             search_focus_preview = (
                 {
@@ -1468,21 +1469,80 @@ class RuntimePlanner:
                     reason="Type only the explicit app-search query from the user prompt.",
                 )
             )
-            steps.append(
-                _step(
-                    intent,
-                    "submit-app-search",
-                    "Submit app search",
-                    "desktop.ui_operation",
-                    _first_allowed(("desktop.search_submit",), allowed),
-                    input_preview={},
-                    depends_on=["type-app-search-query"],
-                    action="submit",
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Submit the app search with the dedicated safe search submit tool.",
+            search_terminal_step_id = "type-app-search-query"
+            if search_followup.get("action") == "arrow_down_confirm":
+                steps.append(
+                    _step(
+                        intent,
+                        "select-app-search-result-with-key",
+                        "Select app search result",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_key",), allowed),
+                        input_preview={"action": "arrow_down", "repeat_count": 1},
+                        depends_on=[search_terminal_step_id],
+                        action="key",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Move to the requested search result with a safe arrow-key operation.",
+                    )
                 )
-            )
+                search_terminal_step_id = "select-app-search-result-with-key"
+                steps.append(
+                    _step(
+                        intent,
+                        "confirm-app-search-result",
+                        "Confirm app search result",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.submit_foreground",), allowed),
+                        input_preview={"action": "confirm"},
+                        depends_on=[search_terminal_step_id],
+                        action="submit",
+                        risk_level="high",
+                        approval_required=True,
+                        reason="Confirm the selected search result only after the explicit arrow-key selection.",
+                    )
+                )
+                search_terminal_step_id = "confirm-app-search-result"
+            else:
+                steps.append(
+                    _step(
+                        intent,
+                        "submit-app-search",
+                        "Submit app search",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.search_submit",), allowed),
+                        input_preview={},
+                        depends_on=[search_terminal_step_id],
+                        action="submit",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Submit the app search with the dedicated safe search submit tool.",
+                    )
+                )
+                search_terminal_step_id = "submit-app-search"
+                if search_followup.get("action") == "click_first_result":
+                    click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
+                    steps.append(
+                        _step(
+                            intent,
+                            "select-app-search-result",
+                            "Select app search result",
+                            "desktop.ui_operation",
+                            click_tool,
+                            input_preview={
+                                "target": str(search_followup.get("target") or "第一个结果"),
+                                "role_filter": "",
+                                "limit": 80,
+                                "click_count": int(search_followup.get("click_count") or 1),
+                            },
+                            depends_on=[search_terminal_step_id],
+                            action="click",
+                            risk_level=_desktop_operation_risk_level(click_tool),
+                            approval_required=_desktop_operation_approval_required(click_tool),
+                            reason="Click the requested app search result after submitting the search.",
+                        )
+                    )
+                    search_terminal_step_id = "select-app-search-result"
             verify_tool = _first_allowed(
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
                 allowed,
@@ -1499,7 +1559,7 @@ class RuntimePlanner:
                         app_name=app_name,
                         operation_preview={},
                     ),
-                    depends_on=["submit-app-search"],
+                    depends_on=[search_terminal_step_id],
                     reason="Observe the app after submitting the search.",
                 )
             )
@@ -3693,9 +3753,10 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
     if app and _is_browser_or_search_app_name(app):
         return {}
     query = _app_search_query_hint(text, app)
-    if not query and not app:
+    if not query:
         parsed = _leading_app_search_hint(text)
-        if parsed:
+        parsed_app = str(parsed.get("app_name") or "").strip() if parsed else ""
+        if parsed and (not app or parsed_app.lower() == app.lower()):
             return parsed
     if not query:
         return {}
@@ -3828,8 +3889,40 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
 def _clean_app_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
+    value = re.split(
+        r"\s*(?:并|然后|再|接着|之后|后|and\s+then|then)\s*"
+        r"(?:选择|选中|点击|点按|打开|按|choose|select|click|open|press)(?:\b)?",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     return value
+
+
+def _app_search_followup_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if re.search(
+        r"(?:按|press).{0,8}(?:下箭头|向下箭头|down\s+arrow).{0,16}(?:确认|回车|enter|return|confirm)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {"action": "arrow_down_confirm"}
+    if re.search(
+        r"(?:选择|选中|点击|点按|打开).{0,8}(?:第一个|首个|第1个).{0,8}(?:结果|项)?",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        click_count = 2 if _contains_any(value, ("打开", "open")) else 1
+        return {"action": "click_first_result", "target": "第一个结果", "click_count": click_count}
+    if re.search(
+        r"\b(?:choose|select|click|open)\s+(?:the\s+)?first\s+(?:result|item)\b",
+        lowered,
+    ):
+        click_count = 2 if re.search(r"\bopen\b", lowered) else 1
+        return {"action": "click_first_result", "target": "first result", "click_count": click_count}
+    return {}
 
 
 def _spotlight_search_query_hint(text: str) -> str:
