@@ -3627,6 +3627,8 @@ def _leading_app_search_hint(text: str) -> dict[str, str]:
 def _invalid_leading_app_search_match(value: str, app_name: str, query: str) -> bool:
     lowered = value.lower()
     normalized_query = str(query or "").strip().lower()
+    if re.fullmatch(r"(?:please|can\s+you|could\s+you|would\s+you)", app_name, flags=re.IGNORECASE):
+        return True
     if normalized_query in {
         "field",
         "search field",
@@ -3870,8 +3872,15 @@ _KNOWN_WEB_DESTINATION_URLS = {
 def _known_web_destination_url_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
+        r"(?:打开|启动|运行|拉起|开启|用|在)\s*"
+        r"(?:浏览器|chrome|google\s*chrome|google|谷歌|百度|safari)"
+        r"(?:里|中|上|内)?\s*(?:并|然后|再|接着|之后)?\s*"
+        r"(?:打开|访问|浏览|前往|去|上)\s*(?P<site>[^。！？!?，,]+)",
         r"(?:打开|访问|浏览|前往|去|上)\s*(?P<site>[^。！？!?，,]+)",
         r"(?P<site>[^。！？!?，,]+?)\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页)$",
+        r"\b(?:open|launch|start|use)\s+(?:the\s+)?"
+        r"(?:browser|chrome|google\s+chrome|google|safari)\s+"
+        r"(?:and\s+|then\s+)?(?:open|visit|browse|go\s+to)\s+(?P<site>[^.!?,]+)",
         r"\b(?:open|visit|browse|go\s+to)\s+(?P<site>[^.!?,]+)",
     )
     for pattern in patterns:
@@ -4060,16 +4069,20 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
     query = _web_search_query(value)
     if not query:
         return {}
+    engine = _web_search_engine_hint(value)
     return {
         "browser_action": "open_search",
         "query": query,
-        "url_hint": f"https://www.google.com/search?q={quote_plus(query)}",
+        "url_hint": _web_search_url(engine, query),
     }
 
 
 def _web_search_query(text: str) -> str:
     if _url_hint(text):
         return ""
+    direct_engine_query = _direct_web_search_query(text)
+    if direct_engine_query:
+        return direct_engine_query
     search_surface = _web_search_surface_hint(text)
     if search_surface and not _is_browser_or_search_app_name(search_surface):
         return ""
@@ -4100,6 +4113,38 @@ def _web_search_query(text: str) -> str:
             if query:
                 return query
     return ""
+
+
+def _direct_web_search_query(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"search\s+(?:google|baidu|chrome|google\s+chrome|browser|safari)\s+"
+        r"for\s+(?P<query>[^.!?,。！？]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:百度|baidu)\s*(?:搜索|搜一下|搜|查一下|查查|检索|一下)?\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:google|谷歌)\s*(?:搜索|搜一下|搜|查一下|查查|检索|一下)?\s*(?P<query>[^。！？!?]+)$",
+        r"\b(?:google|baidu)\s+(?P<query>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_web_search_query(match.group("query"))
+        if query:
+            return query
+    return ""
+
+
+def _web_search_engine_hint(text: str) -> str:
+    return "baidu" if re.search(r"(?:百度|baidu)", text, flags=re.IGNORECASE) else "google"
+
+
+def _web_search_url(engine: str, query: str) -> str:
+    if str(engine or "").strip().lower() == "baidu":
+        return f"https://www.baidu.com/s?wd={quote_plus(query)}"
+    return f"https://www.google.com/search?q={quote_plus(query)}"
 
 
 def _web_search_surface_hint(text: str) -> str:

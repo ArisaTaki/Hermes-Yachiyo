@@ -473,6 +473,61 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    open_selection = planner_first_direct_tool_selection(
+        "打开 PixelForge",
+        ["desktop.list_apps", "app.open", "app.focus", "browser.open_url"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    chinese_app_selection = planner_first_direct_tool_selection(
+        "打开微信",
+        ["desktop.list_apps", "app.open", "app.focus", "browser.open_url"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    focus_selection = planner_first_direct_tool_selection(
+        "切到 Slack",
+        ["desktop.list_apps", "app.open", "app.focus", "browser.open_url"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert open_selection.selected_source == "runtime_planner"
+    assert open_selection.event_payload["legacy_request_count"] == 0
+    assert open_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert chinese_app_selection.selected_source == "runtime_planner"
+    assert chinese_app_selection.event_payload["legacy_request_count"] == 0
+    assert chinese_app_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "微信"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert focus_selection.selected_source == "runtime_planner"
+    assert focus_selection.event_payload["legacy_request_count"] == 0
+    assert focus_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()

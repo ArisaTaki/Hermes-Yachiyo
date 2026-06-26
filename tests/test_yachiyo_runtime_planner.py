@@ -3818,6 +3818,24 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "planning_reason": "planner_fallback_web_research",
         }
     ]
+    assert planner_tool_requests("百度 open hanako", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.baidu.com/s?wd=open+hanako"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("search Google for open hanako", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=open+hanako"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
     assert planner_tool_requests("搜索天气", allowed_tools=allowed) == [
         {
             "protocol": "json_fallback",

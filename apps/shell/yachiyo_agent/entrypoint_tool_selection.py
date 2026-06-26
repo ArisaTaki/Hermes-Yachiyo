@@ -128,6 +128,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
         return False
+    if _runtime_planner_app_launch_owns_selection(requests):
+        return False
     if _runtime_planner_desktop_observation_owns_selection(requests):
         return False
     if _runtime_planner_system_control_owns_selection(requests):
@@ -247,6 +249,24 @@ _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(
 )
 
 
+def _runtime_planner_app_launch_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = _request_planning_reasons(requests)
+    if reasons != {"planner_fallback_desktop_operation"}:
+        return False
+    tools = _request_tool_set(requests)
+    if not tools or not tools <= {"app.open", "app.focus"}:
+        return False
+    for request in requests:
+        request_input = request.get("input") if isinstance(request, dict) else {}
+        if not isinstance(request_input, Mapping):
+            return False
+        if not _runtime_app_name_is_specific(str(request_input.get("app_name") or "")):
+            return False
+    return True
+
+
 def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
@@ -263,13 +283,11 @@ def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str,
     if not isinstance(first_input, Mapping):
         return False
     app_name = str(first_input.get("app_name") or "").strip()
-    return _runtime_observation_app_name_is_specific(app_name)
+    return _runtime_app_name_is_specific(app_name)
 
 
-def _runtime_observation_app_name_is_specific(app_name: str) -> bool:
+def _runtime_app_name_is_specific(app_name: str) -> bool:
     if not app_name:
-        return False
-    if not re.search(r"[A-Za-z]", app_name):
         return False
     compact = re.sub(r"[\W_]+", "", app_name, flags=re.UNICODE).lower()
     return compact not in {
