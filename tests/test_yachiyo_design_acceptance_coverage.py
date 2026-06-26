@@ -1310,7 +1310,11 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             'data-testid="agent-run-detail-group-run-tool-calls"',
             'data-testid="agent-run-detail-group-run-memory-skill-traces"',
             'data-testid="agent-run-detail-group-run-artifacts"',
+            'data-testid="agent-run-detail-group-run-child-planner-trace"',
             'itemTestId="agent-run-detail-group-run-artifact-item"',
+            "function groupRunChildPlannerTraceSummary",
+            "event.event_type === 'agent.intent.selected'",
+            "event.event_type === 'agent.plan.step'",
         ],
     )
     _assert_smoke_script(

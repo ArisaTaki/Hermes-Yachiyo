@@ -281,12 +281,15 @@ export function GroupRunDetailPanel({
             const selected = childRunId === selectedRun.run_id;
             const childStatus = publicRun?.status || childRun?.status || '';
             const childKind = groupRunChildKind(publicRun, childRun);
+            const plannerTraceSummary = groupRunChildPlannerTraceSummary(publicRun);
             return (
               <button
                 key={childRunId}
                 type="button"
                 className={selected ? 'selected' : ''}
                 data-agent-id={publicRun?.agent_id || childRun?.runnable_id || ''}
+                data-has-planner-trace={String(Boolean(plannerTraceSummary))}
+                data-planner-trace-summary={plannerTraceSummary}
                 data-run-id={childRunId}
                 data-run-status={childStatus}
                 data-testid="agent-run-detail-group-run-child"
@@ -298,6 +301,14 @@ export function GroupRunDetailPanel({
                   {selected ? '当前 Run · ' : ''}
                   {groupRunChildMeta(publicRun, childRun, runKindLabel(childKind), runStatusLabel(childStatus))}
                 </small>
+                {plannerTraceSummary ? (
+                  <small
+                    className="group-run-child-planner-trace"
+                    data-testid="agent-run-detail-group-run-child-planner-trace"
+                  >
+                    Planner trace · {plannerTraceSummary}
+                  </small>
+                ) : null}
               </button>
             );
           })}
@@ -338,6 +349,20 @@ function groupRunChildMemoryTraces(publicRuns: RunTimelineSnapshot[]) {
 
 function groupRunChildSkillTraces(publicRuns: RunTimelineSnapshot[]) {
   return publicRuns.flatMap((run) => run.skill_traces || []);
+}
+
+function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null): string {
+  const events = publicRun?.events || [];
+  if (!events.length) return '';
+  const hasIntent = events.some((event) => event.event_type === 'agent.intent.selected');
+  const planSteps = events.filter((event) => event.event_type === 'agent.plan.step').length;
+  const hasSelection = events.some((event) => event.event_type === 'agent.plan.selection');
+  if (!hasIntent && !planSteps && !hasSelection) return '';
+  return [
+    hasIntent ? 'intent' : '',
+    planSteps ? `${planSteps} steps` : '',
+    hasSelection ? 'selection' : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function groupRunEventIsMemorySkillTrace(event: PublicRunEvent): boolean {
