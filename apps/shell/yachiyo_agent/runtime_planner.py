@@ -1595,15 +1595,22 @@ def _foreground_management_action(tool_name: str | None) -> str:
 
 
 def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
-    if any(step_id in {"operate-foreground-ui", "submit-foreground-ui"} for step_id in depends_on):
+    if _desktop_verify_depends_on_ui_operation(depends_on):
         return ("desktop.ui_elements", "desktop.windows", "desktop.active_window", "screen.capture")
     return ("desktop.active_window", "desktop.windows", "desktop.ui_elements", "screen.capture")
 
 
 def _desktop_verify_reason(depends_on: list[str]) -> str:
-    if any(step_id in {"operate-foreground-ui", "submit-foreground-ui"} for step_id in depends_on):
+    if _desktop_verify_depends_on_ui_operation(depends_on):
         return "Read foreground UI or windows after the UI action to verify the visible result."
     return "Observe the foreground state after desktop execution."
+
+
+def _desktop_verify_depends_on_ui_operation(depends_on: list[str]) -> bool:
+    return any(
+        step_id.startswith("operate-foreground-ui") or step_id == "submit-foreground-ui"
+        for step_id in depends_on
+    )
 
 
 def _desktop_verify_input_preview(

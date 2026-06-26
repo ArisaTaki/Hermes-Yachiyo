@@ -679,6 +679,86 @@ def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool(
     ]
 
 
+def test_runtime_tool_request_runner_uses_discovered_app_name_for_combined_app_tool() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "apps": [{"name": "Music", "path": "/Applications/Music.app"}],
+                },
+            }
+            if tool_name == "desktop.list_apps"
+            else {
+                "ok": True,
+                "action": "app.open_and_click_ui_element",
+                "data": {
+                    "app_name": payload["app_name"],
+                    "target": payload["target"],
+                    "launch_verified": True,
+                },
+            }
+        )
+        timeline.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "打开 Apple Music 并点击资料库"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "Apple Music", "limit": 20}},
+            {
+                "tool": "app.open_and_click_ui_element",
+                "input": {
+                    "app_name": "Apple Music",
+                    "target": "资料库",
+                    "role_filter": "button",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+            },
+        ],
+        ["desktop.list_apps", "app.open_and_click_ui_element"],
+        FakeBroker({"ok": True}),
+        messages,
+        [],
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "Apple Music", "limit": 20}),
+        (
+            "app.open_and_click_ui_element",
+            {
+                "app_name": "Music",
+                "target": "资料库",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+        ),
+    ]
+
+
 def test_runtime_tool_request_runner_raises_pending_approval_with_remaining_requests() -> None:
     pending_builder = FakePendingApprovalBuilder()
     runner = _runner(

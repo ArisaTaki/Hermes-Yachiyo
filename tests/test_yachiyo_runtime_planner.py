@@ -735,6 +735,23 @@ def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
     ]
 
 
+def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Notes，输入 hello，再复制",
+        allowed_tools=[
+            "desktop.active_window",
+            "app.open_and_safe_type_text",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+
+    verify = _step_by_id(decision, "verify-desktop-result")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.action == "read_ui"
+    assert verify.depends_on == ["operate-foreground-ui-followup"]
+
+
 def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> None:
     key_decision = RuntimePlanner().decision(
         "按下一页键",
