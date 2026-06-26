@@ -122,6 +122,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_clipboard_owns_selection(requests):
         return False
+    if _runtime_planner_web_research_owns_selection(requests):
+        return False
     if _runtime_planner_communication_send_owns_selection(requests):
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
@@ -208,6 +210,28 @@ def _runtime_planner_clipboard_owns_selection(requests: list[dict[str, Any]]) ->
         "clipboard.read",
         "clipboard.write",
         "desktop.safe_shortcut",
+    }
+
+
+def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    if reasons != {"planner_fallback_web_research"}:
+        return False
+    tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    return bool(tools) and tools <= {
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
     }
 
 

@@ -191,6 +191,29 @@ def test_planner_first_direct_selection_owns_system_control_without_legacy() -> 
     assert screen_saver_selection.event_payload["legacy_request_count"] == 0
 
 
+def test_planner_first_direct_selection_owns_web_research_without_legacy() -> None:
+    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("legacy browser planner should not run for planner-owned web research")
+
+    selection = planner_first_direct_tool_selection(
+        "open https://example.com",
+        ["browser.open_url"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert selection.event_payload["legacy_request_count"] == 0
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
