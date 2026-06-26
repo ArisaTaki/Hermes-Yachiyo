@@ -12,6 +12,7 @@ from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyRuntimePort as CompatLegacyRuntimePort,
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import planner_first_direct_tool_selection
 
 
 def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
@@ -90,6 +91,31 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
     }
     assert "media.playback" in capabilities
     assert plan["tool_plan"]["steps"][0]["tool_name"] == "media.apple_music_open_and_play"
+
+
+def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> None:
+    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("legacy media planner should not run for planner-owned playback")
+
+    selection = planner_first_direct_tool_selection(
+        "播放超时空辉夜姬",
+        ["media.apple_music_play"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.apple_music_play",
+            "input": {"query": "超时空辉夜姬"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+    assert selection.event_payload["selection_source"] == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.event_payload["selected_tools"] == ["media.apple_music_play"]
 
 
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:

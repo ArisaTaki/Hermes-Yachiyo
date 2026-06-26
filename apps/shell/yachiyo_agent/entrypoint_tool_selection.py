@@ -118,6 +118,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
     tools = [str(request.get("tool") or "").strip() for request in requests]
     if _runtime_planner_model_followup_owns_selection(requests):
         return False
+    if _runtime_planner_media_playback_owns_selection(requests):
+        return False
     if _runtime_planner_communication_send_owns_selection(requests):
         return False
     if _runtime_planner_desktop_discovery_owns_selection(requests):
@@ -165,6 +167,24 @@ def _runtime_planner_model_followup_owns_selection(requests: list[dict[str, Any]
         if isinstance(request, dict)
     }
     return bool(reasons) and reasons <= _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS
+
+
+def _runtime_planner_media_playback_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    if reasons != {"planner_fallback_media_playback"}:
+        return False
+    tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    return bool(tools) and all(tool.startswith("media.") for tool in tools)
 
 
 def _runtime_planner_communication_send_owns_selection(requests: list[dict[str, Any]]) -> bool:
