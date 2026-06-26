@@ -392,6 +392,41 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert apply_step.approval_required is True
 
 
+def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:
+    decision = RuntimePlanner().decision(
+        "打开终端运行 ls",
+        allowed_tools=["app.open", "desktop.list_apps", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.title == "Terminal Command"
+    assert decision.selected_intent.inputs == {
+        "terminal_command_hint": {"command": "ls"}
+    }
+    assert decision.plan.route_to_studio is True
+    assert decision.plan.tool_plan.required_capabilities == ["terminal.execution"]
+    assert decision.plan.tool_plan.approvals_required == ["run-terminal-command"]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "run-terminal-command"
+    ]
+    step = _step_by_id(decision, "run-terminal-command")
+    assert step.tool_name == "terminal.run"
+    assert step.input_preview == {"command": "ls"}
+    assert step.approval_required is True
+    assert planner_direct_tool_requests(
+        "run npm test in terminal",
+        ["terminal.run"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "npm test"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_terminal_command",
+        }
+    ]
+
+
 def test_runtime_planner_routes_local_file_access_to_desktop_file_tools() -> None:
     open_decision = RuntimePlanner().decision(
         "打开当前选中的 Finder 文件",
@@ -4573,7 +4608,7 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
     ]
 
 
-def test_planner_first_keeps_terminal_command_on_legacy_approval_path() -> None:
+def test_planner_first_routes_terminal_command_on_planner_approval_path() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
     def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
@@ -4592,22 +4627,20 @@ def test_planner_first_keeps_terminal_command_on_legacy_approval_path() -> None:
         legacy_tool_requests=legacy_requests,
     )
 
-    assert selection.selected_source == "daily_desktop_intent"
-    assert selection.event_payload["selection_source"] == "daily_desktop_intent"
-    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["selection_source"] == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.event_payload["intent_kind"] == "code_task"
     assert selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "terminal.run",
             "input": {"command": "ls"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_terminal_command",
         }
     ]
-    assert legacy_calls == [
-        {
-            "prompt": "打开终端运行 ls",
-            "allowed_tools": ["app.open", "desktop.list_apps", "terminal.run"],
-        }
-    ]
+    assert legacy_calls == []
 
 
 def test_planner_first_owns_direct_context_communication_send_sequence() -> None:

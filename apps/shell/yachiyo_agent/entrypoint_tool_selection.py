@@ -9,6 +9,7 @@ from typing import Any
 
 from .planner_execution import planner_direct_decision_and_tool_requests
 from .planner_projection import planner_selection_payload
+from .terminal_plan_hints import terminal_command_hint
 
 LegacyToolRequestProvider = Callable[[str, list[str]], list[dict[str, Any]]]
 LegacyToolRequestPostprocess = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
@@ -286,24 +287,7 @@ def _runtime_planner_app_launch_owns_selection(
 
 
 def _prompt_contains_terminal_command(prompt: str) -> bool:
-    value = str(prompt or "").strip()
-    if not value:
-        return False
-    return bool(
-        re.search(
-            r"(?:终端|命令行|terminal|shell).{0,16}"
-            r"(?:运行|执行|跑|run|execute)\s*"
-            r"(?!起来|一下|下|吧|吗|嘛|呢|$)\S+",
-            value,
-            flags=re.IGNORECASE,
-        )
-        or re.search(
-            r"(?:运行|执行|跑|run|execute)\s+\S+.+"
-            r"(?:在|用|通过|in|with|using)\s*(?:终端|命令行|terminal|shell)",
-            value,
-            flags=re.IGNORECASE,
-        )
-    )
+    return bool(terminal_command_hint(prompt))
 
 
 def _prompt_contains_shortcut_or_window_followup(prompt: str) -> bool:

@@ -95,12 +95,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             planning_reason="planner_prefetch_report_context",
         )
     if decision.selected_intent.kind == "code_task":
-        return _context_prefetch_tool_requests(
-            decision,
-            allowed,
-            step_ids=("inspect-workspace",),
-            planning_reason="planner_prefetch_code_context",
-        )
+        return _code_task_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "file_organization":
         return _context_prefetch_tool_requests(
             decision,
@@ -345,6 +340,27 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
     )
     request["continue_to_model"] = True
     return [request]
+
+
+def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    terminal_hint = inputs.get("terminal_command_hint")
+    if isinstance(terminal_hint, Mapping):
+        command = str(terminal_hint.get("command") or "").strip()
+        if command and "terminal.run" in allowed:
+            return [
+                _request(
+                    "terminal.run",
+                    {"command": command},
+                    planning_reason="planner_fallback_terminal_command",
+                )
+            ]
+    return _context_prefetch_tool_requests(
+        decision,
+        allowed,
+        step_ids=("inspect-workspace",),
+        planning_reason="planner_prefetch_code_context",
+    )
 
 
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:

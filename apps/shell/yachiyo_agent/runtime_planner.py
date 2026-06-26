@@ -56,6 +56,7 @@ from .desktop_plan_hints import (
 from .file_access_plan_hints import file_access_hint
 from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
+from .terminal_plan_hints import terminal_command_hint
 
 
 class TaskIntentRouter:
@@ -570,6 +571,21 @@ class TaskIntentRouter:
         )
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        terminal_hint = terminal_command_hint(text)
+        if terminal_hint:
+            return TaskIntentSnapshot(
+                intent_id=_stable_id("intent", "code_task", text),
+                kind="code_task",
+                title="Terminal Command",
+                user_goal=text,
+                confidence=0.93,
+                description="Run the explicit terminal command requested by the user.",
+                inputs={"terminal_command_hint": terminal_hint},
+                expected_outputs=["command_output"],
+                required_capabilities=["terminal.execution"],
+                preferred_capabilities=["artifact.write"],
+                risk_level="high",
+            )
         score = _score_terms(text, ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"])
         if score <= 0:
             return _empty_intent("code_task", text)
@@ -1788,6 +1804,21 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        terminal_hint = intent.inputs.get("terminal_command_hint")
+        if isinstance(terminal_hint, Mapping) and str(terminal_hint.get("command") or "").strip():
+            return [
+                _step(
+                    intent,
+                    "run-terminal-command",
+                    "Run terminal command",
+                    "terminal.execution",
+                    _first_allowed(("terminal.run",), allowed),
+                    input_preview={"command": str(terminal_hint.get("command") or "").strip()},
+                    risk_level="high",
+                    approval_required=True,
+                    reason="Run exactly the terminal command explicitly requested by the user.",
+                )
+            ]
         return [
             _step(
                 intent,
