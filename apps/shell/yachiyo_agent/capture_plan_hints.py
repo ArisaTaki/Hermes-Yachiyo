@@ -37,6 +37,15 @@ def capture_tool_preview(
 def note_body(text: str) -> str:
     value = _clean(text)
     patterns = (
+        r"^(?:在|用|通过)\s*(?:Apple\s*Notes|Notes|备忘录|笔记)\s*(?:里|中|上|内)?\s*"
+        r"(?:记录一下|记一下|新建|创建|添加|新增|写|记录|保存|记下)\s*(?:一条|一个)?\s*"
+        r"(?:备忘录|笔记)?\s*[:：]?\s*(?P<body_app>.+)$",
+        r"^(?:in|inside|within|using|with)\s+(?:apple\s+notes|notes|note\s+app)\s+"
+        r"(?:add|make|create|write|record)\s+(?:a\s+)?(?:new\s+)?note\s*"
+        r"[:：]?\s*(?P<body_app_en>.+)$",
+        r"^(?:please\s+)?(?:add|make|create|write|record)\s+(?:a\s+)?(?:new\s+)?note\s+"
+        r"(?:in|inside|within|using|with)\s+(?:apple\s+notes|notes|note\s+app)"
+        r"\s*[:：]?\s*(?P<body_in_app_en>.+)$",
         r"^(?:帮我|请|麻烦)?(?:新建|创建|添加|新增|写|记录|保存)?\s*(?:一个|一条|一份)?\s*"
         r"(?:备忘录|笔记)\s*(?:写|写下|记录|记一下|记下|内容(?:是|为)|正文(?:是|为))?\s*[:：]?\s*(?P<body>.+)$",
         r"^(?:帮我|请|麻烦)?(?:记一下|记录一下|记下)\s*(?P<body>.+)$",
@@ -49,7 +58,15 @@ def note_body(text: str) -> str:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        body = _normalize_body(match.groupdict().get("body") or match.groupdict().get("body_en") or "")
+        groups = match.groupdict()
+        body = _normalize_body(
+            groups.get("body_app")
+            or groups.get("body_app_en")
+            or groups.get("body_in_app_en")
+            or groups.get("body")
+            or groups.get("body_en")
+            or ""
+        )
         if body and not context_source_hint(body):
             return body
     return ""
@@ -128,7 +145,7 @@ def _looks_like_empty_note_request(text: str) -> bool:
 
 
 def _normalize_body(value: str) -> str:
-    body = _clean(value).strip("「」\"'“”‘’ .，,。")
+    body = _clean(value).strip("「」\"'“”‘’ .，,。:：")
     body = re.sub(r"^(?:to|for|about|that)\s+", "", body, flags=re.IGNORECASE)
     return body.strip()
 

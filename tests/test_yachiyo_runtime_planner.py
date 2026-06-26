@@ -1810,6 +1810,11 @@ def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
 def test_runtime_planner_extracts_common_note_body_forms() -> None:
     examples = (
         ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
+        ("在 Notes 新建笔记 hello", "hello"),
+        ("用备忘录记录一下 hello", "hello"),
+        ("create a note in Notes: hello", "hello"),
+        ("write note in Notes hello", "hello"),
+        ("记一下：hello", "hello"),
         ("make a note to buy milk", "buy milk"),
     )
 
@@ -3697,7 +3702,7 @@ def test_planner_tool_requests_prefetches_dynamic_schedule_sources_for_model_loo
 
 def test_planner_tool_requests_maps_explicit_note_plan() -> None:
     requests = planner_tool_requests(
-        "新建备忘录内容是 今天要买牛奶",
+        "在 Notes 新建笔记 hello",
         allowed_tools=["notes.create"],
     )
 
@@ -3705,7 +3710,7 @@ def test_planner_tool_requests_maps_explicit_note_plan() -> None:
         {
             "protocol": "json_fallback",
             "tool": "notes.create",
-            "input": {"body": "今天要买牛奶"},
+            "input": {"body": "hello"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_information_capture",
         }
