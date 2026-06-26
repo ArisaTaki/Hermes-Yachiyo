@@ -15074,6 +15074,73 @@ button.activity-item {
   line-height: 1.55;
 }
 
+.studio-planner-preview {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.studio-planner-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+
+.studio-planner-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.studio-planner-result {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.studio-planner-step-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.studio-planner-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.studio-planner-step div,
+.studio-planner-step strong,
+.studio-planner-step span,
+.studio-planner-step small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-planner-step strong,
+.studio-planner-step span {
+  display: block;
+}
+
+.studio-planner-step strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 590;
+}
+
+.studio-planner-step span,
+.studio-planner-step small {
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
 .studio-tool-inspector-section {
   display: grid;
   gap: 10px;

@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
-import type { ToolCatalogItemSnapshot, ToolCatalogSnapshot } from '../../yachiyo-studio/types';
+import { planYachiyoStudioTask } from '../../yachiyo-studio/api';
+import type {
+  PlannerDecisionSnapshot,
+  ToolCatalogItemSnapshot,
+  ToolCatalogSnapshot,
+  ToolPlanStepSnapshot,
+} from '../../yachiyo-studio/types';
 
 type RiskFilter = 'all' | 'low' | 'medium' | 'high' | 'unknown';
 
@@ -27,6 +33,10 @@ export function AgentStudioToolsTab({
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<RiskFilter>('all');
   const [capabilityFilter, setCapabilityFilter] = useState('all');
+  const [plannerPrompt, setPlannerPrompt] = useState('');
+  const [plannerDecision, setPlannerDecision] = useState<PlannerDecisionSnapshot | null>(null);
+  const [plannerError, setPlannerError] = useState('');
+  const [plannerLoading, setPlannerLoading] = useState(false);
 
   useEffect(() => {
     const tools = catalog.tools || [];
@@ -63,6 +73,28 @@ export function AgentStudioToolsTab({
   const selectedTool = useMemo(() => {
     return catalog.tools.find((tool) => tool.tool_name === selectedToolName) || filteredTools[0] || null;
   }, [catalog.tools, filteredTools, selectedToolName]);
+
+  async function handlePlannerSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const prompt = plannerPrompt.trim();
+    if (!prompt || plannerLoading) return;
+    setPlannerLoading(true);
+    setPlannerError('');
+    try {
+      const decision = await planYachiyoStudioTask({
+        prompt,
+        allowed_tools: catalog.tools
+          .map((tool) => tool.tool_name)
+          .filter((toolName): toolName is string => Boolean(toolName)),
+        metadata: { surface: 'agent_studio_tools' },
+      });
+      setPlannerDecision(decision);
+    } catch (error) {
+      setPlannerError(errorMessage(error));
+    } finally {
+      setPlannerLoading(false);
+    }
+  }
 
   return (
     <section className="agent-studio-grid agent-studio-tools-grid" data-testid="agent-studio-tools-tab">
@@ -142,11 +174,114 @@ export function AgentStudioToolsTab({
       </aside>
 
       <div className="agent-studio-panel studio-tool-detail" data-testid="agent-studio-tool-detail">
+        <RuntimePlannerPreview
+          decision={plannerDecision}
+          error={plannerError}
+          loading={plannerLoading}
+          onPromptChange={setPlannerPrompt}
+          onSubmit={handlePlannerSubmit}
+          prompt={plannerPrompt}
+        />
         {selectedTool ? <ToolDetail tool={selectedTool} catalog={catalog} /> : null}
         {!selectedTool && !loading ? <span className="studio-tool-empty">No tool selected</span> : null}
         {loading ? <span className="studio-tool-empty">Loading tools</span> : null}
       </div>
     </section>
+  );
+}
+
+function RuntimePlannerPreview({
+  decision,
+  error,
+  loading,
+  onPromptChange,
+  onSubmit,
+  prompt,
+}: {
+  decision: PlannerDecisionSnapshot | null;
+  error: string;
+  loading: boolean;
+  onPromptChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  prompt: string;
+}) {
+  const plan = decision?.plan;
+  const toolPlan = plan?.tool_plan;
+  const steps = toolPlan?.steps || [];
+  const missingCapabilities = toolPlan?.missing_capabilities || [];
+  return (
+    <div className="studio-tool-inspector-section studio-planner-preview" data-testid="studio-runtime-planner-preview">
+      <div className="studio-tool-inspector-heading">
+        <h3>Runtime Planner</h3>
+        <span>{decision ? decision.selected_intent.kind : 'Ready'}</span>
+      </div>
+      <form className="studio-planner-form" onSubmit={onSubmit}>
+        <textarea
+          className="hy-input agent-textarea compact"
+          data-testid="studio-runtime-planner-prompt"
+          value={prompt}
+          onChange={(event) => onPromptChange(event.target.value)}
+        />
+        <button
+          type="submit"
+          className="hy-btn hy-btn-primary"
+          disabled={loading || !prompt.trim()}
+          data-testid="studio-runtime-planner-run"
+        >
+          {loading ? 'Planning...' : 'Plan'}
+        </button>
+      </form>
+      {error ? <div className="notice danger" data-testid="studio-runtime-planner-error">{error}</div> : null}
+      {decision ? (
+        <div className="studio-planner-result" data-testid="studio-runtime-planner-result">
+          <div className="studio-tool-detail-grid">
+            <span>
+              <small>Intent</small>
+              <strong>{decision.selected_intent.kind}</strong>
+            </span>
+            <span>
+              <small>Route</small>
+              <strong>{plan?.route_to_studio ? 'Studio' : 'Direct'}</strong>
+            </span>
+            <span>
+              <small>Missing</small>
+              <strong>{missingCapabilities.length || 'None'}</strong>
+            </span>
+          </div>
+          {missingCapabilities.length ? (
+            <div className="studio-tool-pill-row">
+              {missingCapabilities.map((capabilityId) => (
+                <span className="studio-tool-permission missing" key={capabilityId}>{capabilityId}</span>
+              ))}
+            </div>
+          ) : null}
+          <div className="studio-planner-step-list">
+            {steps.map((step, index) => (
+              <PlannerStepRow key={step.step_id || `${step.title}-${index}`} step={step} index={index} />
+            ))}
+            {!steps.length ? <span className="studio-tool-empty">No planned steps</span> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PlannerStepRow({
+  index,
+  step,
+}: {
+  index: number;
+  step: ToolPlanStepSnapshot;
+}) {
+  return (
+    <div className="studio-planner-step" data-testid="studio-runtime-planner-step">
+      <div>
+        <strong>{index + 1}. {step.title}</strong>
+        <span>{step.tool_name || step.capability_id}</span>
+      </div>
+      <small>{step.status}{step.approval_required ? ' / approval' : ''}</small>
+    </div>
   );
 }
 
@@ -311,6 +446,11 @@ function modelToolFunctionName(tool: ToolCatalogItemSnapshot): string {
   const modelSchema = objectRecord(tool.model_tool_schema);
   const functionSchema = objectRecord(modelSchema.function);
   return typeof functionSchema.name === 'string' ? functionSchema.name : '';
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return 'Planner request failed';
 }
 
 function schemaPropertyRows(schema: Record<string, unknown>): SchemaPropertyRow[] {
