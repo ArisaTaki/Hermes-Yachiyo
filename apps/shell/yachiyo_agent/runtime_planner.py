@@ -174,6 +174,7 @@ class TaskIntentRouter:
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
         safe_click = safe_click_hint(text)
+        desktop_discovery = _desktop_discovery_hint(text)
         score = _score_terms(
             text,
             [
@@ -248,6 +249,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and desktop_discovery is None
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -261,7 +263,9 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
-        operation_hint = _desktop_operation_hint(text)
+        if desktop_discovery is not None:
+            app_name_hint = ""
+        operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
         if (
             context_source_hint(text)
             and not app_name_hint
@@ -300,6 +304,8 @@ class TaskIntentRouter:
             inputs["safe_scroll_hint"] = safe_scroll
         if safe_click is not None:
             inputs["safe_click_hint"] = safe_click
+        if desktop_discovery is not None:
+            inputs["desktop_discovery_hint"] = desktop_discovery
         risk_level = (
             "medium"
             if operation_hint
@@ -880,6 +886,9 @@ class RuntimePlanner:
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         safe_click = safe_click_hint(intent.user_goal)
+        desktop_discovery = intent.inputs.get("desktop_discovery_hint")
+        if not isinstance(desktop_discovery, Mapping):
+            desktop_discovery = _desktop_discovery_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -889,6 +898,8 @@ class RuntimePlanner:
             or intent.inputs.get("app_name_hint")
             or ""
         ).strip()
+        if desktop_discovery:
+            app_name = ""
         mode = app_control_mode(intent.user_goal)
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
@@ -912,6 +923,24 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        if (
+            desktop_discovery
+            and not app_name
+            and not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
+        ):
+            action = str(desktop_discovery.get("action") or "").strip()
+            tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
+            return [
+                _step(
+                    intent,
+                    f"{action}-desktop-state" if action else "discover-desktop-state",
+                    "Discover desktop state",
+                    "desktop.app_discovery",
+                    _first_allowed((tool_name,), allowed) if tool_name else None,
+                    input_preview=input_preview,
+                    reason="Run the explicit desktop discovery or permission diagnostic request.",
+                )
+            ]
         if (
             not app_name
             and screen_capture is not None
@@ -1902,6 +1931,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
         return "submit"
+    if capability_id == "desktop.app_discovery":
+        return _desktop_discovery_action(tool_name)
     if capability_id == "data.analysis":
         return "analyze_data_file" if tool_name == "data.analyze" else "run_python_analysis"
     if capability_id == "artifact.write":
@@ -2064,6 +2095,25 @@ def _service_action(capability_id: str) -> str:
     if capability_id == "group.multi_agent":
         return "start_group_run"
     return ""
+
+
+def _desktop_discovery_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if clean_tool == "desktop.permissions":
+        return "diagnose_permissions"
+    if clean_tool == "desktop.active_window":
+        return "read_active_window"
+    if clean_tool == "desktop.running_apps":
+        return "read_running_apps"
+    if clean_tool == "desktop.list_apps":
+        return "list_apps"
+    if clean_tool == "desktop.windows":
+        return "list_windows"
+    if clean_tool == "desktop.ui_elements":
+        return "read_ui"
+    if clean_tool == "screen.capture":
+        return "capture_screen"
+    return "discover"
 
 
 def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
@@ -2454,6 +2504,77 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _desktop_discovery_hint(text: str) -> dict[str, Any] | None:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if _looks_like_desktop_permissions_request(value, lowered):
+        return {"action": "diagnose_permissions"}
+    if _looks_like_active_window_request(value, lowered):
+        return {"action": "read_active_window"}
+    if _looks_like_running_apps_request(value, lowered):
+        return {"action": "read_running_apps"}
+    if _looks_like_installed_apps_request(value, lowered):
+        return {"action": "discover_apps"}
+    return None
+
+
+def _desktop_discovery_tool_preview(
+    action: str,
+    hint: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    if action == "diagnose_permissions":
+        return "desktop.permissions", {}
+    if action == "read_active_window":
+        return "desktop.active_window", {}
+    if action == "read_running_apps":
+        return "desktop.running_apps", {}
+    if action == "discover_apps":
+        return "desktop.list_apps", {}
+    return None, {}
+
+
+def _looks_like_desktop_permissions_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(r"(?:桌面|本地|自动化|辅助功能|屏幕录制|读取屏幕).{0,16}(?:权限|授权|permission)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:需要|缺少|检查|诊断|修复).{0,16}(?:权限|授权)", value)
+        or re.search(r"(?:为什么|为何|why).{0,24}(?:不能|无法|can't|cannot).{0,24}(?:打开|点击|读取屏幕|控制|操作|open|click|control)", value, flags=re.IGNORECASE)
+        or re.search(r"\b(?:desktop|local|accessibility|screen recording)\s+permissions?\b", lowered)
+    )
+
+
+def _looks_like_active_window_request(value: str, lowered: str) -> bool:
+    if re.search(r"我现在是不是在家", value):
+        return False
+    return bool(
+        re.search(r"(?:当前|现在|前台).{0,8}(?:窗口|应用|app).{0,8}(?:是什么|是哪个|是不是)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:当前|现在)?前台是不是\s*.+", value, flags=re.IGNORECASE)
+        or re.search(r"现在是不是在\s*.+", value, flags=re.IGNORECASE)
+        or re.search(r"我正在用什么(?:应用|app|软件)?", value, flags=re.IGNORECASE)
+        or re.search(r"\bwhat\s+app\s+am\s+i\s+using\b", lowered)
+        or re.search(r"\bwhat\s+is\s+(?:the\s+)?(?:frontmost|active|foreground)\s+window\b", lowered)
+        or re.search(r"\bwhich\s+(?:app|application)\s+is\s+(?:frontmost|active|foreground)\b", lowered)
+        or re.search(r"\bis\s+.+\s+(?:frontmost|the\s+active\s+app|the\s+active\s+application)\b", lowered)
+        or re.search(r"\bis\s+(?:the\s+)?(?:active|frontmost|foreground)\s+(?:app|application)\s+.+", lowered)
+    )
+
+
+def _looks_like_running_apps_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(r"(?:现在|当前).{0,8}(?:开了|打开|运行).{0,8}(?:哪些|什么).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:现在|当前).{0,8}(?:哪些|什么).{0,8}(?:应用|app|软件|程序).{0,8}(?:开着|打开|运行|在运行)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:列|列出|列一下|看看|查看).{0,8}(?:打开|运行|正在运行).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"\b(?:what|which|list|show)\s+(?:apps?|applications?)\s+(?:are\s+)?(?:running|open)\b", lowered)
+    )
+
+
+def _looks_like_installed_apps_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(r"(?:列出|列一下|查看|看看|有哪些).{0,8}(?:已安装|可用).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"\bshow\s+installed\s+apps?\b", lowered)
+        or re.search(r"\blist\s+(?:installed|available)\s+(?:apps?|applications?)\b", lowered)
+    )
 
 
 def _looks_like_ui_operation(text: str) -> bool:

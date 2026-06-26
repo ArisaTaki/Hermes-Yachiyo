@@ -1672,6 +1672,53 @@ def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
     ]
 
 
+def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None:
+    allowed_tools = [
+        "desktop.permissions",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.list_apps",
+    ]
+
+    assert planner_tool_requests("需要什么权限", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.permissions",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("当前窗口是什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("当前有哪些 App 在运行", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("show installed apps", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("我现在是不是在家", allowed_tools) == []
+
+
 def test_planner_direct_tool_requests_omits_discover_and_verify_steps() -> None:
     requests = planner_direct_tool_requests(
         "打开 PixelForge 并点击导出按钮",
