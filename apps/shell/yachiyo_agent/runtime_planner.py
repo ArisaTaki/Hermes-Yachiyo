@@ -1947,7 +1947,10 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     )[0]
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
-    app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip()
+    app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(r"\s*(?:please|pls)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(r"(?:应用(?:程序)?|软件)$", "", app).strip(" .，,。")
     app = re.sub(r"^(?:一下|下|这个|那个)\s*", "", app).strip()
     generic = {
         "app",

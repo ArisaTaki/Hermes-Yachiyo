@@ -901,16 +901,25 @@ def test_runtime_planner_verifies_desktop_open_result() -> None:
 
 
 def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
-    decision = RuntimePlanner().decision(
-        "可以帮我打开 Word 吗",
-        allowed_tools=["desktop.running_apps", "app.open", "desktop.active_window"],
+    cases = (
+        ("可以帮我打开 Word 吗", "Word"),
+        ("open Raycast app please?", "Raycast"),
+        ("launch SuperData Studio application", "SuperData Studio"),
+        ("打开微信应用", "微信"),
+        ("启动 Obsidian 软件", "Obsidian"),
     )
 
-    assert decision.selected_intent.kind == "desktop_operation"
-    assert decision.selected_intent.inputs["app_name_hint"] == "Word"
-    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
-        "app_name": "Word",
-    }
+    for prompt, expected_app_name in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.running_apps", "app.open", "desktop.active_window"],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app_name
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app_name,
+        }
 
 
 def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None:
