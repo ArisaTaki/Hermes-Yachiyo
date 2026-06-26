@@ -910,6 +910,10 @@ def daily_desktop_intent_tool_requests(
     app_status_name = _app_status_name(context)
     if app_status_name and "app.status" in allowed:
         return [_request("app.status", {"app_name": app_status_name})]
+    if _is_installed_apps_request(context):
+        if "desktop.list_apps" in allowed:
+            return [_request("desktop.list_apps", {})]
+        return []
     if _is_running_apps_request(context):
         if "desktop.running_apps" in allowed:
             return [_request("desktop.running_apps", {})]
@@ -1377,6 +1381,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.minimize_window",
     "desktop.open_path",
     "desktop.permissions",
+    "desktop.list_apps",
     "desktop.reveal_path",
     "desktop.running_apps",
     "desktop.safe_click",
@@ -1574,6 +1579,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
         "desktop.active_window",
         "desktop.open_path",
         "desktop.permissions",
+        "desktop.list_apps",
         "desktop.running_apps",
         "desktop.click_ui_element",
         "desktop.safe_click",
@@ -1717,6 +1723,8 @@ def _daily_desktop_recovery_control_prompt(tool_name: str, recovery_input: Mappi
         return "检查桌面权限"
     if tool_name == "desktop.active_window":
         return "查看当前窗口"
+    if tool_name == "desktop.list_apps":
+        return "发现已安装应用"
     if tool_name == "desktop.running_apps":
         return "查看正在运行的应用"
     if tool_name == "desktop.windows":
@@ -2839,6 +2847,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     notes_create = _notes_create_tool_request(text)
     if notes_create:
         candidates.append(notes_create)
+
+    if _is_installed_apps_request(text):
+        candidates.append(_request("desktop.list_apps", {}))
 
     if _is_running_apps_request(text):
         candidates.append(_request("desktop.running_apps", {}))
@@ -6668,6 +6679,40 @@ def _is_running_apps_request(text: str) -> bool:
             lowered,
         )
         or re.search(r"\b(?:running|open)\s+(?:apps?|applications?|programs?)\b", lowered)
+    )
+
+
+def _is_installed_apps_request(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(r"\bopen\s+(?:the\s+)?applications?\s+(?:folder|directory)\b", lowered):
+        return False
+    return bool(
+        re.search(
+            r"(?:列出|列一下|列下|查看|看看|显示|读取|找一下|找出).{0,8}"
+            r"(?:已安装|装了|安装了|可用|可以打开|能打开).{0,8}"
+            r"(?:应用|app|软件|程序)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:有哪些|有哪|哪些|什么).{0,8}"
+            r"(?:已安装|装了|安装了|可用|可以打开|能打开).{0,8}"
+            r"(?:应用|app|软件|程序)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:应用|app|软件|程序).{0,8}"
+            r"(?:已安装|装了|安装了|可用|可以打开|能打开)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:list|show|find|read)\s+(?:installed|available)\s+"
+            r"(?:apps?|applications?|programs?)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:installed|available)\s+(?:apps?|applications?|programs?)\b", lowered)
     )
 
 

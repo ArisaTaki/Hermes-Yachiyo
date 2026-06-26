@@ -828,6 +828,20 @@ def test_daily_desktop_entrypoint_routes_running_apps_language() -> None:
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.running_apps"
 
 
+def test_daily_desktop_entrypoint_routes_installed_app_discovery_language() -> None:
+    for prompt in ("列出已安装的应用", "有哪些可用 app", "show installed apps"):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.list_apps"
+
+
 def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
     assert daily_desktop_entrypoint_requests("显示当前窗口列表") == [
         {
