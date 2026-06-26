@@ -115,6 +115,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return True
     tools = [str(request.get("tool") or "").strip() for request in requests]
+    if _runtime_planner_model_followup_owns_selection(requests):
+        return False
     if any(bool(request.get("continue_to_model")) for request in requests):
         return True
     if any(tool == "desktop.submit_foreground" for tool in tools):
@@ -131,6 +133,27 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     tool_name = tools[0]
     return tool_name.startswith(("app.", "desktop.", "browser."))
+
+
+_RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS = frozenset(
+    {
+        "planner_prefetch_information_capture_context",
+        "planner_prefetch_schedule_context",
+    }
+)
+
+
+def _runtime_planner_model_followup_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    if not any(bool(request.get("continue_to_model")) for request in requests):
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    return bool(reasons) and reasons <= _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS
 
 
 def _legacy_requests(

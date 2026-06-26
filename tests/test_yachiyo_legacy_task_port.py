@@ -171,6 +171,46 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
     assert model_loop_call[1]["direct_tool_requests"] == []
 
 
+def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_planner() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-note-clipboard",
+        conversation_id="chat-1",
+        prompt="create a note from clipboard",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_tool"] == "clipboard.read"
+    assert metadata["daily_desktop_planning_reason"] == (
+        "planner_prefetch_information_capture_context"
+    )
+    selection_events = [
+        event for event in runtime.calls if event[0] == "append_run_event"
+        and event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()

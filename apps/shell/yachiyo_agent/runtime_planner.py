@@ -50,7 +50,7 @@ from .desktop_plan_hints import (
     ui_inspection_hint,
     window_list_hint,
 )
-from .schedule_plan_hints import schedule_tool_preview
+from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
 
 
@@ -573,6 +573,7 @@ class TaskIntentRouter:
         score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
         if score <= 0:
             return _empty_intent("schedule", text)
+        context_source = schedule_context_source_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "schedule", text),
             kind="schedule",
@@ -580,8 +581,16 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.86, 0.38 + score),
             description="Create reminders, calendar events, or future tasks.",
+            inputs={"context_source": context_source} if context_source else {},
             required_capabilities=["schedule.reminder"],
-            preferred_capabilities=["artifact.write"],
+            preferred_capabilities=[
+                *(
+                    ["clipboard.read_write", "browser.research", "desktop.ui_operation"]
+                    if context_source
+                    else []
+                ),
+                "artifact.write",
+            ],
             risk_level="medium",
         )
 
@@ -1363,6 +1372,31 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         tool_name, input_preview = schedule_tool_preview(intent.user_goal, allowed)
+        context_source = str(intent.inputs.get("context_source") or "").strip()
+        if context_source and not input_preview:
+            context_steps = _context_source_steps(
+                intent,
+                allowed,
+                context_source,
+                step_prefix="schedule",
+                capability_id="schedule.reminder",
+            )
+            depends_on = [step.step_id for step in context_steps]
+            return [
+                *context_steps,
+                _step(
+                    intent,
+                    "create-schedule-item-from-context",
+                    "Create schedule item from captured context",
+                    "schedule.reminder",
+                    _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                    input_preview={"body_source": context_source},
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=depends_on,
+                    reason="Inspect the requested source before creating the reminder or calendar item.",
+                ),
+            ]
         return [
             _step(
                 intent,
@@ -1398,7 +1432,13 @@ class RuntimePlanner:
             ]
 
         source = str(intent.inputs.get("source") or "").strip()
-        context_steps = _information_capture_context_steps(intent, allowed, source)
+        context_steps = _context_source_steps(
+            intent,
+            allowed,
+            source,
+            step_prefix="note",
+            capability_id="information.capture",
+        )
         depends_on = [step.step_id for step in context_steps]
         return [
             *context_steps,
@@ -1568,10 +1608,13 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
     return None
 
 
-def _information_capture_context_steps(
+def _context_source_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
     source: str,
+    *,
+    step_prefix: str,
+    capability_id: str,
 ) -> list[ToolPlanStepSnapshot]:
     if source == "selection":
         steps = []
@@ -1580,12 +1623,12 @@ def _information_capture_context_steps(
             steps.append(
                 _step(
                     intent,
-                    "copy-selected-note-context",
-                    "Copy selected note context",
-                    "information.capture",
+                    f"copy-selected-{step_prefix}-context",
+                    "Copy selected context",
+                    capability_id,
                     copy_tool,
                     input_preview={"action": "copy"},
-                    reason="Copy the explicit user-selected text before creating a note from it.",
+                    reason="Copy the explicit user-selected text before using it as task context.",
                 )
             )
         read_tool = _first_allowed(("clipboard.read",), allowed)
@@ -1593,12 +1636,12 @@ def _information_capture_context_steps(
             steps.append(
                 _step(
                     intent,
-                    "read-note-context",
-                    "Read note context",
-                    "information.capture",
+                    f"read-{step_prefix}-context",
+                    "Read captured context",
+                    capability_id,
                     read_tool,
-                    depends_on=["copy-selected-note-context"] if copy_tool else [],
-                    reason="Read the copied text so the note body comes from inspected context.",
+                    depends_on=[f"copy-selected-{step_prefix}-context"] if copy_tool else [],
+                    reason="Read the copied text so the next step uses inspected context.",
                 )
             )
         return steps
@@ -1608,11 +1651,11 @@ def _information_capture_context_steps(
         return [
             _step(
                 intent,
-                "read-note-context",
-                "Read note context",
-                "information.capture",
+                f"read-{step_prefix}-context",
+                "Read captured context",
+                capability_id,
                 tool_name,
-                reason="Read the explicitly requested clipboard contents before creating a note.",
+                reason="Read the explicitly requested clipboard contents before using them as task context.",
             )
         ]
 
@@ -1622,12 +1665,12 @@ def _information_capture_context_steps(
         return [
             _step(
                 intent,
-                "read-note-context",
-                "Read note context",
-                "information.capture",
+                f"read-{step_prefix}-context",
+                "Read captured context",
+                capability_id,
                 tool_name,
                 input_preview=payload,
-                reason="Capture the current page reference before creating a note.",
+                reason="Capture the current page reference before using it as task context.",
             )
         ]
 
@@ -1639,12 +1682,12 @@ def _information_capture_context_steps(
         return [
             _step(
                 intent,
-                "read-note-context",
-                "Read note context",
-                "information.capture",
+                f"read-{step_prefix}-context",
+                "Read captured context",
+                capability_id,
                 tool_name,
                 input_preview=_information_capture_context_payload(tool_name),
-                reason="Inspect the current page or window text before creating a note.",
+                reason="Inspect the current page or window text before using it as task context.",
             )
         ]
 
@@ -1653,12 +1696,12 @@ def _information_capture_context_steps(
         return [
             _step(
                 intent,
-                "read-note-context",
-                "Read note context",
-                "information.capture",
+                f"read-{step_prefix}-context",
+                "Read captured context",
+                capability_id,
                 tool_name,
                 input_preview=_information_capture_context_payload(tool_name),
-                reason="Inspect visible text before creating a note.",
+                reason="Inspect visible text before using it as task context.",
             )
         ]
 

@@ -19,6 +19,7 @@ from apps.shell.yachiyo_agent.planner_execution import (
 )
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
+    planner_first_direct_tool_selection,
 )
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
@@ -1264,6 +1265,29 @@ def test_runtime_planner_tracks_context_note_source_without_body() -> None:
     ]
 
 
+def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
+    decision = RuntimePlanner().decision(
+        "create a reminder from selected text",
+        allowed_tools=["reminders.create", "desktop.safe_shortcut", "clipboard.read"],
+    )
+
+    assert decision.selected_intent.kind == "schedule"
+    assert decision.selected_intent.inputs == {"context_source": "selection"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-schedule-context",
+        "read-schedule-context",
+        "create-schedule-item-from-context",
+    ]
+    assert _step_by_id(decision, "copy-selected-schedule-context").input_preview == {
+        "action": "copy"
+    }
+    assert _step_by_id(decision, "read-schedule-context").tool_name == "clipboard.read"
+    create_step = _step_by_id(decision, "create-schedule-item-from-context")
+    assert create_step.tool_name == "reminders.create"
+    assert create_step.input_preview == {"body_source": "selection"}
+    assert create_step.approval_required is True
+
+
 def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> None:
     decision = RuntimePlanner().decision(
         "把 hello 复制到剪贴板",
@@ -2292,21 +2316,40 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
     )
 
 
-def test_planner_tool_requests_leaves_dynamic_schedule_sources_to_legacy_fallback() -> None:
-    assert (
-        planner_tool_requests(
-            "create a reminder from selected text",
-            allowed_tools=["reminders.create", "desktop.safe_shortcut", "clipboard.read"],
-        )
-        == []
-    )
-    assert (
-        planner_tool_requests(
-            "把剪贴板内容创建成日历事件",
-            allowed_tools=["calendar.create_event", "clipboard.read"],
-        )
-        == []
-    )
+def test_planner_tool_requests_prefetches_dynamic_schedule_sources_for_model_loop() -> None:
+    assert planner_tool_requests(
+        "create a reminder from selected text",
+        allowed_tools=["reminders.create", "desktop.safe_shortcut", "clipboard.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_schedule_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_schedule_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "把剪贴板内容创建成日历事件",
+        allowed_tools=["calendar.create_event", "clipboard.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_schedule_context",
+            "continue_to_model": True,
+        }
+    ]
 
 
 def test_planner_tool_requests_maps_explicit_note_plan() -> None:
@@ -2326,21 +2369,76 @@ def test_planner_tool_requests_maps_explicit_note_plan() -> None:
     ]
 
 
-def test_planner_tool_requests_leaves_context_note_to_legacy_fallback() -> None:
-    assert (
-        planner_tool_requests(
-            "create a note from selected text",
-            allowed_tools=["notes.create", "desktop.safe_shortcut", "clipboard.read"],
-        )
-        == []
+def test_planner_tool_requests_prefetches_context_note_for_model_loop() -> None:
+    assert planner_tool_requests(
+        "create a note from selected text",
+        allowed_tools=["notes.create", "desktop.safe_shortcut", "clipboard.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "create a note from clipboard",
+        allowed_tools=["notes.create", "clipboard.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() -> None:
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_shortcut",
+                "input": {"app_name": "Notes", "action": "new_note"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "paste"},
+            },
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "create a note from clipboard",
+        ["notes.create", "clipboard.read", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
     )
-    assert (
-        planner_tool_requests(
-            "create a note from clipboard",
-            allowed_tools=["notes.create", "clipboard.read"],
-        )
-        == []
-    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["selection_source"] == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
 
 
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:

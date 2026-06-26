@@ -10134,12 +10134,16 @@ def test_chat_bridge_quick_message_plans_note_creation_for_lightweight_entrypoin
         assert result["agent_task"]["task_id"] == "task-note"
         assert result["agent_task"]["status"] == "queued"
         assert result["agent_task"]["current_step"] == "准备执行 · 创建备忘录"
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "notes.create"
-        assert result["agent_task"]["recent_events"][0]["payload"] == {
+        planned_event = next(
+            event
+            for event in result["agent_task"]["recent_events"]
+            if event["event_type"] == "agent.desktop.intent_planned"
+        )
+        assert planned_event["detail"] == "notes.create"
+        assert planned_event["payload"] == {
             "input_preview": {"body": "hello"},
-            "planning_reason": "clear_daily_desktop_intent",
-            "source": "daily_desktop_intent",
+            "planning_reason": "planner_fallback_information_capture",
+            "source": "runtime_planner",
             "status": "planned",
             "tool": "notes.create",
         }

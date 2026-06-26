@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from .capture_plan_hints import context_source_hint
+
 
 _LOCAL_ISO_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}"
 
@@ -79,35 +81,24 @@ def calendar_event_payload(text: str) -> dict[str, Any]:
     }
 
 
+def schedule_context_source_hint(text: str) -> str:
+    if not _looks_like_schedule_target(text):
+        return ""
+    return context_source_hint(text)
+
+
 def _looks_like_calendar_event(text: str) -> bool:
     lowered = str(text or "").lower()
     return any(term in lowered for term in ("calendar", "event", "meeting", "日历", "日程", "会议"))
 
 
 def _dynamic_schedule_source_request(text: str) -> bool:
+    return bool(schedule_context_source_hint(text))
+
+
+def _looks_like_schedule_target(text: str) -> bool:
     lowered = str(text or "").lower()
-    has_dynamic_source = any(
-        term in lowered
-        for term in (
-            "selected text",
-            "highlighted text",
-            "selection",
-            "clipboard",
-            "current page",
-            "current window",
-            "current url",
-            "选中",
-            "选取",
-            "高亮",
-            "剪贴板",
-            "粘贴板",
-            "当前网页",
-            "当前页面",
-            "当前窗口",
-            "当前链接",
-        )
-    )
-    has_schedule_target = any(
+    return any(
         term in lowered
         for term in (
             "reminder",
@@ -121,7 +112,6 @@ def _dynamic_schedule_source_request(text: str) -> bool:
             "事件",
         )
     )
-    return has_dynamic_source and has_schedule_target
 
 
 def _reminder_body(text: str) -> str:

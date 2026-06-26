@@ -115,9 +115,9 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             planning_reason="planner_prefetch_communication_surface",
         )
     if decision.selected_intent.kind == "information_capture":
-        return _information_capture_tool_requests(decision.selected_intent.inputs, allowed)
+        return _information_capture_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "schedule":
-        return _schedule_tool_requests(decision.selected_intent.user_goal, allowed)
+        return _schedule_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
         return _clipboard_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind != "desktop_operation":
@@ -442,6 +442,18 @@ def _context_prefetch_payload(
         return {"path": path} if path else None
     if tool_name in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
         return {}
+    if tool_name == "clipboard.read":
+        return {}
+    if tool_name == "desktop.safe_shortcut":
+        action = str(payload.get("action") or "").strip()
+        return {"action": action} if action else None
+    if tool_name == "desktop.ui_elements":
+        request_payload = {
+            key: payload[key]
+            for key in ("role_filter", "limit")
+            if key in payload and payload[key] not in (None, "")
+        }
+        return request_payload
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
         return {}
     if tool_name == "screen.capture":
@@ -453,10 +465,15 @@ def _context_prefetch_payload(
     return None
 
 
-def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, Any]]:
-    tool_name, payload = schedule_tool_preview(prompt, allowed)
+def _schedule_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = schedule_tool_preview(decision.selected_intent.user_goal, allowed)
     if not tool_name or not payload:
-        return []
+        return _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=("copy-selected-schedule-context", "read-schedule-context"),
+            planning_reason="planner_prefetch_schedule_context",
+        )
     return [
         _request(
             tool_name,
@@ -466,10 +483,15 @@ def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, An
     ]
 
 
-def _information_capture_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
-    tool_name, payload = capture_tool_preview(inputs, allowed)
+def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = capture_tool_preview(decision.selected_intent.inputs, allowed)
     if tool_name != "notes.create" or not payload.get("body"):
-        return []
+        return _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=("copy-selected-note-context", "read-note-context"),
+            planning_reason="planner_prefetch_information_capture_context",
+        )
     return [
         _request(
             tool_name,
@@ -477,6 +499,36 @@ def _information_capture_tool_requests(inputs: dict[str, Any], allowed: set[str]
             planning_reason="planner_fallback_information_capture",
         )
     ]
+
+
+def _context_source_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    step_ids: tuple[str, ...],
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for step_id in step_ids:
+        step = next(
+            (
+                item
+                for item in decision.plan.tool_plan.steps
+                if getattr(item, "step_id", "") == step_id
+            ),
+            None,
+        )
+        request = _context_prefetch_request_for_step(
+            step,
+            allowed,
+            planning_reason=planning_reason,
+        )
+        if request:
+            request.pop("continue_to_model", None)
+            requests.append(request)
+    if requests:
+        requests[-1]["continue_to_model"] = True
+    return requests
 
 
 def _clipboard_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:

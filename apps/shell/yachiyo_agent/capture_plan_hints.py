@@ -11,7 +11,7 @@ def capture_note_hint(prompt: str) -> dict[str, Any]:
     text = _clean(prompt)
     if not text or not _looks_like_note_request(text):
         return {}
-    source = _context_source(text)
+    source = context_source_hint(text)
     if source:
         return {"action": "create_note_from_context", "source": source}
     body = note_body(text)
@@ -50,12 +50,12 @@ def note_body(text: str) -> str:
         if not match:
             continue
         body = _normalize_body(match.groupdict().get("body") or match.groupdict().get("body_en") or "")
-        if body and not _context_source(body):
+        if body and not context_source_hint(body):
             return body
     return ""
 
 
-def _context_source(text: str) -> str:
+def context_source_hint(text: str) -> str:
     lowered = text.lower()
     if _contains_any(lowered, ("clipboard", "剪贴板", "粘贴板")):
         return "clipboard"
