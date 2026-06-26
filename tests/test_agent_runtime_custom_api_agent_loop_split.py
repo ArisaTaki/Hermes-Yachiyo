@@ -312,6 +312,63 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert timeline[-1] == {"event": "agent.model.response", "detail": "final answer"}
 
 
+def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysis() -> None:
+    budget = FakeBudget()
+    calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local/",
+            "model": "test-model",
+            "api_key": "key",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"],
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: 0 if not isinstance(value, int) else value,
+        max_tool_iterations=3,
+        operating_doctrine="Follow approval gates.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, messages, **_kwargs: calls.append(
+            list(messages)
+        )
+        or {"role": "assistant", "content": "final answer", "finish_reason": "stop"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda message: {"finish_reason": message.get("finish_reason")},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "请分析 sales.csv 并输出数据分析报告",
+        broker=object(),
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-data-plan",
+    )
+
+    system_prompt = calls[0][0]["content"]
+    assert str(result) == "final answer"
+    assert "Runtime planner guidance" in system_prompt
+    assert "selected intent=data_analysis" in system_prompt
+    assert "workspace.read -> terminal.run -> artifact.write" in system_prompt
+    assert "approval gates still apply" in system_prompt
+
+
 def test_custom_api_agent_loop_injects_runtime_prompt_for_existing_messages() -> None:
     budget = FakeBudget()
     calls: list[list[dict[str, Any]]] = []

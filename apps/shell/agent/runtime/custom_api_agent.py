@@ -1337,7 +1337,10 @@ class RuntimeCustomApiAgentLoop:
         messages: list[dict[str, Any]],
         allowed_tools: list[str],
     ) -> None:
-        runtime_message = self._system_message(allowed_tools)
+        runtime_message = self._system_message(
+            allowed_tools,
+            planner_context=self._latest_user_intent_text(messages),
+        )
         if messages and str(messages[0].get("role") or "") == "system":
             content = str(messages[0].get("content") or "")
             if "Oha-Yachiyo Agent Runtime" in content:
@@ -1351,11 +1354,16 @@ class RuntimeCustomApiAgentLoop:
 
     def _initial_messages(self, context: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [
-            self._system_message(allowed_tools),
+            self._system_message(allowed_tools, planner_context=context),
             {"role": "user", "content": context},
         ]
 
-    def _system_message(self, allowed_tools: list[str]) -> dict[str, Any]:
+    def _system_message(
+        self,
+        allowed_tools: list[str],
+        *,
+        planner_context: str = "",
+    ) -> dict[str, Any]:
         allowed_tool_text = ", ".join(allowed_tools) or "none"
         memory_tool_guidance = (
             "Use memory.add, memory.replace, and memory.remove only for stable user preferences, durable facts, "
@@ -1452,9 +1460,49 @@ class RuntimeCustomApiAgentLoop:
             "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
             "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
             "or switch tools instead of stopping or retrying the same invalid path. "
+            f"{self._runtime_planner_guidance(planner_context, allowed_tools)}"
             f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
         )
         return {"role": "system", "content": system_prompt}
+
+    @staticmethod
+    def _runtime_planner_guidance(
+        planner_context: str,
+        allowed_tools: list[str],
+    ) -> str:
+        clean_context = str(planner_context or "").strip()
+        if not clean_context:
+            return ""
+        try:
+            from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
+        except Exception:
+            return ""
+        try:
+            decision = RuntimePlanner().decision(
+                clean_context,
+                allowed_tools=allowed_tools,
+            )
+        except Exception:
+            return ""
+        if decision.selected_intent.kind == "general":
+            return ""
+        tool_path = [
+            str(step.tool_name or step.capability_id or "").strip()
+            for step in decision.plan.tool_plan.steps
+            if str(step.tool_name or step.capability_id or "").strip()
+        ]
+        if not tool_path:
+            return ""
+        missing = ", ".join(decision.plan.tool_plan.missing_capabilities) or "none"
+        outputs = ", ".join(decision.selected_intent.expected_outputs) or "unspecified"
+        return (
+            "Runtime planner guidance: "
+            f"selected intent={decision.selected_intent.kind}; "
+            f"expected outputs={outputs}; "
+            f"planned tool path={' -> '.join(tool_path)}; "
+            f"missing required capabilities={missing}. "
+            "Use this plan as guidance only; existing tool policy and approval gates still apply. "
+        )
 
 
 def _payload_text(result: dict[str, Any], planned_input: dict[str, Any], key: str) -> str:
