@@ -415,6 +415,7 @@ class TaskIntentRouter:
         source = context_source_hint(text)
         if source and safe_shortcut_hint(text):
             return _empty_intent("web_research", text)
+        browser_action = _browser_current_page_hint(text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         score = _score_terms(
             text,
@@ -443,11 +444,14 @@ class TaskIntentRouter:
             and _contains_any(text, ["open", "打开", "search", "find", "查找", "搜索"])
         ):
             score = 0.16
+        if score <= 0 and browser_action:
+            score = 0.28
         if score <= 0:
             return _empty_intent("web_research", text)
         inputs = {"url_hint": _url_hint(text)}
         if dynamic_source:
             inputs["context_source"] = dynamic_source
+        inputs.update(browser_action)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "web_research", text),
             kind="web_research",
@@ -1338,6 +1342,38 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        browser_action = str(intent.inputs.get("browser_action") or "").strip()
+        if browser_action:
+            tool_name = {
+                "current_page": "browser.current_page",
+                "extract_text": "browser.extract_text",
+                "screenshot": "browser.screenshot",
+            }.get(browser_action)
+            input_preview: dict[str, Any] = {}
+            reason = str(intent.inputs.get("reason") or "").strip()
+            if browser_action == "screenshot" and reason:
+                input_preview["reason"] = reason
+            return [
+                _step(
+                    intent,
+                    {
+                        "current_page": "read-current-page",
+                        "extract_text": "extract-current-page-text",
+                        "screenshot": "capture-current-page",
+                    }.get(browser_action, "read-current-page"),
+                    {
+                        "current_page": "Read current page",
+                        "extract_text": "Extract current page text",
+                        "screenshot": "Capture current page",
+                    }.get(browser_action, "Read current page"),
+                    "browser.research",
+                    _first_allowed((tool_name,), allowed) if tool_name else None,
+                    input_preview=input_preview,
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Use the explicit current-page browser tool instead of desktop screen automation.",
+                )
+            ]
         url = str(intent.inputs.get("url_hint") or "").strip()
         context_source = str(intent.inputs.get("context_source") or "").strip()
         if context_source and not url:
@@ -1944,6 +1980,10 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id == "browser.research":
         if _is_context_source_tool(tool_name):
             return _context_source_action(tool_name)
+        if tool_name == "browser.current_page":
+            return "read_current_page"
+        if tool_name == "browser.screenshot":
+            return "screenshot"
         return "extract_text" if tool_name and "extract_text" in tool_name else "open_url"
     if capability_id == "media.playback":
         return "play"
@@ -2165,6 +2205,12 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
                 ]
             artifact_path = str(step.input_preview.get("artifact_path") or "").strip()
             return [artifact_path or "analysis-report.md"]
+    if intent.kind == "web_research":
+        browser_action = str(intent.inputs.get("browser_action") or "").strip()
+        if browser_action == "screenshot":
+            return ["browser/current-page.png"]
+        if browser_action:
+            return []
     if not any(step.tool_name == "artifact.write" for step in steps):
         return []
     if intent.kind == "data_analysis":
@@ -2504,6 +2550,101 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _browser_current_page_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if safe_shortcut_hint(value):
+        return {}
+    if _looks_like_browser_current_page_screenshot(value, lowered):
+        return {
+            "browser_action": "screenshot",
+            "reason": "user asked to capture the browser page",
+        }
+    if _looks_like_browser_current_page_metadata(value, lowered):
+        return {"browser_action": "current_page"}
+    if _looks_like_browser_current_page_text(value, lowered):
+        hint = {"browser_action": "extract_text"}
+        if _looks_like_browser_current_page_summary(value, lowered):
+            hint["presentation"] = "summary"
+        return hint
+    return {}
+
+
+def _looks_like_browser_current_page_screenshot(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|标签页).{0,8}(?:截图|截屏)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:截图|截屏).{0,8}(?:当前|这个|本页).{0,8}(?:网页|页面|标签页)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"\bscreenshot\s+(?:this|current)\s+(?:web\s*)?page\b", lowered)
+    )
+
+
+def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:读|读取|提取|总结|摘要|概括).{0,8}"
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|标签页|页|正文|内容)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|标签页|页|正文|内容)"
+            r".{0,8}(?:读|读取|提取|总结|摘要|概括)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:read|extract|summari[sz]e)\s+(?:the\s+)?(?:current|this)"
+            r"\s+(?:web\s*)?page(?:\s+text)?\b",
+            lowered,
+        )
+        or re.search(r"\bextract\s+(?:the\s+)?(?:current|this)\s+page\s+text\b", lowered)
+    )
+
+
+def _looks_like_browser_current_page_summary(value: str, lowered: str) -> bool:
+    return _contains_any(value, ("总结", "摘要", "概括")) or bool(
+        re.search(r"\bsummari[sz]e|summary\b", lowered)
+    )
+
+
+def _looks_like_browser_current_page_metadata(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:当前|这个|本页).{0,8}(?:网址|链接|地址).{0,8}(?:是什么|多少|读取|读|打开)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:读取|读|打开).{0,8}(?:当前|这个|本页).{0,8}(?:网址|链接|地址)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|标签页).{0,8}(?:是什么|是啥|标题)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:what(?:'s| is)|read|open)\s+(?:the\s+)?(?:current|this)"
+            r"\s+(?:page|tab)\s+(?:url|link|address)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:current|this)\s+(?:page|tab)\s+(?:url|link|address)\b", lowered)
+        or re.search(
+            r"\bwhat(?:'s| is)\s+(?:the\s+)?(?:current|this)\s+(?:page|tab)\b",
+            lowered,
+        )
+    )
 
 
 def _desktop_discovery_hint(text: str) -> dict[str, Any] | None:

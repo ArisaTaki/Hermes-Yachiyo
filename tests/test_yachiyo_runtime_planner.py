@@ -410,6 +410,68 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
 
 
+def test_runtime_planner_routes_current_page_browser_actions() -> None:
+    screenshot = RuntimePlanner().decision(
+        "screenshot current webpage",
+        allowed_tools=["browser.screenshot", "screen.capture"],
+    )
+
+    assert screenshot.selected_intent.kind == "web_research"
+    assert screenshot.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "screenshot",
+        "reason": "user asked to capture the browser page",
+    }
+    screenshot_step = _step_by_id(screenshot, "capture-current-page")
+    assert screenshot_step.tool_name == "browser.screenshot"
+    assert screenshot_step.action == "screenshot"
+    assert screenshot_step.input_preview == {
+        "reason": "user asked to capture the browser page"
+    }
+    assert screenshot_step.approval_required is False
+    assert screenshot.plan.tool_plan.artifacts_expected == ["browser/current-page.png"]
+
+    summary = RuntimePlanner().decision(
+        "总结当前网页",
+        allowed_tools=["browser.current_page", "browser.extract_text"],
+    )
+
+    assert summary.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+        "presentation": "summary",
+    }
+    summary_step = _step_by_id(summary, "extract-current-page-text")
+    assert summary_step.tool_name == "browser.extract_text"
+    assert summary_step.action == "extract_text"
+    assert summary.plan.tool_plan.artifacts_expected == []
+
+    content = RuntimePlanner().decision(
+        "读取当前网页内容",
+        allowed_tools=["browser.current_page", "browser.extract_text"],
+    )
+
+    content_step = _step_by_id(content, "extract-current-page-text")
+    assert content.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+    }
+    assert content_step.tool_name == "browser.extract_text"
+
+    link = RuntimePlanner().decision(
+        "读取当前网页链接",
+        allowed_tools=["browser.current_page", "browser.extract_text"],
+    )
+
+    link_step = _step_by_id(link, "read-current-page")
+    assert link.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "current_page",
+    }
+    assert link_step.tool_name == "browser.current_page"
+    assert link_step.action == "read_current_page"
+
+
 def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     decision = RuntimePlanner().decision(
         "search selected text",
@@ -2317,6 +2379,53 @@ def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
             "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
+    allowed = [
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.screenshot",
+        "screen.capture",
+    ]
+
+    assert planner_tool_requests("screenshot this page", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.screenshot",
+            "input": {"reason": "user asked to capture the browser page"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("总结当前网页", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+        }
+    ]
+    assert planner_tool_requests("读取当前网页内容", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("读取当前网页链接", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }

@@ -377,7 +377,13 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         (
             item
             for item in decision.plan.tool_plan.steps
-            if getattr(item, "step_id", "") == "open-or-read-web"
+            if getattr(item, "step_id", "")
+            in {
+                "open-or-read-web",
+                "read-current-page",
+                "extract-current-page-text",
+                "capture-current-page",
+            }
         ),
         None,
     )
@@ -385,6 +391,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if tool_name not in allowed:
         return []
     url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
+    browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     payload: dict[str, Any] = {}
     if tool_name in {
         "browser.open_url",
@@ -396,15 +403,21 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         payload = {"url": url}
     elif tool_name not in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
         return []
-    elif not _looks_like_current_page_request(decision.selected_intent.user_goal):
+    elif not browser_action and not _looks_like_current_page_request(decision.selected_intent.user_goal):
         return []
+    elif tool_name == "browser.screenshot":
+        reason = str(decision.selected_intent.inputs.get("reason") or "").strip()
+        payload = {"reason": reason} if reason else {}
 
     request = _request(
         tool_name,
         payload,
         planning_reason="planner_fallback_web_research",
     )
-    if _web_request_needs_model_followup(decision.selected_intent.user_goal):
+    presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
+    if presentation:
+        request["presentation"] = presentation
+    if not browser_action and _web_request_needs_model_followup(decision.selected_intent.user_goal):
         request["continue_to_model"] = True
     return [request]
 
