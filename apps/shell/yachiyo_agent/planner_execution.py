@@ -34,6 +34,8 @@ def planner_desktop_tool_requests(
     )
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
+    if decision.selected_intent.kind == "web_research":
+        return _web_tool_requests(decision, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
 
@@ -160,6 +162,82 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             planning_reason="planner_fallback_media_playback",
         )
     ]
+
+
+def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "step_id", "") == "open-or-read-web"
+        ),
+        None,
+    )
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name not in allowed:
+        return []
+    url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
+    payload: dict[str, Any] = {}
+    if tool_name in {
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+    }:
+        if not url:
+            return []
+        payload = {"url": url}
+    elif tool_name not in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
+        return []
+    elif not _looks_like_current_page_request(decision.selected_intent.user_goal):
+        return []
+
+    request = _request(
+        tool_name,
+        payload,
+        planning_reason="planner_fallback_web_research",
+    )
+    if _web_request_needs_model_followup(decision.selected_intent.user_goal):
+        request["continue_to_model"] = True
+    return [request]
+
+
+def _looks_like_current_page_request(prompt: str) -> bool:
+    return _contains_any(
+        prompt,
+        (
+            "current page",
+            "this page",
+            "current tab",
+            "当前页面",
+            "当前网页",
+            "当前标签",
+            "页面正文",
+            "网页正文",
+        ),
+    )
+
+
+def _web_request_needs_model_followup(prompt: str) -> bool:
+    return _contains_any(
+        prompt,
+        (
+            "summary",
+            "summarize",
+            "report",
+            "research",
+            "analyze",
+            "总结",
+            "报告",
+            "调研",
+            "分析",
+            "输出",
+        ),
+    )
+
+
+def _contains_any(text: str, terms: Iterable[str]) -> bool:
+    lowered = str(text or "").lower()
+    return any(str(term or "").lower() in lowered for term in terms)
 
 
 def _app_tool(mode: str, action: str, allowed: set[str]) -> str:

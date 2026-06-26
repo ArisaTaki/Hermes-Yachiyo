@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime import custom_api_agent as custom_api_agent_module
 from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
@@ -13076,6 +13077,134 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         "source": "daily_desktop_intent",
         "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {},
+    }
+
+
+def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    order: list[str] = []
+    tool_runs: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        order.append("tool")
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": list(messages_arg),
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        request = tool_requests[0]
+        result = {
+            "ok": True,
+            "action": "browser.open_url_and_extract_text",
+            "data": {"url": request["input"]["url"], "text": "Example Domain"},
+        }
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                "browser.open_url_and_extract_text",
+                input_preview=request["input"],
+                result=result,
+            )
+        )
+        messages_arg.append(
+            {
+                "role": "user",
+                "content": f"Tool result for browser.open_url_and_extract_text: {result}",
+            }
+        )
+
+    def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
+        order.append("model")
+        assert "Tool result for browser.open_url_and_extract_text" in model_messages[-1]["content"]
+        return {"role": "assistant", "content": "总结完成。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["browser.open_url_and_extract_text"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use browser tools for web research.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "调研 https://example.com 并总结报告",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-browser-research",
+    )
+
+    assert str(result) == "总结完成。"
+    assert order == ["tool", "model"]
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_planned",
+        "detail": "browser.open_url_and_extract_text",
+        "tool": "browser.open_url_and_extract_text",
+        "status": "planned",
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_web_research",
+        "input_preview": {"url": "https://example.com"},
+        "continue_to_model": True,
     }
 
 

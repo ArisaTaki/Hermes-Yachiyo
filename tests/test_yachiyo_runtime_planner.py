@@ -328,6 +328,41 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
     ]
 
 
+def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 https://example.com",
+        allowed_tools=["browser.open_url"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+
+
+def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> None:
+    requests = planner_desktop_tool_requests(
+        "调研 https://example.com 并总结报告",
+        allowed_tools=["browser.open_url_and_extract_text"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
     class FakePlannerPort:
         def plan_chat_task(

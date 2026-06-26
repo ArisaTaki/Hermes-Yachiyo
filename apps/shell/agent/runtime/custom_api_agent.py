@@ -310,6 +310,8 @@ class RuntimeCustomApiAgentLoop:
                     presentation = str(planned_tool_request.get("presentation") or "").strip()
                     if presentation:
                         planned_payload["presentation"] = presentation
+                    if planned_tool_request.get("continue_to_model"):
+                        planned_payload["continue_to_model"] = True
                     timeline.append(
                         self._timeline(
                             "agent.desktop.intent_planned",
@@ -370,7 +372,14 @@ class RuntimeCustomApiAgentLoop:
                         run_id=run_id,
                     )
                     raise
-                if len(planned_tool_requests) == 1:
+                continue_to_model = any(
+                    bool(request.get("continue_to_model"))
+                    for request in planned_tool_requests
+                    if isinstance(request, dict)
+                )
+                if continue_to_model:
+                    direct_result = ""
+                elif len(planned_tool_requests) == 1:
                     planned_tool = str(planned_tool_requests[0].get("tool") or "")
                     planned_input = planned_tool_requests[0].get("input") or {}
                     presentation = str(planned_tool_requests[0].get("presentation") or "").strip()
