@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_DOCTRINE
+from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 
 MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS = """
@@ -26,7 +26,7 @@ Slack、微信、Messages 等通讯应用中新建消息/新建聊天，用 app.
 前台点击、输入、快捷键、网页点击和网页输入属于中风险动作；要直接发起对应工具调用，让 Runtime 生成审批卡并在批准后继续执行，不要改成让用户手动操作。
 如果系统权限缺失，明确说明缺少的权限和用户需要打开的系统设置入口；不要假装已经完成动作。
 高风险动作仍必须遵守 approval/policy gate，尤其是删除或覆盖用户文件、发送消息、支付、系统设置、裸 shell、凭据相关操作。
-""".format(runtime_doctrine=YACHIYO_RUNTIME_DOCTRINE).strip()
+""".format(runtime_doctrine=YACHIYO_RUNTIME_OPERATING_MANUAL).strip()
 
 
 class MainChatRuntimeConfigBuilder:

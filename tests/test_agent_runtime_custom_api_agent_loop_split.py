@@ -305,6 +305,17 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert "TaskIntent" in calls[0]["messages"][0]["content"]
     assert "discover -> act -> verify" in calls[0]["messages"][0]["content"]
     assert "choose capabilities before app-specific rules" in calls[0]["messages"][0]["content"]
+    assert "Daily entrypoint operating manual" in calls[0]["messages"][0]["content"]
+    assert "not as fixed branches that must be prewritten" in calls[0]["messages"][0]["content"]
+    assert (
+        "Do not answer with recipes like 'you can open the app yourself'"
+        in calls[0]["messages"][0]["content"]
+    )
+    assert "discover available applications/windows/UI first" in calls[0]["messages"][0]["content"]
+    assert (
+        "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports"
+        in calls[0]["messages"][0]["content"]
+    )
     assert "Resolve arbitrary app names through app/window/UI discovery" in calls[0]["messages"][0]["content"]
     assert "instead of requiring app-specific aliases or manual user steps" in calls[0]["messages"][0]["content"]
     assert "memory.add" in calls[0]["messages"][0]["content"]
@@ -375,6 +386,9 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
 
     assert "Runtime planner guidance" in system_prompt
     assert "discover -> act -> verify" in system_prompt
+    assert "Daily entrypoint operating manual" in system_prompt
+    assert "intent to capabilities before choosing concrete tools" in system_prompt
+    assert "not as fixed branches that must be prewritten" in system_prompt
     assert "selected intent=data_analysis" in system_prompt
     assert "workspace.read -> terminal.run -> artifact.write" in system_prompt
     assert "artifact expected=analysis-report.md" in system_prompt

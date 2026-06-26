@@ -52,6 +52,17 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "TaskIntent" in config["instructions"]
     assert "discover -> act -> verify" in config["instructions"]
     assert "choose capabilities before app-specific rules" in config["instructions"]
+    assert "Daily entrypoint operating manual" in config["instructions"]
+    assert "intent to capabilities before choosing concrete tools" in config["instructions"]
+    assert "not as fixed branches that must be prewritten" in config["instructions"]
+    assert "Do not answer with recipes like 'you can open the app yourself'" in config["instructions"]
+    assert "discover available applications/windows/UI first" in config["instructions"]
+    assert "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports" in config[
+        "instructions"
+    ]
+    assert "select the relevant capability path rather than desktop app launch as the default" in config[
+        "instructions"
+    ]
     assert "media.apple_music_play" in config["instructions"]
     assert "media.apple_music_open_and_play" in config["instructions"]
     assert "media.apple_music_control" in config["instructions"]
