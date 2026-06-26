@@ -118,6 +118,40 @@ def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> 
     assert selection.event_payload["selected_tools"] == ["media.apple_music_play"]
 
 
+def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
+    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("legacy clipboard planner should not run for planner-owned clipboard")
+
+    write_selection = planner_first_direct_tool_selection(
+        "copy hello world to clipboard",
+        ["clipboard.write"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+    read_selection = planner_first_direct_tool_selection(
+        "read selected text",
+        ["desktop.safe_shortcut", "clipboard.read"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+
+    assert write_selection.selected_source == "runtime_planner"
+    assert write_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": "hello world"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_clipboard",
+        },
+    ]
+    assert write_selection.event_payload["legacy_request_count"] == 0
+    assert read_selection.selected_source == "runtime_planner"
+    assert read_selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in read_selection.requests] == [
+        "desktop.safe_shortcut",
+        "clipboard.read",
+    ]
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
