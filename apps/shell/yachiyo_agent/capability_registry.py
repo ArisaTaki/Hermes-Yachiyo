@@ -190,6 +190,17 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         output_kinds=("schedule_item",),
     ),
     CapabilityDefinition(
+        capability_id="clipboard.read_write",
+        title="Read And Write Clipboard",
+        category="clipboard",
+        description="Read explicitly requested clipboard contents, write explicit text, or copy the current selection.",
+        tools=("clipboard.read", "clipboard.write", "desktop.safe_shortcut"),
+        risk_level="low",
+        discovery_actions=("read_clipboard",),
+        execution_actions=("write_clipboard", "copy_selection"),
+        output_kinds=("text", "clipboard_state"),
+    ),
+    CapabilityDefinition(
         capability_id="media.playback",
         title="Control Media Playback",
         category="media",
@@ -259,6 +270,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "browser.research": ("browser.",),
     "media.playback": ("media.",),
     "communication.compose": ("communication.", "mail.", "messages.", "email."),
+    "clipboard.read_write": ("clipboard.",),
     "terminal.execution": ("terminal.",),
     "workflow.orchestration": ("workflow.",),
     "group.multi_agent": ("group.",),
@@ -268,6 +280,7 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "data.analysis": ("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
     "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
+    "clipboard.read_write": ("clipboard.read", "clipboard.write", "desktop.safe_shortcut"),
 }
 
 

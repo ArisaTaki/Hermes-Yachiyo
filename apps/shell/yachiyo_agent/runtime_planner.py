@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .capability_registry import capability_snapshots
+from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
     PlannerDecisionSnapshot,
     RuntimePlanSnapshot,
@@ -58,6 +59,7 @@ class TaskIntentRouter:
             self._workflow_intent(text, metadata),
             self._multi_agent_intent(text, metadata),
             self._communication_intent(text, metadata),
+            self._clipboard_intent(text, metadata),
             self._schedule_intent(text, metadata),
         ]
         return sorted(
@@ -353,6 +355,24 @@ class TaskIntentRouter:
             risk_level="medium",
         )
 
+    def _clipboard_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        hint = clipboard_operation_hint(text)
+        if not hint:
+            return _empty_intent("clipboard_operation", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "clipboard_operation", text),
+            kind="clipboard_operation",
+            title="Clipboard Operation",
+            user_goal=text,
+            confidence=0.76,
+            description="Read explicitly requested clipboard contents, write explicit text, or inspect selected text.",
+            inputs=hint,
+            expected_outputs=["text"] if hint.get("action") in {"read", "copy_selection_read"} else ["clipboard_state"],
+            required_capabilities=["clipboard.read_write"],
+            preferred_capabilities=["desktop.ui_operation"],
+            risk_level="low",
+        )
+
 
 class RuntimePlanner:
     def __init__(self, intent_router: TaskIntentRouter | None = None) -> None:
@@ -440,6 +460,8 @@ class RuntimePlanner:
             return self._schedule_steps(intent, allowed)
         if intent.kind == "communication":
             return self._communication_steps(intent, allowed)
+        if intent.kind == "clipboard_operation":
+            return self._clipboard_steps(intent, allowed)
         if intent.kind == "workflow_orchestration":
             return [_service_step(intent, "workflow.orchestration", "Select or start workflow")]
         if intent.kind == "multi_agent":
@@ -738,6 +760,57 @@ class RuntimePlanner:
                 depends_on=depends_on,
                 reason="Prepare the user-requested communication through observable tools; final sending remains approval-gated.",
             ),
+        ]
+
+    def _clipboard_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        action = str(intent.inputs.get("action") or "").strip()
+        tool_name, input_preview = clipboard_tool_preview(intent.inputs, allowed)
+        if action == "copy_selection_read":
+            return [
+                _step(
+                    intent,
+                    "copy-selected-text",
+                    "Copy selected text",
+                    "clipboard.read_write",
+                    _first_allowed(("desktop.safe_shortcut",), allowed),
+                    input_preview={"action": "copy"},
+                    reason="Use the standard copy shortcut only for an explicit selected-text read request.",
+                ),
+                _step(
+                    intent,
+                    "read-clipboard",
+                    "Read clipboard",
+                    "clipboard.read_write",
+                    tool_name,
+                    depends_on=["copy-selected-text"],
+                    reason="Read the clipboard after copying the selected text.",
+                ),
+            ]
+        if action == "write":
+            return [
+                _step(
+                    intent,
+                    "write-clipboard",
+                    "Write clipboard",
+                    "clipboard.read_write",
+                    tool_name,
+                    input_preview=input_preview,
+                    reason="Write only explicit user-provided text to the clipboard.",
+                )
+            ]
+        return [
+            _step(
+                intent,
+                "read-clipboard",
+                "Read clipboard",
+                "clipboard.read_write",
+                tool_name,
+                reason="Read the clipboard only because the user explicitly requested it.",
+            )
         ]
 
 

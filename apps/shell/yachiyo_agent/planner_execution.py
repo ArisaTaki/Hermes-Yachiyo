@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .clipboard_plan_hints import clipboard_tool_preview
 from .desktop_plan_hints import (
     app_control_mode,
     app_control_tool_candidates,
@@ -39,6 +40,8 @@ def planner_tool_requests(
         return _web_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "schedule":
         return _schedule_tool_requests(decision.selected_intent.user_goal, allowed)
+    if decision.selected_intent.kind == "clipboard_operation":
+        return _clipboard_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
 
@@ -226,6 +229,37 @@ def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, An
             tool_name,
             payload,
             planning_reason="planner_fallback_schedule",
+        )
+    ]
+
+
+def _clipboard_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    action = str(inputs.get("action") or "").strip()
+    if action == "copy_selection_read":
+        if "desktop.safe_shortcut" not in allowed or "clipboard.read" not in allowed:
+            return []
+        return [
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "copy"},
+                planning_reason="planner_fallback_clipboard",
+            ),
+            _request(
+                "clipboard.read",
+                {},
+                planning_reason="planner_fallback_clipboard",
+            ),
+        ]
+    tool_name, payload = clipboard_tool_preview(inputs, allowed)
+    if not tool_name:
+        return []
+    if tool_name == "clipboard.write" and not payload.get("text"):
+        return []
+    return [
+        _request(
+            tool_name,
+            payload,
+            planning_reason="planner_fallback_clipboard",
         )
     ]
 

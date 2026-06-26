@@ -233,6 +233,49 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     assert draft_step.approval_required is True
 
 
+def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "把 hello 复制到剪贴板",
+        allowed_tools=["clipboard.write"],
+    )
+
+    assert decision.selected_intent.kind == "clipboard_operation"
+    assert decision.selected_intent.inputs == {"action": "write", "text": "hello"}
+    assert decision.plan.tool_plan.missing_capabilities == []
+    step = _step_by_id(decision, "write-clipboard")
+    assert step.capability_id == "clipboard.read_write"
+    assert step.tool_name == "clipboard.write"
+    assert step.input_preview == {"text": "hello"}
+
+
+def test_runtime_planner_routes_clipboard_read_to_clipboard_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "读取剪贴板内容",
+        allowed_tools=["clipboard.read"],
+    )
+
+    assert decision.selected_intent.kind == "clipboard_operation"
+    step = _step_by_id(decision, "read-clipboard")
+    assert step.tool_name == "clipboard.read"
+    clipboard_capability = _capability_by_id(decision, "clipboard.read_write")
+    assert "clipboard.read" in clipboard_capability.available_tools
+
+
+def test_runtime_planner_routes_selected_text_read_through_clipboard() -> None:
+    decision = RuntimePlanner().decision(
+        "读一下选中的内容",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read"],
+    )
+
+    assert decision.selected_intent.kind == "clipboard_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-text",
+        "read-clipboard",
+    ]
+    assert _step_by_id(decision, "copy-selected-text").input_preview == {"action": "copy"}
+    assert _step_by_id(decision, "read-clipboard").depends_on == ["copy-selected-text"]
+
+
 def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> None:
     snapshots = capability_snapshots(
         allowed_tools=["browser.print_page"],
@@ -444,6 +487,47 @@ def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",
         }
+    ]
+
+
+def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
+    requests = planner_tool_requests(
+        "把 hello 复制到剪贴板",
+        allowed_tools=["clipboard.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_clipboard",
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_selected_text_read_plan() -> None:
+    requests = planner_tool_requests(
+        "读一下选中的内容",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_clipboard",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_clipboard",
+        },
     ]
 
 
