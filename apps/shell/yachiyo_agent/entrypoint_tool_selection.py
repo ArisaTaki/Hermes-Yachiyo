@@ -231,7 +231,19 @@ def _runtime_planner_desktop_discovery_owns_selection(requests: list[dict[str, A
     if reasons != {"planner_fallback_desktop_operation"}:
         return False
     tools = _request_tool_set(requests)
-    return tools == {"desktop.ui_elements"}
+    return bool(tools) and tools <= _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS
+
+
+_RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(
+    {
+        "desktop.active_window",
+        "desktop.list_apps",
+        "desktop.permissions",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "screen.capture",
+    }
+)
 
 
 def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str, Any]]) -> bool:

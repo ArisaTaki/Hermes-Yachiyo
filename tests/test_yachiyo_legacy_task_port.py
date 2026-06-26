@@ -362,6 +362,100 @@ def test_planner_first_direct_selection_owns_file_access_without_legacy() -> Non
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed = [
+        "desktop.permissions",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.list_apps",
+        "screen.capture",
+    ]
+
+    permission_selection = planner_first_direct_tool_selection(
+        "需要什么权限",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    active_window_selection = planner_first_direct_tool_selection(
+        "当前窗口是什么",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    running_apps_selection = planner_first_direct_tool_selection(
+        "当前有哪些 App 在运行",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    list_apps_selection = planner_first_direct_tool_selection(
+        "show installed apps",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    capture_selection = planner_first_direct_tool_selection(
+        "截取当前屏幕",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert permission_selection.selected_source == "runtime_planner"
+    assert permission_selection.event_payload["legacy_request_count"] == 0
+    assert permission_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.permissions",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert active_window_selection.selected_source == "runtime_planner"
+    assert active_window_selection.event_payload["legacy_request_count"] == 0
+    assert active_window_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert running_apps_selection.selected_source == "runtime_planner"
+    assert running_apps_selection.event_payload["legacy_request_count"] == 0
+    assert running_apps_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert list_apps_selection.selected_source == "runtime_planner"
+    assert list_apps_selection.event_payload["legacy_request_count"] == 0
+    assert list_apps_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert capture_selection.selected_source == "runtime_planner"
+    assert capture_selection.event_payload["legacy_request_count"] == 0
+    assert capture_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
