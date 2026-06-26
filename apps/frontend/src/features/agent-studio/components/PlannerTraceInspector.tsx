@@ -296,12 +296,18 @@ function PlannerTraceStepRow({
   index: number;
   step: ToolPlanStepSnapshot;
 }) {
+  const dependsOn = uniqueStrings(step.depends_on || []);
+  const fallbackTools = uniqueStrings(step.fallback_tools || []);
+  const inputPreview = plannerStepInputPreview(step.input_preview);
   return (
     <div
       className="studio-planner-step"
       data-action={step.action || ''}
       data-approval-required={String(Boolean(step.approval_required))}
       data-capability-id={step.capability_id}
+      data-depends-on={dependsOn.join(',')}
+      data-fallback-tools={fallbackTools.join(',')}
+      data-input-preview={inputPreview}
       data-planner-step-id={step.step_id}
       data-risk-level={step.risk_level || ''}
       data-step-status={step.status || 'planned'}
@@ -313,11 +319,24 @@ function PlannerTraceStepRow({
         {step.action ? <span>action: {step.action}</span> : null}
         {step.capability_id ? <span>capability: {step.capability_id}</span> : null}
         {step.tool_name ? <span>tool: {step.tool_name}</span> : null}
+        {inputPreview ? <span>input: {inputPreview}</span> : null}
+        {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
+        {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
         {step.reason ? <span>{step.reason}</span> : null}
       </div>
       <small>{step.status || 'planned'}{step.approval_required ? ' / approval' : ''}</small>
     </div>
   );
+}
+
+function plannerStepInputPreview(value: unknown): string {
+  const record = objectRecord(value);
+  if (!Object.keys(record).length) return '';
+  try {
+    return JSON.stringify(record);
+  } catch {
+    return '';
+  }
 }
 
 function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {

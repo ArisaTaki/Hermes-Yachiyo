@@ -1200,6 +1200,10 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             'data-testid="agent-run-detail-planner-selection"',
             'data-testid="agent-run-detail-planner-capabilities"',
             'data-testid="agent-run-detail-planner-step"',
+            "data-input-preview={inputPreview}",
+            "data-depends-on={dependsOn.join(',')}",
+            "data-fallback-tools={fallbackTools.join(',')}",
+            "depends on: {dependsOn.join(', ')}",
         ],
     )
     _assert_smoke_script(
