@@ -101,6 +101,27 @@ def submit_action_hint(text: str) -> str:
     return ""
 
 
+def hotkey_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    if not contains_any(
+        value.lower(),
+        ["按", "敲", "快捷键", "press", "hit", "tap", "hotkey", "shortcut"],
+    ):
+        return None
+    patterns = (
+        r"(?:按|敲|发送快捷键|快捷键)\s*(?:一下|下)?\s*(?P<combo>[^。！？!?，,]+)",
+        r"(?:press|hit|tap)\s+(?:the\s+)?(?:hotkey\s+|shortcut\s+)?(?P<combo>[^.!?,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        parsed = _parse_hotkey_combo(match.group("combo"))
+        if parsed:
+            return parsed
+    return None
+
+
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
     return {
@@ -258,6 +279,56 @@ def role_filter(value: str) -> str:
     if contains_any(lowered, ["输入框", "文本框", "输入栏", "field", "input", "text"]):
         return "text"
     return ""
+
+
+def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
+    combo = clean(value)
+    combo = re.sub(r"\s*(?:吗|嘛|呢|please)$", "", combo, flags=re.IGNORECASE).strip()
+    if re.search(r"(?:to\s+send|发送|提交|确认)", combo, flags=re.IGNORECASE):
+        return None
+    combo = re.sub(r"\bkey\b|键", " ", combo, flags=re.IGNORECASE)
+    combo = combo.replace("+", " ").replace("-", " ")
+    tokens = [token for token in re.split(r"\s+", combo.strip()) if token]
+    if not tokens:
+        return None
+    modifiers: list[str] = []
+    key = ""
+    for token in tokens:
+        normalized = _normalize_hotkey_token(token)
+        if not normalized:
+            continue
+        if normalized in {"command", "control", "option", "shift"}:
+            if normalized not in modifiers:
+                modifiers.append(normalized)
+            continue
+        key = normalized
+    if not key:
+        return None
+    return {"key": key, "modifiers": modifiers}
+
+
+def _normalize_hotkey_token(value: str) -> str:
+    token = clean(value).lower().strip(" .，,。?？!！")
+    aliases = {
+        "cmd": "command",
+        "command": "command",
+        "⌘": "command",
+        "ctrl": "control",
+        "control": "control",
+        "option": "option",
+        "opt": "option",
+        "alt": "option",
+        "shift": "shift",
+        "return": "return",
+        "enter": "return",
+        "回车": "return",
+        "esc": "escape",
+        "escape": "escape",
+        "tab": "tab",
+        "space": "space",
+        "空格": "space",
+    }
+    return aliases.get(token, token if re.fullmatch(r"[a-z0-9]", token) else "")
 
 
 def clean(value: str) -> str:

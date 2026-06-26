@@ -387,6 +387,62 @@ def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightwei
         store.close()
 
 
+def test_chat_bridge_quick_message_uses_runtime_planner_when_legacy_candidates_miss(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = None
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-runtime-planner",
+            "task_id": "task-runtime-planner",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    monkeypatch.setattr(
+        chat_bridge_mod,
+        "_runtime_planner_candidates_for_quick_message",
+        lambda _text, **_kwargs: [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.screen_saver_start",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_system_control",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        chat_bridge_mod,
+        "_daily_desktop_candidates_for_quick_message",
+        lambda _text, **_kwargs: [],
+    )
+    try:
+        result = bridge.send_quick_message(
+            "打开屏保",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["agent_task"]["task_id"] == "task-runtime-planner"
+        event = result["agent_task"]["recent_events"][0]
+        assert event["event_type"] == "agent.desktop.intent_planned"
+        assert event["payload"]["tool"] == "system.screen_saver_start"
+        assert event["payload"]["source"] == "runtime_planner"
+        assert event["payload"]["planning_reason"] == "planner_fallback_system_control"
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
@@ -688,9 +744,26 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
             },
         }
 
+    windows_calls: list[str] = []
+
+    def fake_windows(app_name: str = "") -> dict:
+        windows_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "desktop.windows",
+            "summary": "Read open windows",
+            "data": {
+                "app_name": app_name,
+                "windows": [
+                    {"app_name": app_name or "WeChat", "title": "general"},
+                ],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -730,7 +803,7 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
     )
 
     assert second["ok"] is True
-    assert windows_calls == ["Slack", "WeChat"]
+    assert windows_calls == ["WeChat"]
     assert second_task["status"] == "completed"
     assert second_task["needs_user_action"] is False
     assert second_task["pending_approvals"] == []
@@ -3712,7 +3785,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         assert waiting_task["pending_approvals"][0]["input_preview"] == {
             "app_name": "Slack",
             "target": "搜索",
-            "role_filter": "",
+            "role_filter": "button",
             "limit": 80,
             "click_count": 1,
         }
@@ -3728,7 +3801,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
 
         assert open_calls == ["Slack"]
         assert focus_calls == ["Slack"]
-        assert click_calls == [("搜索", "", 80, 1)]
+        assert click_calls == [("搜索", "button", 80, 1)]
         assert approved.status == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_approval_required" in event_types

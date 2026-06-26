@@ -551,6 +551,40 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
     ]
 
 
+def test_planner_tool_requests_maps_explicit_hotkey_plan() -> None:
+    requests = planner_tool_requests(
+        "Can you press Command L?",
+        allowed_tools=["desktop.hotkey", "desktop.click_ui_element"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_hotkey",
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_app_hotkey_plan() -> None:
+    requests = planner_tool_requests(
+        "open Chrome and press command l",
+        allowed_tools=["app.open_and_hotkey", "app.open_and_click_ui_element"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_hotkey",
+            "input": {"app_name": "Chrome", "key": "l", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_hotkey",
+        }
+    ]
+
+
 def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
     requests = planner_desktop_tool_requests(
         "打开 https://example.com",

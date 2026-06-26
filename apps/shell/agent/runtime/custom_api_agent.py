@@ -12,7 +12,14 @@ from apps.shell.agent.runtime.desktop_intents import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_DOCTRINE
+
+_SAFE_SHORTCUT_HOTKEY_TOOLS = {
+    "desktop.safe_shortcut": "desktop.hotkey",
+    "app.open_and_safe_shortcut": "app.open_and_hotkey",
+    "app.focus_and_safe_shortcut": "app.focus_and_hotkey",
+}
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
@@ -285,26 +292,25 @@ class RuntimeCustomApiAgentLoop:
                 direct_tool_request,
                 allowed_tools,
             )
-            planned_tool_requests = (
-                [direct_planned_tool_request]
-                if direct_planned_tool_request
-                else self._runtime_planner_tool_requests(
-                    planning_context,
-                    allowed_tools,
-                )
-            )
-            if planned_tool_requests and not direct_planned_tool_request:
-                daily_planned_tool_requests = daily_desktop_intent_tool_requests(
-                    planning_context,
-                    allowed_tools,
-                )
-                if len(daily_planned_tool_requests) > len(planned_tool_requests):
-                    planned_tool_requests = daily_planned_tool_requests
-            if not planned_tool_requests and not direct_planned_tool_request:
+            if direct_planned_tool_request:
+                planned_tool_requests = [direct_planned_tool_request]
+            else:
                 planned_tool_requests = daily_desktop_intent_tool_requests(
                     planning_context,
                     allowed_tools,
                 )
+                approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
+                    planning_context,
+                    planned_tool_requests,
+                    allowed_tools,
+                )
+                if approval_hotkey_request:
+                    planned_tool_requests = [approval_hotkey_request]
+                if not planned_tool_requests:
+                    planned_tool_requests = self._runtime_planner_tool_requests(
+                        planning_context,
+                        allowed_tools,
+                    )
             if planned_tool_requests:
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
@@ -523,6 +529,38 @@ class RuntimeCustomApiAgentLoop:
             **tool_request,
             "tool": tool_name,
             "input": dict(payload),
+        }
+
+    @staticmethod
+    def _approval_hotkey_request_for_safe_shortcut(
+        planning_context: str,
+        tool_requests: list[dict[str, Any]],
+        allowed_tools: list[str],
+    ) -> dict[str, Any] | None:
+        if len(tool_requests) != 1 or not isinstance(tool_requests[0], dict):
+            return None
+        safe_request = tool_requests[0]
+        safe_tool = str(safe_request.get("tool") or "").strip()
+        hotkey_tool = _SAFE_SHORTCUT_HOTKEY_TOOLS.get(safe_tool, "")
+        allowed = {str(tool or "").strip() for tool in allowed_tools}
+        if not hotkey_tool or hotkey_tool not in allowed:
+            return None
+        hotkey = hotkey_hint(planning_context)
+        if not hotkey:
+            return None
+        safe_input = safe_request.get("input") if isinstance(safe_request.get("input"), dict) else {}
+        if str(safe_input.get("action") or "").strip() != "focus_address_bar":
+            return None
+        payload = dict(hotkey)
+        app_name = str(safe_input.get("app_name") or "").strip()
+        if app_name:
+            payload = {"app_name": app_name, **payload}
+        return {
+            "protocol": "json_fallback",
+            "tool": hotkey_tool,
+            "input": payload,
+            "source": "daily_desktop_intent",
+            "planning_reason": "explicit_hotkey_requires_approval",
         }
 
     @staticmethod

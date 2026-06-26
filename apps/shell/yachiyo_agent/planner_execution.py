@@ -11,6 +11,7 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    hotkey_hint,
     media_tool_preview,
     safe_type_text_hint,
     submit_action_hint,
@@ -51,9 +52,29 @@ def planner_tool_requests(
     app_name = str(decision.selected_intent.inputs.get("app_name_hint") or "").strip()
     mode = app_control_mode(prompt)
     click_target = click_target_hint(prompt)
+    hotkey = hotkey_hint(prompt)
     type_target = type_into_ui_hint(prompt, app_name=app_name)
     safe_type_text = "" if type_target else safe_type_text_hint(prompt)
     submit_action = submit_action_hint(prompt)
+
+    app_hotkey_tool = _app_tool(mode, "hotkey", allowed)
+    if app_name and hotkey and app_hotkey_tool:
+        return [
+            _request(
+                app_hotkey_tool,
+                {"app_name": app_name, **hotkey},
+                planning_reason="planner_fallback_desktop_hotkey",
+            )
+        ]
+
+    if hotkey and "desktop.hotkey" in allowed:
+        return [
+            _request(
+                "desktop.hotkey",
+                hotkey,
+                planning_reason="planner_fallback_desktop_hotkey",
+            )
+        ]
 
     app_type_tool = _app_tool(mode, "type_into_ui_element", allowed)
     if app_name and type_target and app_type_tool:

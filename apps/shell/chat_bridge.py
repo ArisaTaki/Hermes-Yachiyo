@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_allowed_tools,
     daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
 )
@@ -226,6 +227,24 @@ def _daily_desktop_candidates_for_quick_message(
     )
 
 
+def _runtime_planner_candidates_for_quick_message(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+
+        return planner_tool_requests(
+            text,
+            daily_desktop_allowed_tools(),
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("Launcher runtime planner quick-message candidates unavailable", exc_info=True)
+    return []
+
+
 def agent_task_snapshot_for_task(
     runtime: "AppRuntime",
     task_id: str,
@@ -357,6 +376,11 @@ class ChatBridge:
             text,
             metadata=metadata,
         )
+        if not desktop_candidates:
+            desktop_candidates = _runtime_planner_candidates_for_quick_message(
+                text,
+                metadata=metadata,
+            )
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,
