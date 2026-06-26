@@ -10769,6 +10769,21 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "runtime_planner",
         "runtime_planner",
     ]
+    selection_events = [
+        event for event in timeline if event["event"] == "agent.plan.selection"
+    ]
+    assert selection_events[0]["selection_source"] == "runtime_planner"
+    assert selection_events[0]["selected_tools"] == ["app.open", "desktop.click_ui_element"]
+    appended_selection_events = [
+        payload
+        for _run_id, event_type, payload in appended_events
+        if event_type == "agent.plan.selection"
+    ]
+    assert appended_selection_events[0]["selection_source"] == "runtime_planner"
+    assert appended_selection_events[0]["selected_tools"] == [
+        "app.open",
+        "desktop.click_ui_element",
+    ]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "desktop.safe_shortcut"
     assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]

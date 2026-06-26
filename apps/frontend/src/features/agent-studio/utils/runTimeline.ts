@@ -38,6 +38,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
+  if (name === 'agent.plan.selection') return detail ? `Planner 选择 · ${detail}` : 'Planner 选择';
   if (name === 'agent.desktop.intent_planned') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
@@ -160,6 +161,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     return decision === 'deny' || decision === 'denied' || decision === 'blocked' ? 'danger' : 'tool';
   }
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
+  if (name === 'agent.plan.selection') return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';
   return 'neutral';

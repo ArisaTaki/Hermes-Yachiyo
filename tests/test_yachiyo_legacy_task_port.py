@@ -120,6 +120,36 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
         "agent.plan.created",
     ]
     assert planner_events[0][1]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
+    selection_events = [
+        event for event in planner_events if event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["app.open"]
+
+
+def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-settings",
+        conversation_id="chat-1",
+        prompt="打开蓝牙",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_tool"] == "system.settings_open"
+    run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    selection_events = [
+        event for event in run_events if event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
+    assert selection_events[0][1]["payload"]["selection_reason"] == "legacy_more_specific_direct_plan"
+    assert selection_events[0][1]["payload"]["planner_tools"] == ["app.open"]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["system.settings_open"]
 
 
 def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> None:

@@ -16,7 +16,7 @@ from .daily_desktop import (
     daily_desktop_user_metadata,
     main_chat_entrypoint_allowed_tools,
 )
-from .entrypoint_tool_selection import planner_first_direct_decision_and_tool_requests
+from .entrypoint_tool_selection import planner_first_direct_tool_selection
 from .legacy_event_pages import (
     is_replay_enrichment_event as _is_replay_enrichment_event,
     run_event_page_from_legacy_stream as _run_event_page_from_legacy_stream,
@@ -229,8 +229,9 @@ class LegacyChatTaskStarter:
             allowed_tools=allowed_daily_desktop_tools,
         )
         planner_decision, selected_requests = (None, [])
+        direct_tool_selection_payload: dict[str, Any] = {}
         if not direct_tool_request:
-            planner_decision, selected_requests = planner_first_direct_decision_and_tool_requests(
+            selection = planner_first_direct_tool_selection(
                 prompt or execution_prompt,
                 allowed_entrypoint_tools,
                 metadata=metadata,
@@ -240,6 +241,9 @@ class LegacyChatTaskStarter:
                     allowed_tools=tools,
                 ),
             )
+            planner_decision = selection.decision
+            selected_requests = selection.requests
+            direct_tool_selection_payload = selection.event_payload
         if not task_id:
             return None
         if not direct_tool_request and not selected_requests:
@@ -266,6 +270,7 @@ class LegacyChatTaskStarter:
             if not run_id:
                 return None
             self._append_planner_run_events(run_id, planner_decision)
+            self._append_direct_tool_selection_run_event(run_id, direct_tool_selection_payload)
             append_run_event = getattr(self._runtime, "append_run_event", None)
             retry_context_payload = recovery_retry_context_payload(metadata)
             if retry_context_payload and callable(append_run_event):
@@ -369,6 +374,19 @@ class LegacyChatTaskStarter:
                 append_run_event(run_id, event_type, payload)
             except Exception:
                 continue
+
+    def _append_direct_tool_selection_run_event(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not run_id or not payload or not callable(append_run_event):
+            return
+        try:
+            append_run_event(run_id, "agent.plan.selection", dict(payload))
+        except Exception:
+            return
 
     def _sync_app_task_running(self, task_id: str) -> None:
         self._sync_app_task_status(task_id, "running", progress_label="正在执行桌面操作")

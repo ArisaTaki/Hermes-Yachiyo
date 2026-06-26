@@ -16,9 +16,18 @@ type PlannerTrace = {
   plan: RuntimePlanSnapshot | null;
   planId: string;
   routeToStudio?: boolean;
+  selection: PlannerSelection | null;
   source: string;
   steps: ToolPlanStepSnapshot[];
   toolPlan: ToolPlanSnapshot | null;
+};
+
+type PlannerSelection = {
+  legacyTools: string[];
+  plannerTools: string[];
+  reason: string;
+  selectedSource: string;
+  selectedTools: string[];
 };
 
 type PlannerTraceInspectorProps = {
@@ -107,6 +116,35 @@ export function PlannerTraceInspector({
             </div>
             <small>{intent.risk_level || 'risk unknown'}</small>
           </div>
+        ) : null}
+
+        {trace.selection ? (
+          <section data-testid="agent-run-detail-planner-selection">
+            <div className="studio-tool-inspector-heading">
+              <h3>Direct Selection</h3>
+              <span>{trace.selection.selectedSource || 'unknown'}</span>
+            </div>
+            <div className="studio-tool-pill-row">
+              <span className="studio-tool-permission" data-selection-reason={trace.selection.reason}>
+                reason · {trace.selection.reason || 'not recorded'}
+              </span>
+              {trace.selection.selectedTools.map((tool) => (
+                <span className="studio-tool-permission" data-selection-tool={tool} key={`selected:${tool}`}>
+                  selected · {tool}
+                </span>
+              ))}
+              {trace.selection.plannerTools.map((tool) => (
+                <span className="studio-tool-permission" data-planner-tool={tool} key={`planner:${tool}`}>
+                  planner · {tool}
+                </span>
+              ))}
+              {trace.selection.legacyTools.map((tool) => (
+                <span className="studio-tool-permission" data-legacy-tool={tool} key={`legacy:${tool}`}>
+                  legacy · {tool}
+                </span>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         {visibleCapabilityIds.length || missingCapabilities.length ? (
@@ -263,6 +301,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let decisionId = '';
   let planId = '';
   let routeToStudio: boolean | undefined;
+  let selection: PlannerSelection | null = null;
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
   const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
@@ -298,6 +337,12 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
+    if (eventType === 'agent.plan.selection') {
+      selection = plannerSelectionFromPayload(payload) || selection;
+      routeToStudio = booleanValue(payload.route_to_studio, routeToStudio);
+      continue;
+    }
+
     if (eventType === 'agent.plan.created') {
       plan = runtimePlanSnapshot(payload.plan) || plan;
       if (plan) {
@@ -327,7 +372,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   const steps = stepById.size ? Array.from(stepById.values()) : fallbackSteps;
   const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
 
-  if (!effectiveIntent && !plan && !steps.length) return null;
+  if (!effectiveIntent && !plan && !steps.length && !selection) return null;
   return {
     candidateIntents,
     decisionId,
@@ -336,6 +381,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     plan,
     planId: effectivePlanId,
     routeToStudio,
+    selection,
     source,
     steps,
     toolPlan: effectiveToolPlan,
@@ -452,6 +498,22 @@ function toolPlanStepSnapshot(value: unknown): ToolPlanStepSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.step_id) && !stringValue(record.title) && !stringValue(record.capability_id)) return null;
   return record as ToolPlanStepSnapshot;
+}
+
+function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerSelection | null {
+  const selectedSource = stringValue(payload.selection_source);
+  const reason = stringValue(payload.selection_reason);
+  const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
+  const plannerTools = uniqueStrings(Array.isArray(payload.planner_tools) ? payload.planner_tools : []);
+  const legacyTools = uniqueStrings(Array.isArray(payload.legacy_tools) ? payload.legacy_tools : []);
+  if (!selectedSource && !reason && !selectedTools.length && !plannerTools.length && !legacyTools.length) return null;
+  return {
+    legacyTools,
+    plannerTools,
+    reason,
+    selectedSource,
+    selectedTools,
+  };
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {

@@ -14,7 +14,8 @@ from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
-    planner_first_direct_decision_and_tool_requests,
+    DirectToolSelection,
+    planner_first_direct_tool_selection,
 )
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
@@ -316,15 +317,21 @@ class RuntimeCustomApiAgentLoop:
                 allowed_tools,
             )
             runtime_planner_decision = None
+            direct_tool_selection_payload: dict[str, Any] = {}
             if direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
             else:
-                runtime_planner_decision, planned_tool_requests = self._runtime_planner_tool_requests(
+                (
+                    runtime_planner_decision,
+                    planned_tool_requests,
+                    direct_tool_selection_payload,
+                ) = self._runtime_planner_tool_requests(
                     planning_context,
                     allowed_tools,
                 )
                 if not planned_tool_requests:
                     runtime_planner_decision = None
+                    direct_tool_selection_payload = {}
                     planned_tool_requests = daily_desktop_intent_tool_requests(
                         planning_context,
                         allowed_tools,
@@ -343,6 +350,11 @@ class RuntimeCustomApiAgentLoop:
                         timeline=timeline,
                         run_id=run_id,
                     )
+                self._record_direct_tool_selection_event(
+                    direct_tool_selection_payload,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
                     planned_input = planned_tool_request.get("input") or {}
@@ -598,9 +610,9 @@ class RuntimeCustomApiAgentLoop:
         self,
         planning_context: str,
         allowed_tools: list[str],
-    ) -> tuple[Any | None, list[dict[str, Any]]]:
+    ) -> tuple[Any | None, list[dict[str, Any]], dict[str, Any]]:
         try:
-            return planner_first_direct_decision_and_tool_requests(
+            selection: DirectToolSelection = planner_first_direct_tool_selection(
                 planning_context,
                 allowed_tools,
                 legacy_tool_requests=daily_desktop_intent_tool_requests,
@@ -614,8 +626,9 @@ class RuntimeCustomApiAgentLoop:
                     for request in requests
                 ],
             )
+            return selection.decision, selection.requests, selection.event_payload
         except Exception:
-            return None, []
+            return None, [], {}
 
     def _record_runtime_planner_events(
         self,
@@ -652,6 +665,31 @@ class RuntimeCustomApiAgentLoop:
         if run_id and self._append_run_event is not None:
             for event_type, payload in planner_run_event_payloads(decision):
                 self._append_run_event(run_id, event_type, payload)
+
+    def _record_direct_tool_selection_event(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        if not payload:
+            return
+        event_payload = dict(payload)
+        detail = str(
+            event_payload.get("selection_source")
+            or event_payload.get("selection_reason")
+            or "direct_tool_selection"
+        )
+        timeline.append(
+            self._timeline(
+                "agent.plan.selection",
+                detail,
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.plan.selection", event_payload)
 
     def _record_unavailable_desktop_intent(
         self,
