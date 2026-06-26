@@ -43,6 +43,35 @@ def _runtime_with_chat_store(store: ChatStore) -> SimpleNamespace:
     )
 
 
+def _agent_task_event(
+    agent_task: dict[str, Any],
+    event_type: str,
+    *,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    for event in agent_task.get("recent_events") or []:
+        if event.get("event_type") != event_type:
+            continue
+        if detail is not None and event.get("detail") != detail:
+            continue
+        return event
+    raise AssertionError(f"missing agent task event: {event_type}")
+
+
+def _assert_planner_trace_prefix(
+    agent_task: dict[str, Any],
+    *,
+    intent_kind: str,
+) -> None:
+    event_types = [event["event_type"] for event in agent_task["recent_events"]]
+    assert event_types[:3] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert agent_task["recent_events"][0]["payload"]["intent"]["kind"] == intent_kind
+
+
 def _run_launcher_daily_desktop_quick_message(
     tmp_path,
     monkeypatch,
@@ -382,10 +411,18 @@ def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightwei
         assert result["agent_task"]["conversation_id"] == "session-current"
         assert result["agent_task"]["status"] == "queued"
         assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["payload"]["tool"] == "desktop.list_apps"
-        assert result["agent_task"]["recent_events"][0]["payload"]["source"] == "runtime_planner"
-        assert result["agent_task"]["recent_events"][0]["payload"]["input_preview"] == {
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="desktop_operation",
+        )
+        planned_event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="desktop.list_apps",
+        )
+        assert planned_event["payload"]["tool"] == "desktop.list_apps"
+        assert planned_event["payload"]["source"] == "runtime_planner"
+        assert planned_event["payload"]["input_preview"] == {
             "query": "Notes",
             "limit": 20,
         }
@@ -448,8 +485,11 @@ def test_chat_bridge_quick_message_prefers_runtime_planner_before_legacy_candida
 
         assert result["ok"] is True
         assert result["agent_task"]["task_id"] == "task-runtime-planner"
-        event = result["agent_task"]["recent_events"][0]
-        assert event["event_type"] == "agent.desktop.intent_planned"
+        event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="system.screen_saver_start",
+        )
         assert event["payload"]["tool"] == "system.screen_saver_start"
         assert event["payload"]["source"] == "runtime_planner"
         assert event["payload"]["planning_reason"] == "planner_fallback_system_control"
@@ -489,8 +529,15 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
 
         assert result["ok"] is True
         assert result["agent_task"]["task_id"] == "task-data-analysis"
-        event = result["agent_task"]["recent_events"][0]
-        assert event["event_type"] == "agent.desktop.intent_planned"
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="data_analysis",
+        )
+        event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="data.analyze",
+        )
         assert event["payload"]["tool"] == "data.analyze"
         assert event["payload"]["source"] == "runtime_planner"
         assert event["payload"]["planning_reason"] == "planner_builtin_data_analysis"
@@ -9835,9 +9882,16 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
         assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["progress_text"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["open_in_studio_url"] is None
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
-        assert result["agent_task"]["recent_events"][0]["payload"] == {
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="desktop_operation",
+        )
+        planned_event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="desktop.list_apps",
+        )
+        assert planned_event["payload"] == {
             "input_preview": {"query": "GitHub", "limit": 20},
             "planning_reason": "planner_fallback_desktop_operation",
             "source": "runtime_planner",
@@ -9873,9 +9927,16 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
         assert result["agent_task"]["task_id"] == "task-screen"
         assert result["agent_task"]["status"] == "queued"
         assert result["agent_task"]["current_step"] == "准备执行 · 截取屏幕"
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "screen.capture"
-        assert result["agent_task"]["recent_events"][0]["payload"] == {
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="desktop_operation",
+        )
+        planned_event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="screen.capture",
+        )
+        assert planned_event["payload"] == {
             "input_preview": {"reason": "user asked to capture the screen"},
             "planning_reason": "planner_fallback_desktop_operation",
             "source": "runtime_planner",
@@ -9908,9 +9969,16 @@ def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints
         assert result["agent_task"]["task_id"] == "task-app-observe"
         assert result["agent_task"]["status"] == "queued"
         assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
-        assert result["agent_task"]["recent_events"][0]["payload"] == {
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="desktop_operation",
+        )
+        planned_event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="desktop.list_apps",
+        )
+        assert planned_event["payload"] == {
             "input_preview": {"query": "Chrome", "limit": 20},
             "planning_reason": "planner_fallback_desktop_operation",
             "source": "runtime_planner",
@@ -9945,9 +10013,16 @@ def test_chat_bridge_quick_message_plans_app_open_visual_followup_for_lightweigh
         assert result["agent_task"]["task_id"] == "task-app-open-observe"
         assert result["agent_task"]["status"] == "queued"
         assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
-        assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
-        assert result["agent_task"]["recent_events"][0]["payload"] == {
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="desktop_operation",
+        )
+        planned_event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="desktop.list_apps",
+        )
+        assert planned_event["payload"] == {
             "input_preview": {"query": "微信", "limit": 20},
             "planning_reason": "planner_fallback_desktop_operation",
             "source": "runtime_planner",

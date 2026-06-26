@@ -29,6 +29,8 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_planned_timeline,
     main_chat_entrypoint_allowed_tools,
 )
+from apps.shell.yachiyo_agent.planner_execution import planner_decision_and_tool_requests
+from apps.shell.yachiyo_agent.planner_projection import planner_timeline_events
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
 from packages.security import redact_api_error_text
@@ -294,6 +296,8 @@ def planned_agent_task_snapshot_for_quick_message(
     task_id: str,
     session_id: str,
     candidates: list[dict[str, Any]] | None = None,
+    allowed_tools: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     task_id = str(task_id or "").strip()
     if not task_id:
@@ -309,7 +313,15 @@ def planned_agent_task_snapshot_for_quick_message(
     tool_name = str(request.get("tool") or "").strip()
     if not tool_name:
         return None
-    timeline = daily_desktop_planned_timeline(text, requests=candidates)
+    timeline = [
+        *_planner_trace_timeline_for_quick_message(
+            text,
+            candidates,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+        ),
+        *daily_desktop_planned_timeline(text, requests=candidates),
+    ]
     if not timeline:
         return None
     snapshot = agent_task_snapshot_from_payload(
@@ -325,6 +337,44 @@ def planned_agent_task_snapshot_for_quick_message(
     ).model_dump(mode="json")
     snapshot["open_in_studio_url"] = None
     return snapshot
+
+
+def _planner_trace_timeline_for_quick_message(
+    text: str,
+    candidates: list[dict[str, Any]],
+    *,
+    allowed_tools: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if not any(
+        str(candidate.get("source") or "") == "runtime_planner"
+        for candidate in candidates
+    ):
+        return []
+    try:
+        decision, planned_requests = planner_decision_and_tool_requests(
+            text,
+            allowed_tools or daily_desktop_allowed_tools(),
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("Launcher planner trace preview unavailable", exc_info=True)
+        return []
+    if not planned_requests:
+        return []
+    candidate_tools = [
+        str(candidate.get("tool") or "").strip()
+        for candidate in candidates
+        if str(candidate.get("tool") or "").strip()
+    ]
+    planned_tools = [
+        str(candidate.get("tool") or "").strip()
+        for candidate in planned_requests
+        if str(candidate.get("tool") or "").strip()
+    ]
+    if candidate_tools != planned_tools:
+        return []
+    return planner_timeline_events(decision)
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -419,6 +469,8 @@ class ChatBridge:
                 task_id=task_id,
                 session_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
                 candidates=desktop_candidates,
+                allowed_tools=planner_allowed_tools,
+                metadata=metadata,
             )
             if planned_task is None:
                 return result
