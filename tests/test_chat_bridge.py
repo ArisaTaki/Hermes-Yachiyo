@@ -422,6 +422,13 @@ def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightwei
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
         assert selection_event["payload"]["selection_reason"] == "runtime_planner_direct"
         assert selection_event["payload"]["legacy_tools"] == []
+        assert selection_event["payload"]["plan_tools"] == [
+            "desktop.list_apps",
+            "app.open_and_safe_type_text",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ]
+        assert selection_event["payload"]["plan_step_count"] == 4
         assert selection_event["payload"]["selected_tools"] == selection_event["payload"]["planner_tools"]
         assert selection_event["payload"]["selected_request_count"] == len(
             selection_event["payload"]["selected_tools"]
@@ -544,6 +551,14 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
             result["agent_task"],
             intent_kind="data_analysis",
         )
+        selection_event = _agent_task_event(
+            result["agent_task"],
+            "agent.plan.selection",
+        )
+        assert selection_event["payload"]["selection_source"] == "runtime_planner"
+        assert selection_event["payload"]["plan_tools"] == ["data.analyze"]
+        assert selection_event["payload"]["selected_tools"] == ["data.analyze"]
+        assert selection_event["payload"]["plan_step_count"] == 1
         event = _agent_task_event(
             result["agent_task"],
             "agent.desktop.intent_planned",
