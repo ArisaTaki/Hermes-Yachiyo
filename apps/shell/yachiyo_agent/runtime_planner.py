@@ -262,6 +262,15 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
         window_list = window_list_hint(text)
+        foreground_app_windows_shortcut = (
+            str((safe_shortcut or {}).get("action") or "").strip() == "application_windows"
+        )
+        if safe_key:
+            screen_capture = None
+        if foreground_app_windows_shortcut:
+            window_list = None
+            app_management = None
+            screen_capture = None
         app_name_hint = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -273,6 +282,8 @@ class TaskIntentRouter:
         ).strip()
         if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint):
             app_management = None
+            app_name_hint = ""
+        if foreground_app_windows_shortcut:
             app_name_hint = ""
         if desktop_discovery is not None:
             app_name_hint = ""
@@ -962,6 +973,15 @@ class RuntimePlanner:
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         safe_click = safe_click_hint(intent.user_goal)
+        foreground_app_windows_shortcut = (
+            str((safe_shortcut or {}).get("action") or "").strip() == "application_windows"
+        )
+        if safe_key:
+            screen_capture = None
+        if foreground_app_windows_shortcut:
+            window_list = None
+            app_management = None
+            screen_capture = None
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
@@ -987,6 +1007,8 @@ class RuntimePlanner:
         ).strip()
         if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
             app_management = None
+            app_name = ""
+        if foreground_app_windows_shortcut:
             app_name = ""
         if desktop_discovery:
             app_name = ""
@@ -3096,6 +3118,12 @@ def _clean_app_name_hint(value: str) -> str:
 
 
 def _desktop_operation_hint(text: str) -> str:
+    safe_key = safe_key_hint(text)
+    if safe_key:
+        return "safe_key"
+    safe_shortcut = safe_shortcut_hint(text)
+    if str((safe_shortcut or {}).get("action") or "").strip() == "application_windows":
+        return "safe_shortcut"
     if focus_window_hint(text):
         return "focus_window"
     if window_list_hint(text) is not None:
@@ -3107,10 +3135,8 @@ def _desktop_operation_hint(text: str) -> str:
     foreground_management = foreground_management_hint(text)
     if foreground_management:
         return str(foreground_management.get("action") or "")
-    if safe_shortcut_hint(text):
+    if safe_shortcut:
         return "safe_shortcut"
-    if safe_key_hint(text):
-        return "safe_key"
     if safe_scroll_hint(text):
         return "safe_scroll"
     if safe_click_hint(text):

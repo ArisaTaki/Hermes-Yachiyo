@@ -1049,6 +1049,29 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert read_ui.depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_cleans_prefixed_app_ui_inspection() -> None:
+    decision = RuntimePlanner().decision(
+        "打开微信看看有什么按钮",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "微信"
+    assert decision.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "微信",
+    }
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "微信",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "微信"
+    }
+    assert _step_by_id(decision, "read-foreground-ui").depends_on == ["open-or-focus-app"]
+
+
 def test_runtime_planner_routes_screen_capture_to_desktop_discovery() -> None:
     decision = RuntimePlanner().decision(
         "看一下当前屏幕",
@@ -1082,6 +1105,15 @@ def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
     assert [step.step_id for step in decision.plan.tool_plan.steps] == ["capture-screen"]
     assert _step_by_id(decision, "capture-screen").tool_name == "screen.capture"
 
+    english_decision = RuntimePlanner().decision(
+        "look at my screen",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+    assert english_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert [step.step_id for step in english_decision.plan.tool_plan.steps] == [
+        "capture-screen"
+    ]
+
 
 def test_runtime_planner_cleans_current_interface_from_app_capture_hint() -> None:
     decision = RuntimePlanner().decision(
@@ -1099,6 +1131,18 @@ def test_runtime_planner_cleans_current_interface_from_app_capture_hint() -> Non
         "app_name": "Chrome",
     }
     assert _step_by_id(decision, "capture-screen").tool_name == "screen.capture"
+
+    prefix_decision = RuntimePlanner().decision(
+        "Chrome 看看界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+    assert prefix_decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert _step_by_id(prefix_decision, "open-or-focus-app").input_preview == {
+        "app_name": "Chrome"
+    }
+    assert _step_by_id(prefix_decision, "capture-screen").depends_on == [
+        "open-or-focus-app"
+    ]
 
 
 def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
@@ -1355,6 +1399,28 @@ def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
         assert operation.input_preview == {"action": action}
 
 
+def test_runtime_planner_routes_foreground_application_windows_shortcut() -> None:
+    for prompt in ("显示当前应用窗口", "show app windows"):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.active_window",
+                "desktop.safe_shortcut",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": "",
+            "operation_hint": "safe_shortcut",
+            "safe_shortcut_hint": {"action": "application_windows"},
+        }
+        operation = _step_by_id(decision, "operate-foreground-ui")
+        assert operation.tool_name == "desktop.safe_shortcut"
+        assert operation.input_preview == {"action": "application_windows"}
+
+
 def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     decision = RuntimePlanner().decision(
         "打开 Notion 并搜索 周报",
@@ -1512,6 +1578,20 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert key_step.input_preview == {"action": "page_down", "repeat_count": 1}
     assert key_step.risk_level == "low"
     assert key_step.approval_required is False
+
+    show_desktop_decision = RuntimePlanner().decision(
+        "show desktop",
+        allowed_tools=["desktop.active_window", "desktop.safe_key"],
+    )
+    assert show_desktop_decision.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "safe_key",
+        "safe_key_hint": {"action": "show_desktop", "repeat_count": 1},
+    }
+    assert _step_by_id(show_desktop_decision, "operate-foreground-ui").input_preview == {
+        "action": "show_desktop",
+        "repeat_count": 1,
+    }
 
     scroll_step = _step_by_id(scroll_decision, "operate-foreground-ui")
     assert scroll_decision.selected_intent.inputs["operation_hint"] == "safe_scroll"

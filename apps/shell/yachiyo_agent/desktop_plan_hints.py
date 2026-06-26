@@ -867,6 +867,20 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(r"^(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*", "", app)
+    app = re.sub(
+        r"^(?:open|launch|start|focus|activate|switch\s+to)\s+",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
+    app = re.split(
+        r"(?:看看|看一下|看下|查看|读取|识别|有哪些|有什么|有啥|"
+        r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
+        app,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
     app = re.sub(
         r"\s*(?:有哪些|有什么|有啥|有哪个|有哪几个|visible|shown|available|there)?\s*"
         r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作|"
@@ -899,6 +913,9 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "current",
         "active",
         "foreground",
+        "my",
+        "the",
+        "this",
         "应用",
         "应用程序",
         "桌面",
@@ -953,6 +970,7 @@ def _screen_capture_app_name_hint(value: str) -> str:
         r"(?:看一下|看看|看下|查看|读取|观察(?:一下|下)?|识别(?:一下|下)?)\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:界面|画面)",
         r"(?P<app2>[^。！？!?，,]+?)\s*(?:界面|画面).{0,8}(?:截图|截屏|看一下|看看|查看|观察)",
+        r"(?P<app3>[^。！？!?，,]+?)\s*(?:看一下|看看|看下|查看|观察(?:一下|下)?)\s*(?:界面|画面)",
         r"\b(?:look at|inspect|view|show me|show)\s+(?P<app_en>.+?)\s+"
         r"(?:screen|interface|ui)\b",
     )
@@ -1285,6 +1303,14 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "打开当前网页的开发者工具": "open_devtools",
         "opendevtools": "open_devtools",
         "showdevtools": "open_devtools",
+        "显示应用窗口": "application_windows",
+        "显示当前应用窗口": "application_windows",
+        "显示前台应用窗口": "application_windows",
+        "应用窗口": "application_windows",
+        "应用窗口都显示": "application_windows",
+        "showappwindows": "application_windows",
+        "showapplicationwindows": "application_windows",
+        "applicationwindows": "application_windows",
         "聚焦地址栏": "focus_address_bar",
         "打开地址栏": "focus_address_bar",
         "选中地址栏": "focus_address_bar",
