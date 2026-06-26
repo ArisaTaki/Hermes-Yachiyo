@@ -809,6 +809,20 @@ def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapsh
             },
         }
     ]
+    events.append(
+        {
+            "event_type": "agent.plan.created",
+            "detail": f"{intent.title} Tool Plan",
+            "payload": {
+                "plan_id": _stable_id("runtime-plan", intent.kind, intent.user_goal),
+                "tool_plan_id": _stable_id("tool-plan", intent.kind, intent.user_goal),
+                "step_count": len(steps),
+                "approvals_required": [step.step_id for step in steps if step.approval_required],
+                "artifacts_expected": _artifacts_expected(intent, steps),
+                "route_to_studio": _route_to_studio(intent, steps),
+            },
+        }
+    )
     for index, step in enumerate(steps, start=1):
         events.append(
             {

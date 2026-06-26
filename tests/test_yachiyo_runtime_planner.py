@@ -42,6 +42,28 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     assert _step_by_id(decision, "run-analysis").approval_required is True
 
 
+def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    event_types = [event["event_type"] for event in decision.plan.timeline_preview]
+    assert event_types == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+        "agent.plan.step",
+        "agent.plan.step",
+    ]
+    created = decision.plan.timeline_preview[1]
+    assert created["payload"]["plan_id"] == decision.plan.plan_id
+    assert created["payload"]["tool_plan_id"] == decision.plan.tool_plan.plan_id
+    assert created["payload"]["approvals_required"] == ["run-analysis"]
+    assert created["payload"]["artifacts_expected"] == ["analysis-report.md"]
+    assert created["payload"]["route_to_studio"] is True
+
+
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:
     decision = RuntimePlanner().decision(
         "分析 sales.csv 并输出报告",
