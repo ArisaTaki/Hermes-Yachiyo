@@ -28,6 +28,7 @@ from .data_analysis_plan_hints import (
     data_source_kind_hint,
 )
 from .desktop_plan_hints import (
+    app_management_hint,
     app_control_mode,
     app_control_tool_candidates,
     app_foreground_tool_candidates,
@@ -158,6 +159,7 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
+        app_management = app_management_hint(text)
         score = _score_terms(
             text,
             [
@@ -193,6 +195,12 @@ class TaskIntentRouter:
                 "截屏",
                 "screenshot",
                 "screen capture",
+                "隐藏",
+                "最小化",
+                "退出",
+                "hide ",
+                "minimize",
+                "quit ",
             ],
         )
         if (
@@ -200,6 +208,7 @@ class TaskIntentRouter:
             and not metadata.get("daily_desktop_intent")
             and ui_inspection is None
             and screen_capture is None
+            and app_management is None
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -209,6 +218,7 @@ class TaskIntentRouter:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
+            or (app_management or {}).get("app_name")
             or _app_name_hint(text)
             or ""
         ).strip()
@@ -225,12 +235,25 @@ class TaskIntentRouter:
             inputs["ui_inspection_hint"] = ui_inspection
         if screen_capture is not None:
             inputs["screen_capture_hint"] = screen_capture
+        if app_management is not None:
+            inputs["app_management_hint"] = app_management
         risk_level = (
             "medium"
-            if operation_hint not in {"focus_window", "list_windows", "read_ui", "capture_screen"}
+            if operation_hint
+            not in {
+                "focus_window",
+                "list_windows",
+                "read_ui",
+                "capture_screen",
+                "show_app",
+                "hide_app",
+                "minimize_app",
+            }
             and _looks_like_ui_operation(text)
             else "low"
         )
+        if operation_hint == "quit_app":
+            risk_level = "high"
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "desktop_operation", text),
             kind="desktop_operation",
@@ -670,11 +693,13 @@ class RuntimePlanner:
         window_list = window_list_hint(intent.user_goal)
         ui_inspection = ui_inspection_hint(intent.user_goal)
         screen_capture = screen_capture_hint(intent.user_goal)
+        app_management = app_management_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
+            or (app_management or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or ""
         ).strip()
@@ -841,6 +866,45 @@ class RuntimePlanner:
                         else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
                     ),
                     reason="Capture visible desktop state for visual inspection before any action.",
+                )
+            )
+            return steps
+        if app_management:
+            action = str(app_management.get("action") or "").strip()
+            tool_name = {
+                "show": "app.show",
+                "hide": "app.hide",
+                "minimize": "app.minimize",
+                "quit": "app.quit",
+            }.get(action)
+            is_quit = action == "quit"
+            steps.append(
+                _step(
+                    intent,
+                    "manage-app",
+                    "Manage app",
+                    "desktop.app_control",
+                    _first_allowed((tool_name,), allowed) if tool_name else None,
+                    input_preview={"app_name": app_name},
+                    risk_level="high" if is_quit else "low",
+                    approval_required=is_quit,
+                    depends_on=["discover-desktop-state"],
+                    reason="Run the requested app management action through the desktop app-control policy gate.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    _first_allowed(
+                        ("desktop.running_apps", "desktop.active_window", "desktop.windows"),
+                        allowed,
+                    ),
+                    input_preview={},
+                    depends_on=["manage-app"],
+                    reason="Observe desktop state after the app management action.",
                 )
             )
             return steps
@@ -1298,6 +1362,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "read_ui"
     if step_key == "capture-screen":
         return "capture_screen"
+    if step_key == "manage-app":
+        return _app_management_action(tool_name)
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
     if step_key == "operate-foreground-ui":
@@ -1338,6 +1404,19 @@ def _desktop_operation_action(tool_name: str | None) -> str:
     if "key" in clean_tool:
         return "key"
     return "operate_ui"
+
+
+def _app_management_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if clean_tool == "app.show":
+        return "show_app"
+    if clean_tool == "app.hide":
+        return "hide_app"
+    if clean_tool == "app.minimize":
+        return "minimize_app"
+    if clean_tool == "app.quit":
+        return "quit_app"
+    return "manage_app"
 
 
 def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
@@ -1714,6 +1793,9 @@ def _desktop_operation_hint(text: str) -> str:
         return "read_ui"
     if screen_capture_hint(text) is not None:
         return "capture_screen"
+    app_management = app_management_hint(text)
+    if app_management:
+        return f"{app_management.get('action')}_app"
     if _contains_any(text, ["click", "点击"]):
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):

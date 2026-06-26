@@ -429,6 +429,50 @@ def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
     assert _step_by_id(decision, "capture-screen").depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_routes_named_app_management_to_app_control() -> None:
+    decision = RuntimePlanner().decision(
+        "隐藏 Slack",
+        allowed_tools=["desktop.list_apps", "app.hide", "desktop.running_apps"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert decision.selected_intent.inputs["operation_hint"] == "hide_app"
+    assert decision.selected_intent.inputs["app_management_hint"] == {
+        "action": "hide",
+        "app_name": "Slack",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "manage-app",
+        "verify-desktop-result",
+    ]
+    manage = _step_by_id(decision, "manage-app")
+    assert manage.tool_name == "app.hide"
+    assert manage.action == "hide_app"
+    assert manage.input_preview == {"app_name": "Slack"}
+    assert manage.approval_required is False
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == ["manage-app"]
+
+
+def test_runtime_planner_marks_named_app_quit_as_approval_required() -> None:
+    decision = RuntimePlanner().decision(
+        "退出 Slack",
+        allowed_tools=["desktop.list_apps", "app.quit", "desktop.running_apps"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "high"
+    assert decision.selected_intent.inputs["operation_hint"] == "quit_app"
+    manage = _step_by_id(decision, "manage-app")
+    assert manage.tool_name == "app.quit"
+    assert manage.action == "quit_app"
+    assert manage.risk_level == "high"
+    assert manage.approval_required is True
+    assert decision.plan.tool_plan.approvals_required == ["manage-app"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -1025,6 +1069,37 @@ def test_planner_desktop_tool_requests_maps_app_scoped_screen_capture() -> None:
             "protocol": "json_fallback",
             "tool": "screen.capture",
             "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_named_app_management() -> None:
+    requests = planner_desktop_tool_requests(
+        "最小化 Slack",
+        allowed_tools=["desktop.list_apps", "app.minimize", "desktop.running_apps"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.minimize",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

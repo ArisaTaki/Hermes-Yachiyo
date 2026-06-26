@@ -201,6 +201,71 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
     return payload
 
 
+def app_management_hint(text: str) -> dict[str, str] | None:
+    value = clean(text)
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            "show",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:显示|显示一下|显示出来|调出来|叫出来|还原|恢复|取消隐藏|show|restore|unhide)\s*"
+            r"(?P<app>[^。！？!?，,]+)",
+        ),
+        (
+            "show",
+            r"(?P<app2>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏|show|restore|unhide)$",
+        ),
+        (
+            "hide",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:隐藏|隐藏一下|藏起来|收起|收起来|hide)\s*"
+            r"(?P<app3>[^。！？!?，,]+)",
+        ),
+        (
+            "hide",
+            r"(?P<app4>[^。！？!?，,]+?)\s*(?:隐藏|藏起来|收起|收起来|hide)$",
+        ),
+        (
+            "minimize",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?P<app5>[^。！？!?，,]+?)\s*(?:最小化|minimi[sz]e)$",
+        ),
+        (
+            "minimize",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:最小化|minimi[sz]e)\s*(?P<app6>[^。！？!?，,]+)",
+        ),
+        (
+            "quit",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:退出|关闭|关掉|结束|终止|quit|close|exit|terminate)\s*"
+            r"(?P<app7>[^。！？!?，,]+)",
+        ),
+        (
+            "quit",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?P<app8>[^。！？!?，,]+?)\s*(?:退出|关闭|关掉|结束|终止|quit|close|exit|terminate)$",
+        ),
+    )
+    for action, pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        if action == "quit" and re.search(r"(?:窗口|window)", value, flags=re.IGNORECASE):
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app_name = _clean_management_app_name_hint(raw_app)
+        if app_name:
+            return {"action": action, "app_name": app_name}
+    return None
+
+
 def hotkey_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     if not contains_any(
@@ -662,6 +727,39 @@ def _screen_capture_app_name_hint(value: str) -> str:
         if app_name:
             return app_name
     return ""
+
+
+def _clean_management_app_name_hint(value: str) -> str:
+    app = clean(value)
+    app = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|把|将|the)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    app = re.sub(
+        r"\s*(?:一下|下|起来|掉|显示出来|还原|恢复|取消隐藏|隐藏|藏起来|收起|收起来|"
+        r"最小化|退出|关闭|关掉|结束|终止|show|restore|unhide|hide|minimi[sz]e|"
+        r"quit|close|exit|terminate)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    app = app.strip(" .，,。")
+    generic = {
+        "",
+        "app",
+        "application",
+        "desktop",
+        "window",
+        "应用",
+        "应用程序",
+        "桌面",
+        "窗口",
+        "当前",
+        "前台",
+    }
+    return "" if app.lower() in generic else app
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
