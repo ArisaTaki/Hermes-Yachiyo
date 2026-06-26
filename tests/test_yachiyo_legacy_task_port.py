@@ -225,6 +225,63 @@ def test_planner_first_direct_selection_owns_web_research_without_legacy() -> No
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_current_page_web_actions_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed = ["browser.current_page", "browser.extract_text", "browser.screenshot"]
+
+    link_selection = planner_first_direct_tool_selection(
+        "读取当前网页链接",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    summary_selection = planner_first_direct_tool_selection(
+        "概括当前网页内容",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    screenshot_selection = planner_first_direct_tool_selection(
+        "当前网页截图",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert link_selection.selected_source == "runtime_planner"
+    assert link_selection.event_payload["legacy_request_count"] == 0
+    assert link_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert summary_selection.selected_source == "runtime_planner"
+    assert summary_selection.event_payload["legacy_request_count"] == 0
+    assert summary_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+        }
+    ]
+    assert screenshot_selection.selected_source == "runtime_planner"
+    assert screenshot_selection.event_payload["legacy_request_count"] == 0
+    assert screenshot_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.screenshot",
+            "input": {"reason": "user asked to capture the browser page"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     data_selection = planner_first_direct_tool_selection(
