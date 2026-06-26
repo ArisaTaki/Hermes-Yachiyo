@@ -223,10 +223,12 @@ def _daily_desktop_candidates_for_quick_message(
     text: str,
     *,
     metadata: dict[str, Any] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     return daily_desktop_entrypoint_requests(
         text,
         metadata=metadata,
+        allowed_tools=allowed_tools,
     )
 
 
@@ -265,6 +267,7 @@ def _desktop_candidates_for_quick_message(
     return _daily_desktop_candidates_for_quick_message(
         text,
         metadata=metadata,
+        allowed_tools=allowed_tools,
     )
 
 

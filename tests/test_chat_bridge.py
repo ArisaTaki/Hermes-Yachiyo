@@ -549,6 +549,41 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         store.close()
 
 
+def test_chat_bridge_quick_message_keeps_legacy_fallback_inside_main_chat_policy(
+    tmp_path,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = SimpleNamespace(
+        _main_chat_tool_policy=lambda: {"allowed_tools": ["workspace.read"]}
+    )
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-policy",
+            "task_id": "task-policy",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message(
+            "打开 GitHub",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["task_id"] == "task-policy"
+        assert "agent_task" not in result
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
