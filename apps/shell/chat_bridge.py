@@ -377,7 +377,49 @@ def _planner_trace_timeline_for_quick_message(
     ]
     if candidate_tools != planned_tools:
         return []
-    return planner_timeline_events(decision)
+    return [
+        *planner_timeline_events(decision),
+        _planner_selection_timeline_event(decision, planned_requests),
+    ]
+
+
+def _planner_selection_timeline_event(
+    decision: Any,
+    selected_requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_tools = [
+        str(request.get("tool") or "").strip()
+        for request in selected_requests
+        if str(request.get("tool") or "").strip()
+    ]
+    plan = getattr(decision, "plan", None)
+    intent = getattr(decision, "selected_intent", None)
+    payload: dict[str, Any] = {
+        "source": "runtime_planner",
+        "selection_source": "runtime_planner",
+        "selection_reason": "runtime_planner_direct",
+        "planner_tools": selected_tools,
+        "legacy_tools": [],
+        "selected_tools": selected_tools,
+        "planner_request_count": len(selected_requests),
+        "legacy_request_count": 0,
+        "selected_request_count": len(selected_requests),
+        "decision_id": str(getattr(decision, "decision_id", "") or "").strip(),
+        "plan_id": str(getattr(plan, "plan_id", "") or "").strip(),
+        "intent_kind": str(getattr(intent, "kind", "") or "").strip(),
+    }
+    route_to_studio = getattr(plan, "route_to_studio", None)
+    if isinstance(route_to_studio, bool):
+        payload["route_to_studio"] = route_to_studio
+    return {
+        "event": "agent.plan.selection",
+        "detail": "runtime_planner",
+        "status": "planned",
+        "source": "runtime_planner",
+        "decision_id": payload["decision_id"],
+        "plan_id": payload["plan_id"],
+        "payload": payload,
+    }
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:

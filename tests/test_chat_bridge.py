@@ -415,6 +415,17 @@ def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightwei
             result["agent_task"],
             intent_kind="desktop_operation",
         )
+        selection_event = _agent_task_event(
+            result["agent_task"],
+            "agent.plan.selection",
+        )
+        assert selection_event["payload"]["selection_source"] == "runtime_planner"
+        assert selection_event["payload"]["selection_reason"] == "runtime_planner_direct"
+        assert selection_event["payload"]["legacy_tools"] == []
+        assert selection_event["payload"]["selected_tools"] == selection_event["payload"]["planner_tools"]
+        assert selection_event["payload"]["selected_request_count"] == len(
+            selection_event["payload"]["selected_tools"]
+        )
         planned_event = _agent_task_event(
             result["agent_task"],
             "agent.desktop.intent_planned",
