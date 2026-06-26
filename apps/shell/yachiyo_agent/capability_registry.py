@@ -231,6 +231,16 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         output_kinds=("media_state",),
     ),
     CapabilityDefinition(
+        capability_id="system.control",
+        title="Control System State",
+        category="system",
+        description="Perform explicit low-risk system controls such as volume, brightness, display sleep, or screen saver.",
+        tools=("system.volume", "system.brightness", "system.display_sleep", "system.screen_saver_start"),
+        discovery_actions=("read_system_state",),
+        execution_actions=("set_volume", "adjust_brightness", "sleep_display", "start_screen_saver"),
+        output_kinds=("system_state",),
+    ),
+    CapabilityDefinition(
         capability_id="communication.compose",
         title="Compose Communication",
         category="communication",
@@ -281,6 +291,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "artifact.write": ("artifact.",),
     "browser.research": ("browser.",),
     "media.playback": ("media.",),
+    "system.control": ("system.",),
     "communication.compose": ("communication.", "mail.", "messages.", "email."),
     "clipboard.read_write": ("clipboard.",),
     "terminal.execution": ("terminal.",),
@@ -295,6 +306,7 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "file.organization": ("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
     "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
     "clipboard.read_write": ("clipboard.read", "clipboard.write", "desktop.safe_shortcut"),
+    "system.control": ("system.volume", "system.brightness", "system.display_sleep", "system.screen_saver_start"),
 }
 
 

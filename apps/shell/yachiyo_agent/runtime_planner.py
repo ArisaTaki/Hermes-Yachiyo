@@ -33,6 +33,7 @@ from .desktop_plan_hints import (
     type_into_ui_hint,
 )
 from .schedule_plan_hints import schedule_tool_preview
+from .system_plan_hints import system_control_hint, system_tool_preview
 
 
 class TaskIntentRouter:
@@ -52,6 +53,7 @@ class TaskIntentRouter:
         candidates = [
             self._data_analysis_intent(text, metadata),
             self._media_playback_intent(text, metadata),
+            self._system_control_intent(text, metadata),
             self._desktop_operation_intent(text, metadata),
             self._web_research_intent(text, metadata),
             self._report_generation_intent(text, metadata),
@@ -222,6 +224,28 @@ class TaskIntentRouter:
             expected_outputs=["media_state"],
             required_capabilities=["media.playback"],
             preferred_capabilities=["desktop.app_control"],
+            risk_level="low",
+        )
+
+    def _system_control_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        hint = system_control_hint(text)
+        if not hint:
+            return _empty_intent("system_control", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "system_control", text),
+            kind="system_control",
+            title="System Control",
+            user_goal=text,
+            confidence=0.82,
+            description="Perform an explicit low-risk system control through dedicated runtime tools.",
+            inputs=hint,
+            expected_outputs=["system_state"],
+            required_capabilities=["system.control"],
+            preferred_capabilities=["desktop.app_discovery"],
             risk_level="low",
         )
 
@@ -491,6 +515,8 @@ class RuntimePlanner:
             return self._desktop_operation_steps(intent, allowed)
         if intent.kind == "media_playback":
             return self._media_playback_steps(intent, allowed)
+        if intent.kind == "system_control":
+            return self._system_control_steps(intent, allowed)
         if intent.kind == "web_research":
             return self._web_research_steps(intent, allowed)
         if intent.kind == "report_generation":
@@ -656,6 +682,24 @@ class RuntimePlanner:
                 tool_name,
                 input_preview=input_preview,
                 reason="Use dedicated media tools for playback instead of explaining manual steps.",
+            )
+        ]
+
+    def _system_control_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        tool_name, input_preview = system_tool_preview(intent.inputs, allowed)
+        return [
+            _step(
+                intent,
+                "control-system-state",
+                "Control system state",
+                "system.control",
+                tool_name,
+                input_preview=input_preview,
+                reason="Use dedicated system tools for explicit low-risk controls instead of app-specific rules.",
             )
         ]
 

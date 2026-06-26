@@ -18,6 +18,7 @@ from .desktop_plan_hints import (
 )
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
+from .system_plan_hints import system_tool_preview
 
 
 def planner_tool_requests(
@@ -36,6 +37,8 @@ def planner_tool_requests(
     )
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
+    if decision.selected_intent.kind == "system_control":
+        return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
         return _web_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "schedule":
@@ -179,6 +182,19 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             tool_name,
             payload,
             planning_reason="planner_fallback_media_playback",
+        )
+    ]
+
+
+def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = system_tool_preview(inputs, allowed)
+    if not tool_name:
+        return []
+    return [
+        _request(
+            tool_name,
+            payload,
+            planning_reason="planner_fallback_system_control",
         )
     ]
 

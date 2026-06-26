@@ -256,6 +256,43 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
     assert step.input_preview == {"query": "超时空辉夜姬"}
 
 
+def test_runtime_planner_routes_system_volume_to_system_control() -> None:
+    decision = RuntimePlanner().decision(
+        "把系统音量调到 50%",
+        allowed_tools=["system.volume"],
+    )
+
+    assert decision.selected_intent.kind == "system_control"
+    assert decision.selected_intent.inputs == {
+        "kind": "volume",
+        "payload": {"action": "set", "level": 50},
+    }
+    step = _step_by_id(decision, "control-system-state")
+    assert step.capability_id == "system.control"
+    assert step.tool_name == "system.volume"
+    assert step.input_preview == {"action": "set", "level": 50}
+
+
+def test_runtime_planner_routes_brightness_and_display_controls() -> None:
+    brightness = RuntimePlanner().decision(
+        "屏幕太亮了，调暗一点",
+        allowed_tools=["system.brightness"],
+    )
+    display_sleep = RuntimePlanner().decision(
+        "关闭屏幕",
+        allowed_tools=["system.display_sleep"],
+    )
+
+    assert brightness.selected_intent.kind == "system_control"
+    assert _step_by_id(brightness, "control-system-state").tool_name == "system.brightness"
+    assert _step_by_id(brightness, "control-system-state").input_preview == {
+        "action": "down",
+        "step": 2,
+    }
+    assert display_sleep.selected_intent.kind == "system_control"
+    assert _step_by_id(display_sleep, "control-system-state").tool_name == "system.display_sleep"
+
+
 def test_runtime_planner_routes_communication_to_compose_capability() -> None:
     decision = RuntimePlanner().decision(
         "发送消息给 Alice：今晚八点见",
@@ -494,6 +531,23 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
+    ]
+
+
+def test_planner_tool_requests_maps_system_control_plan() -> None:
+    requests = planner_tool_requests(
+        "打开屏保",
+        allowed_tools=["system.screen_saver_start"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.screen_saver_start",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        }
     ]
 
 
