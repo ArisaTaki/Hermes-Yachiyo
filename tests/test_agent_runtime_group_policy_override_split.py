@@ -149,6 +149,61 @@ def test_agent_run_async_overlays_daily_desktop_policy_for_clear_chat_intent() -
     assert captured["executed"]["agent"] == captured["validated"]
 
 
+def test_agent_run_async_uses_runtime_planner_for_daily_desktop_overlay(monkeypatch) -> None:
+    from apps.shell.agent.runtime import agent_runs as agent_runs_module
+
+    monkeypatch.setattr(
+        agent_runs_module,
+        "daily_desktop_entrypoint_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    captured: dict[str, Any] = {}
+    persisted_agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "enabled": True,
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda _agent_id: persisted_agent,
+        validate_agent_run_readiness=lambda agent: captured.setdefault("validated", agent),
+        starter=_FakeStarter(captured),
+        execute_agent_run=lambda run_id, agent, user_goal, **_kwargs: captured.setdefault(
+            "executed",
+            {
+                "run_id": run_id,
+                "agent": agent,
+                "user_goal": user_goal,
+                "status": "completed",
+            },
+        ),
+        project_agent_run_group_if_root=lambda run: run,
+        resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
+        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
+        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
+        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        redact_error=str,
+        error_type=RuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    coordinator.create_async({
+        "agent_id": "agent-yachiyo",
+        "user_goal": "打开 Obsidian",
+        "daily_desktop_policy_overlay": True,
+    })
+
+    allowed = captured["validated"]["tool_policy"]["allowed_tools"]
+    assert allowed[:1] == ["workspace.read"]
+    assert "app.open" in allowed
+    assert "desktop.list_apps" in allowed
+    assert captured["validated"]["_daily_desktop_policy_overlay"] is True
+    assert captured["executed"]["agent"] == captured["validated"]
+
+
 def test_agent_run_async_does_not_overlay_daily_desktop_policy_for_howto_question() -> None:
     captured: dict[str, Any] = {}
     persisted_agent = {

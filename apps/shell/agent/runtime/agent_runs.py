@@ -12,6 +12,9 @@ from typing import Any
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_decision_and_tool_requests,
+)
 
 
 @dataclass(frozen=True)
@@ -342,7 +345,14 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
     if not payload.get("daily_desktop_policy_overlay"):
         return agent
     user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-    if not daily_desktop_entrypoint_tool_requests(user_goal, list(DAILY_DESKTOP_TOOL_NAMES)):
+    if _looks_like_daily_desktop_howto_question(user_goal):
+        return agent
+    _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
+        user_goal,
+        list(DAILY_DESKTOP_TOOL_NAMES),
+        legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
+    )
+    if not direct_requests:
         return agent
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
@@ -356,6 +366,20 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
             "approval_required": approval_required,
         },
     }
+
+
+def _looks_like_daily_desktop_howto_question(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+    return (
+        lowered.startswith(("怎么", "如何", "怎样"))
+        or "怎么用" in lowered
+        or "如何用" in lowered
+        or "how to " in lowered
+        or "how do i " in lowered
+        or "how can i " in lowered
+    )
 
 
 def _string_list(value: Any) -> list[str]:
