@@ -102,6 +102,29 @@ _APP_ALIASES = {
     "fontbook": "Font Book",
     "字体册": "Font Book",
     "字体簿": "Font Book",
+    "systeminformation": "System Information",
+    "系统信息": "System Information",
+    "scripteditor": "Script Editor",
+    "脚本编辑器": "Script Editor",
+    "automator": "Automator",
+    "自动操作": "Automator",
+    "自动操作程序": "Automator",
+    "voicememos": "Voice Memos",
+    "语音备忘录": "Voice Memos",
+    "stickies": "Stickies",
+    "便笺": "Stickies",
+    "dictionary": "Dictionary",
+    "词典": "Dictionary",
+    "digitalcolormeter": "Digital Color Meter",
+    "数码测色计": "Digital Color Meter",
+    "audiomidisetup": "Audio MIDI Setup",
+    "音频midi设置": "Audio MIDI Setup",
+    "colorsyncutility": "ColorSync Utility",
+    "色彩同步实用工具": "ColorSync Utility",
+    "migrationassistant": "Migration Assistant",
+    "迁移助理": "Migration Assistant",
+    "timemachine": "Time Machine",
+    "时间机器": "Time Machine",
     "launchpad": "Launchpad",
     "启动台": "Launchpad",
     "controlcenter": "Control Center",
@@ -526,6 +549,11 @@ def daily_desktop_intent_tool_requests(
             for request in app_command_palette_sequence
         ):
             return app_command_palette_sequence
+        return []
+    known_app_alias = _known_open_app_alias_name(context)
+    if known_app_alias:
+        if "app.open" in allowed:
+            return [_request("app.open", {"app_name": known_app_alias})]
         return []
     app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
     if app_scoped_low_risk_action:
@@ -2681,6 +2709,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:
         candidates.append(_request("desktop.hotkey", system_hotkey))
+
+    known_app_alias = _known_open_app_alias_name(text)
+    if known_app_alias:
+        candidates.append(_request("app.open", {"app_name": known_app_alias}))
 
     app_foreground_payload = _app_open_or_focus_foreground_action_request(text)
     if app_foreground_payload:
@@ -12711,6 +12743,9 @@ def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
+    known_app_alias = _known_open_app_alias_name(text)
+    if known_app_alias:
+        return known_app_alias
     permission_settings = _permission_settings_open_name(text)
     if permission_settings:
         return permission_settings
@@ -12775,6 +12810,48 @@ def _app_open_name(text: str) -> str:
     return ""
 
 
+def _known_open_app_alias_name(text: str) -> str:
+    patterns = (
+        r"^\s*(?:你)?(?:帮我|请|麻烦)?(?:直接)?(?:把|将)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?P<verb>打开|启动|运行|拉起来|拉起|开启|开)\s*(?:了|起来)"
+        r"(?:吧|嘛|呢)?[?？。！!]*$",
+        r"^\s*(?:你)?(?:帮我|请|麻烦)(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?P<verb>打开|启动|运行|拉起来|拉起|开启|开)\s*(?:了|起来)"
+        r"(?:吧|嘛|呢)?[?？。！!]*$",
+        r"(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?:把|将)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?P<verb>打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开)\s*(?:一下|下)?"
+        r"(?:吧|吗|嘛|呢)?[?？。！!]*$",
+        r"^\s*(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?(?:直接)?(?P<verb>打开|启动|运行|拉起来|拉起|开启|开(?!了|着|没|吗))\s*(?:一下|下)?\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:起来)?(?=\s*(?:并|然后|之后|再|如果|要是|$|[?？。！!]))",
+        r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<verb>open|launch|start)\s+"
+        r"(?P<app>[^.!?]+?)(?=\s*(?:\b(?:and|then|if)\b|$|[.!?]))",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        if _strip_query(text[match.end() :]):
+            continue
+        raw_app = match.group("app")
+        if _looks_like_browser_navigation_followup(text[match.end() :]) and _browser_app_name(raw_app):
+            continue
+        if _looks_like_local_path(_strip_app_name(raw_app)):
+            continue
+        if _looks_like_common_path_target(raw_app):
+            continue
+        if _normalize_site_name(raw_app):
+            continue
+        if _looks_like_composite_action_target(raw_app):
+            continue
+        app_name = _known_app_alias_name(raw_app, strip_followup=False)
+        if app_name and app_name != "System Settings":
+            return app_name
+    return ""
+
+
 def _looks_like_browser_navigation_followup(value: str) -> bool:
     return bool(
         re.match(
@@ -12822,6 +12899,8 @@ def _direct_system_settings_tool_target(text: str) -> str:
     ):
         return ""
     if re.search(r"(?:看看|看下|查看|检查|有哪些|有什么|选项|按钮|控件|界面)", cleaned):
+        return ""
+    if _known_open_app_alias_name(cleaned):
         return ""
     return _system_settings_tool_target(cleaned) or _bare_system_settings_open_name(cleaned)
 
@@ -13261,6 +13340,16 @@ def _normalize_app_name(value: str) -> str:
         return ""
     if _normalize_url(app):
         return ""
+    known_alias = _known_app_alias_name(app)
+    if known_alias:
+        return known_alias
+    return app
+
+
+def _known_app_alias_name(value: str, *, strip_followup: bool = True) -> str:
+    app = _strip_app_name(value) if strip_followup else _strip_app_alias_candidate(value)
+    if not app:
+        return ""
     candidates = [app]
     article_stripped = re.sub(r"^(?:a|an|the)\s+", "", app, flags=re.IGNORECASE).strip()
     if article_stripped and article_stripped != app:
@@ -13269,7 +13358,21 @@ def _normalize_app_name(value: str) -> str:
         compact = re.sub(r"[\s._-]+", "", candidate.lower())
         if compact in _APP_ALIASES:
             return _APP_ALIASES[compact]
-    return app
+    return ""
+
+
+def _strip_app_alias_candidate(value: str) -> str:
+    app = _strip_query(value)
+    app = re.sub(r"^(?:一下|下(?!载)|这个|那个)\s*", "", app)
+    app = re.sub(r"\s*(?:的|里|中|内|上|里面|里边|内里)$", "", app)
+    app = re.sub(
+        r"\s*(?:应用|app|软件|程序|客户端|桌面版|桌面客户端|client|desktop\s*app|desktop\s*client)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    app = _strip_polite_suffix(app)
+    return app.strip()
 
 
 def _generic_browser_open_app_name(value: str) -> str:

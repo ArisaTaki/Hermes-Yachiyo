@@ -83,6 +83,12 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         ("打开控制台", "Console"),
         ("打开字体册", "Font Book"),
         ("打开图片查看器", "Preview"),
+        ("打开系统信息", "System Information"),
+        ("打开脚本编辑器", "Script Editor"),
+        ("打开语音备忘录", "Voice Memos"),
+        ("打开音频 MIDI 设置", "Audio MIDI Setup"),
+        ("打开色彩同步实用工具", "ColorSync Utility"),
+        ("打开迁移助理", "Migration Assistant"),
         ("Could you launch Calendar for me?", "Calendar"),
         ("Would you open Notes please?", "Notes"),
     )

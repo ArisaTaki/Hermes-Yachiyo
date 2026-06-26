@@ -777,6 +777,36 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.open",
         "input": {"app_name": "Preview"},
     }
+    assert daily_desktop_intent_tool_request("打开系统信息", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "System Information"},
+    }
+    assert daily_desktop_intent_tool_request("打开脚本编辑器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Script Editor"},
+    }
+    assert daily_desktop_intent_tool_request("打开语音备忘录", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Voice Memos"},
+    }
+    assert daily_desktop_intent_tool_request("打开音频 MIDI 设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Audio MIDI Setup"},
+    }
+    assert daily_desktop_intent_tool_request("打开色彩同步实用工具", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "ColorSync Utility"},
+    }
+    assert daily_desktop_intent_tool_request("打开迁移助理", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Migration Assistant"},
+    }
     assert daily_desktop_intent_tool_request("打开当前网页的开发者工具", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.safe_shortcut",
