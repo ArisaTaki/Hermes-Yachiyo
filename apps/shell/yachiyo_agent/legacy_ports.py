@@ -14,6 +14,7 @@ from .daily_desktop import (
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
     daily_desktop_user_metadata,
+    main_chat_entrypoint_allowed_tools,
 )
 from .legacy_event_pages import (
     is_replay_enrichment_event as _is_replay_enrichment_event,
@@ -39,6 +40,7 @@ from .planner_projection import (
     runtime_planner_decision,
     runtime_planner_metadata,
 )
+from .planner_execution import planner_tool_requests
 from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
@@ -177,11 +179,15 @@ class LegacyChatTaskStarter:
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
         allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
+            self._runtime,
+            fallback=allowed_daily_desktop_tools,
+        )
         execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
         planner_decision = runtime_planner_decision(
             prompt or execution_prompt,
             metadata=metadata,
-            allowed_tools=allowed_daily_desktop_tools,
+            allowed_tools=allowed_entrypoint_tools,
         )
         direct_tool_request = daily_desktop_direct_metadata_request(
             metadata,
@@ -192,13 +198,22 @@ class LegacyChatTaskStarter:
             metadata=metadata,
             allowed_tools=allowed_daily_desktop_tools,
         )
+        planner_requests = (
+            []
+            if direct_tool_request or desktop_requests
+            else planner_tool_requests(
+                prompt or execution_prompt,
+                allowed_entrypoint_tools,
+                metadata=metadata,
+            )
+        )
         if not task_id:
             return None
-        if not direct_tool_request and not desktop_requests:
+        if not direct_tool_request and not desktop_requests and not planner_requests:
             return None
         self._sync_chat_user_daily_desktop_metadata(
             task_id,
-            desktop_requests,
+            desktop_requests or planner_requests,
             planner_decision=planner_decision,
         )
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)

@@ -443,6 +443,49 @@ def test_chat_bridge_quick_message_uses_runtime_planner_when_legacy_candidates_m
         store.close()
 
 
+def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
+    tmp_path,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = SimpleNamespace(
+        _main_chat_tool_policy=lambda: {
+            "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"]
+        }
+    )
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-data-analysis",
+            "task_id": "task-data-analysis",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message(
+            "请分析 data/sales.csv 并输出报告",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["agent_task"]["task_id"] == "task-data-analysis"
+        event = result["agent_task"]["recent_events"][0]
+        assert event["event_type"] == "agent.desktop.intent_planned"
+        assert event["payload"]["tool"] == "workspace.read"
+        assert event["payload"]["source"] == "runtime_planner"
+        assert event["payload"]["planning_reason"] == "planner_prefetch_data_source"
+        assert event["payload"]["input_preview"] == {"path": "data/sales.csv"}
+        assert event["payload"]["continue_to_model"] is True
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

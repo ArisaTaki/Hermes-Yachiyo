@@ -27,6 +27,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
+    main_chat_entrypoint_allowed_tools,
 )
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
@@ -231,13 +232,14 @@ def _runtime_planner_candidates_for_quick_message(
     text: str,
     *,
     metadata: dict[str, Any] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     try:
         from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
 
         return planner_tool_requests(
             text,
-            daily_desktop_allowed_tools(),
+            allowed_tools or daily_desktop_allowed_tools(),
             metadata=metadata,
         )
     except Exception:
@@ -372,6 +374,9 @@ class ChatBridge:
             return result
         if isinstance(result.get("agent_task"), dict):
             return result
+        planner_allowed_tools = main_chat_entrypoint_allowed_tools(
+            _runtime_agent_service(self._runtime),
+        )
         desktop_candidates = _daily_desktop_candidates_for_quick_message(
             text,
             metadata=metadata,
@@ -380,6 +385,7 @@ class ChatBridge:
             desktop_candidates = _runtime_planner_candidates_for_quick_message(
                 text,
                 metadata=metadata,
+                allowed_tools=planner_allowed_tools,
             )
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(

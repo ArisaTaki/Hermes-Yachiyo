@@ -119,6 +119,36 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert planner_events[0][1]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
 
 
+def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatDataAnalysisRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-data",
+        conversation_id="chat-1",
+        prompt="请分析 data/sales.csv 并输出报告",
+    )
+
+    assert task is not None
+    assert task["task_id"] == "task-data"
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["daily_desktop_tool"] == "workspace.read"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_data_source"
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
+    assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == (
+        "workspace.read"
+    )
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+
+
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
     runtime = _FakeRuntime()
     monkeypatch.setattr(
@@ -648,3 +678,11 @@ class _MainChatPlannerEventRuntime:
     def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
         self.calls.append(("complete_main_chat_run", {"run_id": run_id, "result": result}))
         return {"run_id": run_id, "status": "completed", "result": result}
+
+
+class _MainChatDataAnalysisRuntime(_MainChatPlannerEventRuntime):
+    def _main_chat_tool_policy(self) -> dict[str, Any]:
+        return {
+            "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"],
+            "approval_required": {},
+        }
