@@ -455,6 +455,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _spotlight_search_query_hint(text):
             return _empty_intent("web_research", text)
+        if _direct_communication_hint(text):
+            return _empty_intent("web_research", text)
         if _app_scoped_desktop_operation_hint(text):
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
@@ -661,10 +663,16 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        score = _score_terms(text, ["email", "message", "mail", "send to", "邮件", "消息", "发给", "发送"])
+        source = context_source_hint(text)
+        direct_hint = {} if source else _direct_communication_hint(text)
+        score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
+        if score <= 0 and direct_hint:
+            score = 0.24
         if score <= 0:
             return _empty_intent("communication", text)
-        source = context_source_hint(text)
+        inputs = {"context_source": source} if source else {}
+        if direct_hint:
+            inputs["direct_message_hint"] = direct_hint
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "communication", text),
             kind="communication",
@@ -672,7 +680,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.82, 0.34 + score),
             description="Draft or send communication through available apps or tools.",
-            inputs={"context_source": source} if source else {},
+            inputs=inputs,
             required_capabilities=["communication.compose"],
             preferred_capabilities=[
                 *(
@@ -1899,6 +1907,11 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         context_source = str(intent.inputs.get("context_source") or "").strip()
+        direct_message = intent.inputs.get("direct_message_hint")
+        if isinstance(direct_message, Mapping):
+            direct_steps = _direct_communication_steps(intent, allowed, direct_message)
+            if direct_steps:
+                return direct_steps
         compose_tool = _first_allowed(
             (
                 "app.open_and_type_into_ui_element",
@@ -2175,6 +2188,84 @@ def _context_source_steps(
     return []
 
 
+def _direct_communication_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    direct_message: Mapping[str, Any],
+) -> list[ToolPlanStepSnapshot]:
+    app_name = str(direct_message.get("app_name") or "").strip()
+    recipient = str(direct_message.get("recipient") or "").strip()
+    body = str(direct_message.get("body") or "").strip()
+    mode = str(direct_message.get("mode") or "focus").strip() or "focus"
+    if not app_name or not recipient or not body:
+        return []
+    shortcut_tool = _first_allowed(
+        app_foreground_tool_candidates(mode, "safe_shortcut"),
+        allowed,
+    )
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
+    return [
+        _step(
+            intent,
+            "focus-communication-recipient-search",
+            "Focus communication recipient search",
+            "communication.compose",
+            shortcut_tool,
+            input_preview={"app_name": app_name, "action": "find"},
+            action="resolve_recipient",
+            reason="Open the app's recipient search with a safe shortcut before drafting the message.",
+        ),
+        _step(
+            intent,
+            "type-communication-recipient",
+            "Type communication recipient",
+            "communication.compose",
+            type_tool,
+            input_preview={"text": recipient},
+            depends_on=["focus-communication-recipient-search"],
+            action="type",
+            reason="Type only the explicit recipient from the user prompt.",
+        ),
+        _step(
+            intent,
+            "submit-communication-recipient-search",
+            "Submit communication recipient search",
+            "communication.compose",
+            search_submit_tool,
+            input_preview={},
+            depends_on=["type-communication-recipient"],
+            action="submit_search",
+            reason="Select or search the recipient with the dedicated safe search submit tool.",
+        ),
+        _step(
+            intent,
+            "draft-communication-message",
+            "Draft communication message",
+            "communication.compose",
+            type_tool,
+            input_preview={"text": body},
+            depends_on=["submit-communication-recipient-search"],
+            action="draft_message",
+            reason="Type only the explicit message body before the approval-gated send step.",
+        ),
+        _step(
+            intent,
+            "send-communication-message",
+            "Send communication message",
+            "communication.compose",
+            send_tool,
+            input_preview={"action": "send"},
+            risk_level="high",
+            approval_required=True,
+            depends_on=["draft-communication-message"],
+            action="send_message",
+            reason="Final message sending remains approval-gated.",
+        ),
+    ]
+
+
 def _current_page_find_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -2387,6 +2478,12 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id == "communication.compose":
         if _is_context_source_tool(tool_name):
             return _context_source_action(tool_name)
+        if tool_name == "desktop.submit_foreground":
+            return "send_message"
+        if tool_name == "desktop.search_submit":
+            return "submit_search"
+        if tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+            return "resolve_recipient"
         return "draft_message"
     if capability_id == "clipboard.read_write":
         return "read_clipboard" if tool_name == "clipboard.read" else "write_clipboard"
@@ -3129,6 +3226,70 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
+
+
+def _direct_communication_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    patterns = (
+        (
+            r"^(?:打开|启动|开启)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:发消息|发送|发)\s*(?:给|到)?\s*(?P<recipient>[^：:，,。]+?)"
+            r"\s*[:：]\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?:在|用|通过)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:搜索|查找|找)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:并|然后|再)\s*(?:发送|发消息|发)\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:search|find|look\s+up)\s+(?P<recipient>[^.!?,]+?)\s+"
+            r"(?:and|then)\s+(?:send|message)\s+(?P<body>[^.!?]+)$"
+        ),
+        (
+            r"^(?:open|launch|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:and\s+)?(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
+        ),
+        (
+            r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _clean_app_name_hint(groups.get("app") or "")
+        recipient = _clean_communication_hint_text(groups.get("recipient") or "")
+        body = _clean_communication_hint_text(groups.get("body") or "")
+        if not app_name or not recipient or not body:
+            continue
+        return {
+            "app_name": app_name,
+            "recipient": recipient,
+            "body": body,
+            "mode": _communication_app_mode(value),
+            "send_action": "send",
+        }
+    return {}
+
+
+def _communication_app_mode(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(r"^(?:打开|启动|开启)\s*", value, flags=re.IGNORECASE):
+        return "open"
+    if re.search(r"^(?:open|launch|start)\s+", value, flags=re.IGNORECASE):
+        return "open"
+    return "focus"
+
+
+def _clean_communication_hint_text(value: str) -> str:
+    text = re.sub(r"^[：:，,\s]+", "", str(value or "").strip())
+    text = re.sub(r"[。.,，；;！!？?]+$", "", text).strip()
+    return text.strip("「」\"'“”‘’")
 
 
 def _app_scoped_desktop_operation_hint(text: str) -> bool:

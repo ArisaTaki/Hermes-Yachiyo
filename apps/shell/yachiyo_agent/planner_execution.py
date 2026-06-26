@@ -111,6 +111,9 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
     if decision.selected_intent.kind == "file_access":
         return _file_access_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "communication":
+        direct_requests = _direct_communication_tool_requests(decision, allowed)
+        if direct_requests:
+            return direct_requests
         context_requests = _context_source_tool_requests(
             decision,
             allowed,
@@ -361,6 +364,39 @@ def _file_access_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> lis
     if not tool_name:
         return []
     return [_request(tool_name, payload, planning_reason="planner_fallback_file_access")]
+
+
+def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    if not isinstance(inputs.get("direct_message_hint"), Mapping):
+        return []
+    required_step_ids = (
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    )
+    steps_by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in decision.plan.tool_plan.steps
+    }
+    requests: list[dict[str, Any]] = []
+    for step_id in required_step_ids:
+        step = steps_by_id.get(step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason="planner_fallback_communication_send",
+            )
+        )
+    return requests
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

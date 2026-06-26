@@ -1748,6 +1748,50 @@ def test_runtime_planner_routes_communication_to_compose_capability() -> None:
     assert "desktop.type_into_ui_element" in communication_capability.available_tools
 
 
+def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Slack 发消息给 yachiyo：hello",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "yachiyo",
+            "body": "hello",
+            "mode": "open",
+            "send_action": "send",
+        }
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(decision, "focus-communication-recipient-search").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "type-communication-recipient").input_preview == {
+        "text": "yachiyo"
+    }
+    assert _step_by_id(decision, "draft-communication-message").input_preview == {
+        "text": "hello"
+    }
+    send_step = _step_by_id(decision, "send-communication-message")
+    assert send_step.tool_name == "desktop.submit_foreground"
+    assert send_step.input_preview == {"action": "send"}
+    assert send_step.approval_required is True
+    assert send_step.risk_level == "high"
+
+
 def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> None:
     decision = RuntimePlanner().decision(
         "写一封邮件给 Alice 说明项目进展",
@@ -2129,9 +2173,9 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
     ]
 
 
-def test_planner_selection_does_not_steal_app_search_send_sequence() -> None:
+def test_planner_selection_owns_app_search_send_sequence_with_send_approval() -> None:
     selection = planner_first_direct_tool_selection(
-        "微信搜索文件传输助手并发送 hello",
+        "Slack search yachiyo and send hello",
         [
             "app.focus_and_safe_shortcut",
             "desktop.safe_type_text",
@@ -2144,12 +2188,12 @@ def test_planner_selection_does_not_steal_app_search_send_sequence() -> None:
             {
                 "protocol": "json_fallback",
                 "tool": "app.focus_and_safe_shortcut",
-                "input": {"app_name": "WeChat", "action": "find"},
+                "input": {"app_name": "Slack", "action": "find"},
             },
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.safe_type_text",
-                "input": {"text": "文件传输助手"},
+                "input": {"text": "yachiyo"},
             },
             {
                 "protocol": "json_fallback",
@@ -2169,8 +2213,9 @@ def test_planner_selection_does_not_steal_app_search_send_sequence() -> None:
         ],
     )
 
-    assert selection.selected_source == "daily_desktop_intent"
+    assert selection.selected_source == "runtime_planner"
     assert selection.event_payload["intent_kind"] == "communication"
+    assert selection.event_payload["legacy_request_count"] == 5
     assert selection.event_payload["selected_tools"] == [
         "app.focus_and_safe_shortcut",
         "desktop.safe_type_text",
