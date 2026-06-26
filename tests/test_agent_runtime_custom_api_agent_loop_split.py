@@ -10702,7 +10702,14 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         for tool_request in tool_requests:
             tool = str(tool_request.get("tool") or "")
             payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-            if tool == "app.open_and_safe_type_text":
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found installed app: Notes",
+                    "data": {"matches": [{"name": "Notes"}]},
+                }
+            elif tool == "app.open_and_safe_type_text":
                 result = {
                     "ok": True,
                     "action": tool,
@@ -10720,6 +10727,13 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                     "action": tool,
                     "summary": "Executed safe shortcut: copy",
                     "data": {"shortcut_action": payload["action"]},
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Read foreground UI",
+                    "data": {"elements": [{"role": "text", "label": "hello"}]},
                 }
             else:
                 raise AssertionError(f"unexpected tool: {tool}")
@@ -10776,6 +10790,13 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         [
             {
                 "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "Notes", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
                 "tool": "app.open_and_safe_type_text",
                 "input": {"app_name": "Notes", "text": "hello"},
                 "source": "runtime_planner",
@@ -10788,16 +10809,27 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                 "source": "runtime_planner",
                 "planning_reason": "planner_fallback_desktop_operation",
             },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
         ]
     ]
     planned_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     ]
     assert [event["detail"] for event in planned_events] == [
+        "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     assert [event["source"] for event in planned_events] == [
+        "runtime_planner",
+        "runtime_planner",
         "runtime_planner",
         "runtime_planner",
     ]
@@ -10805,6 +10837,7 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
     assert selection_events[0]["selection_source"] == "runtime_planner"
+    assert selection_events[0]["selection_reason"] == "runtime_planner_full_plan"
     assert selection_events[0]["plan_tools"] == [
         "desktop.list_apps",
         "app.open_and_safe_type_text",
@@ -10812,13 +10845,21 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.ui_elements",
     ]
     assert selection_events[0]["selected_tools"] == [
+        "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     assert selection_events[0]["plan_step_count"] == 4
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "desktop.safe_shortcut"
-    assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]
+    assert completed[-1]["tools"] == [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
 
 def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rules(

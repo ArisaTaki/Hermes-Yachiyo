@@ -17,6 +17,8 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
 )
+from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 _SAFE_SHORTCUT_HOTKEY_TOOLS = {
@@ -626,6 +628,24 @@ class RuntimeCustomApiAgentLoop:
                     for request in requests
                 ],
             )
+            if selection.selected_source == "runtime_planner" and selection.decision is not None:
+                full_plan_requests = planner_tool_requests(
+                    planning_context,
+                    allowed_tools,
+                )
+                if full_plan_requests:
+                    return (
+                        selection.decision,
+                        full_plan_requests,
+                        planner_selection_payload(
+                            decision=selection.decision,
+                            planner_requests=full_plan_requests,
+                            legacy_requests=[],
+                            selected_requests=full_plan_requests,
+                            selected_source="runtime_planner",
+                            selected_reason="runtime_planner_full_plan",
+                        ),
+                    )
             return selection.decision, selection.requests, selection.event_payload
         except Exception:
             return None, [], {}
@@ -993,7 +1013,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if not summary:
             return ""
-        last_step = completed_steps[-1]
+        last_step = visible_steps[-1]
         clean_source = str(
             (planned_tool_requests[0].get("source") if planned_tool_requests else "")
             or "daily_desktop_intent"
