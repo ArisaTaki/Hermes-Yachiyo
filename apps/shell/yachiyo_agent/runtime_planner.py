@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from .capture_plan_hints import capture_note_hint, capture_tool_preview
 from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
@@ -79,6 +80,7 @@ class TaskIntentRouter:
             self._workflow_intent(text, metadata),
             self._multi_agent_intent(text, metadata),
             self._communication_intent(text, metadata),
+            self._information_capture_intent(text, metadata),
             self._clipboard_intent(text, metadata),
             self._schedule_intent(text, metadata),
         ]
@@ -538,6 +540,35 @@ class TaskIntentRouter:
             risk_level="medium",
         )
 
+    def _information_capture_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        hint = capture_note_hint(text)
+        if not hint:
+            return _empty_intent("information_capture", text)
+        has_body = bool(str(hint.get("body") or "").strip())
+        source = str(hint.get("source") or "").strip()
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "information_capture", text),
+            kind="information_capture",
+            title="Information Capture",
+            user_goal=text,
+            confidence=0.84 if has_body else 0.72,
+            description="Capture explicit text or inspected context into a local note.",
+            inputs=hint,
+            expected_outputs=["note"],
+            required_capabilities=["information.capture"],
+            preferred_capabilities=[
+                capability
+                for capability in ("clipboard.read_write", "browser.research", "desktop.ui_operation")
+                if source
+            ],
+            missing_inputs=[] if has_body or source else ["note_body"],
+            risk_level="low",
+        )
+
     def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
         if score <= 0:
@@ -664,6 +695,8 @@ class RuntimePlanner:
             return self._schedule_steps(intent, allowed)
         if intent.kind == "communication":
             return self._communication_steps(intent, allowed)
+        if intent.kind == "information_capture":
+            return self._information_capture_steps(intent, allowed)
         if intent.kind == "clipboard_operation":
             return self._clipboard_steps(intent, allowed)
         if intent.kind == "workflow_orchestration":
@@ -1345,6 +1378,42 @@ class RuntimePlanner:
             )
         ]
 
+    def _information_capture_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        tool_name, input_preview = capture_tool_preview(intent.inputs, allowed)
+        if tool_name:
+            return [
+                _step(
+                    intent,
+                    "create-note",
+                    "Create note",
+                    "information.capture",
+                    tool_name,
+                    input_preview=input_preview,
+                    reason="Use the note creation tool for explicit user-provided content.",
+                )
+            ]
+
+        source = str(intent.inputs.get("source") or "").strip()
+        context_steps = _information_capture_context_steps(intent, allowed, source)
+        depends_on = [step.step_id for step in context_steps]
+        return [
+            *context_steps,
+            _step(
+                intent,
+                "create-note-from-context",
+                "Create note from captured context",
+                "information.capture",
+                _first_allowed(("notes.create",), allowed),
+                input_preview={"body_source": source} if source else {},
+                depends_on=depends_on,
+                reason="Inspect the requested source before creating a note from it.",
+            ),
+        ]
+
     def _communication_steps(
         self,
         intent: TaskIntentSnapshot,
@@ -1499,6 +1568,111 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
     return None
 
 
+def _information_capture_context_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    source: str,
+) -> list[ToolPlanStepSnapshot]:
+    if source == "selection":
+        steps = []
+        copy_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+        if copy_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "copy-selected-note-context",
+                    "Copy selected note context",
+                    "information.capture",
+                    copy_tool,
+                    input_preview={"action": "copy"},
+                    reason="Copy the explicit user-selected text before creating a note from it.",
+                )
+            )
+        read_tool = _first_allowed(("clipboard.read",), allowed)
+        if read_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "read-note-context",
+                    "Read note context",
+                    "information.capture",
+                    read_tool,
+                    depends_on=["copy-selected-note-context"] if copy_tool else [],
+                    reason="Read the copied text so the note body comes from inspected context.",
+                )
+            )
+        return steps
+
+    if source == "clipboard":
+        tool_name = _first_allowed(("clipboard.read",), allowed)
+        return [
+            _step(
+                intent,
+                "read-note-context",
+                "Read note context",
+                "information.capture",
+                tool_name,
+                reason="Read the explicitly requested clipboard contents before creating a note.",
+            )
+        ]
+
+    if source == "current_page_link":
+        tool_name = _first_allowed(("browser.current_page", "desktop.safe_shortcut"), allowed)
+        payload = {"action": "copy_current_page_link"} if tool_name == "desktop.safe_shortcut" else {}
+        return [
+            _step(
+                intent,
+                "read-note-context",
+                "Read note context",
+                "information.capture",
+                tool_name,
+                input_preview=payload,
+                reason="Capture the current page reference before creating a note.",
+            )
+        ]
+
+    if source == "current_page_content":
+        tool_name = _first_allowed(
+            ("browser.extract_text", "browser.current_page", "desktop.ui_elements", "screen.capture"),
+            allowed,
+        )
+        return [
+            _step(
+                intent,
+                "read-note-context",
+                "Read note context",
+                "information.capture",
+                tool_name,
+                input_preview=_information_capture_context_payload(tool_name),
+                reason="Inspect the current page or window text before creating a note.",
+            )
+        ]
+
+    if source == "visible_text":
+        tool_name = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
+        return [
+            _step(
+                intent,
+                "read-note-context",
+                "Read note context",
+                "information.capture",
+                tool_name,
+                input_preview=_information_capture_context_payload(tool_name),
+                reason="Inspect visible text before creating a note.",
+            )
+        ]
+
+    return []
+
+
+def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
+    if tool_name == "desktop.ui_elements":
+        return {"role_filter": "text", "limit": 80}
+    if tool_name == "screen.capture":
+        return {"reason": "capture note context"}
+    return {}
+
+
 def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> str:
     if step_key == "discover-desktop-state":
         return "list_apps"
@@ -1536,11 +1710,30 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "control_system"
     if capability_id == "schedule.reminder":
         return "schedule_task"
+    if capability_id == "information.capture":
+        return _information_capture_action(tool_name)
     if capability_id == "communication.compose":
         return "draft_message"
     if capability_id == "clipboard.read_write":
         return "read_clipboard" if tool_name == "clipboard.read" else "write_clipboard"
     return ""
+
+
+def _information_capture_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if clean_tool == "notes.create":
+        return "create_note"
+    if clean_tool == "clipboard.read":
+        return "read_clipboard"
+    if clean_tool == "desktop.safe_shortcut":
+        return "shortcut"
+    if clean_tool.startswith("browser."):
+        return "extract_text"
+    if clean_tool == "desktop.ui_elements":
+        return "read_ui"
+    if clean_tool == "screen.capture":
+        return "capture_screen"
+    return "capture"
 
 
 def _desktop_operation_action(tool_name: str | None) -> str:
@@ -1844,6 +2037,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     ):
         score += 0.08
     if intent.kind == "media_playback" and str(intent.inputs.get("query") or "").strip():
+        score += 0.08
+    if intent.kind == "information_capture" and _contains_any(
+        text,
+        ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
+    ):
         score += 0.08
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06

@@ -1195,6 +1195,74 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     assert draft_step.approval_required is True
 
 
+def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
+    decision = RuntimePlanner().decision(
+        "新建备忘录内容是 今天要买牛奶",
+        allowed_tools=["notes.create"],
+    )
+
+    assert decision.selected_intent.kind == "information_capture"
+    assert decision.selected_intent.inputs == {
+        "action": "create_note",
+        "body": "今天要买牛奶",
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert decision.plan.tool_plan.artifacts_expected == []
+    step = _step_by_id(decision, "create-note")
+    assert step.capability_id == "information.capture"
+    assert step.action == "create_note"
+    assert step.tool_name == "notes.create"
+    assert step.input_preview == {"body": "今天要买牛奶"}
+    capability = _capability_by_id(decision, "information.capture")
+    assert "notes.create" in capability.available_tools
+
+
+def test_runtime_planner_extracts_common_note_body_forms() -> None:
+    examples = (
+        ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
+        ("make a note to buy milk", "buy milk"),
+    )
+
+    for prompt, body in examples:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=["notes.create"])
+
+        assert decision.selected_intent.kind == "information_capture"
+        assert decision.selected_intent.inputs == {
+            "action": "create_note",
+            "body": body,
+        }
+        assert _step_by_id(decision, "create-note").input_preview == {"body": body}
+
+
+def test_runtime_planner_tracks_context_note_source_without_body() -> None:
+    decision = RuntimePlanner().decision(
+        "create a note from selected text",
+        allowed_tools=["notes.create", "desktop.safe_shortcut", "clipboard.read"],
+    )
+
+    assert decision.selected_intent.kind == "information_capture"
+    assert decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "selection",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-note-context",
+        "read-note-context",
+        "create-note-from-context",
+    ]
+    assert _step_by_id(decision, "copy-selected-note-context").input_preview == {
+        "action": "copy"
+    }
+    assert _step_by_id(decision, "read-note-context").tool_name == "clipboard.read"
+    create_step = _step_by_id(decision, "create-note-from-context")
+    assert create_step.tool_name == "notes.create"
+    assert create_step.input_preview == {"body_source": "selection"}
+    assert create_step.depends_on == [
+        "copy-selected-note-context",
+        "read-note-context",
+    ]
+
+
 def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> None:
     decision = RuntimePlanner().decision(
         "把 hello 复制到剪贴板",
@@ -2148,6 +2216,33 @@ def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
             "planning_reason": "planner_fallback_schedule",
         }
     ]
+
+
+def test_planner_tool_requests_maps_explicit_note_plan() -> None:
+    requests = planner_tool_requests(
+        "新建备忘录内容是 今天要买牛奶",
+        allowed_tools=["notes.create"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "今天要买牛奶"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_information_capture",
+        }
+    ]
+
+
+def test_planner_tool_requests_leaves_context_note_to_legacy_fallback() -> None:
+    assert (
+        planner_tool_requests(
+            "create a note from selected text",
+            allowed_tools=["notes.create", "desktop.safe_shortcut", "clipboard.read"],
+        )
+        == []
+    )
 
 
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:

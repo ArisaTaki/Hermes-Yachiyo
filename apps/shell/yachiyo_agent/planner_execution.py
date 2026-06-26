@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
 from .desktop_plan_hints import media_tool_preview
@@ -113,6 +114,8 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             step_ids=("discover-communication-surface",),
             planning_reason="planner_prefetch_communication_surface",
         )
+    if decision.selected_intent.kind == "information_capture":
+        return _information_capture_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "schedule":
         return _schedule_tool_requests(decision.selected_intent.user_goal, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
@@ -459,6 +462,19 @@ def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, An
             tool_name,
             payload,
             planning_reason="planner_fallback_schedule",
+        )
+    ]
+
+
+def _information_capture_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = capture_tool_preview(inputs, allowed)
+    if tool_name != "notes.create" or not payload.get("body"):
+        return []
+    return [
+        _request(
+            tool_name,
+            payload,
+            planning_reason="planner_fallback_information_capture",
         )
     ]
 
