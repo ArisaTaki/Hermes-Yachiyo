@@ -579,13 +579,6 @@ def daily_desktop_intent_tool_requests(
         if "system.volume" in allowed:
             return [_request("system.volume", direct_volume_payload)]
         return []
-    app_scoped_low_risk_action = _app_scoped_low_risk_foreground_action_tool_request(context)
-    if app_scoped_low_risk_action:
-        low_risk_tool = str(app_scoped_low_risk_action.get("tool") or "")
-        if low_risk_tool in allowed:
-            return [app_scoped_low_risk_action]
-        if _app_scoped_low_risk_action_should_not_fallback(app_scoped_low_risk_action):
-            return []
     app_scoped_hotkey = _app_scoped_hotkey_tool_request(context)
     if app_scoped_hotkey:
         if str(app_scoped_hotkey.get("tool") or "") in allowed:
