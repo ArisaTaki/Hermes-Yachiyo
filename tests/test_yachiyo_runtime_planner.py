@@ -2993,6 +2993,21 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
         ["browser.open_url", "app.open", "desktop.list_apps"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    reddit_selection = planner_first_direct_tool_selection(
+        "open Reddit",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    drive_selection = planner_first_direct_tool_selection(
+        "打开 Google Drive",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    youtube_music_selection = planner_first_direct_tool_selection(
+        "打开 YouTube Music",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
     app_selection = planner_first_direct_tool_selection(
         "打开 Notion",
         ["browser.open_url", "app.open", "desktop.list_apps"],
@@ -3017,6 +3032,39 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
             "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.bilibili.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert reddit_selection.selected_source == "runtime_planner"
+    assert reddit_selection.event_payload["intent_kind"] == "web_research"
+    assert reddit_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.reddit.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert drive_selection.selected_source == "runtime_planner"
+    assert drive_selection.event_payload["intent_kind"] == "web_research"
+    assert drive_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://drive.google.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert youtube_music_selection.selected_source == "runtime_planner"
+    assert youtube_music_selection.event_payload["intent_kind"] == "web_research"
+    assert youtube_music_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://music.youtube.com"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }
