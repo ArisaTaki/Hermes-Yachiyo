@@ -6606,6 +6606,10 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-planner-intent\"",
             "data-testid=\"agent-run-detail-planner-steps\"",
             "data-testid=\"agent-run-detail-planner-step\"",
+            "data-tool-name={step.tool_name || ''}",
+            "data-step-status={step.status || 'planned'}",
+            "capability: {step.capability_id}",
+            "tool: {step.tool_name}",
         ],
     )
     _assert_contains(

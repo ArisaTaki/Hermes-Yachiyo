@@ -209,11 +209,14 @@ function PlannerTraceStepRow({
       data-capability-id={step.capability_id}
       data-planner-step-id={step.step_id}
       data-risk-level={step.risk_level || ''}
+      data-step-status={step.status || 'planned'}
       data-testid="agent-run-detail-planner-step"
+      data-tool-name={step.tool_name || ''}
     >
       <div>
         <strong>{index + 1}. {step.title}</strong>
-        <span>{step.tool_name || step.capability_id}</span>
+        {step.capability_id ? <span>capability: {step.capability_id}</span> : null}
+        {step.tool_name ? <span>tool: {step.tool_name}</span> : null}
         {step.reason ? <span>{step.reason}</span> : null}
       </div>
       <small>{step.status || 'planned'}{step.approval_required ? ' / approval' : ''}</small>
