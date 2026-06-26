@@ -53,6 +53,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
@@ -451,6 +452,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.reveal_path",
         "desktop.open_path",
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",
@@ -512,6 +514,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     ),
     "media_control": (
         "media.apple_music_play",
+        "media.apple_music_status",
         "media.apple_music_open_and_play",
         "media.apple_music_control",
         "media.music_app_open_and_play",

@@ -713,6 +713,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
     assert desktop_tool_risk_level("desktop.open_path") == "low"
+    assert desktop_tool_risk_level("media.apple_music_status") == "low"
     assert desktop_tool_risk_level("media.music_app_open_and_play") == "low"
     assert desktop_tool_risk_level("system.settings_open") == "low"
     assert desktop_tool_risk_level("system.volume") == "low"
@@ -968,6 +969,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     tools = {tool.tool_name: tool for tool in catalog.tools}
 
     music = tools["media.apple_music_play"]
+    music_status = tools["media.apple_music_status"]
     music_app = tools["media.music_app_open_and_play"]
     settings = tools["system.settings_open"]
     brightness = tools["system.brightness"]
@@ -1017,6 +1019,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert music.input_schema["required"] == ["query"]
     assert music.missing_permissions == ["music_app"]
     assert any("Music" in note for note in music.fallback_notes)
+    assert music_status.capability_id == "media_control"
+    assert music_status.risk_level == "low"
+    assert music_status.input_schema["required"] == []
+    assert music_status.missing_permissions == ["music_app"]
+    assert any("without changing playback" in note for note in music_status.fallback_notes)
     assert music_app.capability_id == "media_control"
     assert music_app.risk_level == "low"
     assert music_app.input_schema["required"] == ["app_name"]

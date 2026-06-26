@@ -275,6 +275,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "media.apple_music_play": [
             "Direct Apple Music playback falls back to opening Music when playback is unavailable.",
         ],
+        "media.apple_music_status": [
+            "Reads Apple Music playback state without changing playback; permission failures are returned as tool results.",
+        ],
         "media.apple_music_open_and_play": [
             "Opens Music first, then starts playback through the same Apple Music automation path.",
         ],
