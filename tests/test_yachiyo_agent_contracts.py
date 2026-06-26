@@ -28,6 +28,7 @@ from apps.shell.yachiyo_agent import (
     ApprovalCardSnapshot,
     ArtifactContentSnapshot,
     ArtifactSnapshot,
+    CapabilityCategory,
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
@@ -89,7 +90,16 @@ def test_task_intent_kind_contract_covers_runtime_planner_routes() -> None:
         "file_access",
         "file_organization",
         "clipboard_operation",
+        "information_capture",
     }.issubset(set(get_args(TaskIntentKind)))
+
+
+def test_capability_category_contract_covers_runtime_registry_categories() -> None:
+    assert {
+        "capture",
+        "clipboard",
+        "system",
+    }.issubset(set(get_args(CapabilityCategory)))
 
 
 def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
