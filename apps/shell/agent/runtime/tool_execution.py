@@ -81,19 +81,43 @@ def _tool_request_with_discovered_app_name(
     tool_request: dict[str, Any],
     timeline: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    resolution = _tool_request_app_name_resolution(tool_request, timeline)
+    return _tool_request_with_app_name_resolution(tool_request, resolution)
+
+
+def _tool_request_with_app_name_resolution(
+    tool_request: dict[str, Any],
+    resolution: dict[str, str],
+) -> dict[str, Any]:
+    if not resolution:
+        return tool_request
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    return {
+        **tool_request,
+        "input": {
+            **raw_input,
+            "app_name": str(resolution.get("resolved_app_name") or "").strip(),
+        },
+    }
+
+
+def _tool_request_app_name_resolution(
+    tool_request: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, str]:
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     requested_app_name = str(raw_input.get("app_name") or "").strip()
     discovered_app_name = _discovered_app_name_for_query(timeline, requested_app_name)
     if not discovered_app_name or _normalized_app_lookup(discovered_app_name) == _normalized_app_lookup(
         requested_app_name
     ):
-        return tool_request
+        return {}
     return {
-        **tool_request,
-        "input": {
-            **raw_input,
-            "app_name": discovered_app_name,
-        },
+        "tool": str(tool_request.get("tool") or "").strip(),
+        "field": "app_name",
+        "requested_app_name": requested_app_name,
+        "resolved_app_name": discovered_app_name,
+        "source_tool": "desktop.list_apps",
     }
 
 
@@ -355,13 +379,32 @@ class RuntimeToolRequestRunner:
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
         for index, tool_request in enumerate(tool_requests):
-            tool_request = _tool_request_with_discovered_app_name(tool_request, timeline)
+            app_name_resolution = _tool_request_app_name_resolution(tool_request, timeline)
+            tool_request = _tool_request_with_app_name_resolution(
+                tool_request,
+                app_name_resolution,
+            )
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
             raw_input = (
                 tool_request.get("input")
                 if isinstance(tool_request.get("input"), dict)
                 else {}
             )
+            if app_name_resolution:
+                resolution_payload = {**app_name_resolution, "tool": tool_name}
+                timeline.append(
+                    self._timeline(
+                        "agent.tool.input_resolved",
+                        tool_name,
+                        **resolution_payload,
+                    )
+                )
+                if run_id:
+                    self._append_run_event(
+                        run_id,
+                        "agent.tool.input_resolved",
+                        resolution_payload,
+                    )
             input_preview = self._input_preview(raw_input)
             goal_block_reason = self._goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
