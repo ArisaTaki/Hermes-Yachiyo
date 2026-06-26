@@ -70,7 +70,7 @@ def planner_first_direct_tool_selection(
             selected_requests = legacy_requests
     if planner_requests:
         return DirectToolSelection(
-            decision=decision if selected_source == "runtime_planner" else None,
+            decision=decision,
             requests=selected_requests,
             event_payload=planner_selection_payload(
                 decision=decision,

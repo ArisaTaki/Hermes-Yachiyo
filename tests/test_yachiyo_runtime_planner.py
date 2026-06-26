@@ -1398,7 +1398,8 @@ def test_entrypoint_selection_uses_legacy_when_single_app_plan_is_less_specific(
         legacy_tool_requests=legacy_requests,
     )
 
-    assert decision is None
+    assert decision is not None
+    assert decision.selected_intent.kind == "desktop_operation"
     assert requests == [
         {
             "protocol": "json_fallback",

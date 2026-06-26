@@ -143,6 +143,11 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
     assert metadata["daily_desktop_source"] == "daily_desktop_intent"
     assert metadata["daily_desktop_tool"] == "system.settings_open"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert [event[1]["event_type"] for event in run_events[:2]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+    ]
+    assert run_events[0][1]["payload"]["intent"]["kind"] == "desktop_operation"
     selection_events = [
         event for event in run_events if event[1]["event_type"] == "agent.plan.selection"
     ]
