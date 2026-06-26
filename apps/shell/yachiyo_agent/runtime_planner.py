@@ -327,8 +327,13 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.82, 0.34 + score),
             description="Draft or send communication through available apps or tools.",
-            required_capabilities=["desktop.app_discovery"],
-            preferred_capabilities=["desktop.app_control", "desktop.ui_operation", "artifact.write"],
+            required_capabilities=["communication.compose"],
+            preferred_capabilities=[
+                "desktop.app_discovery",
+                "desktop.app_control",
+                "desktop.ui_operation",
+                "artifact.write",
+            ],
             risk_level="medium",
         )
 
@@ -433,6 +438,8 @@ class RuntimePlanner:
             return self._code_steps(intent, allowed)
         if intent.kind == "schedule":
             return self._schedule_steps(intent, allowed)
+        if intent.kind == "communication":
+            return self._communication_steps(intent, allowed)
         if intent.kind == "workflow_orchestration":
             return [_service_step(intent, "workflow.orchestration", "Select or start workflow")]
         if intent.kind == "multi_agent":
@@ -691,6 +698,46 @@ class RuntimePlanner:
                 approval_required=True,
                 reason="Create only explicit user-requested reminders, calendar events, or future tasks.",
             )
+        ]
+
+    def _communication_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        compose_tool = _first_allowed(
+            (
+                "app.open_and_type_into_ui_element",
+                "app.focus_and_type_into_ui_element",
+                "desktop.type_into_ui_element",
+                "app.open_and_safe_type_text",
+                "app.focus_and_safe_type_text",
+                "desktop.safe_type_text",
+                "artifact.write",
+            ),
+            allowed,
+        )
+        depends_on = [] if compose_tool == "artifact.write" else ["discover-communication-surface"]
+        return [
+            _step(
+                intent,
+                "discover-communication-surface",
+                "Discover communication surface",
+                "desktop.app_discovery",
+                _first_allowed(("desktop.running_apps", "desktop.active_window", "screen.capture"), allowed),
+                reason="Inspect the current app/window before preparing a message.",
+            ),
+            _step(
+                intent,
+                "draft-communication",
+                "Draft communication",
+                "communication.compose",
+                compose_tool,
+                risk_level="medium",
+                approval_required=True,
+                depends_on=depends_on,
+                reason="Prepare the user-requested communication through observable tools; final sending remains approval-gated.",
+            ),
         ]
 
 

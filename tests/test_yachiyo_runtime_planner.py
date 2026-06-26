@@ -197,6 +197,42 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
     assert step.input_preview == {"query": "超时空辉夜姬"}
 
 
+def test_runtime_planner_routes_communication_to_compose_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "发送消息给 Alice：今晚八点见",
+        allowed_tools=["desktop.active_window", "desktop.type_into_ui_element", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.plan.route_to_studio is True
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-communication-surface",
+        "draft-communication",
+    ]
+    assert _step_by_id(decision, "discover-communication-surface").tool_name == "desktop.active_window"
+    draft_step = _step_by_id(decision, "draft-communication")
+    assert draft_step.capability_id == "communication.compose"
+    assert draft_step.tool_name == "desktop.type_into_ui_element"
+    assert draft_step.approval_required is True
+    communication_capability = _capability_by_id(decision, "communication.compose")
+    assert "desktop.type_into_ui_element" in communication_capability.available_tools
+
+
+def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> None:
+    decision = RuntimePlanner().decision(
+        "写一封邮件给 Alice 说明项目进展",
+        allowed_tools=["artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    draft_step = _step_by_id(decision, "draft-communication")
+    assert draft_step.tool_name == "artifact.write"
+    assert draft_step.depends_on == []
+    assert draft_step.approval_required is True
+
+
 def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> None:
     snapshots = capability_snapshots(
         allowed_tools=["browser.print_page"],
