@@ -1308,6 +1308,8 @@ def windows(app_name: str = "") -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.windows")
     clean_app = str(app_name or "").strip()
+    resolved_app = _resolve_installed_app_name(clean_app) if clean_app else ""
+    app_filter = resolved_app or clean_app
     script = """
     on run argv
         set appFilter to item 1 of argv
@@ -1340,7 +1342,7 @@ def windows(app_name: str = "") -> dict[str, Any]:
         end tell
     end run
     """
-    result = _run_osascript(script, [clean_app])
+    result = _run_osascript(script, [app_filter])
     if not result["ok"]:
         return _with_permission_metadata(
             "desktop.windows",
@@ -1348,21 +1350,25 @@ def windows(app_name: str = "") -> dict[str, Any]:
                 **result,
                 "action": "desktop.windows",
                 "summary": "desktop.windows failed",
-                "data": {"app_name": clean_app},
+                "data": {
+                    "app_name": app_filter,
+                    **_app_resolution_metadata(clean_app, app_filter),
+                },
             },
         )
     windows_payload = _parse_window_rows(result.get("stdout"))
     return {
         "ok": True,
         "action": "desktop.windows",
-        "summary": _windows_summary(windows_payload, clean_app),
+        "summary": _windows_summary(windows_payload, app_filter),
         "data": {
-            "app_name": clean_app,
+            "app_name": app_filter,
             "windows": windows_payload,
             "count": len(windows_payload),
+            **_app_resolution_metadata(clean_app, app_filter),
         },
         "permission_error": False,
-        "fallback_used": False,
+        "fallback_used": bool(clean_app and app_filter != clean_app),
     }
 
 
@@ -2207,6 +2213,18 @@ def _resolve_installed_app_name(app_name: str) -> str:
     return matches[0][2]
 
 
+def _app_resolution_metadata(requested_app_name: str, resolved_app_name: str) -> dict[str, str]:
+    requested = str(requested_app_name or "").strip()
+    resolved = str(resolved_app_name or "").strip()
+    if not requested or not resolved or requested == resolved:
+        return {}
+    return {
+        "requested_app_name": requested,
+        "resolved_app_name": resolved,
+        "app_resolution": "installed_app_bundle",
+    }
+
+
 def _application_search_dirs() -> list[Path]:
     return [
         Path("/Applications"),
@@ -2321,6 +2339,7 @@ def app_focus_window(app_name: str, title_contains: str) -> dict[str, Any]:
         return _unsupported("app.focus_window")
     clean_name = _clean_required(app_name, "app_name")
     clean_title = _clean_required(title_contains, "title_contains")
+    resolved_name = _resolve_installed_app_name(clean_name) or clean_name
     result = _run_osascript(
         """
         on lowercaseText(theText)
@@ -2385,7 +2404,7 @@ def app_focus_window(app_name: str, title_contains: str) -> dict[str, Any]:
             return "focused|" & appName & "|" & matchedIndex & "|" & matchedTitle
         end run
         """,
-        [clean_name, clean_title],
+        [resolved_name, clean_title],
     )
     if not result["ok"]:
         return _with_permission_metadata(
@@ -2394,7 +2413,11 @@ def app_focus_window(app_name: str, title_contains: str) -> dict[str, Any]:
                 **result,
                 "action": "app.focus_window",
                 "summary": "app.focus_window failed",
-                "data": {"app_name": clean_name, "title_contains": clean_title},
+                "data": {
+                    "app_name": resolved_name,
+                    "title_contains": clean_title,
+                    **_app_resolution_metadata(clean_name, resolved_name),
+                },
             },
         )
     stdout = str(result.get("stdout") or "").strip()
@@ -2404,47 +2427,50 @@ def app_focus_window(app_name: str, title_contains: str) -> dict[str, Any]:
         return {
             "ok": False,
             "action": "app.focus_window",
-            "summary": f"{clean_name} is not running",
+            "summary": f"{resolved_name} is not running",
             "error": "app_not_running",
             "error_code": "app_not_running",
             "data": {
-                "app_name": clean_name,
+                "app_name": resolved_name,
                 "title_contains": clean_title,
                 "focus_status": status,
+                **_app_resolution_metadata(clean_name, resolved_name),
             },
             "permission_error": False,
-            "fallback_used": False,
+            "fallback_used": resolved_name != clean_name,
         }
     if status == "not_found":
         return {
             "ok": False,
             "action": "app.focus_window",
-            "summary": f"No {clean_name} window matched {clean_title}",
+            "summary": f"No {resolved_name} window matched {clean_title}",
             "error": "window_not_found",
             "error_code": "window_not_found",
             "data": {
-                "app_name": clean_name,
+                "app_name": resolved_name,
                 "title_contains": clean_title,
                 "focus_status": status,
+                **_app_resolution_metadata(clean_name, resolved_name),
             },
             "permission_error": False,
-            "fallback_used": False,
+            "fallback_used": resolved_name != clean_name,
         }
     window_index = _int_value(parts[2] if len(parts) > 2 else 0)
     window_title = parts[3] if len(parts) > 3 else ""
     return {
         "ok": True,
         "action": "app.focus_window",
-        "summary": f"Focused {clean_name} window: {window_title or clean_title}",
+        "summary": f"Focused {resolved_name} window: {window_title or clean_title}",
         "data": {
-            "app_name": clean_name,
+            "app_name": resolved_name,
             "title_contains": clean_title,
             "focus_status": status,
             "window_index": window_index,
             "window_title": window_title,
+            **_app_resolution_metadata(clean_name, resolved_name),
         },
         "permission_error": False,
-        "fallback_used": False,
+        "fallback_used": resolved_name != clean_name,
     }
 
 

@@ -3228,6 +3228,37 @@ def test_app_focus_window_raises_matching_window(monkeypatch) -> None:
     assert calls[0][1] == ["Slack", "general"]
 
 
+def test_app_focus_window_resolves_installed_bundle_name(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Microsoft Word.app").mkdir(parents=True)
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "focused|Microsoft Word|1|Report", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_focus_window("Word", "Report")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Focused Microsoft Word window: Report"
+    assert result["fallback_used"] is True
+    assert result["data"] == {
+        "app_name": "Microsoft Word",
+        "title_contains": "Report",
+        "focus_status": "focused",
+        "window_index": 1,
+        "window_title": "Report",
+        "requested_app_name": "Word",
+        "resolved_app_name": "Microsoft Word",
+        "app_resolution": "installed_app_bundle",
+    }
+    assert calls[0][1] == ["Microsoft Word", "Report"]
+
+
 def test_app_focus_window_reports_window_not_found(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(
@@ -3741,6 +3772,46 @@ def test_desktop_windows_returns_window_titles(monkeypatch) -> None:
         "count": 2,
     }
     assert osascript_args == [[""]]
+
+
+def test_desktop_windows_resolves_installed_bundle_filter(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Microsoft Word.app").mkdir(parents=True)
+    osascript_args = []
+
+    def fake_osascript(_script, args=None):
+        osascript_args.append(args)
+        return {
+            "ok": True,
+            "stdout": "Microsoft Word\t303\t1\ttrue\tReport",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.windows("Word")
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["data"] == {
+        "app_name": "Microsoft Word",
+        "windows": [
+            {
+                "app_name": "Microsoft Word",
+                "pid": 303,
+                "index": 1,
+                "frontmost": True,
+                "title": "Report",
+            }
+        ],
+        "count": 1,
+        "requested_app_name": "Word",
+        "resolved_app_name": "Microsoft Word",
+        "app_resolution": "installed_app_bundle",
+    }
+    assert osascript_args == [["Microsoft Word"]]
 
 
 def test_desktop_windows_permission_failure_returns_recovery_targets(monkeypatch) -> None:
