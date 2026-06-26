@@ -59,7 +59,9 @@ _TOOL_FUNCTION_NAMES = {
     "artifact.write": "artifact_write",
 }
 _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
-_MAX_AGENT_TOOL_ITERATIONS = 50
+_DEFAULT_MAX_AGENT_TOOL_ITERATIONS = 200
+_MIN_AGENT_TOOL_ITERATIONS = 10
+_MAX_AGENT_TOOL_ITERATIONS = 1000
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
 _SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
@@ -84,6 +86,18 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
+
+
+def _agent_tool_iteration_limit() -> int:
+    raw = str(os.environ.get("HERMES_AGENT_TOOL_ITERATION_LIMIT") or "").strip()
+    if raw:
+        try:
+            configured = int(raw)
+        except ValueError:
+            configured = _DEFAULT_MAX_AGENT_TOOL_ITERATIONS
+    else:
+        configured = _DEFAULT_MAX_AGENT_TOOL_ITERATIONS
+    return max(_MIN_AGENT_TOOL_ITERATIONS, min(configured, _MAX_AGENT_TOOL_ITERATIONS))
 
 
 def _path_entries(value: str | None) -> list[str]:
@@ -1214,7 +1228,11 @@ class AgentRuntimeService:
                 "required": ["path", "content"],
             },
             "terminal.run": {
-                "description": "Run a shell command in the Agent workdir. Requires user approval.",
+                "description": (
+                    "Run a shell command in the Agent workdir. Requires user approval. "
+                    "Use this for shell-style inspection, git, tests, builds, package commands, or when workspace tools are insufficient. "
+                    "Batch related read-only commands into one request when practical."
+                ),
                 "properties": {
                     "command": {"type": "string", "description": "Shell command to run."},
                     "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
@@ -3361,6 +3379,8 @@ class AgentRuntimeService:
                 "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
                 "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
                 "or switch tools instead of stopping or retrying the same invalid path. "
+                "Use terminal.run directly for shell commands, git, tests, builds, package managers, or broad file searches. "
+                "Batch related read-only terminal commands into one terminal.run request when practical. "
                 f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
             )
             messages = [
@@ -3368,7 +3388,8 @@ class AgentRuntimeService:
                 {"role": "user", "content": context},
             ]
         tools = self._tool_schemas(allowed_tools)
-        for iteration in range(max(0, int(start_iteration or 0)), _MAX_AGENT_TOOL_ITERATIONS):
+        iteration_limit = _agent_tool_iteration_limit()
+        for iteration in range(max(0, int(start_iteration or 0)), iteration_limit):
             message = openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
             content = _message_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)
@@ -3401,11 +3422,12 @@ class AgentRuntimeService:
                         for artifact in artifacts
                         if artifact.get("kind") != "context" and str(artifact.get("path") or "").strip()
                     ],
+                    loop_limit=iteration_limit,
                     loop_limit_detail=self._tool_loop_limit_detail(timeline),
                 )
             )
             return artifact_completion
-        raise AgentRuntimeError(f"custom_api Agent 工具循环超过上限；{self._tool_loop_limit_detail(timeline)}")
+        raise AgentRuntimeError(f"custom_api Agent 工具循环超过上限（{iteration_limit} 次）；{self._tool_loop_limit_detail(timeline)}")
 
     @staticmethod
     def _tool_loop_limit_detail(timeline: list[dict[str, Any]]) -> str:
@@ -3621,7 +3643,7 @@ class AgentRuntimeService:
             "messages": messages,
             "tool_request": tool_request,
             "remaining_tool_requests": remaining_tool_requests,
-            "next_iteration": max(0, min(int(next_iteration or 0), _MAX_AGENT_TOOL_ITERATIONS)),
+            "next_iteration": max(0, min(int(next_iteration or 0), _agent_tool_iteration_limit())),
         }
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:

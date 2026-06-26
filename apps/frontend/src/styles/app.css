@@ -8310,7 +8310,8 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .agent-group-sessions.expanded {
-  max-height: 500px;
+  max-height: none;
+  overflow: visible;
 }
 
 .hy-content .open-chat-shell .agent-group-sessions-inner {

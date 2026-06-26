@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService, ToolBroker
+from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService, ToolBroker, _agent_tool_iteration_limit
 
 
 def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeService:
@@ -21,6 +21,23 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
         workspace_dir=tmp_path / "runtime",
         seed_templates=seed_templates,
     )
+
+
+def test_agent_tool_iteration_limit_env(monkeypatch):
+    monkeypatch.delenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", raising=False)
+    assert _agent_tool_iteration_limit() == 200
+
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "42")
+    assert _agent_tool_iteration_limit() == 42
+
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "2")
+    assert _agent_tool_iteration_limit() == 10
+
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "5000")
+    assert _agent_tool_iteration_limit() == 1000
+
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "not-a-number")
+    assert _agent_tool_iteration_limit() == 200
 
 
 class FakeDefaultProfileService:
@@ -2272,6 +2289,7 @@ def test_agent_run_recovers_from_absolute_workspace_path_with_terminal(tmp_path,
 
 
 def test_agent_tool_loop_limit_includes_last_tool_detail(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "12")
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
     workdir.mkdir()
@@ -2312,6 +2330,7 @@ def test_agent_tool_loop_limit_includes_last_tool_detail(tmp_path, monkeypatch):
 
 
 def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_AGENT_TOOL_ITERATION_LIMIT", "12")
     service = make_service(tmp_path)
     calls = []
 
@@ -2345,7 +2364,7 @@ def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_
         assert any(artifact.get("path") == "done.md" for artifact in run["artifacts"])
         assert service.read_run_artifact(run["run_id"], "done.md")["content"] == "done"
         assert any(event["event"] == "agent.tool.loop_limit_completed" for event in run["timeline"])
-        assert len(calls) == 50
+        assert len(calls) == 12
     finally:
         service.close()
 
