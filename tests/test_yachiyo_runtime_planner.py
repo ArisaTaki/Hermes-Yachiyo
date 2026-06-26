@@ -3413,6 +3413,23 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
     ]
 
 
+def test_planner_desktop_tool_requests_normalizes_named_music_app_control() -> None:
+    requests = planner_desktop_tool_requests(
+        "QQ Music next track",
+        allowed_tools=["media.music_app_control", "media.system_control"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_control",
+            "input": {"app_name": "QQ音乐", "action": "next"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
 def test_planner_tool_requests_maps_system_control_plan() -> None:
     requests = planner_tool_requests(
         "打开屏保",

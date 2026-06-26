@@ -9,6 +9,11 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
+from apps.shell.agent.runtime.media_apps import (
+    compact_music_app_name,
+    is_known_music_app_compact,
+    known_music_app_name,
+)
 from apps.shell.agent.runtime.web_destinations import known_web_destination_url
 
 
@@ -477,29 +482,6 @@ _COMMON_REVEAL_PATHS = {
     "废纸篓目录": "~/.Trash",
     "回收站目录": "~/.Trash",
 }
-_MUSIC_APP_COMPACTS = {
-    "applemusic",
-    "苹果音乐",
-    "music",
-    "musicapp",
-    "musicplayer",
-    "音乐",
-    "音乐app",
-    "音乐应用",
-    "音乐软件",
-    "音乐播放器",
-    "播放器",
-    "spotify",
-    "qq音乐",
-    "qqmusic",
-    "网易云",
-    "网易云音乐",
-    "neteasecloud",
-    "neteasecloudmusic",
-    "neteasemusic",
-    "cloudmusic",
-}
-
 _APP_STATUS_PATTERNS = (
     r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)?\s*"
     r"(?P<app>[^。！？!?，,]+?)\s*(?:开没开|开了没|开着没|打开没|打开了没|启动没|启动了没)"
@@ -13328,10 +13310,13 @@ def _non_apple_music_named_play_match(text: str) -> tuple[str, str, str, str] | 
 
 
 def _known_music_app_name(value: str) -> str:
+    known_name = known_music_app_name(value)
+    if known_name:
+        return known_name
     app_name = _normalize_app_name(value)
-    raw_compact = re.sub(r"[\s._-]+", "", _strip_app_name(value).lower())
-    app_compact = re.sub(r"[\s._-]+", "", app_name.lower())
-    if raw_compact in _MUSIC_APP_COMPACTS or app_compact in _MUSIC_APP_COMPACTS:
+    raw_compact = compact_music_app_name(_strip_app_name(value))
+    app_compact = compact_music_app_name(app_name)
+    if is_known_music_app_compact(raw_compact) or is_known_music_app_compact(app_compact):
         return app_name
     return ""
 

@@ -6,6 +6,8 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.media_apps import music_app_name_from_text
+
 _GENERIC_MUSIC_QUERIES = {
     "",
     "music",
@@ -560,16 +562,7 @@ def media_control_only_hint(text: str, *, action: str = "") -> bool:
 
 
 def music_app_name_hint(text: str) -> str:
-    lowered = str(text or "").lower()
-    if re.search(r"spotify", lowered):
-        return "Spotify"
-    if re.search(r"网易云|netease", lowered):
-        return "网易云音乐"
-    if re.search(r"qq\s*音乐|qq music", lowered):
-        return "QQ 音乐"
-    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app)", lowered):
-        return "Music"
-    return ""
+    return music_app_name_from_text(text)
 
 
 def media_query_hint(text: str) -> str:
