@@ -30,25 +30,43 @@ def analyze_data_file(
     clean_artifact_paths = _artifact_paths(artifact_path, artifact_paths)
     primary_artifact_path = clean_artifact_paths[0]
     suffix = path.suffix.lower()
-    if suffix == ".xlsx":
-        table = _xlsx_table(path, max_rows=clean_max_rows)
-        source_kind = "xlsx"
-    else:
-        text = path.read_text(encoding="utf-8")
-        if suffix == ".json":
-            table = _json_table(text, max_rows=clean_max_rows)
-            source_kind = "json"
-        elif suffix == ".tsv":
-            table = _delimited_table(text, delimiter="\t", max_rows=clean_max_rows)
-            source_kind = "tsv"
-        elif suffix == ".csv":
-            table = _delimited_table(text, delimiter=",", max_rows=clean_max_rows)
-            source_kind = "csv"
+    source_kind = _source_kind_for_suffix(suffix)
+    try:
+        if suffix == ".xlsx":
+            table = _xlsx_table(path, max_rows=clean_max_rows)
         else:
-            table = _text_table(text, max_rows=clean_max_rows)
-            source_kind = "text_table" if table["columns"] else "text"
+            text = path.read_text(encoding="utf-8")
+            if suffix == ".json":
+                table = _json_table(text, max_rows=clean_max_rows)
+            elif suffix == ".jsonl":
+                table = _jsonl_table(text, max_rows=clean_max_rows)
+            elif suffix == ".tsv":
+                table = _delimited_table(text, delimiter="\t", max_rows=clean_max_rows)
+            elif suffix == ".csv":
+                table = _delimited_table(text, delimiter=",", max_rows=clean_max_rows)
+            else:
+                table = _text_table(text, max_rows=clean_max_rows)
+                source_kind = "text_table" if table["columns"] else "text"
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        csv.Error,
+        OSError,
+        zipfile.BadZipFile,
+        KeyError,
+        ElementTree.ParseError,
+    ) as exc:
+        return _parse_error_result(display_path, source_kind=source_kind, error=exc)
 
     if not table["columns"]:
+        if source_kind in {"csv", "tsv", "json", "jsonl", "xlsx"}:
+            return _empty_structured_report(
+                display_path=display_path,
+                source_kind=source_kind,
+                artifact_path=primary_artifact_path,
+                artifact_paths=clean_artifact_paths,
+                table=table,
+            )
         return _plain_text_report(
             path,
             display_path=display_path,
@@ -144,6 +162,43 @@ def _plain_text_report(
     }
 
 
+def _empty_structured_report(
+    *,
+    display_path: str,
+    source_kind: str,
+    artifact_path: str,
+    artifact_paths: list[str],
+    table: dict[str, Any],
+) -> dict[str, Any]:
+    content = _markdown_report(
+        display_path=display_path,
+        source_kind=source_kind,
+        artifact_path=artifact_path,
+        table=table,
+        column_summaries=[],
+    )
+    return {
+        "ok": True,
+        "path": display_path,
+        "source_kind": source_kind,
+        "rows": table["row_count"],
+        "analyzed_rows": len(table["rows"]),
+        "columns": [],
+        "column_summaries": [],
+        "artifact_path": artifact_path,
+        "artifact_paths": artifact_paths,
+        "artifact_content": content,
+        "extra_artifacts": _extra_table_artifacts(
+            artifact_paths[1:],
+            display_path=display_path,
+            source_kind=source_kind,
+            table=table,
+            column_summaries=[],
+        ),
+        "summary": f"Analyzed {display_path}: no tabular columns found. Report: {artifact_path}.",
+    }
+
+
 def _delimited_table(text: str, *, delimiter: str, max_rows: int) -> dict[str, Any]:
     sample = text[:4096]
     if delimiter:
@@ -167,6 +222,29 @@ def _json_table(text: str, *, max_rows: int) -> dict[str, Any]:
         "columns": columns,
         "rows": [{column: _stringify(row.get(column)) for column in columns} for row in rows],
         "row_count": len(records),
+    }
+
+
+def _jsonl_table(text: str, *, max_rows: int) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    row_count = 0
+    for line in text.splitlines():
+        clean_line = line.strip()
+        if not clean_line:
+            continue
+        row_count += 1
+        if len(records) >= max_rows:
+            continue
+        item = json.loads(clean_line)
+        if isinstance(item, dict):
+            records.append(_flatten_dict(item))
+        else:
+            records.append({"value": item})
+    columns = _ordered_columns(records)
+    return {
+        "columns": columns,
+        "rows": [{column: _stringify(row.get(column)) for column in columns} for row in records],
+        "row_count": row_count,
     }
 
 
@@ -436,6 +514,40 @@ def _stringify(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return str(value)
+
+
+def _source_kind_for_suffix(suffix: str) -> str:
+    if suffix == ".xlsx":
+        return "xlsx"
+    if suffix == ".json":
+        return "json"
+    if suffix == ".jsonl":
+        return "jsonl"
+    if suffix == ".tsv":
+        return "tsv"
+    if suffix == ".csv":
+        return "csv"
+    return "text"
+
+
+def _parse_error_result(
+    display_path: str,
+    *,
+    source_kind: str,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "path": display_path,
+        "source_kind": source_kind,
+        "error": "数据文件解析失败",
+        "detail": str(error),
+        "hint": (
+            "请确认文件格式、编码和扩展名匹配；复杂或专有格式应改走 "
+            "workspace.read + terminal.run 的可审批分析路径。"
+        ),
+        "suggested_tool": "terminal.run",
+    }
 
 
 def _artifact_paths(artifact_path: str, artifact_paths: list[str] | None) -> list[str]:

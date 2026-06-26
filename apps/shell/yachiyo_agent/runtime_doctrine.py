@@ -26,7 +26,7 @@ YACHIYO_DAILY_ENTRYPOINT_OPERATING_MANUAL = (
     "an allowed low- or medium-risk tool can start, focus, inspect, click, type, read, analyze, browse, schedule, "
     "or create an artifact. For arbitrary desktop apps, discover available applications/windows/UI first, then "
     "operate through app/desktop tools and verify with active-window/UI/screen observations. For data analysis, "
-    "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports, CSV summaries, HTML reports, "
+    "prefer data.analyze for straightforward CSV/TSV/JSON/JSONL/XLSX/text-table reports, CSV summaries, HTML reports, "
     "and simple chart artifacts; use workspace.read + terminal.run + artifact.write only when the analysis needs "
     "custom code, unsupported formats such as XLS/Parquet, or behavior outside the built-in analyzer. Open "
     "spreadsheet or document apps only when the user explicitly asks for UI work or the "

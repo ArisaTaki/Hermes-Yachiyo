@@ -159,6 +159,100 @@ def test_tool_broker_call_analyzes_markdown_table_file(tmp_path) -> None:
     assert "mean=15.0" in content
 
 
+def test_tool_broker_call_analyzes_json_file(tmp_path) -> None:
+    (tmp_path / "sales.json").write_text(
+        (
+            "["
+            '{"region":"East","metrics":{"revenue":10}},'
+            '{"region":"West","metrics":{"revenue":20}}'
+            "]"
+        ),
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.json", "artifact_path": "reports/sales-json.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "json"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "metrics.revenue"]
+    content = (tmp_path / "artifacts" / "reports" / "sales-json.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mean=15.0" in content
+
+
+def test_tool_broker_call_analyzes_jsonl_file(tmp_path) -> None:
+    (tmp_path / "events.jsonl").write_text(
+        '{"region":"East","revenue":10}\n{"region":"West","revenue":20}\n',
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "events.jsonl", "artifact_path": "reports/events.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "jsonl"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "revenue"]
+    content = (tmp_path / "artifacts" / "reports" / "events.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mean=15.0" in content
+
+
+def test_tool_broker_call_analyzes_tsv_file(tmp_path) -> None:
+    (tmp_path / "sales.tsv").write_text(
+        "region\trevenue\nEast\t10\nWest\t20\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.tsv", "artifact_path": "reports/sales-tsv.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "tsv"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "revenue"]
+    content = (tmp_path / "artifacts" / "reports" / "sales-tsv.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mean=15.0" in content
+
+
+def test_tool_broker_call_analyzes_plain_text_file(tmp_path) -> None:
+    (tmp_path / "notes.txt").write_text(
+        "first line\nsecond line with words\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "notes.txt", "artifact_path": "reports/notes.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "text"
+    assert result["rows"] == 2
+    assert result["columns"] == []
+    content = (tmp_path / "artifacts" / "reports" / "notes.md").read_text(
+        encoding="utf-8"
+    )
+    assert "- Lines: 2" in content
+    assert "- Words: 6" in content
+
+
 def test_tool_broker_call_analyzes_xlsx_file(tmp_path) -> None:
     workbook = tmp_path / "sales.xlsx"
     with zipfile.ZipFile(workbook, "w") as archive:
@@ -198,6 +292,52 @@ def test_tool_broker_call_analyzes_xlsx_file(tmp_path) -> None:
         encoding="utf-8"
     )
     assert "mean=15.0" in content
+
+
+def test_tool_broker_call_handles_empty_xlsx_without_text_fallback(tmp_path) -> None:
+    workbook = tmp_path / "empty.xlsx"
+    with zipfile.ZipFile(workbook, "w") as archive:
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            (
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                "<sheetData />"
+                "</worksheet>"
+            ),
+        )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "empty.xlsx", "artifact_path": "reports/empty.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "xlsx"
+    assert result["rows"] == 0
+    assert result["columns"] == []
+    content = (tmp_path / "artifacts" / "reports" / "empty.md").read_text(
+        encoding="utf-8"
+    )
+    assert "- Source kind: `xlsx`" in content
+    assert "_No rows to preview._" in content
+
+
+def test_tool_broker_call_returns_data_analysis_parse_error(tmp_path) -> None:
+    (tmp_path / "broken.json").write_text('{"region": "East"', encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "broken.json", "artifact_path": "reports/broken.md"},
+    )
+
+    assert result["ok"] is False
+    assert result["source_kind"] == "json"
+    assert result["error"] == "数据文件解析失败"
+    assert result["suggested_tool"] == "terminal.run"
+    assert "workspace.read + terminal.run" in result["hint"]
+    assert not (tmp_path / "artifacts" / "reports" / "broken.md").exists()
 
 
 def test_data_analyze_schema_rejects_invalid_max_rows() -> None:

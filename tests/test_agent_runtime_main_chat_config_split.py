@@ -64,7 +64,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "Do not answer with recipes like 'you can open the app yourself'" in config["instructions"]
     assert "discover available applications/windows/UI first" in config["instructions"]
     assert (
-        "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports, "
+        "prefer data.analyze for straightforward CSV/TSV/JSON/JSONL/XLSX/text-table reports, "
         "CSV summaries, HTML reports, and simple chart artifacts"
         in config["instructions"]
     )

@@ -139,6 +139,27 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_markdown_tables() -> 
     }
 
 
+def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 logs/events.jsonl 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_hint"] == "logs/events.jsonl"
+    assert decision.selected_intent.inputs["data_source_kind"] == "jsonl"
+    assert decision.plan.tool_plan.approvals_required == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file"
+    ]
+    step = _step_by_id(decision, "analyze-data-file")
+    assert step.tool_name == "data.analyze"
+    assert step.input_preview == {
+        "path": "logs/events.jsonl",
+        "artifact_path": "analysis-report.md",
+    }
+
+
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
     decision = RuntimePlanner().decision(
         "请分析 metrics.parquet 并输出报告",

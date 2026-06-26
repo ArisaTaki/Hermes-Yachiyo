@@ -884,7 +884,7 @@ def _workspace_readable_data_source(source_hint: str, inputs: Mapping[str, Any])
     source_kind = str(inputs.get("data_source_kind") or "").strip()
     if not source_kind or source_kind == "unknown":
         source_kind = data_source_kind_hint(source_hint)
-    return source_kind in {"csv", "tsv", "json", "text", "text_table"}
+    return source_kind in {"csv", "tsv", "json", "jsonl", "text", "text_table"}
 
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:

@@ -916,7 +916,7 @@ class RuntimePlanner:
                     _first_allowed(("data.analyze",), allowed),
                     input_preview=input_preview,
                     reason=(
-                        "Use the built-in local parser for straightforward CSV, TSV, JSON, XLSX, "
+                        "Use the built-in local parser for straightforward CSV, TSV, JSON, JSONL, XLSX, "
                         "text-table, and standard report artifacts before escalating to terminal.run."
                     ),
                 )
@@ -2864,7 +2864,7 @@ def _can_use_builtin_data_analysis(
         return False
     if any(part == ".." for part in source_hint.replace("\\", "/").split("/")):
         return False
-    if source_kind not in {"csv", "tsv", "json", "xlsx", "text", "text_table"}:
+    if source_kind not in {"csv", "tsv", "json", "jsonl", "xlsx", "text", "text_table"}:
         return False
     return True
 
