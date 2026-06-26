@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .planner_execution import planner_direct_decision_and_tool_requests
+from .planner_projection import planner_selection_payload
 
 LegacyToolRequestProvider = Callable[[str, list[str]], list[dict[str, Any]]]
 LegacyToolRequestPostprocess = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
@@ -71,7 +72,7 @@ def planner_first_direct_tool_selection(
         return DirectToolSelection(
             decision=decision if selected_source == "runtime_planner" else None,
             requests=selected_requests,
-            event_payload=_selection_event_payload(
+            event_payload=planner_selection_payload(
                 decision=decision,
                 planner_requests=planner_requests,
                 legacy_requests=legacy_requests,
@@ -85,7 +86,7 @@ def planner_first_direct_tool_selection(
         return DirectToolSelection(
             decision=None,
             requests=selected_requests,
-            event_payload=_selection_event_payload(
+            event_payload=planner_selection_payload(
                 decision=decision,
                 planner_requests=planner_requests,
                 legacy_requests=selected_requests,
@@ -98,7 +99,7 @@ def planner_first_direct_tool_selection(
     return DirectToolSelection(
         decision=None,
         requests=[],
-        event_payload=_selection_event_payload(
+        event_payload=planner_selection_payload(
             decision=decision,
             planner_requests=planner_requests,
             legacy_requests=legacy_requests,
@@ -178,48 +179,3 @@ def _legacy_selection_reason(planner_requests: list[dict[str, Any]]) -> str:
     if any(bool(request.get("continue_to_model")) for request in planner_requests):
         return "legacy_direct_plan_over_model_followup"
     return "legacy_more_specific_direct_plan"
-
-
-def _selection_event_payload(
-    *,
-    decision: Any | None,
-    planner_requests: list[dict[str, Any]],
-    legacy_requests: list[dict[str, Any]],
-    selected_requests: list[dict[str, Any]],
-    selected_source: str,
-    selected_reason: str,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "source": "runtime_planner",
-        "selection_source": selected_source,
-        "selection_reason": selected_reason,
-        "planner_tools": _tool_names(planner_requests),
-        "legacy_tools": _tool_names(legacy_requests),
-        "selected_tools": _tool_names(selected_requests),
-        "planner_request_count": len(planner_requests),
-        "legacy_request_count": len(legacy_requests),
-        "selected_request_count": len(selected_requests),
-    }
-    decision_id = str(getattr(decision, "decision_id", "") or "").strip()
-    if decision_id:
-        payload["decision_id"] = decision_id
-    plan = getattr(decision, "plan", None)
-    plan_id = str(getattr(plan, "plan_id", "") or "").strip()
-    if plan_id:
-        payload["plan_id"] = plan_id
-    intent = getattr(decision, "selected_intent", None)
-    intent_kind = str(getattr(intent, "kind", "") or "").strip()
-    if intent_kind:
-        payload["intent_kind"] = intent_kind
-    route_to_studio = getattr(plan, "route_to_studio", None)
-    if isinstance(route_to_studio, bool):
-        payload["route_to_studio"] = route_to_studio
-    return payload
-
-
-def _tool_names(requests: list[dict[str, Any]]) -> list[str]:
-    return [
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if str(request.get("tool") or "").strip()
-    ]

@@ -19,7 +19,11 @@ from apps.shell.yachiyo_agent.planner_execution import (
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
 )
-from apps.shell.yachiyo_agent.planner_projection import planner_timeline_events
+from apps.shell.yachiyo_agent.planner_projection import (
+    planner_selection_payload,
+    planner_selection_timeline_event,
+    planner_timeline_events,
+)
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
@@ -210,6 +214,46 @@ def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() ->
     ]
     assert plan_tools == ["app.open", "desktop.click_ui_element"]
     assert events[2]["payload"]["step"]["step_id"] == "discover-desktop-state"
+
+
+def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=["app.open"],
+    )
+    planner_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=planner_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    event = planner_selection_timeline_event(payload)
+
+    assert payload["source"] == "runtime_planner"
+    assert payload["selection_source"] == "runtime_planner"
+    assert payload["selection_reason"] == "runtime_planner_direct"
+    assert payload["planner_tools"] == ["app.open"]
+    assert payload["legacy_tools"] == []
+    assert payload["selected_tools"] == ["app.open"]
+    assert payload["planner_request_count"] == 1
+    assert payload["legacy_request_count"] == 0
+    assert payload["selected_request_count"] == 1
+    assert payload["decision_id"] == decision.decision_id
+    assert payload["plan_id"] == decision.plan.plan_id
+    assert payload["intent_kind"] == "desktop_operation"
+    assert event["event"] == "agent.plan.selection"
+    assert event["detail"] == "runtime_planner"
+    assert event["payload"] == payload
 
 
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:

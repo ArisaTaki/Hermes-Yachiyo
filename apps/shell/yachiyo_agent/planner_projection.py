@@ -90,6 +90,66 @@ def planner_timeline_events(
     return events
 
 
+def planner_selection_payload(
+    *,
+    decision: Any | None,
+    planner_requests: Iterable[Mapping[str, Any]],
+    legacy_requests: Iterable[Mapping[str, Any]],
+    selected_requests: Iterable[Mapping[str, Any]],
+    selected_source: str,
+    selected_reason: str,
+) -> dict[str, Any]:
+    planner_request_list = _request_list(planner_requests)
+    legacy_request_list = _request_list(legacy_requests)
+    selected_request_list = _request_list(selected_requests)
+    payload: dict[str, Any] = {
+        "source": "runtime_planner",
+        "selection_source": str(selected_source or "").strip(),
+        "selection_reason": str(selected_reason or "").strip(),
+        "planner_tools": _tool_names(planner_request_list),
+        "legacy_tools": _tool_names(legacy_request_list),
+        "selected_tools": _tool_names(selected_request_list),
+        "planner_request_count": len(planner_request_list),
+        "legacy_request_count": len(legacy_request_list),
+        "selected_request_count": len(selected_request_list),
+    }
+    decision_id = str(getattr(decision, "decision_id", "") or "").strip()
+    if decision_id:
+        payload["decision_id"] = decision_id
+    plan = getattr(decision, "plan", None)
+    plan_id = str(getattr(plan, "plan_id", "") or "").strip()
+    if plan_id:
+        payload["plan_id"] = plan_id
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    if intent_kind:
+        payload["intent_kind"] = intent_kind
+    route_to_studio = getattr(plan, "route_to_studio", None)
+    if isinstance(route_to_studio, bool):
+        payload["route_to_studio"] = route_to_studio
+    return payload
+
+
+def planner_selection_timeline_event(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    event_payload = dict(payload)
+    detail = str(
+        event_payload.get("selection_source")
+        or event_payload.get("selection_reason")
+        or "direct_tool_selection"
+    ).strip()
+    return {
+        "event": "agent.plan.selection",
+        "detail": detail,
+        "status": "planned",
+        "source": str(event_payload.get("source") or "runtime_planner"),
+        "decision_id": str(event_payload.get("decision_id") or ""),
+        "plan_id": str(event_payload.get("plan_id") or ""),
+        "payload": event_payload,
+    }
+
+
 def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str:
     if event_type == "agent.intent.selected":
         intent = payload.get("intent") if isinstance(payload.get("intent"), Mapping) else {}
@@ -146,3 +206,17 @@ def planner_run_event_payloads(
             )
         )
     return payloads
+
+
+def _request_list(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    return [request for request in requests if isinstance(request, Mapping)]
+
+
+def _tool_names(requests: Iterable[Mapping[str, Any]]) -> list[str]:
+    return [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if str(request.get("tool") or "").strip()
+    ]
