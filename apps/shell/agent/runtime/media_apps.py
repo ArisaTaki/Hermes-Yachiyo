@@ -40,7 +40,7 @@ def music_app_name_from_text(text: str) -> str:
         return "网易云音乐"
     if re.search(r"qq\s*音乐|qq\s*music", lowered):
         return "QQ音乐"
-    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app|软件|播放器)?|\bmusic(?:\s*(?:app|player))?\b", lowered):
+    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app|软件|播放器)|\bmusic\s+(?:app|player)\b", lowered):
         return "Music"
     return ""
 

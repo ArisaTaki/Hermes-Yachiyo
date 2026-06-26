@@ -3430,6 +3430,23 @@ def test_planner_desktop_tool_requests_normalizes_named_music_app_control() -> N
     ]
 
 
+def test_planner_desktop_tool_requests_keeps_generic_music_control_system_scoped() -> None:
+    requests = planner_desktop_tool_requests(
+        "关掉音乐",
+        allowed_tools=["media.apple_music_control", "media.system_control"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.system_control",
+            "input": {"action": "pause"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
 def test_planner_tool_requests_maps_system_control_plan() -> None:
     requests = planner_tool_requests(
         "打开屏保",
