@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -34,6 +34,16 @@ def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
 
 def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
     return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
+
+
+def _recording_legacy_requests(
+    calls: list[dict[str, Any]],
+) -> Callable[[str, list[str]], list[dict[str, Any]]]:
+    def record(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return []
+
+    return record
 
 
 def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -> None:
@@ -2760,8 +2770,7 @@ def test_planner_direct_tool_requests_maps_foreground_browser_safe_shortcuts() -
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_system_settings_open() -> None:
-    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
-        raise AssertionError("system settings open should be owned by runtime planner")
+    legacy_calls: list[dict[str, Any]] = []
 
     decision, requests = planner_first_direct_decision_and_tool_requests(
         "打开蓝牙",
@@ -2771,7 +2780,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_system_settings_open() -
             "desktop.active_window",
             "system.settings_open",
         ],
-        legacy_tool_requests=fail_legacy,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert decision is not None
@@ -2785,11 +2794,11 @@ def test_entrypoint_selection_keeps_runtime_planner_for_system_settings_open() -
             "planning_reason": "planner_fallback_system_control",
         }
     ]
+    assert legacy_calls == []
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan() -> None:
-    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
-        raise AssertionError("strong runtime planner plan should not consult legacy")
+    legacy_calls: list[dict[str, Any]] = []
 
     decision, requests = planner_first_direct_decision_and_tool_requests(
         "打开 PixelForge 并点击导出按钮",
@@ -2799,7 +2808,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
             "desktop.click_ui_element",
             "desktop.ui_elements",
         ],
-        legacy_tool_requests=fail_legacy,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert decision is not None
@@ -2807,16 +2816,16 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
         "app.open",
         "desktop.click_ui_element",
     ]
+    assert legacy_calls == []
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> None:
-    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
-        raise AssertionError("current-page find should be owned by runtime planner")
+    legacy_calls: list[dict[str, Any]] = []
 
     selection = planner_first_direct_tool_selection(
         "用剪贴板内容查找当前网页",
         ["desktop.safe_shortcut", "desktop.safe_type_text", "clipboard.read"],
-        legacy_tool_requests=fail_legacy,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert selection.selected_source == "runtime_planner"
@@ -2837,6 +2846,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> N
             "planning_reason": "planner_fallback_current_page_find",
         },
     ]
+    assert legacy_calls == []
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_matching_safe_shortcuts() -> None:
@@ -2877,7 +2887,10 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_safe_shortcuts(
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
     def legacy_requests(prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(_allowed_tools)})
         if "127.0.0.1" in prompt:
             return [
                 {
@@ -2901,7 +2914,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> N
     )
 
     assert selection.selected_source == "runtime_planner"
-    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.event_payload["legacy_request_count"] == 0
     assert selection.requests == [
         {
             "protocol": "json_fallback",
@@ -2911,6 +2924,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> N
             "planning_reason": "planner_fallback_web_research",
         }
     ]
+    assert legacy_calls == []
 
     local_selection = planner_first_direct_tool_selection(
         "打开 127.0.0.1:5173",
@@ -2928,10 +2942,14 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> N
             "planning_reason": "planner_fallback_web_research",
         }
     ]
+    assert legacy_calls == []
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
     def legacy_requests(prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(_allowed_tools)})
         request = {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
@@ -2948,7 +2966,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
     )
 
     assert selection.selected_source == "runtime_planner"
-    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.event_payload["legacy_request_count"] == 0
     assert selection.requests == [
         {
             "protocol": "json_fallback",
@@ -2959,6 +2977,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
             "presentation": "summary",
         }
     ]
+    assert legacy_calls == []
 
 
 def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
@@ -4444,13 +4463,12 @@ def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
 
 
 def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> None:
-    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
-        raise AssertionError("planner-owned app UI observation should not consult legacy")
+    legacy_calls: list[dict[str, Any]] = []
 
     app_ui = planner_first_direct_tool_selection(
         "Slack 有哪些按钮",
         ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
-        legacy_tool_requests=fail_legacy,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert app_ui.selected_source == "runtime_planner"
@@ -4471,6 +4489,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
             "planning_reason": "planner_fallback_desktop_operation",
         },
     ]
+    assert legacy_calls == []
 
 
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
