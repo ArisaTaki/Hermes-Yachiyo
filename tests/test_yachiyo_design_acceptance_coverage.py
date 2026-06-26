@@ -332,6 +332,33 @@ def _assert_acceptance_evidence(evidence: AcceptanceEvidence) -> None:
         _assert_contains(relative_path, list(fragments))
 
 
+def test_hanako_hermes_runtime_roadmap_is_guarded() -> None:
+    _assert_contains(
+        "docs/yachiyo-hanako-hermes-runtime-roadmap.md",
+        [
+            "Phase 0 - 基线审计与保护网",
+            "Phase 1 - Public Contracts",
+            "Phase 2 - Capability Registry",
+            "Phase 3 - Task Intent Router",
+            "Phase 4 - Runtime Planner",
+            "Phase 5 - Desktop Discover/Operate Layer",
+            "Phase 6 - Data Analysis Capability",
+            "Phase 7 - Prompt/Skill Runtime Doctrine",
+            "Phase 8 - Chat/Bubble/Live2D Planner Integration",
+            "Phase 9 - Agent Studio Debug Surface",
+            "Phase 10 - 删除旧硬编码与收敛代码",
+            "Runtime planning follows TaskIntent -> CapabilityPlan -> ToolPlan.",
+            "Discovery comes before app-specific rules",
+            "Old route response shapes, database schema, Agent Studio, Groups, Workflow",
+            "禁止删除 Agent Studio。",
+            "禁止一次性重写 NativeRunEngine。",
+            "禁止改数据库 schema。",
+            "禁止破坏旧 route response shape。",
+            "禁止绕过 approval/policy gate。",
+        ],
+    )
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
