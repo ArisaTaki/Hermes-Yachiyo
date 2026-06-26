@@ -287,7 +287,7 @@ class RuntimeCustomApiAgentLoop:
             planned_tool_requests = (
                 [direct_planned_tool_request]
                 if direct_planned_tool_request
-                else self._runtime_planner_desktop_tool_requests(
+                else self._runtime_planner_tool_requests(
                     planning_context,
                     allowed_tools,
                 )
@@ -525,16 +525,16 @@ class RuntimeCustomApiAgentLoop:
         }
 
     @staticmethod
-    def _runtime_planner_desktop_tool_requests(
+    def _runtime_planner_tool_requests(
         planning_context: str,
         allowed_tools: list[str],
     ) -> list[dict[str, Any]]:
         try:
-            from apps.shell.yachiyo_agent.planner_execution import planner_desktop_tool_requests
+            from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
         except Exception:
             return []
         try:
-            return planner_desktop_tool_requests(
+            return planner_tool_requests(
                 planning_context,
                 allowed_tools,
             )

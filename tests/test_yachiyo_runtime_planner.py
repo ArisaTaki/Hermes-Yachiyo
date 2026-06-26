@@ -11,7 +11,10 @@ from apps.shell.yachiyo_agent import (
     YachiyoAgentService,
     capability_snapshots,
 )
-from apps.shell.yachiyo_agent.planner_execution import planner_desktop_tool_requests
+from apps.shell.yachiyo_agent.planner_execution import (
+    planner_desktop_tool_requests,
+    planner_tool_requests,
+)
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
@@ -361,6 +364,16 @@ def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> No
             "continue_to_model": True,
         }
     ]
+
+
+def test_planner_desktop_tool_requests_remains_compat_wrapper() -> None:
+    assert planner_desktop_tool_requests(
+        "打开 https://example.com",
+        allowed_tools=["browser.open_url"],
+    ) == planner_tool_requests(
+        "打开 https://example.com",
+        allowed_tools=["browser.open_url"],
+    )
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:

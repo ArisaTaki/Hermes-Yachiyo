@@ -18,7 +18,7 @@ from .desktop_plan_hints import (
 from .runtime_planner import RuntimePlanner
 
 
-def planner_desktop_tool_requests(
+def planner_tool_requests(
     prompt: str,
     allowed_tools: Iterable[str],
     *,
@@ -134,6 +134,19 @@ def planner_desktop_tool_requests(
         requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
 
     return requests
+
+
+def planner_desktop_tool_requests(
+    prompt: str,
+    allowed_tools: Iterable[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    return planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
 
 
 def _request(
