@@ -17,6 +17,10 @@ def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
     return {step.step_id: step for step in decision.plan.tool_plan.steps}[step_id]
 
 
+def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
+    return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
+
+
 def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告和图表",
@@ -74,6 +78,34 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     assert _step_by_id(decision, "operate-foreground-ui").approval_required is True
 
 
+def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=[
+            "desktop.running_apps",
+            "app.open_and_click_ui_element",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+    ]
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.tool_name == "app.open_and_click_ui_element"
+    assert operation.input_preview == {
+        "app_name": "PixelForge",
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert operation.depends_on == ["discover-desktop-state"]
+    ui_capability = _capability_by_id(decision, "desktop.ui_operation")
+    assert "app.open_and_click_ui_element" in ui_capability.tools
+
+
 def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",
@@ -97,6 +129,59 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
                 "limit": 80,
                 "click_count": 1,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_prefers_combined_app_foreground_tool() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=["app.open_and_click_ui_element", "app.open", "desktop.click_ui_element"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_arbitrary_app_typing_and_submit() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 PixelForge 搜索框输入 hello 并回车",
+        allowed_tools=["app.open_and_type_into_ui_element", "desktop.submit_foreground"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "搜索框",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

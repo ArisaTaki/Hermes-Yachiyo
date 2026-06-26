@@ -21,6 +21,14 @@ from .contracts import (
     ToolPlanSnapshot,
     ToolPlanStepSnapshot,
 )
+from .desktop_plan_hints import (
+    app_control_mode,
+    app_control_tool_candidates,
+    app_foreground_tool_candidates,
+    click_target_hint,
+    safe_type_text_hint,
+    type_into_ui_hint,
+)
 
 
 class TaskIntentRouter:
@@ -427,6 +435,19 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         app_name = str(intent.inputs.get("app_name_hint") or "").strip()
+        mode = app_control_mode(intent.user_goal)
+        click_target = click_target_hint(intent.user_goal)
+        type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
+        safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
+        operation_tool, operation_preview = _desktop_operation_tool_preview(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            click_target=click_target,
+            type_target=type_target,
+            safe_type_text=safe_type_text,
+        )
+        operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
         steps = [
             _step(
                 intent,
@@ -437,14 +458,14 @@ class RuntimePlanner:
                 reason="Inspect the current app/window state before acting.",
             )
         ]
-        if app_name:
+        if app_name and not operation_uses_app_tool:
             steps.append(
                 _step(
                     intent,
                     "open-or-focus-app",
                     "Open or focus app",
                     "desktop.app_control",
-                    _first_allowed(("app.open", "app.focus"), allowed),
+                    _first_allowed(app_control_tool_candidates(mode), allowed),
                     input_preview={"app_name": app_name},
                     depends_on=["discover-desktop-state"],
                     reason="Resolve the requested app by name at runtime.",
@@ -457,7 +478,8 @@ class RuntimePlanner:
                     "operate-foreground-ui",
                     "Operate foreground UI",
                     "desktop.ui_operation",
-                    _first_allowed(
+                    operation_tool
+                    or _first_allowed(
                         (
                             "desktop.click_ui_element",
                             "desktop.type_into_ui_element",
@@ -467,9 +489,14 @@ class RuntimePlanner:
                         ),
                         allowed,
                     ),
+                    input_preview=operation_preview,
                     risk_level="medium",
                     approval_required=True,
-                    depends_on=["open-or-focus-app"] if app_name else ["discover-desktop-state"],
+                    depends_on=(
+                        ["discover-desktop-state"]
+                        if operation_uses_app_tool or not app_name
+                        else ["open-or-focus-app"]
+                    ),
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
@@ -788,6 +815,39 @@ def _looks_like_ui_operation(text: str) -> bool:
         text,
         ["click", "type", "press", "shortcut", "scroll", "点击", "输入", "按", "快捷键", "滚动", "发送"],
     )
+
+
+def _desktop_operation_tool_preview(
+    *,
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+    click_target: dict[str, Any] | None,
+    type_target: dict[str, Any] | None,
+    safe_type_text: str,
+) -> tuple[str | None, dict[str, Any]]:
+    if app_name and type_target:
+        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "type_into_ui_element"), allowed)
+        if app_tool:
+            return app_tool, {"app_name": app_name, **type_target, "limit": 80}
+        return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
+    if app_name and safe_type_text:
+        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_type_text"), allowed)
+        if app_tool:
+            return app_tool, {"app_name": app_name, "text": safe_type_text}
+        return _first_allowed(("desktop.safe_type_text",), allowed), {"text": safe_type_text}
+    if app_name and click_target:
+        app_tool = _first_allowed(app_foreground_tool_candidates(mode, "click_ui_element"), allowed)
+        if app_tool:
+            return app_tool, {"app_name": app_name, **click_target, "limit": 80}
+        return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
+    if type_target:
+        return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
+    if safe_type_text:
+        return _first_allowed(("desktop.safe_type_text",), allowed), {"text": safe_type_text}
+    if click_target:
+        return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
+    return None, {}
 
 
 def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
