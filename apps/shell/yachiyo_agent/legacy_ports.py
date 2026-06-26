@@ -47,6 +47,7 @@ from .legacy_tasks import (
 )
 from .planner_projection import (
     planner_run_event_payloads,
+    runtime_planner_decision,
     runtime_planner_metadata,
 )
 from .planner_execution import planner_tool_requests
@@ -706,15 +707,22 @@ class LegacyStudioPort:
         )
 
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
-        return self._runtime.create_agent_run(
+        user_goal = str(request.get("objective") or request.get("goal") or "").strip()
+        metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        run = self._runtime.create_agent_run(
             {
                 "agent_id": request.get("agent_id"),
-                "user_goal": request.get("objective") or request.get("goal"),
+                "user_goal": user_goal,
                 "source": "yachiyo_studio",
                 "client_run_id": request.get("client_run_id"),
                 "run_group_id": request.get("run_group_id"),
             }
         )
+        self._append_planner_run_events(
+            _run_id_from_payload(run),
+            runtime_planner_decision(user_goal, metadata=metadata),
+        )
+        return run
 
     def list_groups(self) -> dict[str, Any]:
         list_agent_groups = getattr(self._runtime, "list_agent_groups", None)
@@ -850,15 +858,22 @@ class LegacyStudioPort:
         return self._runtime.delete_workflow(workflow_id)
 
     def start_workflow_run(self, request: dict[str, Any]) -> dict[str, Any]:
-        return self._runtime.create_workflow_run(
+        user_goal = str(request.get("objective") or request.get("goal") or "").strip()
+        metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        run = self._runtime.create_workflow_run(
             {
                 "workflow_id": request.get("workflow_id"),
-                "user_goal": request.get("objective") or request.get("goal"),
+                "user_goal": user_goal,
                 "source": "yachiyo_studio",
                 "client_run_id": request.get("client_run_id"),
                 "run_group_id": request.get("run_group_id"),
             }
         )
+        self._append_planner_run_events(
+            _run_id_from_payload(run),
+            runtime_planner_decision(user_goal, metadata=metadata),
+        )
+        return run
 
     def list_run_timelines(self, limit: int = 50) -> dict[str, Any]:
         return self._runtime.list_runs(limit)
@@ -936,9 +951,28 @@ class LegacyStudioPort:
             limit=limit,
         )
 
+    def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not run_id or not callable(append_run_event):
+            return
+        for event_type, payload in planner_run_event_payloads(planner_decision):
+            try:
+                append_run_event(run_id, event_type, payload)
+            except Exception:
+                continue
+
 
 def _chat_task_payload(run: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
     return _LEGACY_RUN_PROJECTOR.chat_task_payload(run, conversation_id=conversation_id)
+
+
+def _run_id_from_payload(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("run_id")
+        or payload.get("workflow_run_id")
+        or payload.get("agent_run_id")
+        or ""
+    ).strip()
 
 
 def _safe_runtime_planner_tool_requests(

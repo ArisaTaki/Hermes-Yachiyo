@@ -10,6 +10,65 @@ from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
+def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
+    runtime = _FakeStudioRunRuntime()
+
+    run = LegacyStudioPort(runtime).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "请分析 data/sales.csv 并输出报告",
+            "client_run_id": "client-agent-run-1",
+        }
+    )
+
+    assert run["run_id"] == "agent-run-1"
+    assert runtime.agent_run_payload == {
+        "agent_id": "agent-1",
+        "user_goal": "请分析 data/sales.csv 并输出报告",
+        "source": "yachiyo_studio",
+        "client_run_id": "client-agent-run-1",
+        "run_group_id": None,
+    }
+    events = runtime.events["agent-run-1"]
+    assert [event["event_type"] for event in events[:3]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert events[0]["payload"]["intent"]["kind"] == "data_analysis"
+    assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == "data.analyze"
+
+
+def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
+    runtime = _FakeStudioRunRuntime()
+
+    run = LegacyStudioPort(runtime).start_workflow_run(
+        {
+            "workflow_id": "workflow-1",
+            "objective": "打开 PixelForge",
+            "client_run_id": "client-workflow-run-1",
+        }
+    )
+
+    assert run["workflow_run_id"] == "workflow-run-1"
+    assert runtime.workflow_run_payload == {
+        "workflow_id": "workflow-1",
+        "user_goal": "打开 PixelForge",
+        "source": "yachiyo_studio",
+        "client_run_id": "client-workflow-run-1",
+        "run_group_id": None,
+    }
+    events = runtime.events["workflow-run-1"]
+    assert [event["event_type"] for event in events[:3]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert events[0]["payload"]["intent"]["kind"] == "desktop_operation"
+    assert events[0]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
+    assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["action"] == "list_apps"
+
+
 def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     runtime = _FakeGroupRuntime()
 
@@ -128,6 +187,45 @@ def test_legacy_studio_port_rejects_mismatched_approval_id() -> None:
         port.approve_run_approval("run-1", {"approval_id": "wrong-approval"})
 
     assert runtime.last_approve_request is None
+
+
+class _FakeStudioRunRuntime:
+    def __init__(self) -> None:
+        self.agent_run_payload: dict[str, Any] | None = None
+        self.workflow_run_payload: dict[str, Any] | None = None
+        self.events: dict[str, list[dict[str, Any]]] = {}
+
+    def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.agent_run_payload = dict(payload)
+        return {
+            "run_id": "agent-run-1",
+            "status": "processing",
+            "user_goal": payload.get("user_goal"),
+        }
+
+    def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.workflow_run_payload = dict(payload)
+        return {
+            "run_id": "workflow-run-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_id": payload.get("workflow_id"),
+            "status": "processing",
+            "user_goal": payload.get("user_goal"),
+        }
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        event = {
+            "event_type": event_type,
+            "payload": dict(payload),
+            "run_id": run_id,
+        }
+        self.events.setdefault(run_id, []).append(event)
+        return event
 
 
 class _FakeGroupRuntime:
