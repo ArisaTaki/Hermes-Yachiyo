@@ -4372,6 +4372,24 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
         store.close()
 
 
+def test_send_message_keeps_legacy_daily_desktop_fallback_inside_main_chat_policy(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.agent_runtime_service = SimpleNamespace(
+        _main_chat_tool_policy=lambda: {"allowed_tools": ["workspace.read"]}
+    )
+    try:
+        result = api.send_message("打开 GitHub")
+        user_message = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert result["status"] == "pending"
+        assert "agent_task" not in result
+        assert user_message.metadata.get("daily_desktop_intent") is None
+        assert user_message.metadata.get("daily_desktop_tool") is None
+    finally:
+        store.close()
+
+
 def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

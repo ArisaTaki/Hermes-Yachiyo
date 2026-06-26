@@ -733,7 +733,7 @@ class ChatAPI:
         return daily_desktop_entrypoint_requests(
             text,
             metadata=metadata,
-            allowed_tools=allowed_daily_desktop_tools,
+            allowed_tools=allowed_entrypoint_tools,
         )
 
     def _daily_desktop_followup_goal_text(

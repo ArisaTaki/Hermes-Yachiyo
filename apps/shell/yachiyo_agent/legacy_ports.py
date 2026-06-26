@@ -200,7 +200,7 @@ class LegacyChatTaskStarter:
             planned_requests = daily_desktop_entrypoint_requests(
                 prompt,
                 metadata=metadata,
-                allowed_tools=allowed_daily_desktop_tools,
+                allowed_tools=allowed_entrypoint_tools,
             )
         return daily_desktop_planned_timeline(
             prompt,
