@@ -8,6 +8,7 @@ from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 from .desktop_permissions import desktop_permission_missing_by_capability
 from .legacy_runs import LegacyRunPayloadProjector
+from .planner_projection import planner_run_event_payloads, runtime_planner_decision
 from .policy import desktop_execution_capability_snapshots
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
@@ -95,6 +96,7 @@ class LegacyRuntimePort:
         )
         conversation_id = str(request.get("conversation_id") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        planner_decision = runtime_planner_decision(prompt, metadata=metadata)
         requested_task_id = str(
             request.get("task_id")
             or request.get("client_task_id")
@@ -124,6 +126,7 @@ class LegacyRuntimePort:
                     user_goal=prompt,
                 )
         run_id = str(run.get("run_id") or "").strip()
+        self._append_planner_run_events(run_id, planner_decision)
         task_id = requested_task_id or run_id
         if task_id and run_id:
             link_task_run = getattr(self._runtime, "link_task_run", None)
@@ -137,6 +140,16 @@ class LegacyRuntimePort:
             else:
                 run = {**run, "task_id": task_id, "session_id": conversation_id}
         return self._projector.chat_task_payload(run, conversation_id=conversation_id)
+
+    def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not run_id or not callable(append_run_event):
+            return
+        for event_type, payload in planner_run_event_payloads(planner_decision):
+            try:
+                append_run_event(run_id, event_type, payload)
+            except Exception:
+                continue
 
     def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)

@@ -7,7 +7,10 @@ from typing import Any
 import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.yachiyo_agent.legacy_ports import LegacyRuntimePort as CompatLegacyRuntimePort
+from apps.shell.yachiyo_agent.legacy_ports import (
+    LegacyChatTaskStarter,
+    LegacyRuntimePort as CompatLegacyRuntimePort,
+)
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 
 
@@ -34,6 +37,58 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
         ("link_task_run", {"task_id": "task-1", "run_id": "run-1", "session_id": "chat-1"}),
         ("get_run", "run-1"),
     ]
+
+
+def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> None:
+    runtime = _PlannerEventFakeRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "分析 sales.csv 并输出报告",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert task["task_id"] == "task-1"
+    assert [event[1]["event_type"] for event in planner_events] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+        "agent.plan.step",
+        "agent.plan.step",
+    ]
+    assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
+    assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["artifacts_expected"] == [
+        "analysis-report.md",
+    ]
+
+
+def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+    )
+
+    assert task is not None
+    assert task["task_id"] == "task-main"
+    assert app_runtime.chat_session.metadata_calls[0]["metadata"]["yachiyo_runtime_planner"] is True
+    assert app_runtime.chat_session.metadata_calls[0]["metadata"]["yachiyo_intent_kind"] == (
+        "desktop_operation"
+    )
+    assert app_runtime.chat_session.metadata_calls[0]["metadata"]["daily_desktop_tool"] == "app.open"
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert [event[1]["event_type"] for event in planner_events[:2]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+    ]
+    assert planner_events[0][1]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
 
 
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
@@ -436,3 +491,132 @@ class _PagedFakeRuntime(_FakeRuntime):
             "has_more": True,
             "events": [{"event": "agent.progress", "sequence": 5}],
         }
+
+
+class _PlannerEventFakeRuntime(_FakeRuntime):
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.calls.append(
+            (
+                "append_run_event",
+                {
+                    "run_id": run_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+            )
+        )
+
+
+class _FakeChatSession:
+    session_id = "chat-1"
+
+    def __init__(self) -> None:
+        self.metadata_calls: list[dict[str, Any]] = []
+        self.assistant_messages: list[dict[str, Any]] = []
+
+    def update_message_metadata_for_task(
+        self,
+        task_id: str,
+        metadata: dict[str, Any],
+        *,
+        role: str,
+    ) -> None:
+        self.metadata_calls.append(
+            {
+                "task_id": task_id,
+                "metadata": metadata,
+                "role": role,
+            }
+        )
+
+    def upsert_assistant_message(self, **payload: Any) -> None:
+        self.assistant_messages.append(payload)
+
+
+class _FakeAppState:
+    def __init__(self) -> None:
+        self.status_calls: list[dict[str, Any]] = []
+
+    def update_task_status(self, task_id: str, status: Any, **payload: Any) -> None:
+        self.status_calls.append({"task_id": task_id, "status": status, **payload})
+
+
+class _FakeAppRuntime:
+    def __init__(self) -> None:
+        self.chat_session = _FakeChatSession()
+        self.state = _FakeAppState()
+
+
+class _MainChatPlannerEventRuntime:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def start_main_chat_run(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        user_goal: str,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "start_main_chat_run",
+                {
+                    "task_id": task_id,
+                    "session_id": session_id,
+                    "user_goal": user_goal,
+                },
+            )
+        )
+        return {
+            "run_id": "run-main",
+            "task_id": task_id,
+            "session_id": session_id,
+            "user_goal": user_goal,
+            "status": "running",
+        }
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.calls.append(
+            (
+                "append_run_event",
+                {
+                    "run_id": run_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+            )
+        )
+
+    def execute_main_chat_model_loop(
+        self,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        direct_tool_request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "execute_main_chat_model_loop",
+                {
+                    "run_id": run_id,
+                    "messages": messages,
+                    "direct_tool_request": direct_tool_request,
+                },
+            )
+        )
+        return {"run_id": run_id, "status": "completed", "result": "Done"}
+
+    def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
+        self.calls.append(("complete_main_chat_run", {"run_id": run_id, "result": result}))
+        return {"run_id": run_id, "status": "completed", "result": result}

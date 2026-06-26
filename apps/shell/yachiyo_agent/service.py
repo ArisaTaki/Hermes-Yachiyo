@@ -21,6 +21,7 @@ from .contracts import (
     StartChatTaskRequest,
 )
 from .events import public_run_event_from_payload, public_run_event_page_from_payload
+from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
@@ -74,7 +75,7 @@ class YachiyoAgentService:
         self,
         request: StartChatTaskRequest | Mapping[str, Any],
     ) -> AgentTaskSnapshot:
-        payload = _request_payload(request)
+        payload = planner_enriched_chat_request(_request_payload(request))
         if self._chat_task_starter is not None:
             chat_payload = self._chat_task_starter.start_chat_task(payload)
             if chat_payload is not None:

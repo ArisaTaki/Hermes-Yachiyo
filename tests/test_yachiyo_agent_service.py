@@ -365,6 +365,29 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert port.calls[1][1]["prompt"] == "Patch README"
 
 
+def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="打开 PixelForge 并点击导出",
+            conversation_id="chat-1",
+            title="Desktop task",
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "desktop_operation"
+    assert metadata["yachiyo_route_to_studio"] is True
+    assert metadata["yachiyo_plan_tools"] == [
+        "desktop.running_apps",
+        "app.open",
+        "desktop.click_ui_element",
+    ]
+
+
 def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)

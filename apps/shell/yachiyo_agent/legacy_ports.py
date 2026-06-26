@@ -34,6 +34,11 @@ from .legacy_tasks import (
     _approval_id_from_decision,
     _assert_matching_pending_approval,
 )
+from .planner_projection import (
+    planner_run_event_payloads,
+    runtime_planner_decision,
+    runtime_planner_metadata,
+)
 from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
@@ -172,11 +177,16 @@ class LegacyChatTaskStarter:
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
         allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
+        planner_decision = runtime_planner_decision(
+            prompt or execution_prompt,
+            metadata=metadata,
+            allowed_tools=allowed_daily_desktop_tools,
+        )
         direct_tool_request = daily_desktop_direct_metadata_request(
             metadata,
             allowed_tools=allowed_daily_desktop_tools,
         )
-        execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
         desktop_requests = daily_desktop_entrypoint_requests(
             prompt,
             metadata=metadata,
@@ -186,7 +196,11 @@ class LegacyChatTaskStarter:
             return None
         if not direct_tool_request and not desktop_requests:
             return None
-        self._sync_chat_user_daily_desktop_metadata(task_id, desktop_requests)
+        self._sync_chat_user_daily_desktop_metadata(
+            task_id,
+            desktop_requests,
+            planner_decision=planner_decision,
+        )
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
         if not callable(start_main_chat_run) or not callable(execute_main_chat_model_loop):
@@ -203,6 +217,7 @@ class LegacyChatTaskStarter:
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
                 return None
+            self._append_planner_run_events(run_id, planner_decision)
             append_run_event = getattr(self._runtime, "append_run_event", None)
             retry_context_payload = recovery_retry_context_payload(metadata)
             if retry_context_payload and callable(append_run_event):
@@ -279,18 +294,33 @@ class LegacyChatTaskStarter:
         self,
         task_id: str,
         desktop_requests: list[dict[str, Any]],
+        *,
+        planner_decision: Any | None = None,
     ) -> None:
         chat_session = getattr(self._app_runtime, "chat_session", None)
         update_metadata = getattr(chat_session, "update_message_metadata_for_task", None)
         if not callable(update_metadata):
             return
-        metadata = daily_desktop_user_metadata(desktop_requests)
+        metadata = {
+            **runtime_planner_metadata(planner_decision),
+            **daily_desktop_user_metadata(desktop_requests),
+        }
         if not metadata:
             return
         try:
             update_metadata(task_id, metadata, role="user")
         except Exception:
             return
+
+    def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not run_id or not callable(append_run_event):
+            return
+        for event_type, payload in planner_run_event_payloads(planner_decision):
+            try:
+                append_run_event(run_id, event_type, payload)
+            except Exception:
+                continue
 
     def _sync_app_task_running(self, task_id: str) -> None:
         self._sync_app_task_status(task_id, "running", progress_label="正在执行桌面操作")
