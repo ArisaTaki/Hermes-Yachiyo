@@ -1369,13 +1369,14 @@ class RuntimePlanner:
             )
             return steps
         if app_name and not operation_uses_app_tool and not focus_step_added:
+            prepare_mode = _app_search_prepare_mode(intent.user_goal, mode) if app_search else mode
             steps.append(
                 _step(
                     intent,
                     "open-or-focus-app",
                     "Open or focus app",
                     "desktop.app_control",
-                    _first_allowed(app_control_tool_candidates(mode), allowed),
+                    _first_allowed(app_control_tool_candidates(prepare_mode), allowed),
                     input_preview={"app_name": app_name},
                     depends_on=["discover-desktop-state"],
                     reason="Resolve the requested app by name at runtime.",
@@ -3145,7 +3146,17 @@ def _clean_app_name_hint(value: str) -> str:
         "应用程序",
         "桌面",
         "窗口",
+        "当前窗口",
+        "现在窗口",
+        "前台窗口",
+        "这个窗口",
+        "该窗口",
+        "当前界面",
+        "现在界面",
+        "前台界面",
         "屏幕",
+        "当前屏幕",
+        "现在屏幕",
         "界面",
         "画面",
         "当前",
@@ -3155,6 +3166,13 @@ def _clean_app_name_hint(value: str) -> str:
         "current",
         "current app",
         "foreground app",
+        "current window",
+        "active window",
+        "foreground window",
+        "this window",
+        "current interface",
+        "active interface",
+        "foreground interface",
     }
     if context_source_hint(app):
         return ""
@@ -3265,6 +3283,12 @@ def _app_management_prepare_mode(
     ):
         return "open"
     return ""
+
+
+def _app_search_prepare_mode(text: str, fallback: str) -> str:
+    if _contains_any(text, ["打开", "启动", "开启", "open ", "launch ", "start "]):
+        return fallback
+    return "focus"
 
 
 def _safe_shortcut_targets_foreground(

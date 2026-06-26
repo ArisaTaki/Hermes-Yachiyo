@@ -895,6 +895,13 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(
+        r"\s*(?:当前|现在|这个|前台|该|current|active|foreground|this)?\s*"
+        r"(?:界面|窗口|屏幕|应用|ui|interface|window|screen|app|application)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
     if re.fullmatch(
         r"(?:当前|现在|这个|前台|该)?(?:应用|app|界面|窗口|屏幕|ui|interface|window|screen)",
         app,
@@ -917,6 +924,8 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "me",
         "the",
         "this",
+        "and",
+        "then",
         "你能",
         "我",
         "我的",
@@ -934,6 +943,12 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "屏幕",
         "当前",
         "前台",
+        "并",
+        "然后",
+        "再",
+        "接着",
+        "之后",
+        "后",
     }
     return "" if app.lower().strip(" .，,。") in generic else app.strip(" .，,。")
 

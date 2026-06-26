@@ -153,3 +153,75 @@ def test_tool_call_snapshots_merge_input_resolution_with_followup_call() -> None
         "app_resolution_source": "desktop.list_apps",
     }
     assert call.output_preview == {"ok": True, "opened": True}
+
+
+def test_tool_call_snapshots_merge_resolved_app_with_completed_desktop_steps() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-app-resolution-steps",
+                sequence=1,
+                event_type="agent.tool.input_resolved",
+                detail="app.focus",
+                created_at="2026-06-27T00:00:00Z",
+                payload={
+                    "tool": "app.focus",
+                    "field": "app_name",
+                    "requested_app_name": "Chrome",
+                    "resolved_app_name": "Google Chrome",
+                    "source_tool": "desktop.list_apps",
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-app-resolution-steps",
+                sequence=2,
+                event_type="agent.tool.call",
+                detail="app.focus",
+                created_at="2026-06-27T00:00:01Z",
+                payload={
+                    "tool": "app.focus",
+                    "input_preview": {"app_name": "Google Chrome"},
+                    "result": {"ok": True, "data": {"app_name": "Google Chrome"}},
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-app-resolution-steps",
+                sequence=3,
+                event_type="agent.tool.call",
+                detail="desktop.ui_elements",
+                created_at="2026-06-27T00:00:02Z",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "input_preview": {"role_filter": "button", "limit": 80},
+                    "result": {"ok": True},
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-app-resolution-steps",
+                sequence=4,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.ui_elements",
+                created_at="2026-06-27T00:00:03Z",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "steps": [
+                        {
+                            "tool": "app.focus",
+                            "input_preview": {"app_name": "Google Chrome"},
+                            "result": {"ok": True, "data": {"app_name": "Google Chrome"}},
+                        },
+                        {
+                            "tool": "desktop.ui_elements",
+                            "input_preview": {"role_filter": "button", "limit": 80},
+                            "result": {"ok": True},
+                        },
+                    ],
+                    "result": {"ok": True},
+                },
+            ),
+        ]
+    )
+
+    assert [call.tool_name for call in calls] == ["app.focus", "desktop.ui_elements"]
+    assert calls[0].input_preview["app_name"] == "Google Chrome"
+    assert calls[0].input_preview["requested_app_name"] == "Chrome"

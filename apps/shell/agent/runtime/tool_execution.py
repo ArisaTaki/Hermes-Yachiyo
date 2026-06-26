@@ -43,6 +43,35 @@ def _apps_from_list_apps_result(result: dict[str, Any]) -> list[Any]:
     return []
 
 
+def _app_match_score(app: dict[str, Any]) -> int | None:
+    value = app.get("match_score")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _contains_non_ascii(value: Any) -> bool:
+    return any(ord(char) > 127 for char in str(value or ""))
+
+
+def _app_match_is_high_confidence(app: dict[str, Any], query: str) -> bool:
+    score = _app_match_score(app)
+    if score is not None and score < 80:
+        return False
+    clean_query = _normalized_app_lookup(query)
+    clean_name = _normalized_app_lookup(app.get("name"))
+    if (
+        clean_query
+        and clean_name
+        and clean_query != clean_name
+        and _contains_non_ascii(query)
+        and clean_name.endswith(clean_query)
+    ):
+        return False
+    return True
+
+
 def _discovered_app_name_for_query(
     timeline: list[dict[str, Any]],
     query: str,
@@ -69,11 +98,15 @@ def _discovered_app_name_for_query(
             if _normalized_app_lookup(app_name) == clean_query:
                 return app_name
         for app in discovered_apps:
+            if not _app_match_is_high_confidence(app, query):
+                continue
             app_name = str(app.get("name") or "").strip()
             if _app_lookups_related(app_name, clean_query):
                 return app_name
         for app in discovered_apps:
-            return str(app.get("name") or "").strip()
+            score = _app_match_score(app)
+            if score is not None and score >= 80 and _app_match_is_high_confidence(app, query):
+                return str(app.get("name") or "").strip()
     return ""
 
 

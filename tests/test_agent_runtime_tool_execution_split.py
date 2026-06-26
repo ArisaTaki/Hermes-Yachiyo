@@ -875,6 +875,72 @@ def test_runtime_tool_request_runner_prefers_related_app_match_over_first_candid
     ]
 
 
+def test_runtime_tool_request_runner_does_not_rewrite_low_confidence_app_match() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "apps": [
+                        {
+                            "name": "企业微信",
+                            "path": "/Applications/企业微信.app",
+                            "match_score": 80,
+                        },
+                    ],
+                },
+            }
+            if tool_name == "desktop.list_apps"
+            else {
+                "ok": True,
+                "action": "app.focus",
+                "data": {"app_name": payload["app_name"]},
+            }
+        )
+        timeline.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "在微信搜索文件传输助手"}]
+    timeline: list[dict[str, Any]] = []
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "微信", "limit": 20}},
+            {"tool": "app.focus", "input": {"app_name": "微信"}},
+        ],
+        ["desktop.list_apps", "app.focus"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "微信", "limit": 20}),
+        ("app.focus", {"app_name": "微信"}),
+    ]
+    assert not any(event["event"] == "agent.tool.input_resolved" for event in timeline)
+
+
 def test_runtime_tool_request_runner_uses_discovered_app_name_for_combined_app_tool() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 

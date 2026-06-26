@@ -2030,16 +2030,33 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert second["ok"] is True
         assert second["status"] == "completed"
         assert calls[-3:] == [
-            ("focus", "WeChat"),
+            ("focus", "微信"),
             ("shortcut", "find"),
             ("type", "文件传输助手"),
         ]
         assert second["agent_task"]["status"] == "completed"
-        assert second["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（6 个字符）。"
-        assert [tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"][-2:]] == [
-            "app.focus_and_safe_shortcut",
-            "desktop.safe_type_text",
+        assert second["agent_task"]["summary"] == (
+            "已切换到微信。 已打开查找。 已向前台输入文字（6 个字符）。 已提交前台搜索。"
+        )
+        second_tool_names = [
+            tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"]
         ]
+        for tool_name in (
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ):
+            assert tool_name in second_tool_names
+        assert second_tool_names.index("app.focus") < second_tool_names.index(
+            "desktop.safe_shortcut"
+        )
+        assert second_tool_names.index("desktop.safe_shortcut") < second_tool_names.index(
+            "desktop.safe_type_text"
+        )
+        assert second_tool_names.index("desktop.safe_type_text") < second_tool_names.index(
+            "desktop.search_submit"
+        )
         assert second_task is not None
         assert second_task.status == TaskStatus.COMPLETED
         assert second_assistant is not None
@@ -2047,7 +2064,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert second_assistant.content == second["agent_task"]["summary"]
         assert second_latest_user.content == "在微信搜索文件传输助手"
         assert second_run["status"] == "completed"
-        assert second_event_types.count("agent.desktop.intent_planned") == 2
+        assert second_event_types.count("agent.desktop.intent_planned") == 6
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
@@ -2542,17 +2559,21 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         ]
         assert result["agent_task"]["status"] == "completed"
         assert result["agent_task"]["summary"] == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
-        assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
-            "app.open_and_safe_type_text",
-            "desktop.safe_shortcut",
+        tool_names = [
+            tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"]
         ]
+        assert "app.open_and_safe_type_text" in tool_names
+        assert "desktop.safe_shortcut" in tool_names
+        assert tool_names.index("app.open_and_safe_type_text") < tool_names.index(
+            "desktop.safe_shortcut"
+        )
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == result["agent_task"]["summary"]
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 4
         assert "agent.desktop.permission_preflight" in event_types
         assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
             "tool.requested"
@@ -8789,9 +8810,11 @@ def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
             "app.focus",
             "desktop.ui_elements",
         ]
-        assert result["agent_task"]["tool_calls"][-2]["input_preview"] == {
-            "app_name": "Google Chrome",
-        }
+        focus_preview = result["agent_task"]["tool_calls"][-2]["input_preview"]
+        assert focus_preview["app_name"] == "Google Chrome"
+        assert focus_preview["requested_app_name"] == "Chrome"
+        assert focus_preview["resolved_app_name"] == "Google Chrome"
+        assert focus_preview["app_resolution_source"] == "desktop.list_apps"
         assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
             "role_filter": "button",
             "limit": 80,
@@ -8807,7 +8830,7 @@ def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
             "已切换到 Google Chrome。 当前 Google Chrome 界面控件：Button Send（640, 720）。"
         )
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 3
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "agent.desktop.intent_approval_required" not in event_types
@@ -8877,8 +8900,12 @@ def test_send_message_executes_direct_minimize_current_window_task(tmp_path, mon
             assert result["agent_task"]["needs_user_action"] is False
             assert result["agent_task"]["pending_approvals"] == []
             assert result["agent_task"]["summary"] == "已最小化当前窗口。"
-            assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
-            assert result["agent_task"]["tool_calls"][-1]["status"] == "completed"
+            minimize_tool_call = next(
+                tool_call
+                for tool_call in result["agent_task"]["tool_calls"]
+                if tool_call["tool_name"] == "desktop.minimize_window"
+            )
+            assert minimize_tool_call["status"] == "completed"
             assert task is not None
             assert task.status == TaskStatus.COMPLETED
             assert task.result == "已最小化当前窗口。"

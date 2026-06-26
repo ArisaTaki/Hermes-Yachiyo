@@ -948,10 +948,15 @@ class RuntimeCustomApiAgentLoop:
             return ""
         result = _with_retry_recovery_action(planned_tool, planned_input, result)
         tool_event["result"] = result
+        executed_input = (
+            tool_event.get("input_preview")
+            if isinstance(tool_event.get("input_preview"), dict)
+            else planned_input
+        )
         clean_presentation = str(presentation or "").strip()
         summary = self._daily_desktop_summary(
             planned_tool,
-            planned_input,
+            executed_input,
             result,
             presentation=clean_presentation,
         )
@@ -960,7 +965,7 @@ class RuntimeCustomApiAgentLoop:
         event_payload = {
             "tool": planned_tool,
             "source": str(source or "daily_desktop_intent"),
-            "input_preview": planned_input,
+            "input_preview": executed_input,
             "result": result,
             "summary": summary,
         }
@@ -980,7 +985,7 @@ class RuntimeCustomApiAgentLoop:
             self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
         recovery_payload = _desktop_permission_recovery_event_payload(
             planned_tool,
-            planned_input,
+            executed_input,
             result,
         )
         if recovery_payload:
@@ -1040,10 +1045,15 @@ class RuntimeCustomApiAgentLoop:
                 return ""
             result = _with_retry_recovery_action(planned_tool, planned_input, result)
             tool_event["result"] = result
+            executed_input = (
+                tool_event.get("input_preview")
+                if isinstance(tool_event.get("input_preview"), dict)
+                else planned_input
+            )
             presentation = str(planned_tool_request.get("presentation") or "").strip()
             summary = self._daily_desktop_summary(
                 planned_tool,
-                planned_input,
+                executed_input,
                 result,
                 presentation=presentation,
             )
@@ -1051,7 +1061,7 @@ class RuntimeCustomApiAgentLoop:
                 return ""
             completed_step = {
                 "tool": planned_tool,
-                "input_preview": planned_input,
+                "input_preview": executed_input,
                 "result": result,
                 "summary": summary,
             }

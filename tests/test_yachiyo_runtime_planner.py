@@ -922,6 +922,29 @@ def test_runtime_planner_treats_music_app_open_as_desktop_open() -> None:
     assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
 
 
+def test_runtime_planner_keeps_app_name_before_chinese_followup_capture() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music，然后看看界面",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "screen.capture",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Apple Music"
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Apple Music",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Apple Music",
+    }
+    assert _step_by_id(decision, "capture-screen").depends_on == ["open-or-focus-app"]
+
+
 def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
     decision = RuntimePlanner().decision(
         "显示微信窗口列表",
@@ -1063,6 +1086,28 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert read_ui.input_preview == {"role_filter": "button", "limit": 80}
     assert read_ui.depends_on == ["open-or-focus-app"]
 
+    current_interface = RuntimePlanner().decision(
+        "Chrome 当前界面有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+    )
+    assert current_interface.selected_intent.kind == "desktop_operation"
+    assert current_interface.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert current_interface.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "Chrome",
+    }
+    assert _step_by_id(current_interface, "discover-desktop-state").input_preview == {
+        "query": "Chrome",
+        "limit": 20,
+    }
+    assert _step_by_id(current_interface, "open-or-focus-app").input_preview == {
+        "app_name": "Chrome",
+    }
+    assert _step_by_id(current_interface, "read-foreground-ui").depends_on == [
+        "open-or-focus-app"
+    ]
+
 
 def test_runtime_planner_cleans_prefixed_app_ui_inspection() -> None:
     decision = RuntimePlanner().decision(
@@ -1148,6 +1193,33 @@ def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
     }
     assert [step.step_id for step in current_interface.plan.tool_plan.steps] == [
         "capture-screen"
+    ]
+
+
+def test_runtime_planner_does_not_treat_current_window_as_app_for_foreground_input() -> None:
+    decision = RuntimePlanner().decision(
+        "在当前窗口输入 hello 并回车",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "submit-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "discover-desktop-state").tool_name == "desktop.running_apps"
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == "desktop.safe_type_text"
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {"text": "hello"}
+    assert _step_by_id(decision, "operate-foreground-ui").depends_on == [
+        "discover-desktop-state"
     ]
 
 
@@ -1497,6 +1569,7 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(decision, "focus-app-search-field").input_preview == {
         "action": "find",
     }
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(decision, "type-app-search-query").input_preview == {
         "text": "周报"
     }
@@ -1521,6 +1594,25 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "query": "下载文件",
         "target": "搜索",
     }
+
+    scoped_search = RuntimePlanner().decision(
+        "在微信搜索文件传输助手",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert scoped_search.selected_intent.kind == "desktop_operation"
+    assert scoped_search.selected_intent.inputs["app_name_hint"] == "微信"
+    assert scoped_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "文件传输助手",
+        "target": "搜索",
+    }
+    assert _step_by_id(scoped_search, "open-or-focus-app").tool_name == "app.focus"
 
 
 def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> None:
