@@ -344,6 +344,25 @@ def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None
     ]
 
 
+def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 搜索框输入 hello 并回车",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+            "desktop.active_window",
+        ],
+    )
+
+    verify = _step_by_id(decision, "verify-desktop-result")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.action == "read_ui"
+    assert verify.depends_on == ["submit-foreground-ui"]
+    assert "Read foreground UI" in verify.reason
+
+
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
     decision = RuntimePlanner().decision(
         "能否帮我播放 Apple Music?",

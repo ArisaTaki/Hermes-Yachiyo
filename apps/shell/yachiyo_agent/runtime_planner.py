@@ -732,16 +732,17 @@ class RuntimePlanner:
         elif any(step.step_id == "open-or-focus-app" for step in steps):
             verify_depends_on = ["open-or-focus-app"]
         if verify_depends_on:
+            verify_tools = _desktop_verify_tool_candidates(verify_depends_on)
             steps.append(
                 _step(
                     intent,
                     "verify-desktop-result",
                     "Verify desktop result",
                     "desktop.app_discovery",
-                    _first_allowed(("desktop.active_window", "desktop.windows", "desktop.ui_elements", "screen.capture"), allowed),
+                    _first_allowed(verify_tools, allowed),
                     input_preview={"app_name": app_name} if app_name else {},
                     depends_on=verify_depends_on,
-                    reason="Observe the foreground state after desktop execution.",
+                    reason=_desktop_verify_reason(verify_depends_on),
                 )
             )
         return steps
@@ -1144,6 +1145,18 @@ def _desktop_operation_action(tool_name: str | None) -> str:
     if "key" in clean_tool:
         return "key"
     return "operate_ui"
+
+
+def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
+    if any(step_id in {"operate-foreground-ui", "submit-foreground-ui"} for step_id in depends_on):
+        return ("desktop.ui_elements", "desktop.windows", "desktop.active_window", "screen.capture")
+    return ("desktop.active_window", "desktop.windows", "desktop.ui_elements", "screen.capture")
+
+
+def _desktop_verify_reason(depends_on: list[str]) -> str:
+    if any(step_id in {"operate-foreground-ui", "submit-foreground-ui"} for step_id in depends_on):
+        return "Read foreground UI or windows after the UI action to verify the visible result."
+    return "Observe the foreground state after desktop execution."
 
 
 def _service_action(capability_id: str) -> str:
