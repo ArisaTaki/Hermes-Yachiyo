@@ -200,8 +200,8 @@ export function RunDetailPanel({
     ? selectedRunReplayEvents
     : selectedPublicRunTimeline?.events || [];
   const plannerTraceSource = selectedRunReplayEvents.length
-    ? 'RunEvent replay planner facts · Intent / Capability / Plan'
-    : 'RunTimelineSnapshot planner facts · Intent / Capability / Plan';
+    ? 'RunEvent replay planner facts · Intent / Capability / Plan / Selection'
+    : 'RunTimelineSnapshot planner facts · Intent / Capability / Plan / Selection';
   const rerunSourceRunId = selectedPublicRunTimeline?.rerun_of_run_id || selectedRun?.rerun_of_run_id || '';
   const rerunSourceLabel = selectedPublicRunTimeline?.rerun_of_runnable_name
     || selectedRun?.rerun_of_runnable_name

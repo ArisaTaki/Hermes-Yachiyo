@@ -24,10 +24,13 @@ type PlannerTrace = {
 
 type PlannerSelection = {
   legacyTools: string[];
+  legacyRequestCount: number;
   plannerTools: string[];
+  plannerRequestCount: number;
   reason: string;
   selectedSource: string;
   selectedTools: string[];
+  selectedRequestCount: number;
 };
 
 type PlannerTraceInspectorProps = {
@@ -119,7 +122,12 @@ export function PlannerTraceInspector({
         ) : null}
 
         {trace.selection ? (
-          <section data-testid="agent-run-detail-planner-selection">
+          <section
+            data-legacy-request-count={trace.selection.legacyRequestCount}
+            data-planner-request-count={trace.selection.plannerRequestCount}
+            data-selected-request-count={trace.selection.selectedRequestCount}
+            data-testid="agent-run-detail-planner-selection"
+          >
             <div className="studio-tool-inspector-heading">
               <h3>Direct Selection</h3>
               <span>{trace.selection.selectedSource || 'unknown'}</span>
@@ -127,6 +135,15 @@ export function PlannerTraceInspector({
             <div className="studio-tool-pill-row">
               <span className="studio-tool-permission" data-selection-reason={trace.selection.reason}>
                 reason · {trace.selection.reason || 'not recorded'}
+              </span>
+              <span className="studio-tool-permission" data-selection-count-kind="selected">
+                selected requests · {trace.selection.selectedRequestCount}
+              </span>
+              <span className="studio-tool-permission" data-selection-count-kind="planner">
+                planner requests · {trace.selection.plannerRequestCount}
+              </span>
+              <span className="studio-tool-permission" data-selection-count-kind="legacy">
+                legacy requests · {trace.selection.legacyRequestCount}
               </span>
               {trace.selection.selectedTools.map((tool) => (
                 <span className="studio-tool-permission" data-selection-tool={tool} key={`selected:${tool}`}>
@@ -506,13 +523,19 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
   const plannerTools = uniqueStrings(Array.isArray(payload.planner_tools) ? payload.planner_tools : []);
   const legacyTools = uniqueStrings(Array.isArray(payload.legacy_tools) ? payload.legacy_tools : []);
+  const selectedRequestCount = integerValue(payload.selected_request_count, selectedTools.length);
+  const plannerRequestCount = integerValue(payload.planner_request_count, plannerTools.length);
+  const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
   if (!selectedSource && !reason && !selectedTools.length && !plannerTools.length && !legacyTools.length) return null;
   return {
     legacyTools,
+    legacyRequestCount,
     plannerTools,
+    plannerRequestCount,
     reason,
     selectedSource,
     selectedTools,
+    selectedRequestCount,
   };
 }
 
@@ -537,6 +560,11 @@ function slugValue(value: string): string {
 
 function booleanValue(value: unknown, fallback?: boolean): boolean | undefined {
   if (typeof value === 'boolean') return value;
+  return fallback;
+}
+
+function integerValue(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
   return fallback;
 }
 
