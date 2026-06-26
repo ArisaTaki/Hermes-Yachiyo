@@ -146,6 +146,13 @@ def _desktop_running_apps(
     return broker.desktop_running_apps()
 
 
+def _desktop_list_apps(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.desktop_list_apps(
+        query=str(payload.get("query") or ""),
+        limit=payload.get("limit", 200),
+    )
+
+
 def _desktop_windows(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.desktop_windows(str(payload.get("app_name") or ""))
 
@@ -803,6 +810,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.permissions": _desktop_permissions,
     "desktop.active_window": _desktop_active_window,
     "desktop.running_apps": _desktop_running_apps,
+    "desktop.list_apps": _desktop_list_apps,
     "desktop.windows": _desktop_windows,
     "desktop.ui_elements": _desktop_ui_elements,
     "desktop.click_ui_element": _desktop_click_ui_element,

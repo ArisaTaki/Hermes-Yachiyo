@@ -350,6 +350,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_permissions",
         "desktop_active_window",
         "desktop_running_apps",
+        "desktop_list_apps",
         "desktop_windows",
         "app_status",
         "app_open",
@@ -419,6 +420,16 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
 
 def test_desktop_running_apps_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.running_apps", {})
+
+
+def test_desktop_list_apps_schema_accepts_optional_query_and_limit() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.list_apps", {})
+    ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"query": "Word", "limit": 20})
+
+    with pytest.raises(AgentRuntimeError, match="desktop.list_apps 参数 query 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"query": 123})
+    with pytest.raises(AgentRuntimeError, match="desktop.list_apps 参数 limit 必须是 1-500 的整数"):
+        ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"limit": 0})
 
 
 def test_desktop_permissions_schema_accepts_empty_payload() -> None:
@@ -1333,6 +1344,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_list_apps",
+        lambda query="", limit=200: calls.append(("list_apps", query, limit))
+        or {"ok": True, "query": query, "limit": limit},
+    )
+    monkeypatch.setattr(
+        broker,
         "desktop_windows",
         lambda app_name="": calls.append(("windows", app_name)) or {"ok": True, "app_name": app_name},
     )
@@ -1689,6 +1706,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "ok": True,
         "apps": ["Finder"],
     }
+    assert dispatch_tool_call(broker, "desktop.list_apps", {"query": "Word", "limit": 10}) == {
+        "ok": True,
+        "query": "Word",
+        "limit": 10,
+    }
     assert dispatch_tool_call(broker, "desktop.windows", {"app_name": "Google Chrome"}) == {
         "ok": True,
         "app_name": "Google Chrome",
@@ -1746,6 +1768,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("settings_open", "辅助功能权限"),
         ("permissions",),
         ("running",),
+        ("list_apps", "Word", 10),
         ("windows", "Google Chrome"),
         ("ui_elements", "button", 20),
         ("status", "Google Chrome"),
@@ -3580,6 +3603,49 @@ def test_desktop_permission_preflight_reports_cached_missing_targets(monkeypatch
         }
     ]
     assert result["data"]["recovery_actions"] == result["recovery_actions"]
+
+
+def test_desktop_list_apps_returns_installed_app_bundles(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Google Chrome.app").mkdir(parents=True)
+    (app_dir / "Microsoft Word.app").mkdir()
+    (app_dir / "Utilities").mkdir()
+    (app_dir / "Utilities" / "Terminal.app").mkdir()
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+
+    result = desktop_mod.list_apps(limit=2)
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.list_apps"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+    assert result["data"]["count"] == 2
+    assert result["data"]["total_count"] == 3
+    assert result["data"]["truncated"] is True
+    assert [app["name"] for app in result["data"]["apps"]] == [
+        "Google Chrome",
+        "Microsoft Word",
+    ]
+
+
+def test_desktop_list_apps_filters_by_query(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Music.app").mkdir(parents=True)
+    (app_dir / "Microsoft Word.app").mkdir()
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+
+    result = desktop_mod.list_apps(query="Apple Music")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Installed apps matching Apple Music: Music"
+    assert result["data"]["query"] == "Apple Music"
+    assert result["data"]["count"] == 1
+    assert result["data"]["apps"][0]["name"] == "Music"
+    assert result["data"]["apps"][0]["match_score"] > 0
 
 
 def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:

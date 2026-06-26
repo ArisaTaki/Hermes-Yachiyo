@@ -439,6 +439,9 @@ class ToolBroker:
     def desktop_running_apps(self) -> dict[str, Any]:
         return desktop.running_apps()
 
+    def desktop_list_apps(self, query: str = "", limit: Any = 200) -> dict[str, Any]:
+        return desktop.list_apps(query=query, limit=limit)
+
     def desktop_windows(self, app_name: str = "") -> dict[str, Any]:
         return desktop.windows(app_name)
 

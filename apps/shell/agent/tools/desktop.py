@@ -1247,6 +1247,63 @@ def running_apps() -> dict[str, Any]:
     }
 
 
+def list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.list_apps")
+    clean_query = str(query or "").strip()
+    try:
+        clean_limit = max(1, min(500, int(limit or 200)))
+    except (TypeError, ValueError):
+        clean_limit = 200
+    apps: list[dict[str, Any]] = []
+    for bundle in _iter_installed_app_bundles():
+        score = _installed_app_match_score(clean_query, bundle.stem) if clean_query else 0
+        if clean_query and score <= 0:
+            continue
+        apps.append(
+            {
+                "name": bundle.stem,
+                "path": str(bundle),
+                "match_score": score,
+            }
+        )
+    if clean_query:
+        apps.sort(
+            key=lambda item: (
+                -int(item["match_score"]),
+                len(str(item["name"])),
+                str(item["name"]),
+            )
+        )
+    else:
+        apps.sort(key=lambda item: str(item["name"]).casefold())
+    total_count = len(apps)
+    limited_apps = apps[:clean_limit]
+    names = [str(app.get("name") or "") for app in limited_apps[:5]]
+    if clean_query:
+        summary = (
+            f"Installed apps matching {clean_query}: {', '.join(names)}"
+            if names
+            else f"No installed apps matching {clean_query}"
+        )
+    else:
+        summary = f"Installed apps: {', '.join(names)}" if names else "No installed apps found"
+    return {
+        "ok": True,
+        "action": "desktop.list_apps",
+        "summary": summary,
+        "data": {
+            "query": clean_query,
+            "apps": limited_apps,
+            "count": len(limited_apps),
+            "total_count": total_count,
+            "truncated": total_count > len(limited_apps),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def windows(app_name: str = "") -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.windows")

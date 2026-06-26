@@ -31,6 +31,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.permissions": "desktop_permissions",
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
+    "desktop.list_apps": "desktop_list_apps",
     "desktop.windows": "desktop_windows",
     "desktop.ui_elements": "desktop_ui_elements",
     "desktop.click_ui_element": "desktop_click_ui_element",
@@ -181,6 +182,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.permissions",
     "desktop.active_window",
     "desktop.running_apps",
+    "desktop.list_apps",
     "desktop.windows",
     "desktop.ui_elements",
     "app.status",
@@ -463,6 +465,13 @@ class ToolDescriptor:
         if self.name == "desktop.windows" and "app_name" in payload:
             if not isinstance(payload.get("app_name"), str):
                 raise AgentRuntimeError("desktop.windows 参数 app_name 必须是字符串")
+        if self.name == "desktop.list_apps":
+            if "query" in payload and not isinstance(payload.get("query"), str):
+                raise AgentRuntimeError("desktop.list_apps 参数 query 必须是字符串")
+            if "limit" in payload:
+                value = payload.get("limit")
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 500:
+                    raise AgentRuntimeError("desktop.list_apps 参数 limit 必须是 1-500 的整数")
         if self.name in {
             "desktop.ui_elements",
             "desktop.click_ui_element",
@@ -1069,6 +1078,24 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Low-risk, observable desktop state."
         ),
         properties={},
+    ),
+    "desktop.list_apps": ToolDescriptor(
+        name="desktop.list_apps",
+        description=(
+            "Discover installed macOS application bundles by name, optionally filtered "
+            "by a user-provided app query. Use before app.open when the exact app name "
+            "is uncertain."
+        ),
+        properties={
+            "query": {
+                "type": "string",
+                "description": "Optional user-facing app name or partial app name to match.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of app matches to return, 1-500.",
+            },
+        },
     ),
     "desktop.windows": ToolDescriptor(
         name="desktop.windows",
