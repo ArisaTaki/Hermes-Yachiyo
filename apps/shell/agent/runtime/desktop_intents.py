@@ -1394,7 +1394,6 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "media.system_control",
     "media.apple_music_open_and_play",
     "media.apple_music_play",
-    "notes.create",
     "reminders.create",
     "screen.capture",
     "system.settings_open",
