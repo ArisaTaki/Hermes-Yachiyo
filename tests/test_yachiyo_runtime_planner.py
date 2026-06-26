@@ -1086,6 +1086,15 @@ def test_runtime_planner_cleans_prefixed_app_ui_inspection() -> None:
     }
     assert _step_by_id(decision, "read-foreground-ui").depends_on == ["open-or-focus-app"]
 
+    open_decision = RuntimePlanner().decision(
+        "打开微信看看有什么按钮",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.ui_elements"],
+    )
+    assert _step_by_id(open_decision, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(open_decision, "open-or-focus-app").input_preview == {
+        "app_name": "微信"
+    }
+
 
 def test_runtime_planner_routes_screen_capture_to_desktop_discovery() -> None:
     decision = RuntimePlanner().decision(
@@ -1192,6 +1201,13 @@ def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
     ]
     assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(decision, "capture-screen").depends_on == ["open-or-focus-app"]
+
+    open_decision = RuntimePlanner().decision(
+        "打开 Slack 然后截图",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus", "screen.capture"],
+    )
+    assert _step_by_id(open_decision, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(open_decision, "capture-screen").depends_on == ["open-or-focus-app"]
 
 
 def test_runtime_planner_routes_named_app_management_to_app_control() -> None:

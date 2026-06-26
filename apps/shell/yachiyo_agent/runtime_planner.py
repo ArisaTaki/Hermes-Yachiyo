@@ -1240,10 +1240,15 @@ class RuntimePlanner:
                         "open-or-focus-app",
                         "Open or focus app",
                         "desktop.app_control",
-                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        _first_allowed(
+                            app_control_tool_candidates(
+                                _desktop_observation_prepare_mode(intent.user_goal)
+                            ),
+                            allowed,
+                        ),
                         input_preview={"app_name": app_name},
                         depends_on=["discover-desktop-state"],
-                        reason="Focus the requested app before reading its foreground UI.",
+                        reason="Prepare the requested app before reading its foreground UI.",
                     )
                 )
             steps.append(
@@ -1278,10 +1283,15 @@ class RuntimePlanner:
                         "open-or-focus-app",
                         "Open or focus app",
                         "desktop.app_control",
-                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        _first_allowed(
+                            app_control_tool_candidates(
+                                _desktop_observation_prepare_mode(intent.user_goal)
+                            ),
+                            allowed,
+                        ),
                         input_preview={"app_name": app_name},
                         depends_on=["discover-desktop-state"],
-                        reason="Focus the requested app before capturing its visible state.",
+                        reason="Prepare the requested app before capturing its visible state.",
                     )
                 )
             steps.append(
@@ -3187,6 +3197,17 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _desktop_observation_prepare_mode(text: str) -> str:
+    if _contains_any(
+        text,
+        ["切到", "聚焦", "focus", "switch to", "switch ", "activate ", "bring "],
+    ):
+        return "focus"
+    if _contains_any(text, ["open", "launch", "start", "打开", "启动", "开启", "拉起"]):
+        return "open"
+    return "focus"
 
 
 def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
