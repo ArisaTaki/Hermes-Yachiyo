@@ -420,6 +420,7 @@ class TaskIntentRouter:
         browser_action = (
             _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
+            or _browser_url_action_hint(text, dynamic_source)
             or _web_search_hint(text, dynamic_source)
         )
         score = _score_terms(
@@ -562,6 +563,8 @@ class TaskIntentRouter:
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _explicit_browser_url_hint(text):
+            return _empty_intent("file_access", text)
         hint = file_access_hint(text)
         if not hint:
             return _empty_intent("file_access", text)
@@ -1362,12 +1365,14 @@ class RuntimePlanner:
                 "extract_text": "browser.extract_text",
                 "screenshot": "browser.screenshot",
                 "open_search": "browser.open_url",
+                "open_url": "browser.open_url",
+                "open_url_screenshot": "browser.open_url_and_screenshot",
             }.get(browser_action)
             input_preview: dict[str, Any] = {}
             reason = str(intent.inputs.get("reason") or "").strip()
-            if browser_action == "screenshot" and reason:
+            if browser_action in {"screenshot", "open_url_screenshot"} and reason:
                 input_preview["reason"] = reason
-            if browser_action == "open_search":
+            if browser_action in {"open_search", "open_url", "open_url_screenshot"}:
                 url = str(intent.inputs.get("url_hint") or "").strip()
                 if url:
                     input_preview["url"] = url
@@ -1379,12 +1384,16 @@ class RuntimePlanner:
                         "extract_text": "extract-current-page-text",
                         "screenshot": "capture-current-page",
                         "open_search": "open-web-search",
+                        "open_url": "open-web-url",
+                        "open_url_screenshot": "capture-web-url",
                     }.get(browser_action, "read-current-page"),
                     {
                         "current_page": "Read current page",
                         "extract_text": "Extract current page text",
                         "screenshot": "Capture current page",
                         "open_search": "Open web search",
+                        "open_url": "Open web URL",
+                        "open_url_screenshot": "Open and capture web URL",
                     }.get(browser_action, "Read current page"),
                     "browser.research",
                     _first_allowed((tool_name,), allowed) if tool_name else None,
@@ -2297,7 +2306,7 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
             return [artifact_path or "analysis-report.md"]
     if intent.kind == "web_research":
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
-        if browser_action == "screenshot":
+        if browser_action in {"screenshot", "open_url_screenshot"}:
             return ["browser/current-page.png"]
         if browser_action:
             return []
@@ -2556,8 +2565,7 @@ def _file_operation_hint(text: str) -> str:
 
 
 def _url_hint(text: str) -> str:
-    match = re.search(r"https?://[^\s)]+", text)
-    return match.group(0) if match else ""
+    return _explicit_browser_url_hint(text)
 
 
 def _app_name_hint(text: str) -> str:
@@ -2645,6 +2653,178 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
+    if context_source in {"selection", "clipboard"}:
+        return {}
+    value = _clean_prompt(text)
+    url = _explicit_browser_url_hint(value)
+    if not url:
+        return {}
+    if _looks_like_url_screenshot_request(value):
+        return {
+            "browser_action": "open_url_screenshot",
+            "url_hint": url,
+            "reason": "user asked to capture the browser page after opening a URL",
+        }
+    if not _looks_like_plain_url_open(value):
+        return {}
+    return {"browser_action": "open_url", "url_hint": url}
+
+
+def _explicit_browser_url_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    match = re.search(r"https?://[^\s)）]+", value, flags=re.IGNORECASE)
+    if match:
+        return _clean_browser_url(match.group(0))
+
+    host_match = re.search(
+        r"\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d{1,5})?(?:/[^\s，,。)）]*)?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if host_match:
+        return _with_browser_url_scheme(_clean_browser_url(host_match.group(0)))
+
+    domain_match = re.search(
+        r"(?<!@)\b(?:[a-z0-9-]+\.)+[a-z]{2,24}(?::\d{1,5})?(?:/[^\s，,。)）]*)?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not domain_match:
+        return ""
+    candidate = _clean_browser_url(domain_match.group(0))
+    if not _browser_url_context_allows_domain(value, candidate):
+        return ""
+    return _with_browser_url_scheme(candidate)
+
+
+def _clean_browser_url(url: str) -> str:
+    return str(url or "").strip().rstrip("。.,，；;！!？?)）")
+
+
+def _with_browser_url_scheme(url: str) -> str:
+    if not url:
+        return ""
+    if re.match(r"^https?://", url, flags=re.IGNORECASE):
+        return url
+    return f"http://{url}" if _looks_like_localhost_url(url) else f"https://{url}"
+
+
+def _looks_like_localhost_url(url: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|(?:\d{1,3}\.){3}\d{1,3})(?::|/|$)",
+            url,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _browser_url_context_allows_domain(text: str, candidate: str) -> bool:
+    if not candidate or _looks_like_local_file_name(candidate):
+        return False
+    return _contains_any(
+        text,
+        (
+            "open",
+            "visit",
+            "go to",
+            "browse",
+            "summarize",
+            "summary",
+            "read",
+            "research",
+            "screenshot",
+            "打开",
+            "访问",
+            "上",
+            "网页",
+            "网址",
+            "链接",
+            "浏览器",
+            "总结",
+            "概括",
+            "读取",
+            "读一下",
+            "调研",
+            "截图",
+            "截屏",
+        ),
+    )
+
+
+def _looks_like_local_file_name(candidate: str) -> bool:
+    path = candidate.split("/", 1)[0]
+    host = path.split(":", 1)[0].lower()
+    suffix = host.rsplit(".", 1)[-1] if "." in host else ""
+    return suffix in {
+        "csv",
+        "tsv",
+        "xlsx",
+        "xls",
+        "json",
+        "jsonl",
+        "txt",
+        "md",
+        "py",
+        "js",
+        "ts",
+        "tsx",
+        "jsx",
+        "toml",
+        "yaml",
+        "yml",
+    }
+
+
+def _looks_like_url_screenshot_request(text: str) -> bool:
+    return _contains_any(
+        text,
+        ("screenshot", "screen capture", "截图", "截屏"),
+    )
+
+
+def _looks_like_plain_url_open(text: str) -> bool:
+    if _contains_any(
+        text,
+        (
+            "summarize",
+            "summary",
+            "read",
+            "extract",
+            "research",
+            "report",
+            "总结",
+            "概括",
+            "摘要",
+            "读取",
+            "读一下",
+            "提取",
+            "调研",
+            "报告",
+            "内容",
+        ),
+    ):
+        return False
+    return _contains_any(
+        text,
+        (
+            "open",
+            "visit",
+            "go to",
+            "browse",
+            "打开",
+            "访问",
+            "上",
+            "地址栏",
+            "网页",
+            "网址",
+            "链接",
+            "浏览器",
+        ),
+    )
 
 
 def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:

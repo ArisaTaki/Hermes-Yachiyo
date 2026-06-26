@@ -387,6 +387,8 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 "extract-current-page-text",
                 "capture-current-page",
                 "open-web-search",
+                "open-web-url",
+                "capture-web-url",
             }
         ),
         None,
@@ -404,6 +406,10 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         if not url:
             return []
         payload = {"url": url}
+        if tool_name == "browser.open_url_and_screenshot":
+            reason = str(decision.selected_intent.inputs.get("reason") or "").strip()
+            if reason:
+                payload["reason"] = reason
     elif tool_name not in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
         return []
     elif not browser_action and not _looks_like_current_page_request(decision.selected_intent.user_goal):

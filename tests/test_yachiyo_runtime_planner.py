@@ -585,6 +585,85 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     ) == []
 
 
+def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
+    allowed = [
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+    ]
+
+    https = RuntimePlanner().decision("打开 https://example.com", allowed_tools=allowed)
+
+    assert https.selected_intent.kind == "web_research"
+    assert https.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "browser_action": "open_url",
+    }
+    https_step = _step_by_id(https, "open-web-url")
+    assert https_step.tool_name == "browser.open_url"
+    assert https_step.input_preview == {"url": "https://example.com"}
+    assert https.plan.tool_plan.artifacts_expected == []
+
+    local = RuntimePlanner().decision("打开 127.0.0.1:5173", allowed_tools=allowed)
+
+    assert local.selected_intent.inputs == {
+        "url_hint": "http://127.0.0.1:5173",
+        "browser_action": "open_url",
+    }
+    assert _step_by_id(local, "open-web-url").tool_name == "browser.open_url"
+
+    ip_path = RuntimePlanner().decision(
+        "open 192.168.1.10:8000/status",
+        allowed_tools=allowed,
+    )
+
+    assert ip_path.selected_intent.kind == "web_research"
+    assert ip_path.selected_intent.inputs == {
+        "url_hint": "http://192.168.1.10:8000/status",
+        "browser_action": "open_url",
+    }
+
+    domain = RuntimePlanner().decision("打开网页 github.com", allowed_tools=allowed)
+
+    assert domain.selected_intent.inputs == {
+        "url_hint": "https://github.com",
+        "browser_action": "open_url",
+    }
+
+    screenshot = RuntimePlanner().decision(
+        "请调研 https://example.com 并截图",
+        allowed_tools=allowed,
+    )
+
+    assert screenshot.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "browser_action": "open_url_screenshot",
+        "reason": "user asked to capture the browser page after opening a URL",
+    }
+    screenshot_step = _step_by_id(screenshot, "capture-web-url")
+    assert screenshot_step.tool_name == "browser.open_url_and_screenshot"
+    assert screenshot_step.input_preview == {
+        "url": "https://example.com",
+        "reason": "user asked to capture the browser page after opening a URL",
+    }
+    assert screenshot.plan.tool_plan.artifacts_expected == ["browser/current-page.png"]
+
+    research = RuntimePlanner().decision(
+        "请调研 https://example.com 并总结报告",
+        allowed_tools=allowed,
+    )
+
+    assert research.selected_intent.inputs == {"url_hint": "https://example.com"}
+    assert _step_by_id(research, "open-or-read-web").tool_name == "browser.open_url_and_extract_text"
+
+    data_file = RuntimePlanner().decision(
+        "分析 sales.csv",
+        allowed_tools=["browser.open_url", "data.analyze", "workspace.read"],
+    )
+
+    assert data_file.selected_intent.kind == "data_analysis"
+
+
 def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     decision = RuntimePlanner().decision(
         "search selected text",
@@ -1658,7 +1737,7 @@ def test_runtime_planner_uses_browser_screenshot_tool_from_catalog() -> None:
 
     assert decision.selected_intent.kind == "web_research"
     assert decision.plan.tool_plan.missing_capabilities == []
-    assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.open_url_and_screenshot"
+    assert _step_by_id(decision, "capture-web-url").tool_name == "browser.open_url_and_screenshot"
     browser_capability = _capability_by_id(decision, "browser.research")
     assert "browser.open_url_and_screenshot" in browser_capability.available_tools
 
@@ -2009,6 +2088,60 @@ def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> N
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_current_page_find",
         },
+    ]
+
+
+def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> None:
+    def legacy_requests(prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        if "127.0.0.1" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "http://127.0.0.1:5173"},
+                }
+            ]
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {"url": "https://example.com"},
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "打开 https://example.com",
+        ["browser.open_url", "browser.open_url_and_extract_text"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+
+    local_selection = planner_first_direct_tool_selection(
+        "打开 127.0.0.1:5173",
+        ["browser.open_url", "desktop.open_path"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert local_selection.selected_source == "runtime_planner"
+    assert local_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "http://127.0.0.1:5173"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
     ]
 
 
@@ -2719,6 +2852,76 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "planning_reason": "planner_prefetch_web_context",
             "continue_to_model": True,
         },
+    ]
+
+
+def test_planner_tool_requests_maps_explicit_browser_url_open_actions() -> None:
+    allowed = [
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+    ]
+
+    assert planner_tool_requests("打开 https://example.com", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("打开 127.0.0.1:5173", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "http://127.0.0.1:5173"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("open 192.168.1.10:8000/status", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "http://192.168.1.10:8000/status"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("打开网页 github.com", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("请调研 https://example.com 并截图", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_screenshot",
+            "input": {
+                "url": "https://example.com",
+                "reason": "user asked to capture the browser page after opening a URL",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests(
+        "请调研 https://example.com 并总结报告",
+        allowed_tools=allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
     ]
 
 
