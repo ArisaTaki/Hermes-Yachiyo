@@ -4109,6 +4109,35 @@ def test_planner_first_owns_direct_context_communication_send_sequence() -> None
     )
 
 
+def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "screen.capture",
+                "input": {"reason": "legacy fallback"},
+            }
+        ]
+
+    current_ui = planner_first_direct_tool_selection(
+        "当前界面有哪些按钮",
+        ["desktop.active_window", "desktop.ui_elements", "screen.capture"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert current_ui.selected_source == "runtime_planner"
+    assert current_ui.event_payload["legacy_request_count"] == 0
+    assert current_ui.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
     requests = planner_tool_requests(
         "把 hello 复制到剪贴板",
