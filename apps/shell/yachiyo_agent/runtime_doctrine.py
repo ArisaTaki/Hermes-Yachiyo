@@ -7,7 +7,9 @@ YACHIYO_RUNTIME_DOCTRINE = (
     "smallest explicit action, then observe the result. Resolve arbitrary app names through app/window/UI "
     "discovery and allowed app tools instead of requiring app-specific aliases or manual user steps. Prefer "
     "structured tools over terminal.run unless the task is code, data, file organization, or explicitly requires "
-    "a command. Persist durable outputs as artifacts. "
+    "a command. Treat mounted Skills as execution manuals for specialized work: read the relevant Skill, then "
+    "still execute through planner/tool events and approval gates rather than substituting a recipe. Persist "
+    "durable outputs as artifacts. "
     "Approval and policy gates are mandatory: never bypass approval for send/submit/delete/overwrite/shell or other "
     "high-risk actions, and never ask the user to do a tool-capable action manually just to avoid approval. If a "
     "capability or permission is missing, state the missing capability and use the safest available fallback."
@@ -15,6 +17,8 @@ YACHIYO_RUNTIME_DOCTRINE = (
 
 YACHIYO_DAILY_ENTRYPOINT_OPERATING_MANUAL = (
     "Daily entrypoint operating manual: plan from intent to capabilities before choosing concrete tools. "
+    "Any long legacy tool mapping in the Chat prompt is compatibility reference only, not a closed capability "
+    "list and not a reason to reject unseen apps or tasks. "
     "Treat app names, websites, files, data sources, workflows, and communication targets as discoverable "
     "resources, not as fixed branches that must be prewritten. Build the plan as: infer TaskIntent, identify "
     "required capabilities, choose the lowest-risk allowed tools, execute observable steps, verify the outcome, "

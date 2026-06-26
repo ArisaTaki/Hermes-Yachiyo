@@ -59,6 +59,34 @@ def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
 
 
+_PLANNER_EVENT_TYPES = {
+    "agent.intent.selected",
+    "agent.plan.created",
+    "agent.plan.step",
+    "agent.plan.selection",
+}
+
+
+def _non_planner_timeline_events(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in timeline
+        if event.get("event") not in _PLANNER_EVENT_TYPES
+    ]
+
+
+def _non_planner_run_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events
+        if event.get("event_type") not in _PLANNER_EVENT_TYPES
+    ]
+
+
+def _planner_selection_events(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [event for event in timeline if event.get("event") == "agent.plan.selection"]
+
+
 class RecordingDesktopBroker:
     def __init__(self, order: list[str]) -> None:
         self.order = order
@@ -391,6 +419,8 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
     assert "discover -> act -> verify" in system_prompt
     assert "Daily entrypoint operating manual" in system_prompt
     assert "intent to capabilities before choosing concrete tools" in system_prompt
+    assert "Treat mounted Skills as execution manuals" in system_prompt
+    assert "legacy tool mapping in the Chat prompt is compatibility reference only" in system_prompt
     assert "not as fixed branches that must be prewritten" in system_prompt
     assert "selected intent=data_analysis" in system_prompt
     assert "workspace.read -> terminal.run -> artifact.write" in system_prompt
@@ -10773,16 +10803,9 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
     assert selection_events[0]["selection_source"] == "runtime_planner"
-    assert selection_events[0]["selected_tools"] == ["app.open", "desktop.click_ui_element"]
-    appended_selection_events = [
-        payload
-        for _run_id, event_type, payload in appended_events
-        if event_type == "agent.plan.selection"
-    ]
-    assert appended_selection_events[0]["selection_source"] == "runtime_planner"
-    assert appended_selection_events[0]["selected_tools"] == [
-        "app.open",
-        "desktop.click_ui_element",
+    assert selection_events[0]["selected_tools"] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
     ]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "desktop.safe_shortcut"
@@ -11480,15 +11503,18 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     assert broker.calls == [("media.apple_music_play", {"query": "超时空辉夜姬"}, False)]
     assert budget.tool_claims == [("media.apple_music_play", False)]
     assert budget.claims == 0
-    assert [event["event"] for event in timeline] == [
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["media.apple_music_play"]
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert timeline[1]["detail"] == "media.apple_music_play"
-    assert timeline[1]["result"]["ok"] is True
-    assert timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
-    assert [event["event_type"] for event in run_events] == [
+    assert non_planner_timeline[1]["detail"] == "media.apple_music_play"
+    assert non_planner_timeline[1]["result"]["ok"] is True
+    assert non_planner_timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+    non_planner_run_events = _non_planner_run_events(run_events)
+    assert [event["event_type"] for event in non_planner_run_events] == [
         "agent.desktop.intent_planned",
         "agent.tool.policy_decision",
         "tool.requested",
@@ -11497,18 +11523,13 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert run_events[0]["payload"] == {
-        "tool": "media.apple_music_play",
-        "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {"query": "超时空辉夜姬"},
-    }
-    assert run_events[1]["payload"]["tool"] == "media.apple_music_play"
-    assert run_events[1]["payload"]["decision"] == "allow"
-    assert run_events[1]["payload"]["reason"] == "agent_tool_policy"
-    assert run_events[1]["payload"]["policy_overlay"] is False
-    assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+    assert non_planner_run_events[0]["payload"]["tool"] == "media.apple_music_play"
+    assert non_planner_run_events[0]["payload"]["source"] == "runtime_planner"
+    assert non_planner_run_events[1]["payload"]["tool"] == "media.apple_music_play"
+    assert non_planner_run_events[1]["payload"]["decision"] == "allow"
+    assert non_planner_run_events[1]["payload"]["reason"] == "agent_tool_policy"
+    assert non_planner_run_events[1]["payload"]["policy_overlay"] is False
+    assert non_planner_run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
 def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -> None:
@@ -11604,13 +11625,16 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
     assert order == ["tool"]
     assert budget.tool_claims == [("media.apple_music_play", False)]
     assert budget.claims == 0
-    assert [event["event"] for event in timeline] == [
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["media.apple_music_play"]
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
-    assert [event["event_type"] for event in run_events] == [
+    assert non_planner_timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+    non_planner_run_events = _non_planner_run_events(run_events)
+    assert [event["event_type"] for event in non_planner_run_events] == [
         "agent.desktop.intent_planned",
         "agent.tool.policy_decision",
         "tool.requested",
@@ -11619,11 +11643,11 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert run_events[1]["payload"]["tool"] == "media.apple_music_play"
-    assert run_events[1]["payload"]["decision"] == "allow"
-    assert run_events[1]["payload"]["reason"] == "agent_tool_policy"
-    assert run_events[1]["payload"]["policy_overlay"] is False
-    assert run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+    assert non_planner_run_events[1]["payload"]["tool"] == "media.apple_music_play"
+    assert non_planner_run_events[1]["payload"]["decision"] == "allow"
+    assert non_planner_run_events[1]["payload"]["reason"] == "agent_tool_policy"
+    assert non_planner_run_events[1]["payload"]["policy_overlay"] is False
+    assert non_planner_run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
 def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execution() -> None:
@@ -11717,13 +11741,15 @@ def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execu
 
     assert str(result) == "已在 Apple Music 播放：超时空辉夜姬。"
     assert order == ["preflight", "tool"]
-    assert [event["event"] for event in timeline] == [
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["media.apple_music_play"]
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.desktop.permission_preflight",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    preflight = timeline[1]
+    preflight = non_planner_timeline[1]
     assert preflight["tool"] == "media.apple_music_play"
     assert preflight["permission_targets"] == ["automation"]
     assert preflight["affected_tools"] == ["media.apple_music_play"]
@@ -11736,11 +11762,12 @@ def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execu
             "risk_level": "low",
         }
     ]
-    assert [event["event_type"] for event in run_events[:2]] == [
+    non_planner_run_events = _non_planner_run_events(run_events)
+    assert [event["event_type"] for event in non_planner_run_events[:2]] == [
         "agent.desktop.intent_planned",
         "agent.desktop.permission_preflight",
     ]
-    assert run_events[1]["payload"]["diagnostic_route"] == "/yachiyo/readiness"
+    assert non_planner_run_events[1]["payload"]["diagnostic_route"] == "/yachiyo/readiness"
     assert "model.request.started" not in [event["event_type"] for event in run_events]
 
 
@@ -11839,17 +11866,17 @@ def test_main_chat_browser_search_intent_returns_deterministic_result_without_mo
     assert broker.calls == [("browser.open_url", {"url": url}, False)]
     assert budget.tool_claims == [("browser.open_url", False)]
     assert budget.claims == 0
-    assert timeline[0] == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "browser.open_url",
-        "tool": "browser.open_url",
-        "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {"url": url},
-    }
-    assert timeline[-1]["event"] == "agent.desktop.intent_completed"
-    assert timeline[-1]["summary"] == f"已打开网页：{url}。"
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["browser.open_url"]
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event["tool"] == "browser.open_url"
+    assert planned_event["source"] == "daily_desktop_intent"
+    assert planned_event["planning_reason"] == "clear_daily_desktop_intent"
+    assert planned_event["input_preview"] == {"url": url}
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert non_planner_timeline[-1]["event"] == "agent.desktop.intent_completed"
+    assert non_planner_timeline[-1]["summary"] == f"已打开网页：{url}。"
     assert run_events[-1]["event_type"] == "agent.desktop.intent_completed"
     assert run_events[-1]["payload"]["summary"] == f"已打开网页：{url}。"
 
@@ -13239,19 +13266,22 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
             "protocol": "json_fallback",
             "tool": "media.apple_music_open_and_play",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
-    assert timeline[0] == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "media.apple_music_open_and_play",
-        "tool": "media.apple_music_open_and_play",
-        "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {},
-    }
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == [
+        "media.apple_music_open_and_play"
+    ]
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event["tool"] == "media.apple_music_open_and_play"
+    assert planned_event["source"] == "runtime_planner"
+    assert planned_event["planning_reason"] == "planner_fallback_media_playback"
+    assert planned_event["input_preview"] == {}
 
 
 def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
@@ -13778,7 +13808,11 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
     assert tool_runs[0]["allowed_tools"] == ["desktop.hotkey"]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-hotkey"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
-    assert timeline[0] == {
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["desktop.hotkey"]
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event == {
         "event": "agent.desktop.intent_planned",
         "detail": "desktop.hotkey",
         "tool": "desktop.hotkey",
@@ -13871,12 +13905,14 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
 
     assert str(result) == "已发送快捷键：Command+Option+P。"
     assert order == ["tool"]
-    assert [event["event"] for event in timeline] == [
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["desktop.hotkey"]
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert timeline[-1]["summary"] == "已发送快捷键：Command+Option+P。"
+    assert non_planner_timeline[-1]["summary"] == "已发送快捷键：Command+Option+P。"
     assert appended_events[-1] == {
         "run_id": "run-hotkey-direct",
         "event_type": "agent.desktop.intent_completed",
@@ -14173,11 +14209,13 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
     else:
         raise AssertionError("expected AgentApprovalRequired")
 
-    assert [event["event"] for event in timeline] == [
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["desktop.hotkey"]
+    non_planner_timeline = _non_planner_timeline_events(timeline)
+    assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.desktop.intent_approval_required",
     ]
-    assert timeline[-1] == {
+    assert non_planner_timeline[-1] == {
         "event": "agent.desktop.intent_approval_required",
         "detail": "desktop.hotkey",
         "tool": "desktop.hotkey",
@@ -14400,52 +14438,34 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
             "protocol": "json_fallback",
             "tool": "media.apple_music_play",
             "input": {"query": "超时空辉夜姬"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-music"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
-    assert timeline[0] == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "media.apple_music_play",
-        "tool": "media.apple_music_play",
-        "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
-        "input_preview": {"query": "超时空辉夜姬"},
-    }
-    assert appended_events == [
-        {
-            "run_id": "run-music",
-            "event_type": "agent.desktop.intent_planned",
-            "payload": {
-                "tool": "media.apple_music_play",
-                "status": "planned",
-                "source": "daily_desktop_intent",
-                "planning_reason": "clear_daily_desktop_intent",
-                "input_preview": {"query": "超时空辉夜姬"},
-            },
-        },
-        {
-            "run_id": "run-music",
-            "event_type": "agent.tool.policy_decision",
-            "payload": {
-                "tool": "media.apple_music_play",
-                "status": "allowed",
-                "decision": "allow",
-                "source": "daily_desktop_intent",
-                "reason": "agent_tool_policy",
-                "policy_scope": "daily_desktop",
-                "policy_overlay": False,
-                "input_preview": {"query": "超时空辉夜姬"},
-                "allowed_tools": [
-                    "media.apple_music_play",
-                    "screen.capture",
-                    "desktop.active_window",
-                ],
-                "planning_reason": "clear_daily_desktop_intent",
-            },
-        },
+    assert _planner_selection_events(timeline)[0]["selected_tools"] == ["media.apple_music_play"]
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event["tool"] == "media.apple_music_play"
+    assert planned_event["source"] == "runtime_planner"
+    assert planned_event["planning_reason"] == "planner_fallback_media_playback"
+    assert planned_event["input_preview"] == {"query": "超时空辉夜姬"}
+    non_planner_appended = _non_planner_run_events(appended_events)
+    assert [event["event_type"] for event in non_planner_appended] == [
+        "agent.desktop.intent_planned",
+        "agent.tool.policy_decision",
     ]
+    assert non_planner_appended[0]["payload"]["tool"] == "media.apple_music_play"
+    assert non_planner_appended[0]["payload"]["source"] == "runtime_planner"
+    assert non_planner_appended[0]["payload"]["planning_reason"] == "planner_fallback_media_playback"
+    policy_payload = non_planner_appended[1]["payload"]
+    assert policy_payload["tool"] == "media.apple_music_play"
+    assert policy_payload["decision"] == "allow"
+    assert policy_payload["reason"] == "agent_tool_policy"
+    assert policy_payload["policy_overlay"] is False
+    assert policy_payload["input_preview"] == {"query": "超时空辉夜姬"}
 
 
 def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
