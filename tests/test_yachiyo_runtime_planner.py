@@ -1103,6 +1103,53 @@ def test_runtime_planner_routes_named_app_management_to_app_control() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["manage-app"]
 
 
+def test_runtime_planner_sequences_app_open_or_focus_before_app_management() -> None:
+    cases = [
+        ("打开 Slack 然后隐藏", "open", "app.open", "app.hide", False),
+        ("切到 Slack 然后隐藏", "focus", "app.focus", "app.hide", False),
+        ("open Chrome then minimize", "open", "app.open", "app.minimize", False),
+        ("打开 Slack 然后退出", "open", "app.open", "app.quit", True),
+    ]
+
+    for prompt, prepare_mode, prepare_tool, manage_tool, approval_required in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "app.focus",
+                "app.hide",
+                "app.minimize",
+                "app.quit",
+                "desktop.running_apps",
+            ],
+        )
+
+        app_name = "Chrome" if "Chrome" in prompt else "Slack"
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert decision.selected_intent.inputs["app_management_hint"]["app_name"] == app_name
+        assert decision.selected_intent.inputs["app_management_prepare_mode"] == prepare_mode
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "open-or-focus-app",
+            "manage-app",
+            "verify-desktop-result",
+        ]
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": app_name,
+            "limit": 20,
+        }
+        prepare = _step_by_id(decision, "open-or-focus-app")
+        assert prepare.tool_name == prepare_tool
+        assert prepare.input_preview == {"app_name": app_name}
+        manage = _step_by_id(decision, "manage-app")
+        assert manage.tool_name == manage_tool
+        assert manage.input_preview == {"app_name": app_name}
+        assert manage.depends_on == ["open-or-focus-app"]
+        assert manage.approval_required is approval_required
+
+
 def test_runtime_planner_marks_named_app_quit_as_approval_required() -> None:
     decision = RuntimePlanner().decision(
         "退出 Slack",
@@ -2526,6 +2573,30 @@ def test_planner_desktop_tool_requests_maps_named_app_management() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.running_apps",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_direct_tool_requests_maps_app_management_sequence() -> None:
+    requests = planner_direct_tool_requests(
+        "打开 Slack 然后隐藏",
+        allowed_tools=["desktop.list_apps", "app.open", "app.hide", "desktop.running_apps"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

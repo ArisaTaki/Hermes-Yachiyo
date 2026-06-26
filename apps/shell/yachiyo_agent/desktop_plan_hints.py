@@ -982,8 +982,17 @@ def _clean_management_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     )
+    app = re.sub(r"\s*(?:然后|再|接着|之后|后|then)\s*$", "", app, flags=re.IGNORECASE)
+    app = re.sub(r"^(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*", "", app)
+    app = re.sub(
+        r"^(?:open|launch|start|focus|activate|bring)\s+|^switch\s+to\s+",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
     app = re.sub(
         r"\s*(?:一下|下|起来|掉|显示出来|还原|恢复|取消隐藏|隐藏|藏起来|收起|收起来|"
+        r"打开|启动|开启|运行|拉起|切到|聚焦|open|launch|start|focus|activate|"
         r"最小化|退出|关闭|关掉|结束|终止|show|restore|unhide|hide|minimi[sz]e|"
         r"quit|close|exit|terminate)$",
         "",

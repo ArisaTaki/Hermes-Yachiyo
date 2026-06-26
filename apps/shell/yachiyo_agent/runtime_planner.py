@@ -269,6 +269,11 @@ class TaskIntentRouter:
             app_name_hint = ""
         if desktop_discovery is not None:
             app_name_hint = ""
+        app_management_prepare_mode = _app_management_prepare_mode(
+            text,
+            app_name_hint,
+            app_management,
+        )
         operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
         if (
             context_source_hint(text)
@@ -298,6 +303,8 @@ class TaskIntentRouter:
             inputs["screen_capture_hint"] = screen_capture
         if app_management is not None:
             inputs["app_management_hint"] = app_management
+        if app_management_prepare_mode:
+            inputs["app_management_prepare_mode"] = app_management_prepare_mode
         if foreground_management is not None:
             inputs["foreground_management_hint"] = foreground_management
         if safe_shortcut is not None:
@@ -924,6 +931,11 @@ class RuntimePlanner:
             app_name = ""
         if desktop_discovery:
             app_name = ""
+        app_management_prepare_mode = str(
+            intent.inputs.get("app_management_prepare_mode")
+            or _app_management_prepare_mode(intent.user_goal, app_name, app_management)
+            or ""
+        ).strip()
         mode = app_control_mode(intent.user_goal)
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
@@ -1182,6 +1194,24 @@ class RuntimePlanner:
                 "quit": "app.quit",
             }.get(action)
             is_quit = action == "quit"
+            manage_depends_on = ["discover-desktop-state"]
+            if app_management_prepare_mode in {"open", "focus"}:
+                steps.append(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        _first_allowed(
+                            app_control_tool_candidates(app_management_prepare_mode),
+                            allowed,
+                        ),
+                        input_preview={"app_name": app_name},
+                        depends_on=["discover-desktop-state"],
+                        reason="Resolve the requested app before the follow-up management action.",
+                    )
+                )
+                manage_depends_on = ["open-or-focus-app"]
             steps.append(
                 _step(
                     intent,
@@ -1192,7 +1222,7 @@ class RuntimePlanner:
                     input_preview={"app_name": app_name},
                     risk_level="high" if is_quit else "low",
                     approval_required=is_quit,
-                    depends_on=["discover-desktop-state"],
+                    depends_on=manage_depends_on,
                     reason="Run the requested app management action through the desktop app-control policy gate.",
                 )
             )
@@ -2701,6 +2731,42 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "open_devtools",
         "focus_address_bar",
     }
+
+
+def _app_management_prepare_mode(
+    text: str,
+    app_name_hint: str,
+    hint: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(hint, Mapping):
+        return ""
+    app_name = str(app_name_hint or hint.get("app_name") or "").strip()
+    if not app_name:
+        return ""
+    connector = r"(?:然后|再|接着|之后|后|\bthen\b|\band\b)"
+    management = r"(?:隐藏|藏起来|收起|最小化|退出|关闭|关掉|结束|终止|hide|minimi[sz]e|quit|close|exit|terminate)"
+    app = re.escape(app_name)
+    if (
+        re.search(rf"(?:切到|聚焦)\s*{app}.*{connector}.*{management}", text, flags=re.IGNORECASE)
+        or re.search(rf"{app}\s*(?:切到|聚焦).*(?:{connector}).*{management}", text, flags=re.IGNORECASE)
+        or re.search(
+            rf"(?:focus|switch\s+to|activate|bring)\s+{app}\b.*{connector}.*{management}",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ):
+        return "focus"
+    if (
+        re.search(rf"(?:打开|启动|开启|运行|拉起)\s*{app}.*{connector}.*{management}", text, flags=re.IGNORECASE)
+        or re.search(rf"{app}\s*(?:打开|启动|开启|运行|拉起).*{connector}.*{management}", text, flags=re.IGNORECASE)
+        or re.search(
+            rf"(?:open|launch|start)\s+{app}\b.*{connector}.*{management}",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ):
+        return "open"
+    return ""
 
 
 def _safe_shortcut_targets_foreground(
