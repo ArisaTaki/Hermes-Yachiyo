@@ -250,6 +250,9 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert discover.action == "list_apps"
     assert discover.input_preview == {"query": "SuperData Studio", "limit": 20}
     assert "Discover installed apps" in discover.reason
+    discovery_capability = _capability_by_id(decision, "desktop.app_discovery")
+    assert "desktop.list_apps" in discovery_capability.tools
+    assert "desktop.list_apps" in discovery_capability.available_tools
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 

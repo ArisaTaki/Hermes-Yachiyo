@@ -57,6 +57,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         category="desktop",
         description="Inspect running apps, windows, foreground state, and available UI.",
         tools=(
+            "desktop.list_apps",
             "desktop.running_apps",
             "desktop.active_window",
             "desktop.windows",

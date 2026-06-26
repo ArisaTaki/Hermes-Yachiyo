@@ -463,6 +463,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
             "screen.capture",
             "desktop.permissions",
             "desktop.active_window",
+            "desktop.list_apps",
             "desktop.windows",
             "desktop.ui_elements",
             "app.status",
@@ -493,6 +494,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
     ]
     assert capabilities["desktop_execution"]["available"] is True
     assert "desktop.permissions" in capabilities["desktop_execution"]["available_tools"]
+    assert "desktop.list_apps" in capabilities["desktop_execution"]["available_tools"]
     assert capabilities["screen_capture"]["available"] is True
     assert capabilities["screen_capture"]["available_tools"] == ["screen.capture"]
     assert capabilities["foreground_input"]["available"] is False
@@ -660,6 +662,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
     assert desktop_tool_risk_level("desktop.permissions") == "low"
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
+    assert desktop_tool_risk_level("desktop.list_apps") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("desktop.ui_elements") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
@@ -757,6 +760,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "diagnose_permissions",
         "read_active_window",
         "read_running_apps",
+        "discover_apps",
         "read_windows",
         "read_ui_elements",
         "read_app_status",
@@ -782,7 +786,6 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "foreground_safe_key",
         "foreground_safe_type_text",
         "foreground_safe_click",
-        "foreground_safe_scroll",
     ]
     assert catalog["read_screen"].risk_level == "low"
     assert catalog["read_screen"].tools == ["screen.capture"]
@@ -790,6 +793,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["diagnose_permissions"].tools == ["desktop.permissions"]
     assert catalog["read_running_apps"].risk_level == "low"
     assert catalog["read_running_apps"].tools == ["desktop.running_apps"]
+    assert catalog["discover_apps"].risk_level == "low"
+    assert catalog["discover_apps"].tools == ["desktop.list_apps"]
     assert catalog["read_windows"].risk_level == "low"
     assert catalog["read_windows"].tools == ["desktop.windows"]
     assert catalog["read_ui_elements"].risk_level == "low"
@@ -959,6 +964,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     display_sleep = tools["system.display_sleep"]
     screen_saver = tools["system.screen_saver_start"]
     permissions = tools["desktop.permissions"]
+    list_apps = tools["desktop.list_apps"]
     quit_app = tools["app.quit"]
     named_show_app = tools["app.show"]
     named_focus_window = tools["app.focus_window"]
@@ -1026,6 +1032,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert permissions.capability_id == "desktop_execution"
     assert permissions.risk_level == "low"
     assert any("missing desktop permission" in note for note in permissions.fallback_notes)
+    assert list_apps.capability_id == "desktop_execution"
+    assert list_apps.risk_level == "low"
+    assert list_apps.input_schema["required"] == []
+    assert any("without opening" in note for note in list_apps.fallback_notes)
     assert quit_app.capability_id == "app_control"
     assert quit_app.risk_level == "medium"
     assert quit_app.approval_required is False

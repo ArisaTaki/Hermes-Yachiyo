@@ -344,6 +344,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.running_apps": [
             "Requires Automation or Accessibility permission to read the foreground app list.",
         ],
+        "desktop.list_apps": [
+            "Discovers installed app bundles without opening them; use before app.open when the exact app name is uncertain.",
+        ],
         "desktop.windows": [
             "Requires Automation or Accessibility permission to read desktop window titles.",
         ],
