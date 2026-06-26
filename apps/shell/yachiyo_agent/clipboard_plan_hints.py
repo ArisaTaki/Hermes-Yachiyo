@@ -11,6 +11,8 @@ def clipboard_operation_hint(prompt: str) -> dict[str, Any]:
     text = str(prompt or "").strip()
     if not text:
         return {}
+    if _clipboard_context_source_request(text):
+        return {}
     write_text = _clipboard_write_text(text)
     if write_text:
         return {"action": "write", "text": write_text}
@@ -57,6 +59,30 @@ def _clipboard_write_text(text: str) -> str:
         if cleaned:
             return cleaned
     return ""
+
+
+def _clipboard_context_source_request(text: str) -> bool:
+    lowered = text.lower()
+    has_clipboard_source = any(term in lowered for term in ("clipboard", "剪贴板", "粘贴板"))
+    has_external_target = any(
+        term in lowered
+        for term in (
+            "note",
+            "notes",
+            "reminder",
+            "reminders",
+            "calendar",
+            "event",
+            "备忘录",
+            "笔记",
+            "提醒",
+            "提醒事项",
+            "日历",
+            "日程",
+            "事件",
+        )
+    )
+    return has_clipboard_source and has_external_target
 
 
 def _clipboard_read_request(text: str) -> bool:

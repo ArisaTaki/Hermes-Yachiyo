@@ -2292,6 +2292,23 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
     )
 
 
+def test_planner_tool_requests_leaves_dynamic_schedule_sources_to_legacy_fallback() -> None:
+    assert (
+        planner_tool_requests(
+            "create a reminder from selected text",
+            allowed_tools=["reminders.create", "desktop.safe_shortcut", "clipboard.read"],
+        )
+        == []
+    )
+    assert (
+        planner_tool_requests(
+            "把剪贴板内容创建成日历事件",
+            allowed_tools=["calendar.create_event", "clipboard.read"],
+        )
+        == []
+    )
+
+
 def test_planner_tool_requests_maps_explicit_note_plan() -> None:
     requests = planner_tool_requests(
         "新建备忘录内容是 今天要买牛奶",
@@ -2314,6 +2331,13 @@ def test_planner_tool_requests_leaves_context_note_to_legacy_fallback() -> None:
         planner_tool_requests(
             "create a note from selected text",
             allowed_tools=["notes.create", "desktop.safe_shortcut", "clipboard.read"],
+        )
+        == []
+    )
+    assert (
+        planner_tool_requests(
+            "create a note from clipboard",
+            allowed_tools=["notes.create", "clipboard.read"],
         )
         == []
     )

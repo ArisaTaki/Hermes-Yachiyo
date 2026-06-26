@@ -27,6 +27,8 @@ def schedule_tool_preview(
 
 
 def reminder_payload(text: str) -> dict[str, Any]:
+    if _dynamic_schedule_source_request(text):
+        return {}
     body = _reminder_body(text)
     if not body:
         return {}
@@ -49,6 +51,8 @@ def reminder_payload(text: str) -> dict[str, Any]:
 
 
 def calendar_event_payload(text: str) -> dict[str, Any]:
+    if _dynamic_schedule_source_request(text):
+        return {}
     start_at = _local_iso_hint(text)
     if start_at:
         title = _calendar_title(text, start_at)
@@ -78,6 +82,46 @@ def calendar_event_payload(text: str) -> dict[str, Any]:
 def _looks_like_calendar_event(text: str) -> bool:
     lowered = str(text or "").lower()
     return any(term in lowered for term in ("calendar", "event", "meeting", "日历", "日程", "会议"))
+
+
+def _dynamic_schedule_source_request(text: str) -> bool:
+    lowered = str(text or "").lower()
+    has_dynamic_source = any(
+        term in lowered
+        for term in (
+            "selected text",
+            "highlighted text",
+            "selection",
+            "clipboard",
+            "current page",
+            "current window",
+            "current url",
+            "选中",
+            "选取",
+            "高亮",
+            "剪贴板",
+            "粘贴板",
+            "当前网页",
+            "当前页面",
+            "当前窗口",
+            "当前链接",
+        )
+    )
+    has_schedule_target = any(
+        term in lowered
+        for term in (
+            "reminder",
+            "reminders",
+            "calendar",
+            "event",
+            "提醒",
+            "提醒事项",
+            "日历",
+            "日程",
+            "事件",
+        )
+    )
+    return has_dynamic_source and has_schedule_target
 
 
 def _reminder_body(text: str) -> str:
