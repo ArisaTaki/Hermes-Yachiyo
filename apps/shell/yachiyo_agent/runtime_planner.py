@@ -177,6 +177,8 @@ class TaskIntentRouter:
         safe_click = safe_click_hint(text)
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
+        app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        spotlight_search_query = _spotlight_search_query_hint(text)
         score = _score_terms(
             text,
             [
@@ -240,6 +242,10 @@ class TaskIntentRouter:
                 "page up",
             ],
         )
+        if score <= 0 and app_scoped_desktop_operation:
+            score = 0.18
+        if score <= 0 and spotlight_search_query:
+            score = 0.18
         if (
             score <= 0
             and not metadata.get("daily_desktop_intent")
@@ -275,6 +281,9 @@ class TaskIntentRouter:
             app_name_hint,
             app_management,
         )
+        app_search = _app_search_hint(text, app_name_hint)
+        if not app_name_hint and app_search.get("app_name"):
+            app_name_hint = str(app_search.get("app_name") or "").strip()
         operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
         if (
             context_source in {"selection", "clipboard"}
@@ -319,6 +328,10 @@ class TaskIntentRouter:
             inputs["app_management_hint"] = app_management
         if app_management_prepare_mode:
             inputs["app_management_prepare_mode"] = app_management_prepare_mode
+        if app_search:
+            inputs["app_search_hint"] = app_search
+        if spotlight_search_query:
+            inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
         if foreground_management is not None:
             inputs["foreground_management_hint"] = foreground_management
         if safe_shortcut is not None:
@@ -439,6 +452,10 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         source = context_source_hint(text)
         if source and safe_shortcut_hint(text):
+            return _empty_intent("web_research", text)
+        if _spotlight_search_query_hint(text):
+            return _empty_intent("web_research", text)
+        if _app_scoped_desktop_operation_hint(text):
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         browser_action = (
@@ -936,6 +953,16 @@ class RuntimePlanner:
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
+        app_search = intent.inputs.get("app_search_hint")
+        if not isinstance(app_search, Mapping):
+            app_search = _app_search_hint(
+                intent.user_goal,
+                str(intent.inputs.get("app_name_hint") or ""),
+            )
+        spotlight_search = intent.inputs.get("spotlight_search_hint")
+        if not isinstance(spotlight_search, Mapping):
+            spotlight_query = _spotlight_search_query_hint(intent.user_goal)
+            spotlight_search = {"query": spotlight_query} if spotlight_query else {}
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -943,6 +970,7 @@ class RuntimePlanner:
             or (screen_capture or {}).get("app_name")
             or (app_management or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
+            or app_search.get("app_name")
             or ""
         ).strip()
         if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
@@ -961,6 +989,8 @@ class RuntimePlanner:
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
         submit_action = submit_action_hint(intent.user_goal)
+        if click_target and not any((type_target, safe_type_text, app_search)):
+            submit_action = ""
         followup_safe_shortcut = safe_shortcut if safe_type_text and safe_shortcut else None
         primary_safe_shortcut = None if followup_safe_shortcut else safe_shortcut
         operation_tool, operation_preview = _desktop_operation_tool_preview(
@@ -978,9 +1008,39 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        if spotlight_search:
+            query = str(spotlight_search.get("query") or "").strip()
+            return [
+                _step(
+                    intent,
+                    "open-spotlight-search",
+                    "Open Spotlight search",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_shortcut",), allowed),
+                    input_preview={"action": "spotlight_search"},
+                    action="shortcut",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Open Spotlight with the dedicated safe shortcut.",
+                ),
+                _step(
+                    intent,
+                    "type-spotlight-search-query",
+                    "Type Spotlight search query",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_type_text",), allowed),
+                    input_preview={"text": query},
+                    depends_on=["open-spotlight-search"],
+                    action="type",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Type only the explicit Spotlight query from the user prompt.",
+                ),
+            ]
         if (
             desktop_discovery
             and not app_name
+            and not app_search
             and not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
         ):
             action = str(desktop_discovery.get("action") or "").strip()
@@ -999,6 +1059,7 @@ class RuntimePlanner:
         if (
             not app_name
             and screen_capture is not None
+            and not app_search
             and not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
         ):
             capture_payload = {
@@ -1274,6 +1335,87 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
+        if app_search:
+            search_query = str(app_search.get("query") or "").strip()
+            search_target = str(app_search.get("target") or "").strip() or "Search"
+            search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
+            search_focus_preview = (
+                {
+                    "target": search_target,
+                    "role_filter": "text",
+                    "click_count": 1,
+                    "limit": 80,
+                }
+                if search_focus_tool == "desktop.click_ui_element"
+                else {"action": "find"}
+            )
+            search_depends_on = ["discover-desktop-state"]
+            if focus_step_added:
+                search_depends_on = ["focus-app-window"]
+            elif app_name:
+                search_depends_on = ["open-or-focus-app"]
+            steps.append(
+                _step(
+                    intent,
+                    "focus-app-search-field",
+                    "Focus app search field",
+                    "desktop.ui_operation",
+                    search_focus_tool,
+                    input_preview=search_focus_preview,
+                    depends_on=search_depends_on,
+                    action="click" if search_focus_tool == "desktop.click_ui_element" else "shortcut",
+                    reason="Focus the requested app's search affordance without relying on app-specific aliases.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "type-app-search-query",
+                    "Type app search query",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_type_text",), allowed),
+                    input_preview={"text": search_query},
+                    depends_on=["focus-app-search-field"],
+                    action="type",
+                    reason="Type only the explicit app-search query from the user prompt.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "submit-app-search",
+                    "Submit app search",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.search_submit",), allowed),
+                    input_preview={},
+                    depends_on=["type-app-search-query"],
+                    action="submit",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Submit the app search with the dedicated safe search submit tool.",
+                )
+            )
+            verify_tool = _first_allowed(
+                ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+                allowed,
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=app_name,
+                        operation_preview={},
+                    ),
+                    depends_on=["submit-app-search"],
+                    reason="Observe the app after submitting the search.",
+                )
+            )
+            return steps
         if (
             _looks_like_ui_operation(intent.user_goal)
             or primary_safe_shortcut
@@ -2202,6 +2344,16 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
         return "submit"
+    if step_key == "focus-app-search-field":
+        return _desktop_operation_action(tool_name)
+    if step_key == "type-app-search-query":
+        return "type"
+    if step_key == "submit-app-search":
+        return "submit"
+    if step_key == "open-spotlight-search":
+        return "shortcut"
+    if step_key == "type-spotlight-search-query":
+        return "type"
     if step_key == "submit-browser-context":
         return "submit"
     if capability_id == "desktop.app_discovery":
@@ -2766,6 +2918,13 @@ def _clean_app_name_hint(value: str) -> str:
         "屏幕",
         "界面",
         "画面",
+        "当前",
+        "当前app",
+        "当前应用",
+        "前台应用",
+        "current",
+        "current app",
+        "foreground app",
     }
     if context_source_hint(app):
         return ""
@@ -2970,6 +3129,186 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
+
+
+def _app_scoped_desktop_operation_hint(text: str) -> bool:
+    app_name = _app_name_hint(text)
+    if app_name and _is_browser_or_search_app_name(app_name):
+        return False
+    if _app_search_hint(text, app_name):
+        return True
+    if not app_name:
+        return False
+    return bool(
+        click_target_hint(text)
+        or type_into_ui_hint(text, app_name=app_name)
+        or safe_type_text_hint(text)
+        or _contains_any(
+            text,
+            ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入"),
+        )
+    )
+
+
+def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
+    if _looks_like_app_search_field_input(text):
+        return {}
+    app = str(app_name or "").strip()
+    if app and _is_browser_or_search_app_name(app):
+        return {}
+    query = _app_search_query_hint(text, app)
+    if not query and not app:
+        parsed = _leading_app_search_hint(text)
+        if parsed:
+            return parsed
+    if not query:
+        return {}
+    return {
+        "query": query,
+        "target": "搜索" if _contains_any(text, ("搜索", "查找", "检索", "找")) else "Search",
+    }
+
+
+def _looks_like_app_search_field_input(text: str) -> bool:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    return bool(
+        (
+            _contains_any(
+                lowered,
+                (
+                    "search field",
+                    "search box",
+                    "search input",
+                    "search bar",
+                ),
+            )
+            and _contains_any(lowered, ("type", "enter", "input", "write", "fill"))
+        )
+        or (
+            re.search(r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)", value, flags=re.IGNORECASE)
+            and _contains_any(value, ("输入", "键入", "填写", "填入", "写入", "写"))
+        )
+    )
+
+
+def _leading_app_search_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?P<app>[\w .·-]{1,40}?)\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _clean_app_name_hint(match.group("app"))
+        if not app_name or _is_browser_or_search_app_name(app_name):
+            continue
+        query = _clean_app_search_query(match.group("query"))
+        if not query or _invalid_leading_app_search_match(value, app_name, query):
+            continue
+        return {
+            "app_name": app_name,
+            "query": query,
+            "target": "搜索" if _contains_any(value, ("搜索", "查找", "检索", "找")) else "Search",
+        }
+    return {}
+
+
+def _invalid_leading_app_search_match(value: str, app_name: str, query: str) -> bool:
+    lowered = value.lower()
+    normalized_query = str(query or "").strip().lower()
+    if normalized_query in {
+        "field",
+        "search field",
+        "box",
+        "search box",
+        "input",
+        "search input",
+        "result",
+        "results",
+        "search result",
+        "search results",
+        "框",
+        "栏",
+        "搜索框",
+        "搜索栏",
+        "输入框",
+        "结果",
+        "搜索结果",
+    }:
+        return True
+    if _contains_any(
+        app_name,
+        ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入", "填写"),
+    ):
+        return True
+    return bool(
+        _contains_any(lowered, ("click", "press", "tap", "type", "enter", "fill"))
+        and _contains_any(
+            lowered,
+            ("search field", "search box", "search input", "search result", "search results"),
+        )
+    )
+
+
+def _app_search_query_hint(text: str, app_name: str) -> str:
+    value = _clean_prompt(text)
+    app = str(app_name or "").strip()
+    app_pattern = (
+        re.escape(app)
+        if app
+        else r"(?:当前\s*(?:app|应用|软件)|current\s+app|foreground\s+app)"
+    )
+    chinese_patterns = (
+        rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:并|然后|再|接着|之后)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+    )
+    for pattern in chinese_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            query = _clean_app_search_query(match.group("query"))
+            if query:
+                return query
+
+    lowered = value.lower()
+    english_patterns = (
+        rf"\b(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\s+(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        rf"\b(?:open|launch|focus|start)\s+(?:the\s+)?{app_pattern}\s+(?:and|then)?\s*(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        rf"\b(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+?)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\b",
+    )
+    for pattern in english_patterns:
+        match = re.search(pattern, lowered, flags=re.IGNORECASE)
+        if match:
+            query = _clean_app_search_query(match.group("query"))
+            if query:
+                return query
+    return ""
+
+
+def _clean_app_search_query(query: str) -> str:
+    value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
+    value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
+    value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
+    return value
+
+
+def _spotlight_search_query_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
+        r"\b(?:open|launch|start|show)\s+(?:spotlight|system\s+search)\s+(?:and\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        r"\b(?:use\s+)?(?:spotlight|system\s+search)\s+(?:to\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_app_search_query(match.group("query"))
+        if query and query.lower() not in {"search", "spotlight", "spotlight search"}:
+            return query
+    return ""
 
 
 def _dynamic_context_browser_action_hint(text: str, context_source: str) -> dict[str, Any]:
@@ -3306,6 +3645,7 @@ def _is_browser_or_search_app_name(app_name: str) -> bool:
         "google",
         "谷歌",
         "浏览器",
+        "spotlight",
     }
 
 

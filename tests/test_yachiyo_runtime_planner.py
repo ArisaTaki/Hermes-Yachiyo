@@ -1355,6 +1355,97 @@ def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
         assert operation.input_preview == {"action": action}
 
 
+def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Notion 并搜索 周报",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Notion"
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "周报",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "focus-app-search-field").tool_name == "desktop.safe_shortcut"
+    assert _step_by_id(decision, "focus-app-search-field").input_preview == {
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "周报"
+    }
+    assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
+    assert _step_by_id(decision, "submit-app-search").approval_required is False
+
+    leading = RuntimePlanner().decision(
+        "Finder 找下载文件",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+
+    assert leading.selected_intent.kind == "desktop_operation"
+    assert leading.selected_intent.inputs["app_name_hint"] == "Finder"
+    assert leading.selected_intent.inputs["app_search_hint"] == {
+        "app_name": "Finder",
+        "query": "下载文件",
+        "target": "搜索",
+    }
+
+
+def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> None:
+    decision = RuntimePlanner().decision(
+        "Spotlight 搜索 yachiyo",
+        allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text", "browser.open_url"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["spotlight_search_hint"] == {"query": "yachiyo"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-spotlight-search",
+        "type-spotlight-search-query",
+    ]
+    assert _step_by_id(decision, "open-spotlight-search").input_preview == {
+        "action": "spotlight_search"
+    }
+    assert _step_by_id(decision, "type-spotlight-search-query").input_preview == {
+        "text": "yachiyo"
+    }
+
+
+def test_runtime_planner_keeps_current_app_input_foreground_scoped() -> None:
+    decision = RuntimePlanner().decision(
+        "在当前应用输入 hello",
+        allowed_tools=["desktop.active_window", "desktop.safe_type_text", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == "desktop.safe_type_text"
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {"text": "hello"}
+
+
 def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
     decision = RuntimePlanner().decision(
         "打开 Notes，输入 hello，再复制",
@@ -1980,6 +2071,53 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
                 "limit": 80,
                 "click_count": 1,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
+    requests = planner_direct_tool_requests(
+        "在 Spotify 搜索 lo-fi",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "lo-fi"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

@@ -2912,7 +2912,7 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
     assert "model.requested" not in event_types
 
     launcher_cases = [
-        ("在微信搜索文件传输助手", "bubble", "WeChat", "文件传输助手"),
+        ("在微信搜索文件传输助手", "bubble", "企业微信", "文件传输助手"),
         ("Apple Music 搜索超时空辉夜姬", "live2d", "Music", "超时空辉夜姬"),
         ("Finder 找下载文件", "bubble", "Finder", "下载文件"),
     ]
@@ -2925,21 +2925,25 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
         )
 
         assert result["ok"] is True
-        assert calls[-3:] == [
-            ("focus", app_name),
+        assert calls[-4:] == [
+            ("open", app_name),
             ("shortcut", "find"),
             ("type", typed_text),
+            ("search_submit", ""),
         ]
         assert agent_task["status"] == "completed"
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
+        open_summary = f"已打开{app_name}" if app_name == "企业微信" else f"已打开 {app_name}"
         assert agent_task["summary"] == (
-            f"已切到 {app_name} 并打开查找。 已向前台输入文字（{len(typed_text)} 个字符）。"
+            f"{open_summary}。 已打开查找。 "
+            f"已向前台输入文字（{len(typed_text)} 个字符）。 已提交前台搜索。"
         )
-        assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
-            "app.focus_and_safe_shortcut",
-            "desktop.safe_type_text",
-        ]
+        tool_names = [tool_call["tool_name"] for tool_call in agent_task["tool_calls"]]
+        assert "app.open" in tool_names
+        assert "desktop.safe_shortcut" in tool_names
+        assert "desktop.safe_type_text" in tool_names
+        assert "desktop.search_submit" in tool_names
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
         assert "agent.desktop.intent_planned" in event_types
