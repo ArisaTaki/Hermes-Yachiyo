@@ -415,8 +415,11 @@ class TaskIntentRouter:
         source = context_source_hint(text)
         if source and safe_shortcut_hint(text):
             return _empty_intent("web_research", text)
-        browser_action = _browser_current_page_hint(text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
+        browser_action = (
+            _browser_current_page_find_hint(text, dynamic_source)
+            or _browser_current_page_hint(text)
+        )
         score = _score_terms(
             text,
             [
@@ -448,10 +451,16 @@ class TaskIntentRouter:
             score = 0.28
         if score <= 0:
             return _empty_intent("web_research", text)
+        browser_action_name = str(browser_action.get("browser_action") or "")
         inputs = {"url_hint": _url_hint(text)}
-        if dynamic_source:
+        if dynamic_source and browser_action_name != "find_current_page":
             inputs["context_source"] = dynamic_source
         inputs.update(browser_action)
+        required_capabilities = (
+            ["desktop.ui_operation"]
+            if browser_action_name == "find_current_page"
+            else ["browser.research"]
+        )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "web_research", text),
             kind="web_research",
@@ -461,7 +470,7 @@ class TaskIntentRouter:
             description="Open, read, and summarize web content.",
             inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["summary"]),
-            required_capabilities=["browser.research"],
+            required_capabilities=required_capabilities,
             preferred_capabilities=[
                 *(
                     ["clipboard.read_write", "desktop.ui_operation"]
@@ -470,7 +479,7 @@ class TaskIntentRouter:
                 ),
                 "artifact.write",
             ],
-            risk_level="medium",
+            risk_level="low" if browser_action else "medium",
         )
 
     def _report_generation_intent(
@@ -1343,6 +1352,8 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
+        if browser_action == "find_current_page":
+            return _current_page_find_steps(intent, allowed)
         if browser_action:
             tool_name = {
                 "current_page": "browser.current_page",
@@ -1936,6 +1947,76 @@ def _context_source_steps(
     return []
 
 
+def _current_page_find_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> list[ToolPlanStepSnapshot]:
+    source = str(intent.inputs.get("context_source") or "").strip()
+    query = str(intent.inputs.get("query") or "").strip()
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    steps: list[ToolPlanStepSnapshot] = []
+
+    if source == "selection":
+        steps.append(
+            _step(
+                intent,
+                "copy-selected-page-find-query",
+                "Copy selected page find query",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                action="shortcut",
+                reason="Copy the explicit selection before using it as the current-page find query.",
+            )
+        )
+
+    steps.append(
+        _step(
+            intent,
+            "open-current-page-find",
+            "Open current page find",
+            "desktop.ui_operation",
+            shortcut_tool,
+            input_preview={"action": "find"},
+            depends_on=["copy-selected-page-find-query"] if source == "selection" else [],
+            action="shortcut",
+            reason="Open the foreground browser page find box with the standard safe shortcut.",
+        )
+    )
+
+    if source in {"selection", "clipboard"}:
+        steps.append(
+            _step(
+                intent,
+                "paste-current-page-find-query",
+                "Paste current page find query",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "paste"},
+                depends_on=["open-current-page-find"],
+                action="shortcut",
+                reason="Paste the selected or clipboard text into the current-page find box.",
+            )
+        )
+        return steps
+
+    steps.append(
+        _step(
+            intent,
+            "type-current-page-find-query",
+            "Type current page find query",
+            "desktop.ui_operation",
+            type_tool,
+            input_preview={"text": query} if query else {},
+            depends_on=["open-current-page-find"],
+            action="type",
+            reason="Type the explicit query into the current-page find box.",
+        )
+    )
+    return steps
+
+
 def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
     if tool_name == "desktop.ui_elements":
         return {"role_filter": "text", "limit": 80}
@@ -2386,6 +2467,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.06
     if intent.kind == "web_research" and _contains_any(text, _UI_CONTROL_TERMS):
         score -= 0.24
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip() == "find_current_page"
+    ):
+        score += 0.28
     if intent.kind == "web_research" and _contains_any(
         text,
         ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
@@ -2550,6 +2636,130 @@ def _desktop_operation_hint(text: str) -> str:
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
         return "open"
     return ""
+
+
+def _browser_current_page_find_hint(text: str, context_source: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if _looks_like_browser_field_input(value, lowered):
+        return {}
+    if not _looks_like_browser_current_page_find(value, lowered):
+        return {}
+    source = context_source if context_source in {"selection", "clipboard"} else ""
+    query = _current_page_find_query(value, lowered)
+    if not source and not query:
+        return {}
+    hint = {"browser_action": "find_current_page"}
+    if source:
+        hint["context_source"] = source
+    if query:
+        hint["query"] = query
+    return hint
+
+
+def _looks_like_browser_field_input(value: str, lowered: str) -> bool:
+    return bool(
+        (
+            _contains_any(
+                lowered,
+                (
+                    "search field",
+                    "search box",
+                    "search input",
+                    "input field",
+                    "text field",
+                    "text box",
+                ),
+            )
+            and _contains_any(lowered, ("type ", "enter ", "input ", "write "))
+        )
+        or re.search(
+            r"(?:输入|键入|填写).{0,24}(?:搜索框|搜索栏|输入框|输入栏|文本框)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_browser_current_page_find(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|页|标签页).{0,12}(?:查找|搜索|检索)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:查找|搜索|检索).{0,16}(?:当前|这个|本页).{0,8}(?:网页|页面|页|标签页)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:search|find)\s+(?:the\s+)?(?:current|this)\s+(?:web\s*)?page\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:search|find)\s+.+?\s+(?:on|in)\s+(?:the\s+)?(?:current|this)"
+            r"\s+(?:web\s*)?page\b",
+            lowered,
+        )
+        or re.search(
+            r"\bfind\s+(?:selected\s+text|current\s+selection|clipboard\s+contents|"
+            r"the\s+clipboard)\s+(?:on|in)\s+(?:current\s+)?page\b",
+            lowered,
+        )
+    )
+
+
+def _current_page_find_query(value: str, lowered: str) -> str:
+    patterns = (
+        r"\b(?:search|find)\s+(?:the\s+)?(?:current|this)\s+(?:web\s*)?page\s+for\s+(.+)$",
+        r"\b(?:search|find)\s+(.+?)\s+(?:on|in)\s+(?:the\s+)?(?:current|this)\s+(?:web\s*)?page\b",
+        r"\b(?:current|this)\s+(?:web\s*)?page\s+(?:search|find)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            query = _clean_current_page_find_query(match.group(1))
+            if query:
+                return query
+
+    chinese_patterns = (
+        r"(?:当前|这个|本页).{0,8}(?:网页|页面|页|标签页).{0,4}(?:查找|搜索|检索)\s*(.+)$",
+        r"(?:查找|搜索|检索)\s*(.+?)\s*(?:在|于|到).{0,4}(?:当前|这个|本页).{0,8}(?:网页|页面|页|标签页)",
+        r"(?:在|于).{0,4}(?:当前|这个|本页).{0,8}(?:网页|页面|页|标签页).{0,4}(?:查找|搜索|检索)\s*(.+)$",
+    )
+    for pattern in chinese_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            query = _clean_current_page_find_query(match.group(1))
+            if query:
+                return query
+    return ""
+
+
+def _clean_current_page_find_query(query: str) -> str:
+    value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
+    value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
+    lowered = value.lower()
+    if not value:
+        return ""
+    context_terms = (
+        "选中的内容",
+        "选中内容",
+        "当前选中文字",
+        "当前选择",
+        "剪贴板内容",
+        "selected text",
+        "current selection",
+        "clipboard contents",
+        "the clipboard",
+        "clipboard",
+    )
+    if _contains_any(value, context_terms):
+        return ""
+    if lowered in {"current page", "this page", "current webpage", "this webpage"}:
+        return ""
+    return value
 
 
 def _browser_current_page_hint(text: str) -> dict[str, Any]:

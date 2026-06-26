@@ -472,6 +472,79 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert link_step.action == "read_current_page"
 
 
+def test_runtime_planner_routes_current_page_find_actions() -> None:
+    static = RuntimePlanner().decision(
+        "search current page for hello",
+        allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text"],
+    )
+
+    assert static.selected_intent.kind == "web_research"
+    assert static.selected_intent.required_capabilities == ["desktop.ui_operation"]
+    assert static.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "find_current_page",
+        "query": "hello",
+    }
+    assert [step.step_id for step in static.plan.tool_plan.steps] == [
+        "open-current-page-find",
+        "type-current-page-find-query",
+    ]
+    assert _step_by_id(static, "open-current-page-find").input_preview == {
+        "action": "find"
+    }
+    assert _step_by_id(static, "type-current-page-find-query").input_preview == {
+        "text": "hello"
+    }
+
+    selected = RuntimePlanner().decision(
+        "在当前网页查找当前选中文字",
+        allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text"],
+    )
+
+    assert selected.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "find_current_page",
+        "context_source": "selection",
+    }
+    assert [step.step_id for step in selected.plan.tool_plan.steps] == [
+        "copy-selected-page-find-query",
+        "open-current-page-find",
+        "paste-current-page-find-query",
+    ]
+    assert [step.input_preview for step in selected.plan.tool_plan.steps] == [
+        {"action": "copy"},
+        {"action": "find"},
+        {"action": "paste"},
+    ]
+
+    clipboard = RuntimePlanner().decision(
+        "用剪贴板内容查找当前网页",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read"],
+    )
+
+    assert clipboard.selected_intent.kind == "web_research"
+    assert clipboard.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "find_current_page",
+        "context_source": "clipboard",
+    }
+    assert [step.input_preview for step in clipboard.plan.tool_plan.steps] == [
+        {"action": "find"},
+        {"action": "paste"},
+    ]
+
+    global_search = RuntimePlanner().decision(
+        "search selected text",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+    )
+
+    assert global_search.selected_intent.kind == "web_research"
+    assert global_search.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "selection",
+    }
+
+
 def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     decision = RuntimePlanner().decision(
         "search selected text",
@@ -1869,6 +1942,75 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
     ]
 
 
+def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> None:
+    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        raise AssertionError("current-page find should be owned by runtime planner")
+
+    selection = planner_first_direct_tool_selection(
+        "用剪贴板内容查找当前网页",
+        ["desktop.safe_shortcut", "desktop.safe_type_text", "clipboard.read"],
+        legacy_tool_requests=fail_legacy,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["selection_source"] == "runtime_planner"
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+    ]
+
+
+def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
+    search_selector = (
+        'input[type="search"], input[name="q"], textarea[name="q"], '
+        'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+        'input[aria-label*="search" i], input[placeholder*="search" i]'
+    )
+
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.type_text",
+                "input": {"selector": search_selector, "text": "hello"},
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "type hello in current webpage search field into input on current page",
+        [
+            "browser.type_text",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "app.open_and_safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "daily_desktop_intent"
+    assert selection.event_payload["selection_reason"] == "legacy_more_specific_direct_plan"
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.type_text",
+            "input": {"selector": search_selector, "text": "hello"},
+        }
+    ]
+
+
 def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -> None:
     decision = RuntimePlanner().decision(
         "在 PixelForge 里点击导出按钮",
@@ -2429,6 +2571,71 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }
+    ]
+
+
+def test_planner_tool_requests_maps_current_page_find_actions() -> None:
+    allowed = [
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "clipboard.read",
+        "browser.open_url",
+    ]
+
+    assert planner_tool_requests("search current page for hello", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+    ]
+    assert planner_tool_requests("在当前网页查找当前选中文字", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+    ]
+    assert planner_tool_requests("用剪贴板内容查找当前网页", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_current_page_find",
+        },
     ]
 
 

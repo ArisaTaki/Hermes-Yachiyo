@@ -364,6 +364,9 @@ def _file_access_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> lis
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
+    if browser_action == "find_current_page":
+        return _current_page_find_tool_requests(decision, allowed)
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(
         decision.selected_intent.inputs.get("url_hint") or ""
     ).strip():
@@ -391,7 +394,6 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if tool_name not in allowed:
         return []
     url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
-    browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     payload: dict[str, Any] = {}
     if tool_name in {
         "browser.open_url",
@@ -420,6 +422,53 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if not browser_action and _web_request_needs_model_followup(decision.selected_intent.user_goal):
         request["continue_to_model"] = True
     return [request]
+
+
+def _current_page_find_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    source = str(inputs.get("context_source") or "").strip()
+    query = str(inputs.get("query") or "").strip()
+    if source == "selection":
+        required_step_ids = (
+            "copy-selected-page-find-query",
+            "open-current-page-find",
+            "paste-current-page-find-query",
+        )
+    elif source == "clipboard":
+        required_step_ids = (
+            "open-current-page-find",
+            "paste-current-page-find-query",
+        )
+    elif query:
+        required_step_ids = (
+            "open-current-page-find",
+            "type-current-page-find-query",
+        )
+    else:
+        return []
+
+    steps_by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in decision.plan.tool_plan.steps
+    }
+    requests: list[dict[str, Any]] = []
+    for step_id in required_step_ids:
+        step = steps_by_id.get(step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        if step_id == "type-current-page-find-query" and not str(payload.get("text") or "").strip():
+            return []
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason="planner_fallback_current_page_find",
+            )
+        )
+    return requests
 
 
 def _context_prefetch_tool_requests(
