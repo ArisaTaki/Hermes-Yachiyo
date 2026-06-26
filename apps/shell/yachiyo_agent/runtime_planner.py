@@ -32,9 +32,11 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    hotkey_hint,
     media_playback_hint,
     media_tool_preview,
     safe_type_text_hint,
+    submit_action_hint,
     type_into_ui_hint,
 )
 from .schedule_plan_hints import schedule_tool_preview
@@ -598,13 +600,16 @@ class RuntimePlanner:
         app_name = str(intent.inputs.get("app_name_hint") or "").strip()
         mode = app_control_mode(intent.user_goal)
         click_target = click_target_hint(intent.user_goal)
+        hotkey = hotkey_hint(intent.user_goal)
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
+        submit_action = submit_action_hint(intent.user_goal)
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
             mode=mode,
             allowed=allowed,
             click_target=click_target,
+            hotkey=hotkey,
             type_target=type_target,
             safe_type_text=safe_type_text,
         )
@@ -661,8 +666,25 @@ class RuntimePlanner:
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
+        if submit_action and any(step.step_id == "operate-foreground-ui" for step in steps):
+            steps.append(
+                _step(
+                    intent,
+                    "submit-foreground-ui",
+                    "Submit foreground UI",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.submit_foreground",), allowed),
+                    input_preview={"action": submit_action},
+                    risk_level="high",
+                    approval_required=True,
+                    depends_on=["operate-foreground-ui"],
+                    reason="Submit only after the explicit foreground input operation is planned.",
+                )
+            )
         verify_depends_on = []
-        if any(step.step_id == "operate-foreground-ui" for step in steps):
+        if any(step.step_id == "submit-foreground-ui" for step in steps):
+            verify_depends_on = ["submit-foreground-ui"]
+        elif any(step.step_id == "operate-foreground-ui" for step in steps):
             verify_depends_on = ["operate-foreground-ui"]
         elif any(step.step_id == "open-or-focus-app" for step in steps):
             verify_depends_on = ["open-or-focus-app"]
@@ -1331,9 +1353,16 @@ def _desktop_operation_tool_preview(
     mode: str,
     allowed: set[str] | None,
     click_target: dict[str, Any] | None,
+    hotkey: dict[str, Any] | None,
     type_target: dict[str, Any] | None,
     safe_type_text: str,
 ) -> tuple[str | None, dict[str, Any]]:
+    if hotkey:
+        if app_name:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **hotkey}
+        return _first_allowed(("desktop.hotkey",), allowed), dict(hotkey)
     if app_name and type_target:
         app_tool = _first_allowed(app_foreground_tool_candidates(mode, "type_into_ui_element"), allowed)
         if app_tool:

@@ -8,17 +8,7 @@ from typing import Any
 
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
-from .desktop_plan_hints import (
-    app_control_mode,
-    app_control_tool_candidates,
-    app_foreground_tool_candidates,
-    click_target_hint,
-    hotkey_hint,
-    media_tool_preview,
-    safe_type_text_hint,
-    submit_action_hint,
-    type_into_ui_hint,
-)
+from .desktop_plan_hints import media_tool_preview
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
 from .system_plan_hints import system_tool_preview
@@ -52,122 +42,7 @@ def planner_tool_requests(
         return _clipboard_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
-
-    app_name = str(decision.selected_intent.inputs.get("app_name_hint") or "").strip()
-    mode = app_control_mode(prompt)
-    click_target = click_target_hint(prompt)
-    hotkey = hotkey_hint(prompt)
-    type_target = type_into_ui_hint(prompt, app_name=app_name)
-    safe_type_text = "" if type_target else safe_type_text_hint(prompt)
-    submit_action = submit_action_hint(prompt)
-
-    app_hotkey_tool = _app_tool(mode, "hotkey", allowed)
-    if app_name and hotkey and app_hotkey_tool:
-        return [
-            _request(
-                app_hotkey_tool,
-                {"app_name": app_name, **hotkey},
-                planning_reason="planner_fallback_desktop_hotkey",
-            )
-        ]
-
-    if hotkey and "desktop.hotkey" in allowed:
-        return [
-            _request(
-                "desktop.hotkey",
-                hotkey,
-                planning_reason="planner_fallback_desktop_hotkey",
-            )
-        ]
-
-    app_type_tool = _app_tool(mode, "type_into_ui_element", allowed)
-    if app_name and type_target and app_type_tool:
-        requests = [
-            _request(
-                app_type_tool,
-                {
-                    "app_name": app_name,
-                    "target": type_target["target"],
-                    "text": type_target["text"],
-                    "role_filter": type_target["role_filter"],
-                    "limit": 80,
-                },
-            )
-        ]
-        if submit_action and "desktop.submit_foreground" in allowed:
-            requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
-        return requests
-
-    app_safe_type_tool = _app_tool(mode, "safe_type_text", allowed)
-    if app_name and safe_type_text and app_safe_type_tool:
-        requests = [
-            _request(
-                app_safe_type_tool,
-                {
-                    "app_name": app_name,
-                    "text": safe_type_text,
-                },
-            )
-        ]
-        if submit_action and "desktop.submit_foreground" in allowed:
-            requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
-        return requests
-
-    app_click_tool = _app_tool(mode, "click_ui_element", allowed)
-    if app_name and click_target and app_click_tool:
-        requests = [
-            _request(
-                app_click_tool,
-                {
-                    "app_name": app_name,
-                    "target": click_target["target"],
-                    "role_filter": click_target["role_filter"],
-                    "limit": 80,
-                    "click_count": click_target["click_count"],
-                },
-            )
-        ]
-        if submit_action and "desktop.submit_foreground" in allowed:
-            requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
-        return requests
-
-    requests: list[dict[str, Any]] = []
-    app_control_tool = _app_tool(mode, "control", allowed)
-    if app_name and app_control_tool:
-        requests.append(_request(app_control_tool, {"app_name": app_name}))
-
-    if type_target and "desktop.type_into_ui_element" in allowed:
-        requests.append(
-            _request(
-                "desktop.type_into_ui_element",
-                {
-                    "target": type_target["target"],
-                    "text": type_target["text"],
-                    "role_filter": type_target["role_filter"],
-                    "limit": 80,
-                },
-            )
-        )
-    elif safe_type_text and "desktop.safe_type_text" in allowed:
-        requests.append(_request("desktop.safe_type_text", {"text": safe_type_text}))
-
-    if click_target and "desktop.click_ui_element" in allowed:
-        requests.append(
-            _request(
-                "desktop.click_ui_element",
-                {
-                    "target": click_target["target"],
-                    "role_filter": click_target["role_filter"],
-                    "limit": 80,
-                    "click_count": click_target["click_count"],
-                },
-            )
-        )
-
-    if submit_action and requests and "desktop.submit_foreground" in allowed:
-        requests.append(_request("desktop.submit_foreground", {"action": submit_action}))
-
-    return requests
+    return _desktop_tool_requests(decision, allowed)
 
 
 def planner_desktop_tool_requests(
@@ -196,6 +71,50 @@ def _request(
         "source": "runtime_planner",
         "planning_reason": planning_reason,
     }
+
+
+def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for step in decision.plan.tool_plan.steps:
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            continue
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason=_desktop_step_planning_reason(step, tool_name),
+            )
+        )
+    return requests
+
+
+def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
+    input_preview = getattr(step, "input_preview", None)
+    if "hotkey" in tool_name or (
+        isinstance(input_preview, Mapping)
+        and input_preview.get("key")
+        and input_preview.get("modifiers") is not None
+    ):
+        return "planner_fallback_desktop_hotkey"
+    return "planner_fallback_desktop_operation"
+
+
+def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if tool_name in {"desktop.running_apps", "desktop.active_window", "screen.capture"}:
+        return {}
+    if tool_name == "desktop.ui_elements":
+        return {
+            key: payload[key]
+            for key in ("role_filter", "limit")
+            if key in payload and payload[key] not in (None, "")
+        }
+    if tool_name == "desktop.windows":
+        app_name = str(payload.get("app_name") or "").strip()
+        return {"app_name": app_name} if app_name else {}
+    return payload
 
 
 def _data_analysis_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
@@ -370,14 +289,3 @@ def _workspace_readable_data_source(source_hint: str, inputs: Mapping[str, Any])
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = str(text or "").lower()
     return any(str(term or "").lower() in lowered for term in terms)
-
-
-def _app_tool(mode: str, action: str, allowed: set[str]) -> str:
-    if action == "control":
-        candidates = app_control_tool_candidates(mode)
-    else:
-        candidates = app_foreground_tool_candidates(mode, action)
-    for tool in candidates:
-        if tool in allowed:
-            return tool
-    return ""

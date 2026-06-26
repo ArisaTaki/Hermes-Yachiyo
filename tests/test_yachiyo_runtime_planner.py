@@ -257,6 +257,35 @@ def test_runtime_planner_verifies_desktop_open_result() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 搜索框输入 hello 并回车",
+        allowed_tools=[
+            "desktop.running_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "submit-foreground-ui",
+        "verify-desktop-result",
+    ]
+    submit = _step_by_id(decision, "submit-foreground-ui")
+    assert submit.tool_name == "desktop.submit_foreground"
+    assert submit.input_preview == {"action": "confirm"}
+    assert submit.risk_level == "high"
+    assert submit.approval_required is True
+    assert submit.depends_on == ["operate-foreground-ui"]
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "submit-foreground-ui"
+    ]
+
+
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
     decision = RuntimePlanner().decision(
         "能否帮我播放 Apple Music?",
@@ -491,6 +520,54 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
                 "limit": 80,
                 "click_count": 1,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_preserves_discover_operate_verify_steps() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=[
+            "desktop.running_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
