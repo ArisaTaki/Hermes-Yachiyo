@@ -3731,6 +3731,20 @@ def test_desktop_list_apps_filters_by_query(monkeypatch, tmp_path) -> None:
     assert result["data"]["apps"][0]["match_score"] > 0
 
 
+def test_desktop_list_apps_does_not_match_ascii_query_inside_token(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Passwords.app").mkdir(parents=True)
+    (app_dir / "Microsoft Word.app").mkdir()
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+
+    result = desktop_mod.list_apps(query="Word")
+
+    assert result["ok"] is True
+    assert [app["name"] for app in result["data"]["apps"]] == ["Microsoft Word"]
+
+
 def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(

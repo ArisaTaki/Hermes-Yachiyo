@@ -6704,23 +6704,24 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
     assert started["recent_events"][0]["detail"] == "media.apple_music_play"
     assert started["recent_events"][0]["payload"] == {
         "input_preview": {"query": "超时空辉夜姬"},
-        "planning_reason": "clear_daily_desktop_intent",
-        "source": "daily_desktop_intent",
+        "planning_reason": "planner_fallback_media_playback",
+        "source": "runtime_planner",
         "status": "planned",
         "tool": "media.apple_music_play",
     }
-    assert app_runtime.chat_calls == [
-        {
-            "session_id": "chat-1",
-            "text": "播放超时空辉夜姬",
-            "runnable_id": "builtin:yachiyo-main",
-            "client_message_id": "client-main-1",
-            "metadata": {
-                "client_message_id": "client-main-1",
-                "daily_desktop_intent": True,
-            },
-        }
-    ]
+    assert len(app_runtime.chat_calls) == 1
+    chat_call = app_runtime.chat_calls[0]
+    assert chat_call["session_id"] == "chat-1"
+    assert chat_call["text"] == "播放超时空辉夜姬"
+    assert chat_call["runnable_id"] == "builtin:yachiyo-main"
+    assert chat_call["client_message_id"] == "client-main-1"
+    metadata = chat_call["metadata"]
+    assert metadata["client_message_id"] == "client-main-1"
+    assert metadata["daily_desktop_intent"] is True
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "media_playback"
+    assert metadata["yachiyo_plan_source"] == "runtime_planner"
+    assert metadata["yachiyo_plan_tools"] == ["media.apple_music_play"]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 
@@ -6786,23 +6787,31 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
     assert started["task_id"] == "launcher-chat-task-1"
     assert started["status"] == "running"
     assert started["conversation_id"] == "chat-1"
-    assert started["current_step"] == "准备执行 · 打开应用"
+    assert started["current_step"] == "准备执行 · 发现已安装应用"
     assert started["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-    assert started["recent_events"][0]["detail"] == "app.open"
-    assert app_runtime.chat_calls == [
-        {
-            "session_id": "chat-1",
-            "text": "打开 Apple Music",
-            "runnable_id": "builtin:yachiyo-main",
-            "client_message_id": "launcher-main-1",
-            "metadata": {
-                "client_message_id": "launcher-main-1",
-                "source": "launcher",
-                "launcher_mode": "bubble",
-                "launcher_surface": "desktop_launcher",
-            },
-        }
-    ]
+    assert started["recent_events"][0]["detail"] == "desktop.list_apps"
+    assert started["recent_events"][0]["payload"] == {
+        "input_preview": {"limit": 20, "query": "Apple Music"},
+        "planning_reason": "planner_fallback_desktop_operation",
+        "source": "runtime_planner",
+        "status": "planned",
+        "tool": "desktop.list_apps",
+    }
+    assert len(app_runtime.chat_calls) == 1
+    chat_call = app_runtime.chat_calls[0]
+    assert chat_call["session_id"] == "chat-1"
+    assert chat_call["text"] == "打开 Apple Music"
+    assert chat_call["runnable_id"] == "builtin:yachiyo-main"
+    assert chat_call["client_message_id"] == "launcher-main-1"
+    metadata = chat_call["metadata"]
+    assert metadata["client_message_id"] == "launcher-main-1"
+    assert metadata["source"] == "launcher"
+    assert metadata["launcher_mode"] == "bubble"
+    assert metadata["launcher_surface"] == "desktop_launcher"
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "desktop_operation"
+    assert metadata["yachiyo_plan_source"] == "runtime_planner"
+    assert metadata["yachiyo_plan_tools"][:2] == ["desktop.list_apps", "app.open"]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 

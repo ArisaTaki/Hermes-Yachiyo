@@ -2267,13 +2267,18 @@ def _installed_app_match_score(query_name: str, candidate_name: str) -> int:
         return 90
     if candidate_tokens and all(token in query_tokens for token in candidate_tokens):
         return 85
+    if query_tokens and all(
+        any(candidate_token.startswith(token) for candidate_token in candidate_tokens)
+        for token in query_tokens
+    ):
+        return 82
     if candidate_compact.endswith(query_compact):
         return 80
     if query_compact.endswith(candidate_compact):
         return 75
-    if query_compact in candidate_compact:
+    if _contains_non_ascii(query_name) and query_compact in candidate_compact:
         return 70
-    if candidate_compact in query_compact:
+    if _contains_non_ascii(candidate_name) and candidate_compact in query_compact:
         return 65
     return 0
 
@@ -2284,6 +2289,10 @@ def _compact_app_match_name(value: str) -> str:
 
 def _app_match_tokens(value: str) -> list[str]:
     return [token for token in re.split(r"[\W_]+", str(value or "").casefold()) if token]
+
+
+def _contains_non_ascii(value: str) -> bool:
+    return any(ord(char) > 127 for char in str(value or ""))
 
 
 def app_focus(app_name: str) -> dict[str, Any]:

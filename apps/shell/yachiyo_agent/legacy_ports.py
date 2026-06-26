@@ -131,7 +131,10 @@ class LegacyChatTaskStarter:
                     "user_goal": request.get("prompt") or request.get("goal") or "",
                     "summary": result.get("summary") or result.get("result") or "",
                     "timeline": result.get("timeline")
-                    or daily_desktop_planned_timeline(str(request.get("prompt") or "")),
+                    or self._planner_first_planned_timeline(
+                        str(request.get("prompt") or request.get("goal") or ""),
+                        metadata=metadata,
+                    ),
                 },
                 conversation_id=conversation_id,
             )
@@ -169,6 +172,43 @@ class LegacyChatTaskStarter:
             metadata=metadata,
         )
 
+    def _planner_first_planned_timeline(
+        self,
+        prompt: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
+            self._runtime,
+            fallback=allowed_daily_desktop_tools,
+        )
+        direct_tool_request = daily_desktop_direct_metadata_request(
+            metadata,
+            allowed_tools=allowed_daily_desktop_tools,
+        )
+        planned_requests = (
+            [direct_tool_request]
+            if direct_tool_request
+            else planner_tool_requests(
+                prompt,
+                allowed_entrypoint_tools,
+                metadata=metadata,
+            )
+        )
+        if not planned_requests:
+            planned_requests = daily_desktop_entrypoint_requests(
+                prompt,
+                metadata=metadata,
+                allowed_tools=allowed_daily_desktop_tools,
+            )
+        return daily_desktop_planned_timeline(
+            prompt,
+            requests=planned_requests,
+            metadata=metadata,
+            allowed_tools=allowed_entrypoint_tools,
+        )
+
     def _execute_main_daily_desktop_task(
         self,
         *,
@@ -193,18 +233,22 @@ class LegacyChatTaskStarter:
             metadata,
             allowed_tools=allowed_daily_desktop_tools,
         )
-        desktop_requests = daily_desktop_entrypoint_requests(
-            prompt,
-            metadata=metadata,
-            allowed_tools=allowed_daily_desktop_tools,
-        )
         planner_requests = (
             []
-            if direct_tool_request or desktop_requests
+            if direct_tool_request
             else planner_tool_requests(
                 prompt or execution_prompt,
                 allowed_entrypoint_tools,
                 metadata=metadata,
+            )
+        )
+        desktop_requests = (
+            []
+            if direct_tool_request or planner_requests
+            else daily_desktop_entrypoint_requests(
+                prompt,
+                metadata=metadata,
+                allowed_tools=allowed_daily_desktop_tools,
             )
         )
         if not task_id:

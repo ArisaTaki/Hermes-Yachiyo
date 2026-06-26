@@ -118,8 +118,15 @@ def _run_launcher_daily_desktop_quick_message(
         assert user_metadata["source"] == "launcher"
         assert user_metadata["launcher_mode"] == launcher_mode
         assert user_metadata["daily_desktop_intent"] is True
-        assert user_metadata["daily_desktop_source"] == "daily_desktop_intent"
-        assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user_metadata["daily_desktop_source"] in {
+            "runtime_planner",
+            "daily_desktop_intent",
+        }
+        if user_metadata.get("yachiyo_runtime_planner"):
+            assert user_metadata["daily_desktop_source"] == "runtime_planner"
+            assert user_metadata["yachiyo_plan_source"] == "runtime_planner"
+        else:
+            assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
         assert user_metadata["daily_desktop_tool"]
         assert user_metadata["daily_desktop_tools"]
         assert policy_decision_events
@@ -499,6 +506,9 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     tmp_path,
     monkeypatch,
 ):
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Passwords.app").mkdir(parents=True)
+    (app_dir / "Microsoft Word.app").mkdir()
     open_calls: list[str] = []
 
     def fake_app_open(app_name: str) -> dict:
@@ -513,6 +523,11 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
             },
         }
 
+    monkeypatch.setattr("apps.shell.agent.tools.desktop._desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop._application_search_dirs",
+        lambda: [app_dir],
+    )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
