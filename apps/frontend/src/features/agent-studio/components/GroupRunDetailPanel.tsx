@@ -355,14 +355,70 @@ function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null)
   const events = publicRun?.events || [];
   if (!events.length) return '';
   const hasIntent = events.some((event) => event.event_type === 'agent.intent.selected');
-  const planSteps = events.filter((event) => event.event_type === 'agent.plan.step').length;
+  const hasPlan = events.some((event) => event.event_type === 'agent.plan.created');
+  const planSteps = groupRunChildPlannerStepCount(events);
+  const capabilityCount = groupRunChildPlannerCapabilityCount(events);
   const hasSelection = events.some((event) => event.event_type === 'agent.plan.selection');
-  if (!hasIntent && !planSteps && !hasSelection) return '';
+  if (!hasIntent && !hasPlan && !planSteps && !capabilityCount && !hasSelection) return '';
   return [
     hasIntent ? 'intent' : '',
+    hasPlan ? 'plan' : '',
+    capabilityCount ? `${capabilityCount} capabilities` : '',
     planSteps ? `${planSteps} steps` : '',
     hasSelection ? 'selection' : '',
   ].filter(Boolean).join(' · ');
+}
+
+function groupRunChildPlannerStepCount(events: PublicRunEvent[]): number {
+  const explicitSteps = events.filter((event) => event.event_type === 'agent.plan.step').length;
+  if (explicitSteps) return explicitSteps;
+  return events.reduce((count, event) => {
+    if (event.event_type !== 'agent.plan.created') return count;
+    const payload = objectRecord(event.payload);
+    const plan = objectRecord(payload.plan);
+    const toolPlan = objectRecord(plan.tool_plan);
+    const steps = Array.isArray(toolPlan.steps) ? toolPlan.steps : [];
+    return count + steps.length;
+  }, 0);
+}
+
+function groupRunChildPlannerCapabilityCount(events: PublicRunEvent[]): number {
+  const capabilityIds = new Set<string>();
+  events.forEach((event) => {
+    const payload = objectRecord(event.payload);
+    if (event.event_type === 'agent.plan.step') {
+      const step = objectRecord(payload.step);
+      const capabilityId = stringValue(step.capability_id) || stringValue(payload.capability_id);
+      if (capabilityId) capabilityIds.add(capabilityId);
+      return;
+    }
+    if (event.event_type !== 'agent.plan.created') return;
+    const plan = objectRecord(payload.plan);
+    const toolPlan = objectRecord(plan.tool_plan);
+    const capabilities = Array.isArray(plan.capabilities) ? plan.capabilities : [];
+    capabilities.forEach((capability) => {
+      const capabilityId = stringValue(objectRecord(capability).capability_id);
+      if (capabilityId) capabilityIds.add(capabilityId);
+    });
+    const requiredCapabilities = Array.isArray(toolPlan.required_capabilities)
+      ? toolPlan.required_capabilities
+      : [];
+    requiredCapabilities.forEach((capabilityId) => {
+      const value = stringValue(capabilityId);
+      if (value) capabilityIds.add(value);
+    });
+  });
+  return capabilityIds.size;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function groupRunEventIsMemorySkillTrace(event: PublicRunEvent): boolean {

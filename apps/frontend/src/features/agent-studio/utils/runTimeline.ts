@@ -38,6 +38,9 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
+  if (name === 'agent.intent.selected') return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
+  if (name === 'agent.plan.created') return detail ? `Planner 计划 · ${detail}` : 'Planner 计划';
+  if (name === 'agent.plan.step') return detail ? `计划步骤 · ${detail}` : '计划步骤';
   if (name === 'agent.plan.selection') return detail ? `Planner 选择 · ${detail}` : 'Planner 选择';
   if (name === 'agent.desktop.intent_planned') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
@@ -162,7 +165,12 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     return decision === 'deny' || decision === 'denied' || decision === 'blocked' ? 'danger' : 'tool';
   }
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
-  if (name === 'agent.plan.selection') return 'tool';
+  if (
+    name === 'agent.intent.selected'
+    || name === 'agent.plan.created'
+    || name === 'agent.plan.step'
+    || name === 'agent.plan.selection'
+  ) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';
   return 'neutral';
@@ -255,6 +263,7 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventPayloadString(payload, 'workflow_node_id')
     || publicRunEventPayloadString(payload, 'skill_name')
     || publicRunEventPayloadString(payload, 'skill_id')
+    || publicRunEventPlannerSummary(event.event_type, payload)
     || publicRunEventMemorySummary(payload)
     || publicRunEventPayloadString(payload, 'memory_id')
     || publicRunEventPayloadString(payload, 'memory_kind')
@@ -305,6 +314,13 @@ function publicRunEventPayloadString(payload: Record<string, unknown>, key: stri
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function publicRunEventPayloadRecord(payload: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = payload[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export function publicRunEventWorkflowStepPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const artifactPath = publicRunEventPayloadString(payload, 'artifact_path') || publicRunEventPayloadString(payload, 'path');
   return {
@@ -348,6 +364,43 @@ function publicRunEventMemorySummary(payload: Record<string, unknown>): string {
     .filter(Boolean)
     .join('、');
   return labels ? `Memory × ${count || memories.length} · ${labels}` : `Memory × ${count || memories.length}`;
+}
+
+function publicRunEventPlannerSummary(eventType: string, payload: Record<string, unknown>): string {
+  if (eventType === 'agent.intent.selected') {
+    const intent = publicRunEventPayloadRecord(payload, 'intent');
+    return (
+      publicRunEventPayloadString(intent, 'title')
+      || publicRunEventPayloadString(intent, 'kind')
+      || publicRunEventPayloadString(payload, 'intent_kind')
+    );
+  }
+  if (eventType === 'agent.plan.created') {
+    const plan = publicRunEventPayloadRecord(payload, 'plan');
+    const toolPlan = publicRunEventPayloadRecord(plan, 'tool_plan');
+    return (
+      publicRunEventPayloadString(plan, 'title')
+      || publicRunEventPayloadString(toolPlan, 'title')
+      || publicRunEventPayloadString(plan, 'plan_id')
+      || publicRunEventPayloadString(payload, 'plan_id')
+    );
+  }
+  if (eventType === 'agent.plan.step') {
+    const step = publicRunEventPayloadRecord(payload, 'step');
+    return (
+      publicRunEventPayloadString(step, 'title')
+      || publicRunEventPayloadString(step, 'tool_name')
+      || publicRunEventPayloadString(step, 'capability_id')
+      || publicRunEventPayloadString(payload, 'tool_name')
+    );
+  }
+  if (eventType === 'agent.plan.selection') {
+    return (
+      publicRunEventPayloadString(payload, 'selection_reason')
+      || publicRunEventPayloadString(payload, 'selection_source')
+    );
+  }
+  return '';
 }
 
 function publicRunEventArtifactSummary(payload: Record<string, unknown>): string {

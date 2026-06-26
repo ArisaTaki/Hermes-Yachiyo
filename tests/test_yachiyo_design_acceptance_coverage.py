@@ -1317,6 +1317,9 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             'itemTestId="agent-run-detail-group-run-artifact-item"',
             "function groupRunChildPlannerTraceSummary",
             "event.event_type === 'agent.intent.selected'",
+            "event.event_type === 'agent.plan.created'",
+            "groupRunChildPlannerStepCount",
+            "groupRunChildPlannerCapabilityCount",
             "event.event_type === 'agent.plan.step'",
         ],
     )
