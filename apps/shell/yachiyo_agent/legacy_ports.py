@@ -230,6 +230,7 @@ class LegacyChatTaskStarter:
         )
         planner_decision, selected_requests = (None, [])
         direct_tool_selection_payload: dict[str, Any] = {}
+        selected_source = ""
         if not direct_tool_request:
             selection = planner_first_direct_tool_selection(
                 prompt or execution_prompt,
@@ -243,6 +244,7 @@ class LegacyChatTaskStarter:
             )
             planner_decision = selection.decision
             selected_requests = selection.requests
+            selected_source = selection.selected_source
             direct_tool_selection_payload = selection.event_payload
         if not task_id:
             return None
@@ -251,7 +253,9 @@ class LegacyChatTaskStarter:
         self._sync_chat_user_daily_desktop_metadata(
             task_id,
             [direct_tool_request] if direct_tool_request else selected_requests,
-            planner_decision=planner_decision,
+            planner_decision=(
+                planner_decision if selected_source == "runtime_planner" else None
+            ),
         )
         start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
         execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)

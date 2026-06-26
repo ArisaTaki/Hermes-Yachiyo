@@ -11,7 +11,14 @@ from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_tool_requests,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
-from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.agent.tools.policy import (
+    DAILY_BROWSER_TOOL_NAMES,
+    DAILY_DESKTOP_TOOL_NAMES,
+    HIGH_RISK_AGENT_TOOLS,
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+)
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
@@ -110,17 +117,32 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
     "desktop.list_apps",
     "desktop.running_apps",
+    "desktop.windows",
+    "desktop.permissions",
+}
+
+_DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
     "desktop.permissions",
 }
 
 _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.windows",
     "desktop.ui_elements",
 }
 
 _DAILY_DESKTOP_PLAN_SOURCES = {
     "daily_desktop_intent",
     "runtime_planner",
+}
+
+_DAILY_DESKTOP_APPROVAL_PLAN_TOOLS = {
+    *HIGH_RISK_AGENT_TOOLS,
+    *HIGH_RISK_DESKTOP_TOOL_NAMES,
+    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
 }
 
 _APP_FOREGROUND_ACTION_TOOLS = {
@@ -285,6 +307,7 @@ class RuntimeCustomApiAgentLoop:
         *,
         messages: list[dict[str, Any]] | None = None,
         direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
         daily_desktop_planning_context: str | None = None,
         start_iteration: int = 0,
         run_id: str = "",
@@ -318,9 +341,15 @@ class RuntimeCustomApiAgentLoop:
                 direct_tool_request,
                 allowed_tools,
             )
+            direct_planned_tool_requests = self._direct_daily_desktop_tool_requests(
+                direct_tool_requests,
+                allowed_tools,
+            )
             runtime_planner_decision = None
             direct_tool_selection_payload: dict[str, Any] = {}
-            if direct_planned_tool_request:
+            if direct_planned_tool_requests:
+                planned_tool_requests = direct_planned_tool_requests
+            elif direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
             else:
                 (
@@ -576,6 +605,24 @@ class RuntimeCustomApiAgentLoop:
             "input": dict(payload),
         }
 
+    @classmethod
+    def _direct_daily_desktop_tool_requests(
+        cls,
+        tool_requests: list[dict[str, Any]] | None,
+        allowed_tools: list[str],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(tool_requests, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        for tool_request in tool_requests:
+            cleaned_request = cls._direct_daily_desktop_tool_request(
+                tool_request,
+                allowed_tools,
+            )
+            if cleaned_request:
+                cleaned.append(cleaned_request)
+        return cleaned
+
     @staticmethod
     def _approval_hotkey_request_for_safe_shortcut(
         planning_context: str,
@@ -633,7 +680,7 @@ class RuntimeCustomApiAgentLoop:
                     planning_context,
                     allowed_tools,
                 )
-                if full_plan_requests:
+                if full_plan_requests and not self._has_approval_plan_tool(full_plan_requests):
                     return (
                         selection.decision,
                         full_plan_requests,
@@ -649,6 +696,14 @@ class RuntimeCustomApiAgentLoop:
             return selection.decision, selection.requests, selection.event_payload
         except Exception:
             return None, [], {}
+
+    @staticmethod
+    def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:
+        return any(
+            isinstance(request, dict)
+            and str(request.get("tool") or "").strip() in _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS
+            for request in tool_requests
+        )
 
     def _record_runtime_planner_events(
         self,
@@ -2926,13 +2981,22 @@ def _visible_daily_desktop_completed_steps(
         and str(step.get("tool") or "") not in _DAILY_DESKTOP_VERIFY_TOOLS
     ]
     if not primary_indexes:
-        return completed_steps
+        visible_steps = list(completed_steps)
+        while (
+            len(visible_steps) > 1
+            and str(visible_steps[0].get("tool") or "") in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS
+        ):
+            visible_steps = visible_steps[1:]
+        return visible_steps
     first_primary = primary_indexes[0]
     last_primary = primary_indexes[-1]
     visible_steps: list[dict[str, Any]] = []
     for index, step in enumerate(completed_steps):
         tool_name = str(step.get("tool") or "")
-        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS and index < first_primary:
+        if (
+            tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS
+            and (index < first_primary or index > last_primary)
+        ):
             continue
         if (
             tool_name in _DAILY_DESKTOP_VERIFY_TOOLS

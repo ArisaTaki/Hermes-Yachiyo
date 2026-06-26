@@ -119,6 +119,7 @@ class MainChatModelLoopRunner:
         *,
         profile_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -145,6 +146,7 @@ class MainChatModelLoopRunner:
             messages,
             runtime["tool_policy"].get("allowed_tools") or [],
             direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
         )
         if not default_profile_id and not direct_daily_desktop_intent:
             raise self._error_type("native_agent_not_ready:chat_model_profile_required")
@@ -193,6 +195,7 @@ class MainChatModelLoopRunner:
                 artifacts,
                 messages=messages,
                 direct_tool_request=direct_tool_request,
+                direct_tool_requests=direct_tool_requests,
                 run_id=run_id,
                 budget=budget,
             )
@@ -265,7 +268,13 @@ class MainChatModelLoopRunner:
         allowed_tools: list[str],
         *,
         direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> bool:
+        if any(
+            isinstance(request, dict) and str(request.get("tool") or "").strip()
+            for request in direct_tool_requests or []
+        ):
+            return True
         if isinstance(direct_tool_request, dict) and str(direct_tool_request.get("tool") or "").strip():
             return True
         intent_text = _latest_user_intent_text(messages)

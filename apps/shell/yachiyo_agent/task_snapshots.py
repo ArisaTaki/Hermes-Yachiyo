@@ -147,10 +147,23 @@ def agent_task_snapshot_from_payload(
         run_id=run_id,
         events=recent_events,
     )
+    active_task = status in _ACTIVE_TASK_STATUSES
+    recovery_needs_user_action = (
+        _has_desktop_recovery_user_action(
+            recent_events,
+            tool_calls,
+            all_events=all_events,
+        )
+        if active_task
+        else _has_completed_desktop_recovery_user_action(recent_events)
+    )
     needs_user_action = bool(
-        payload.get("needs_user_action")
-        or approvals
-        or _has_desktop_recovery_user_action(recent_events, tool_calls, all_events=all_events)
+        approvals
+        or recovery_needs_user_action
+        or (
+            active_task
+            and payload.get("needs_user_action")
+        )
     )
 
     return AgentTaskSnapshot(
@@ -344,6 +357,7 @@ def _has_desktop_recovery_user_action(
     tool_calls: list[Any],
     *,
     all_events: list[PublicRunEvent] | None = None,
+    count_success_recovery_actions: bool = True,
 ) -> bool:
     is_recovery_execution = any(
         event.event_type == RECOVERY_RETRY_CONTEXT_EVENT_TYPE
@@ -359,14 +373,19 @@ def _has_desktop_recovery_user_action(
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
         if (
             event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE
-            and _has_recovery_signal(payload)
+            and _has_recovery_signal(
+                payload,
+                count_success_recovery_actions=count_success_recovery_actions,
+            )
         ):
             return True
         if (
             event.event_type in {_COMPLETED_DESKTOP_INTENT_EVENT_TYPE, _TOOL_CALL_EVENT_TYPE}
             and _has_recovery_signal(
                 result,
-                count_success_recovery_actions=not is_recovery_execution,
+                count_success_recovery_actions=(
+                    count_success_recovery_actions and not is_recovery_execution
+                ),
             )
         ):
             return True
@@ -374,9 +393,21 @@ def _has_desktop_recovery_user_action(
         output_preview = getattr(tool_call, "output_preview", {})
         if isinstance(output_preview, Mapping) and _has_recovery_signal(
             output_preview,
-            count_success_recovery_actions=not is_recovery_execution,
+            count_success_recovery_actions=(
+                count_success_recovery_actions and not is_recovery_execution
+            ),
         ):
             return True
+    return False
+
+
+def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) -> bool:
+    for event in reversed(events):
+        if event.event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+        return _has_recovery_signal(result, count_success_recovery_actions=False)
     return False
 
 

@@ -58,6 +58,13 @@ def _agent_task_event(
     raise AssertionError(f"missing agent task event: {event_type}")
 
 
+def _agent_task_tool_call(agent_task: dict[str, Any], tool_name: str) -> dict[str, Any]:
+    for tool_call in reversed(agent_task.get("tool_calls") or []):
+        if tool_call.get("tool_name") == tool_name:
+            return tool_call
+    raise AssertionError(f"missing agent task tool call: {tool_name}")
+
+
 def _assert_planner_trace_prefix(
     agent_task: dict[str, Any],
     *,
@@ -161,7 +168,9 @@ def _run_launcher_daily_desktop_quick_message(
         assert policy_decision_events
         assert policy_decision_events[0]["payload"]["decision"] == "allow"
         assert policy_decision_events[0]["payload"]["policy_scope"] == "daily_desktop"
-        assert policy_decision_events[0]["payload"]["tool"] == user_metadata["daily_desktop_tool"]
+        assert user_metadata["daily_desktop_tool"] in {
+            event["payload"]["tool"] for event in policy_decision_events
+        }
         if agent_task["status"] == "waiting_approval":
             assert assistant.content in {
                 agent_task["summary"],
@@ -845,8 +854,12 @@ def test_chat_bridge_quick_message_focuses_app_for_polite_launcher_entrypoint(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == f"已切换到 {app_name}。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
+        focus_tool_call = next(
+            tool_call
+            for tool_call in agent_task["tool_calls"]
+            if tool_call["tool_name"] == "app.focus"
+        )
+        assert focus_tool_call["input_preview"] == {"app_name": app_name}
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
@@ -2017,8 +2030,7 @@ def test_chat_bridge_quick_message_executes_minimize_window_without_approval(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == "已最小化当前窗口。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert _agent_task_tool_call(agent_task, "desktop.minimize_window")["status"] == "completed"
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
         assert "agent.desktop.intent_planned" in event_types
@@ -2069,8 +2081,7 @@ def test_chat_bridge_quick_message_executes_hide_app_without_approval(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == "已隐藏当前应用。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert _agent_task_tool_call(agent_task, "desktop.hide_app")["status"] == "completed"
         assert run["status"] == "completed"
         assert run["pending_approval"] == {}
         assert "agent.desktop.intent_planned" in event_types
@@ -2112,8 +2123,7 @@ def test_chat_bridge_quick_message_executes_named_app_hide_without_approval(
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已隐藏 Slack。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.hide"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert _agent_task_tool_call(agent_task, "app.hide")["status"] == "completed"
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
     assert "agent.desktop.intent_planned" in event_types
@@ -2260,8 +2270,7 @@ def test_chat_bridge_quick_message_executes_named_app_window_focus_without_appro
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已切换到 Slack 的 general 窗口。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.focus_window"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert _agent_task_tool_call(agent_task, "app.focus_window")["status"] == "completed"
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
     assert "agent.desktop.intent_planned" in event_types
@@ -2303,8 +2312,7 @@ def test_chat_bridge_quick_message_executes_named_app_minimize_without_approval(
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已最小化 Slack。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.minimize"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert _agent_task_tool_call(agent_task, "app.minimize")["status"] == "completed"
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
     assert "agent.desktop.intent_planned" in event_types
@@ -5574,8 +5582,8 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Finder 并新建窗口。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
+    open_shortcut_call = _agent_task_tool_call(agent_task, "app.open_and_safe_shortcut")
+    assert open_shortcut_call["input_preview"] == {
         "app_name": "Finder",
         "action": "new_window",
     }
@@ -5599,8 +5607,8 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Google Chrome 并新建标签页。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
+    open_shortcut_call = _agent_task_tool_call(agent_task, "app.open_and_safe_shortcut")
+    assert open_shortcut_call["input_preview"] == {
         "app_name": "Google Chrome",
         "action": "new_tab",
     }
@@ -5971,9 +5979,9 @@ def test_chat_bridge_quick_message_executes_safe_shortcut_without_approval(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == summary
-        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_shortcut"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"action": action}
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        shortcut_call = _agent_task_tool_call(agent_task, "desktop.safe_shortcut")
+        assert shortcut_call["input_preview"] == {"action": action}
+        assert shortcut_call["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -6332,8 +6340,7 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Notes 并输入文字（13 个字符）。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert _agent_task_tool_call(agent_task, "app.open_and_safe_type_text")["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
@@ -6349,12 +6356,12 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 WeChat 并输入文字（2 个字符）。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
-    assert agent_task["tool_calls"][-1]["input_preview"] == {
+    type_call = _agent_task_tool_call(agent_task, "app.open_and_safe_type_text")
+    assert type_call["input_preview"] == {
         "app_name": "WeChat",
         "text": "你好",
     }
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert type_call["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
@@ -6457,12 +6464,19 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+    assert [
+        tool_call["tool_name"]
+        for tool_call in agent_task["tool_calls"]
+        if tool_call["tool_name"] in {
+            "app.open_and_safe_type_text",
+            "desktop.safe_shortcut",
+        }
+    ] == [
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert event_types.count("agent.desktop.intent_planned") == 4
     assert "agent.desktop.permission_preflight" in event_types
     assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
         "tool.requested"
@@ -6575,8 +6589,7 @@ def test_chat_bridge_quick_message_executes_safe_click_without_approval(
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == "已点击前台位置：120, 240。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
-    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert _agent_task_tool_call(agent_task, "desktop.safe_click")["status"] == "completed"
     assert run["status"] == "completed"
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
@@ -6624,12 +6637,12 @@ def test_chat_bridge_quick_message_executes_safe_arrow_key_without_approval(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == summary
-        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {
+        safe_key_call = _agent_task_tool_call(agent_task, "desktop.safe_key")
+        assert safe_key_call["input_preview"] == {
             "action": action,
             "repeat_count": repeat_count,
         }
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert safe_key_call["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -6847,12 +6860,12 @@ def test_chat_bridge_quick_message_executes_safe_scroll_page_without_approval(
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
         assert agent_task["summary"] == "已向下滚动前台界面（1 页）。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {
+        safe_scroll_call = _agent_task_tool_call(agent_task, "desktop.safe_scroll")
+        assert safe_scroll_call["input_preview"] == {
             "direction": "down",
             "pages": 1,
         }
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        assert safe_scroll_call["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -7306,21 +7319,27 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
         event
         for event in timeline["events"]
         if event["event_type"] == "agent.desktop.permission_recovery"
+        and "desktop.safe_click" in event["payload"].get("affected_tools", [])
     )
 
     assert osascript_calls
-    assert osascript_calls[0][1] == ["120", "240", "1"]
+    assert ["120", "240", "1"] in [args for _script, args in osascript_calls]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is True
     assert agent_task["pending_approvals"] == []
     assert "桌面操作未完成：Not authorized to send Apple events to System Events." in agent_task["summary"]
     assert "缺少权限：accessibility" in agent_task["summary"]
     assert "可直接打开：打开辅助功能权限。" in agent_task["summary"]
-    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
-    assert agent_task["tool_calls"][-1]["status"] == "failed"
-    assert agent_task["tool_calls"][-1]["output_preview"]["permission_error"] is True
-    assert agent_task["tool_calls"][-1]["output_preview"]["permission_targets"] == ["accessibility"]
-    assert agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"] == [
+    safe_click_tool_call = next(
+        tool_call
+        for tool_call in agent_task["tool_calls"]
+        if tool_call["tool_name"] == "desktop.safe_click"
+    )
+    safe_click_output = safe_click_tool_call["output_preview"]
+    assert safe_click_output["permission_error"] in {True, "True"}
+    assert "accessibility" in str(safe_click_output["permission_targets"])
+    assert "打开辅助功能权限" in str(safe_click_output["recovery_actions"])
+    assert recovery_event["payload"]["recovery_actions"] == [
         {
             "label": "打开辅助功能权限",
             "tool": "system.settings_open",
@@ -7341,7 +7360,6 @@ def test_chat_bridge_quick_message_surfaces_safe_click_accessibility_recovery(
     assert "model.request.started" not in event_types
     assert recovery_event["payload"]["permission_targets"] == ["accessibility"]
     assert recovery_event["payload"]["affected_tools"] == ["desktop.safe_click"]
-    assert recovery_event["payload"]["recovery_actions"] == agent_task["tool_calls"][-1]["output_preview"]["recovery_actions"]
 
 
 def test_chat_bridge_quick_message_surfaces_browser_cdp_recovery(

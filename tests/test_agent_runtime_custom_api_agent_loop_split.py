@@ -10862,6 +10862,138 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
     assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
 
+def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    direct_tool_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Notes", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "explicit_full_plan",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Notes"},
+            "source": "runtime_planner",
+            "planning_reason": "explicit_full_plan",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "explicit_full_plan",
+        },
+    ]
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found installed app: Notes",
+                    "data": {"matches": [{"name": "Notes"}]},
+                }
+            elif tool == "app.open":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened Notes",
+                    "data": {"app_name": payload["app_name"], "launch_verified": True},
+                }
+            elif tool == "desktop.active_window":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Frontmost app is Notes",
+                    "data": {"app_name": "Notes"},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open",
+                    "desktop.active_window",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit direct tool request list should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-explicit-direct-list",
+        direct_tool_requests=direct_tool_requests,
+    )
+
+    assert result == "已打开 Notes。"
+    assert tool_runs == [direct_tool_requests]
+    planned_events = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    ]
+    assert [event["detail"] for event in planned_events] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert not [event for event in timeline if event["event"] == "agent.plan.selection"]
+    completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
+    assert completed[-1]["detail"] == "app.open"
+    assert completed[-1]["tools"] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+
+
 def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rules(
     monkeypatch,
 ) -> None:

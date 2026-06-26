@@ -74,6 +74,7 @@ class RuntimeMainChatFacadeMixin:
         *,
         profile_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -82,6 +83,7 @@ class RuntimeMainChatFacadeMixin:
             messages,
             profile_id=profile_id,
             direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
             tool_policy=tool_policy,
             workspace_policy=workspace_policy,
         )
