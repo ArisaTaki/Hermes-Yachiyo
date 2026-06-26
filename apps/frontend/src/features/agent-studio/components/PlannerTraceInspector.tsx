@@ -25,11 +25,16 @@ type PlannerTrace = {
 type PlannerSelection = {
   legacyTools: string[];
   legacyRequestCount: number;
+  missingCapabilities: string[];
+  missingCapabilityCount: number;
+  planCapabilities: string[];
+  planCapabilityCount: number;
   planTools: string[];
   planStepCount: number;
   plannerTools: string[];
   plannerRequestCount: number;
   reason: string;
+  requiredCapabilities: string[];
   selectedSource: string;
   selectedTools: string[];
   selectedRequestCount: number;
@@ -53,17 +58,24 @@ export function PlannerTraceInspector({
   const toolPlan = trace.toolPlan || trace.plan?.tool_plan || null;
   const capabilities = trace.plan?.capabilities || [];
   const capabilityById = new Map(capabilities.map((capability) => [capability.capability_id, capability]));
+  const selectionPlanCapabilities = trace.selection?.planCapabilities || [];
+  const selectionRequiredCapabilities = trace.selection?.requiredCapabilities || [];
   const requiredCapabilities = uniqueStrings([
     ...(intent?.required_capabilities || []),
     ...(toolPlan?.required_capabilities || []),
+    ...selectionRequiredCapabilities,
   ]);
   const preferredCapabilities = uniqueStrings(intent?.preferred_capabilities || []);
   const visibleCapabilityIds = uniqueStrings([
     ...requiredCapabilities,
     ...preferredCapabilities,
+    ...selectionPlanCapabilities,
     ...capabilities.map((capability) => capability.capability_id),
   ]);
-  const missingCapabilities = uniqueStrings(toolPlan?.missing_capabilities || []);
+  const missingCapabilities = uniqueStrings([
+    ...(toolPlan?.missing_capabilities || []),
+    ...(trace.selection?.missingCapabilities || []),
+  ]);
   const approvalsRequired = uniqueStrings(toolPlan?.approvals_required || []);
   const artifactsExpected = uniqueStrings(toolPlan?.artifacts_expected || []);
   const openQuestions = uniqueStrings(toolPlan?.open_questions || []);
@@ -126,6 +138,8 @@ export function PlannerTraceInspector({
         {trace.selection ? (
           <section
             data-legacy-request-count={trace.selection.legacyRequestCount}
+            data-missing-capability-count={trace.selection.missingCapabilityCount}
+            data-plan-capability-count={trace.selection.planCapabilityCount}
             data-plan-step-count={trace.selection.planStepCount}
             data-planner-request-count={trace.selection.plannerRequestCount}
             data-selected-request-count={trace.selection.selectedRequestCount}
@@ -151,6 +165,24 @@ export function PlannerTraceInspector({
               <span className="studio-tool-permission" data-selection-count-kind="legacy">
                 legacy requests · {trace.selection.legacyRequestCount}
               </span>
+              {trace.selection.planCapabilities.map((capabilityId) => (
+                <span
+                  className="studio-tool-permission"
+                  data-selection-capability={capabilityId}
+                  key={`capability:${capabilityId}`}
+                >
+                  capability · {capabilityId}
+                </span>
+              ))}
+              {trace.selection.missingCapabilities.map((capabilityId) => (
+                <span
+                  className="studio-tool-permission missing"
+                  data-selection-missing-capability={capabilityId}
+                  key={`missing-capability:${capabilityId}`}
+                >
+                  missing capability · {capabilityId}
+                </span>
+              ))}
               {trace.selection.selectedTools.map((tool) => (
                 <span className="studio-tool-permission" data-selection-tool={tool} key={`selected:${tool}`}>
                   selected · {tool}
@@ -552,21 +584,46 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const reason = stringValue(payload.selection_reason);
   const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
   const planTools = uniqueStrings(Array.isArray(payload.plan_tools) ? payload.plan_tools : []);
+  const planCapabilities = uniqueStrings(
+    Array.isArray(payload.plan_capabilities) ? payload.plan_capabilities : [],
+  );
+  const requiredCapabilities = uniqueStrings(
+    Array.isArray(payload.required_capabilities) ? payload.required_capabilities : [],
+  );
+  const missingCapabilities = uniqueStrings(
+    Array.isArray(payload.missing_capabilities) ? payload.missing_capabilities : [],
+  );
   const plannerTools = uniqueStrings(Array.isArray(payload.planner_tools) ? payload.planner_tools : []);
   const legacyTools = uniqueStrings(Array.isArray(payload.legacy_tools) ? payload.legacy_tools : []);
   const selectedRequestCount = integerValue(payload.selected_request_count, selectedTools.length);
   const planStepCount = integerValue(payload.plan_step_count, planTools.length);
+  const planCapabilityCount = integerValue(payload.plan_capability_count, planCapabilities.length);
+  const missingCapabilityCount = integerValue(payload.missing_capability_count, missingCapabilities.length);
   const plannerRequestCount = integerValue(payload.planner_request_count, plannerTools.length);
   const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
-  if (!selectedSource && !reason && !selectedTools.length && !planTools.length && !plannerTools.length && !legacyTools.length) return null;
+  if (
+    !selectedSource
+    && !reason
+    && !selectedTools.length
+    && !planTools.length
+    && !planCapabilities.length
+    && !missingCapabilities.length
+    && !plannerTools.length
+    && !legacyTools.length
+  ) return null;
   return {
     legacyTools,
     legacyRequestCount,
+    missingCapabilities,
+    missingCapabilityCount,
+    planCapabilities,
+    planCapabilityCount,
     planTools,
     planStepCount,
     plannerTools,
     plannerRequestCount,
     reason,
+    requiredCapabilities,
     selectedSource,
     selectedTools,
     selectedRequestCount,

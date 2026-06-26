@@ -245,10 +245,19 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert payload["selection_source"] == "runtime_planner"
     assert payload["selection_reason"] == "runtime_planner_direct"
     assert payload["plan_tools"] == ["desktop.list_apps", "app.open", "desktop.active_window"]
+    assert payload["plan_capabilities"] == [
+        "desktop.app_discovery",
+        "desktop.app_control",
+        "desktop.ui_operation",
+    ]
+    assert payload["required_capabilities"] == ["desktop.app_discovery"]
+    assert payload["missing_capabilities"] == []
     assert payload["planner_tools"] == ["app.open"]
     assert payload["legacy_tools"] == []
     assert payload["selected_tools"] == ["app.open"]
     assert payload["plan_step_count"] == 3
+    assert payload["plan_capability_count"] == 3
+    assert payload["missing_capability_count"] == 0
     assert payload["planner_request_count"] == 1
     assert payload["legacy_request_count"] == 0
     assert payload["selected_request_count"] == 1
