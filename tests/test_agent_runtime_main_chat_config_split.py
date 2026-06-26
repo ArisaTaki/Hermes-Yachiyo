@@ -69,6 +69,8 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "screen.capture" in config["instructions"]
     assert "desktop.permissions" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]
+    assert "desktop.list_apps" in config["instructions"]
+    assert "应用名不确定时先用 desktop.list_apps" in config["instructions"]
     assert "desktop.running_apps" in config["instructions"]
     assert "desktop.windows" in config["instructions"]
     assert "app.status" in config["instructions"]

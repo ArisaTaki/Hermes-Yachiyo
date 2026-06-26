@@ -181,6 +181,7 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'screen.capture') return '截图当前屏幕';
   if (tool === 'desktop.permissions') return '检查桌面权限';
   if (tool === 'desktop.active_window') return '查看当前窗口';
+  if (tool === 'desktop.list_apps') return '发现已安装应用';
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.ui_elements') return '查看当前界面控件';
@@ -223,6 +224,7 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'desktop.active_window'
     || tool === 'desktop.open_path'
     || tool === 'desktop.permissions'
+    || tool === 'desktop.list_apps'
     || tool === 'desktop.running_apps'
     || tool === 'desktop.safe_click'
     || tool === 'desktop.safe_key'
@@ -272,6 +274,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'browser.screenshot') return '截取当前网页';
   if (tool === 'screen.capture') return '截图当前屏幕';
   if (tool === 'desktop.active_window') return '查看当前窗口';
+  if (tool === 'desktop.list_apps') return '发现已安装应用';
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.permissions') return '检查桌面权限';

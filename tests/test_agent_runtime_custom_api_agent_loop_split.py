@@ -321,6 +321,8 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert "memory.add" in calls[0]["messages"][0]["content"]
     assert "future_task.schedule" in calls[0]["messages"][0]["content"]
     assert "prefer structured desktop tools" in calls[0]["messages"][0]["content"]
+    assert "desktop.list_apps" in calls[0]["messages"][0]["content"]
+    assert "uncertain app names to desktop.list_apps before app.open" in calls[0]["messages"][0]["content"]
     assert "prefer structured browser tools" in calls[0]["messages"][0]["content"]
     assert (
         "Do not replace these structured desktop or browser actions with terminal.run"

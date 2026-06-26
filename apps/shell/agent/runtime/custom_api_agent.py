@@ -73,6 +73,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "screen.capture",
     "desktop.permissions",
     "desktop.active_window",
+    "desktop.list_apps",
     "desktop.running_apps",
     "desktop.windows",
     "desktop.ui_elements",
@@ -123,6 +124,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "screen.capture": "截取屏幕",
     "desktop.permissions": "检查桌面权限",
     "desktop.active_window": "读取当前窗口",
+    "desktop.list_apps": "发现已安装应用",
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
     "desktop.ui_elements": "读取界面控件",
@@ -1127,6 +1129,8 @@ class RuntimeCustomApiAgentLoop:
                 return _desktop_permissions_summary(result) or result_summary or "已检查桌面权限。"
             if tool_name == "desktop.active_window":
                 return _active_window_summary(result) or result_summary or "已读取当前前台窗口。"
+            if tool_name == "desktop.list_apps":
+                return _installed_apps_summary(result) or result_summary or "已发现已安装应用。"
             if tool_name == "desktop.running_apps":
                 return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
             if tool_name == "desktop.windows":
@@ -1474,7 +1478,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.list_apps, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.open_and_safe_key/app.focus_and_safe_key/app.open_and_hotkey/app.focus_and_hotkey/app.open_and_safe_scroll/app.focus_and_safe_scroll/app.open_and_safe_click/app.focus_and_safe_click/app.open_and_click_ui_element/app.focus_and_click_ui_element/app.open_and_type_into_ui_element/app.focus_and_type_into_ui_element/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_open_and_play, media.apple_music_control, media.music_app_open_and_play, media.music_app_control, media.system_control, system.settings_open, system.volume, system.brightness, system.display_sleep, system.screen_saver_start, clipboard.write, clipboard.read, notes.create, reminders.create, calendar.create_event, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.show_all_apps, desktop.minimize_window, desktop.close_window, desktop.quit_app, desktop.click, desktop.hotkey, desktop.submit_foreground, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
@@ -1483,7 +1487,7 @@ class RuntimeCustomApiAgentLoop:
             "commands to system.volume; map explicit relative brightness up/down commands to system.brightness; map explicit display sleep or turn-off-screen commands to system.display_sleep; map explicit start-screen-saver commands to system.screen_saver_start; map explicit 'copy/write to clipboard' requests to "
             "clipboard.write without reading clipboard contents; map explicit clipboard content read/status questions to clipboard.read; map explicit selected text read requests to desktop.safe_shortcut(copy) followed by clipboard.read; map explicit create/new note requests with user-provided body text to notes.create; map explicit reminder creation requests with a clear title to reminders.create, adding due_at only when the local date/time is deterministic; map explicit calendar event creation requests with a clear title and deterministic local start time to calendar.create_event; map screen capture requests to "
             "screen.capture, and current or foreground window questions to desktop.active_window "
-            "before answering; map running/open app list questions to desktop.running_apps; "
+            "before answering; map installed/available app discovery or uncertain app names to desktop.list_apps before app.open; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
             "map explicit current-page reading/extraction requests to browser.extract_text; "
             "map foreground UI control/button/input field list questions to desktop.ui_elements; "
@@ -2127,6 +2131,32 @@ def _running_apps_summary(result: dict[str, Any]) -> str:
     frontmost = str(data.get("frontmost") or "").strip()
     frontmost_text = f"前台是 {frontmost}。" if frontmost else ""
     return f"正在运行的应用：{', '.join(visible)}{suffix}。{frontmost_text}"
+
+
+def _installed_apps_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_apps = data.get("apps")
+    if not isinstance(raw_apps, list):
+        return ""
+    query = str(data.get("query") or "").strip()
+    names = []
+    for item in raw_apps:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    if not names:
+        return f"没有找到匹配「{query}」的已安装应用。" if query else "没有读取到已安装应用。"
+    visible = names[:8]
+    total_count = data.get("total_count")
+    try:
+        total = int(total_count)
+    except (TypeError, ValueError):
+        total = len(names)
+    suffix = f" 等 {total} 个应用" if total > len(visible) else ""
+    prefix = f"匹配「{query}」的已安装应用" if query else "已安装应用"
+    return f"{prefix}：{', '.join(visible)}{suffix}。"
 
 
 def _windows_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
