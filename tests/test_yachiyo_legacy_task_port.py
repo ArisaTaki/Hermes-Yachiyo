@@ -243,6 +243,33 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
         }
     ]
 
+    runtime.calls.clear()
+    app_runtime.chat_session.metadata_calls.clear()
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-open-clipboard-link",
+        conversation_id="chat-1",
+        prompt="open clipboard link",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_tool"] == "clipboard.read"
+    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_web_context"
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
     app_runtime = _FakeAppRuntime()

@@ -374,6 +374,34 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
 
 
+def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
+    decision = RuntimePlanner().decision(
+        "search selected text",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+    )
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "selection",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-web-context",
+        "read-web-context",
+        "open-or-read-web-from-context",
+    ]
+    assert _step_by_id(decision, "copy-selected-web-context").input_preview == {
+        "action": "copy"
+    }
+    read_step = _step_by_id(decision, "read-web-context")
+    assert read_step.tool_name == "clipboard.read"
+    assert read_step.action == "read_clipboard"
+    web_step = _step_by_id(decision, "open-or-read-web-from-context")
+    assert web_step.tool_name == "browser.open_url"
+    assert web_step.input_preview == {"body_source": "selection"}
+    assert web_step.depends_on == ["copy-selected-web-context", "read-web-context"]
+
+
 def test_runtime_planner_report_generation_prefers_workspace_list_for_context() -> None:
     decision = RuntimePlanner().decision(
         "写一份项目总结报告",
@@ -2230,6 +2258,42 @@ def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> No
     ]
 
 
+def test_planner_tool_requests_prefetches_dynamic_web_context() -> None:
+    assert planner_tool_requests(
+        "search selected text",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "browser.open_url"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "open clipboard link",
+        allowed_tools=["clipboard.read", "browser.open_url"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> None:
     requests = planner_tool_requests(
         "写一份项目总结报告",
@@ -2563,6 +2627,26 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    web_selection = planner_first_direct_tool_selection(
+        "open clipboard link",
+        ["clipboard.read", "browser.open_url", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert web_selection.selected_source == "runtime_planner"
+    assert web_selection.event_payload["selection_source"] == "runtime_planner"
+    assert web_selection.event_payload["legacy_request_count"] == 0
+    assert web_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_web_context",
             "continue_to_model": True,
         }
     ]

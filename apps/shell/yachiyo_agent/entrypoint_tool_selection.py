@@ -140,6 +140,7 @@ _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS = frozenset(
         "planner_prefetch_information_capture_context",
         "planner_prefetch_schedule_context",
         "planner_prefetch_communication_context",
+        "planner_prefetch_web_context",
     }
 )
 

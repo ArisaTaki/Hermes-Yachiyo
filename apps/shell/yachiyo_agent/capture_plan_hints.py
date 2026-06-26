@@ -59,7 +59,26 @@ def context_source_hint(text: str) -> str:
     lowered = text.lower()
     if _contains_any(lowered, ("clipboard", "剪贴板", "粘贴板")):
         return "clipboard"
-    if _contains_any(lowered, ("selected text", "highlighted text", "selection", "选中", "选取", "高亮")):
+    if _contains_any(
+        lowered,
+        (
+            "selected text",
+            "highlighted text",
+            "selection",
+            "选中文字",
+            "选中文本",
+            "选中的文字",
+            "选中的文本",
+            "选中的内容",
+            "选中内容",
+            "选取文字",
+            "选取文本",
+            "选取内容",
+            "高亮文字",
+            "高亮文本",
+            "高亮内容",
+        ),
+    ):
         return "selection"
     if _contains_any(lowered, ("current page link", "current url", "当前网页链接", "当前页面链接", "当前链接")):
         return "current_page_link"

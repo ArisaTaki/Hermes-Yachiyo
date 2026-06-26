@@ -260,6 +260,20 @@ class TaskIntentRouter:
             or ""
         ).strip()
         operation_hint = _desktop_operation_hint(text)
+        if (
+            context_source_hint(text)
+            and not app_name_hint
+            and operation_hint == "open"
+            and ui_inspection is None
+            and screen_capture is None
+            and app_management is None
+            and foreground_management is None
+            and safe_shortcut is None
+            and safe_key is None
+            and safe_scroll is None
+            and safe_click is None
+        ):
+            return _empty_intent("desktop_operation", text)
         inputs: dict[str, Any] = {
             "app_name_hint": app_name_hint,
             "operation_hint": operation_hint,
@@ -390,12 +404,42 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        source = context_source_hint(text)
+        if source and safe_shortcut_hint(text):
+            return _empty_intent("web_research", text)
+        dynamic_source = source if source in {"clipboard", "selection"} else ""
         score = _score_terms(
             text,
-            ["research", "search web", "website", "url", "http", "web page", "网页", "网站", "搜索", "调研"],
+            [
+                "research",
+                "search web",
+                "search",
+                "website",
+                "url",
+                "link",
+                "http",
+                "web page",
+                "网页",
+                "网站",
+                "链接",
+                "网址",
+                "搜索",
+                "查找",
+                "调研",
+            ],
         )
+        if (
+            score <= 0
+            and dynamic_source
+            and not _app_name_hint(text)
+            and _contains_any(text, ["open", "打开", "search", "find", "查找", "搜索"])
+        ):
+            score = 0.16
         if score <= 0:
             return _empty_intent("web_research", text)
+        inputs = {"url_hint": _url_hint(text)}
+        if dynamic_source:
+            inputs["context_source"] = dynamic_source
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "web_research", text),
             kind="web_research",
@@ -403,10 +447,17 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.9, 0.38 + score),
             description="Open, read, and summarize web content.",
-            inputs={"url_hint": _url_hint(text)},
+            inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["summary"]),
             required_capabilities=["browser.research"],
-            preferred_capabilities=["artifact.write"],
+            preferred_capabilities=[
+                *(
+                    ["clipboard.read_write", "desktop.ui_operation"]
+                    if dynamic_source
+                    else []
+                ),
+                "artifact.write",
+            ],
             risk_level="medium",
         )
 
@@ -1237,6 +1288,40 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         url = str(intent.inputs.get("url_hint") or "").strip()
+        context_source = str(intent.inputs.get("context_source") or "").strip()
+        if context_source and not url:
+            context_steps = _context_source_steps(
+                intent,
+                allowed,
+                context_source,
+                step_prefix="web",
+                capability_id="browser.research",
+            )
+            depends_on = [step.step_id for step in context_steps]
+            return [
+                *context_steps,
+                _step(
+                    intent,
+                    "open-or-read-web-from-context",
+                    "Open or read web content from captured context",
+                    "browser.research",
+                    _first_allowed(
+                        (
+                            "browser.open_url_and_extract_text",
+                            "browser.open_url_and_screenshot",
+                            "browser.open_url",
+                            "browser.current_page",
+                            "browser.extract_text",
+                        ),
+                        allowed,
+                    ),
+                    input_preview={"body_source": context_source},
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=depends_on,
+                    reason="Inspect the requested source before deciding which URL or query to open.",
+                ),
+            ]
         return [
             _step(
                 intent,
@@ -1781,6 +1866,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id in {"file.workspace_read", "file.organization"}:
         return "inspect_paths" if capability_id == "file.organization" else "read_file"
     if capability_id == "browser.research":
+        if _is_context_source_tool(tool_name):
+            return _context_source_action(tool_name)
         return "extract_text" if tool_name and "extract_text" in tool_name else "open_url"
     if capability_id == "media.playback":
         return "play"
@@ -2260,7 +2347,7 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|搜索|创建|新建|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|谢谢|thanks)",
+        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -2285,6 +2372,8 @@ def _clean_app_name_hint(value: str) -> str:
         "界面",
         "画面",
     }
+    if context_source_hint(app):
+        return ""
     return "" if app.lower() in generic else app
 
 

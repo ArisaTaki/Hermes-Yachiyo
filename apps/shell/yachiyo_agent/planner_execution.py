@@ -353,6 +353,15 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(
+        decision.selected_intent.inputs.get("url_hint") or ""
+    ).strip():
+        return _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=("copy-selected-web-context", "read-web-context"),
+            planning_reason="planner_prefetch_web_context",
+        )
     step = next(
         (
             item
