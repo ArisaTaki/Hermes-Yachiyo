@@ -427,6 +427,58 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 
+def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
+    cases = (
+        ("把 Arc 打开", "Arc", "app.open"),
+        ("帮我把 Linear 启动起来", "Linear", "app.open"),
+        ("把微信打开", "微信", "app.open"),
+        ("把 Slack 切到前台", "Slack", "app.focus"),
+        ("把 Obsidian 聚焦", "Obsidian", "app.focus"),
+    )
+
+    for prompt, expected_app_name, expected_tool in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.active_window"],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app_name
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": expected_app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").tool_name == expected_tool
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app_name,
+        }
+
+
+def test_runtime_planner_keeps_postposed_app_name_for_app_scoped_shortcut() -> None:
+    decision = RuntimePlanner().decision(
+        "把 Chrome 打开然后新建标签页",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Chrome",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {
+        "app_name": "Chrome",
+        "action": "new_tab",
+    }
+
+
 def test_runtime_planner_treats_music_app_open_as_desktop_open() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music",

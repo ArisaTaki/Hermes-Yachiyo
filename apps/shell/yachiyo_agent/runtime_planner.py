@@ -190,6 +190,7 @@ class TaskIntentRouter:
                 "打开",
                 "启动",
                 "切到",
+                "聚焦",
                 "点击",
                 "输入",
                 "播放",
@@ -1924,6 +1925,7 @@ def _url_hint(text: str) -> str:
 
 def _app_name_hint(text: str) -> str:
     patterns = [
+        r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
         r"(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
