@@ -513,6 +513,27 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     if browser_action == "find_current_page":
         return _current_page_find_tool_requests(decision, allowed)
+    if browser_action == "click":
+        if "browser.click" not in allowed:
+            return []
+        selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
+        if not selector:
+            return []
+        payload: dict[str, Any] = {"selector": selector}
+        click_count = decision.selected_intent.inputs.get("click_count")
+        if click_count not in (None, ""):
+            payload["click_count"] = click_count
+        for key in ("fallback_x", "fallback_y"):
+            value = decision.selected_intent.inputs.get(key)
+            if value not in (None, ""):
+                payload[key] = value
+        return [
+            _request(
+                "browser.click",
+                payload,
+                planning_reason="planner_fallback_web_research",
+            )
+        ]
     if browser_action == "type_text":
         if "browser.type_text" not in allowed:
             return []

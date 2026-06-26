@@ -3433,6 +3433,57 @@ def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
     ]
 
 
+def test_entrypoint_selection_routes_browser_click_to_planner() -> None:
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.click",
+                "input": {"selector": "search-result=1", "click_count": 1},
+            }
+        ]
+
+    for prompt in (
+        "click the first search result",
+        "点击当前页面第一个搜索结果",
+    ):
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            [
+                "browser.click",
+                "desktop.click_ui_element",
+                "app.open_and_click_ui_element",
+            ],
+            legacy_tool_requests=legacy_requests,
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["selection_reason"] == "runtime_planner_direct"
+        assert selection.decision is not None
+        assert selection.decision.selected_intent.kind == "web_research"
+        assert selection.decision.selected_intent.inputs["browser_action"] == "click"
+        step = selection.decision.plan.tool_plan.steps[0]
+        assert step.step_id == "click-current-page-element"
+        assert step.tool_name == "browser.click"
+        assert step.approval_required is True
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.click",
+                "input": {"selector": "search-result=1", "click_count": 1},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_web_research",
+            }
+        ]
+
+    desktop = RuntimePlanner().decision(
+        "点击可见的登录按钮",
+        allowed_tools=["browser.click", "desktop.click_ui_element"],
+    )
+    assert desktop.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(desktop, "operate-foreground-ui").tool_name == "desktop.click_ui_element"
+
+
 def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -> None:
     decision = RuntimePlanner().decision(
         "在 PixelForge 里点击导出按钮",

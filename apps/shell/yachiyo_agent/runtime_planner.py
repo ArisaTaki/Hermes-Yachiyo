@@ -184,7 +184,7 @@ class TaskIntentRouter:
         safe_click = safe_click_hint(text)
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
-        if _browser_type_text_hint(text):
+        if _browser_type_text_hint(text) or _browser_click_hint(text):
             return _empty_intent("desktop_operation", text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
@@ -515,12 +515,12 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _direct_communication_hint(text):
             return _empty_intent("web_research", text)
-        browser_type_text = _browser_type_text_hint(text)
-        if _app_scoped_desktop_operation_hint(text) and not browser_type_text:
+        browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
+        if _app_scoped_desktop_operation_hint(text) and not browser_interaction:
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         browser_action = (
-            browser_type_text
+            browser_interaction
             or _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
             or _dynamic_context_browser_action_hint(text, dynamic_source)
@@ -574,7 +574,7 @@ class TaskIntentRouter:
         )
         risk_level = (
             "medium"
-            if browser_action_name == "type_text"
+            if browser_action_name in {"click", "type_text"}
             else ("low" if browser_action else "medium")
         )
         return TaskIntentSnapshot(
@@ -1807,6 +1807,7 @@ class RuntimePlanner:
                 "current_page": "browser.current_page",
                 "extract_text": "browser.extract_text",
                 "screenshot": "browser.screenshot",
+                "click": "browser.click",
                 "type_text": "browser.type_text",
                 "open_search": "browser.open_url",
                 "open_url": "browser.open_url",
@@ -1814,6 +1815,13 @@ class RuntimePlanner:
                 "open_url_screenshot": "browser.open_url_and_screenshot",
             }.get(browser_action)
             input_preview: dict[str, Any] = {}
+            if browser_action == "click":
+                selector = str(intent.inputs.get("selector") or "").strip()
+                click_count = intent.inputs.get("click_count")
+                if selector:
+                    input_preview["selector"] = selector
+                if click_count not in (None, ""):
+                    input_preview["click_count"] = click_count
             if browser_action == "type_text":
                 selector = str(intent.inputs.get("selector") or "").strip()
                 text = str(intent.inputs.get("text") or "")
@@ -1839,6 +1847,7 @@ class RuntimePlanner:
                         "current_page": "read-current-page",
                         "extract_text": "extract-current-page-text",
                         "screenshot": "capture-current-page",
+                        "click": "click-current-page-element",
                         "type_text": "type-current-page-input",
                         "open_search": "open-web-search",
                         "open_url": "open-web-url",
@@ -1849,6 +1858,7 @@ class RuntimePlanner:
                         "current_page": "Read current page",
                         "extract_text": "Extract current page text",
                         "screenshot": "Capture current page",
+                        "click": "Click current page element",
                         "type_text": "Type into current page input",
                         "open_search": "Open web search",
                         "open_url": "Open web URL",
@@ -1858,11 +1868,11 @@ class RuntimePlanner:
                     "browser.research",
                     _first_allowed((tool_name,), allowed) if tool_name else None,
                     input_preview=input_preview,
-                    risk_level="medium" if browser_action == "type_text" else "low",
-                    approval_required=browser_action == "type_text",
+                    risk_level="medium" if browser_action in {"click", "type_text"} else "low",
+                    approval_required=browser_action in {"click", "type_text"},
                     reason=(
-                        "Use the browser input tool so the runtime can enforce browser interaction approval."
-                        if browser_action == "type_text"
+                        "Use the browser interaction tool so the runtime can enforce browser approval."
+                        if browser_action in {"click", "type_text"}
                         else "Use the explicit current-page browser tool instead of desktop screen automation."
                     ),
                 )
@@ -3238,6 +3248,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() == "type_text"
     ):
         score += 0.34
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip() == "click"
+    ):
+        score += 0.34
     if intent.kind == "web_research" and _contains_any(
         text,
         ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
@@ -4468,6 +4483,116 @@ def _clean_web_search_query(query: str) -> str:
     ):
         return ""
     return value
+
+
+def _browser_click_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    rank_match = re.search(
+        r"(?:点击|点一下|点按|单击|打开|进入|访问)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)$",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:click|open|visit|press)\s+(?:the\s+)?"
+        r"(?P<rank_en>first|1st)\s+"
+        r"(?:search\s+)?(?:result|link)\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if rank_match:
+        rank = rank_match.groupdict().get("rank") or rank_match.groupdict().get("rank_en") or ""
+        index = _browser_search_result_rank_index(rank)
+        if index:
+            return {
+                "browser_action": "click",
+                "selector": f"search-result={index}",
+                "click_count": 1,
+            }
+    if not _has_browser_page_context(value):
+        return {}
+    point = _browser_click_point(value)
+    if point:
+        return {
+            "browser_action": "click",
+            "selector": f"point={point['x']},{point['y']}",
+            "fallback_x": point["x"],
+            "fallback_y": point["y"],
+            "click_count": point["click_count"],
+        }
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:点击|点一下|点按|单击|点)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?P<label>[^。！？!?，,]+?)\s*(?:按钮|链接|元素)?$",
+        r"\b(?:click|press)\s+(?:the\s+)?(?P<label>[^.!?]+?)"
+        r"(?:\s+(?:button|link|element))?"
+        r"(?:\s+(?:on|in)\s+(?:the\s+)?(?:current\s+)?(?:page|browser))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        label = _clean_browser_element_label(match.group("label"))
+        if not label or _looks_like_click_coordinate_label(label):
+            continue
+        return {
+            "browser_action": "click",
+            "selector": _browser_selector_from_label(label),
+            "click_count": 1,
+        }
+    return {}
+
+
+def _browser_click_point(text: str) -> dict[str, Any]:
+    patterns = (
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|click)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)(?:上|里|中|内|的|上的)?\s*"
+        r"(?:坐标|位置|coordinate|point)?\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?P<double2>双击|double\s+click)|点击|点一下|点按|单击|click)\s*"
+        r"(?:当前)?(?:网页|页面|浏览器|当前页)?(?:上|里|中|内|的|上的)?\s*"
+        r"(?:坐标|位置|coordinate|point)\s*"
+        r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        return {
+            "x": _number_value(match.group("x")),
+            "y": _number_value(match.group("y")),
+            "click_count": 2 if groups.get("double") or groups.get("double2") else 1,
+        }
+    return {}
+
+
+def _browser_search_result_rank_index(value: str) -> int:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    if compact in {"第一个", "第一条", "首个", "第1个", "第1条", "1", "first", "1st"}:
+        return 1
+    return 0
+
+
+def _browser_selector_from_label(label: str) -> str:
+    clean = str(label or "").strip()
+    if _looks_like_css_selector(clean):
+        return clean
+    return f"text={clean}"
+
+
+def _looks_like_click_coordinate_label(value: str) -> bool:
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?\s*(?:,|，|\s)\s*\d+(?:\.\d+)?", str(value or "").strip()))
+
+
+def _number_value(value: str) -> int | float:
+    number = float(value)
+    if number.is_integer():
+        return int(number)
+    return number
 
 
 def _browser_type_text_hint(text: str) -> dict[str, Any]:
