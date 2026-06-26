@@ -1,0 +1,216 @@
+"""Capability registry for the next Yachiyo task planner.
+
+The registry describes what the runtime can do. Apps are parameters of
+desktop capabilities, not the top-level planning primitive.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from .contracts import CapabilitySnapshot
+
+
+@dataclass(frozen=True)
+class CapabilityDefinition:
+    capability_id: str
+    title: str
+    category: str
+    description: str
+    tools: tuple[str, ...] = ()
+    risk_level: str = "low"
+    approval_required: bool = False
+    discovery_actions: tuple[str, ...] = ()
+    execution_actions: tuple[str, ...] = ()
+    output_kinds: tuple[str, ...] = ()
+
+    def to_snapshot(self, allowed_tools: Iterable[str] | None = None) -> CapabilitySnapshot:
+        allowed_provided = allowed_tools is not None
+        allowed = {str(tool or "").strip() for tool in allowed_tools or [] if str(tool or "").strip()}
+        available_tools = [tool for tool in self.tools if not allowed_provided or tool in allowed]
+        missing_tools = [tool for tool in self.tools if allowed_provided and tool not in allowed]
+        return CapabilitySnapshot(
+            capability_id=self.capability_id,
+            title=self.title,
+            category=self.category,
+            description=self.description,
+            tools=list(self.tools),
+            available_tools=available_tools,
+            missing_tools=missing_tools,
+            risk_level=self.risk_level,
+            approval_required=self.approval_required,
+            discovery_actions=list(self.discovery_actions),
+            execution_actions=list(self.execution_actions),
+            output_kinds=list(self.output_kinds),
+        )
+
+
+CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
+    CapabilityDefinition(
+        capability_id="desktop.app_discovery",
+        title="Discover Desktop Apps",
+        category="desktop",
+        description="Inspect running apps, windows, foreground state, and available UI.",
+        tools=(
+            "desktop.running_apps",
+            "desktop.active_window",
+            "desktop.windows",
+            "desktop.ui_elements",
+            "screen.capture",
+        ),
+        discovery_actions=("list_apps", "list_windows", "capture", "read_ui"),
+        output_kinds=("desktop_state", "screenshot"),
+    ),
+    CapabilityDefinition(
+        capability_id="desktop.app_control",
+        title="Open And Focus Desktop Apps",
+        category="desktop",
+        description="Open, focus, show, hide, minimize, or quit local desktop apps by name.",
+        tools=("app.open", "app.focus", "app.status", "app.show", "app.hide", "app.minimize", "app.quit"),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("resolve_app_name",),
+        execution_actions=("open_app", "focus_app", "manage_app"),
+        output_kinds=("desktop_state",),
+    ),
+    CapabilityDefinition(
+        capability_id="desktop.ui_operation",
+        title="Operate Desktop UI",
+        category="desktop",
+        description="Click, type, scroll, press shortcuts, and verify foreground UI state.",
+        tools=(
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.safe_type_text",
+            "desktop.safe_click",
+            "desktop.safe_scroll",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.hotkey",
+            "desktop.submit_foreground",
+        ),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("read_ui", "capture"),
+        execution_actions=("click", "type", "shortcut", "scroll", "verify"),
+        output_kinds=("desktop_state",),
+    ),
+    CapabilityDefinition(
+        capability_id="file.workspace_read",
+        title="Read Workspace Files",
+        category="file",
+        description="List and read files inside the configured workspace.",
+        tools=("workspace.list", "workspace.read"),
+        discovery_actions=("list_files", "read_file"),
+        output_kinds=("text", "table", "source_file"),
+    ),
+    CapabilityDefinition(
+        capability_id="terminal.execution",
+        title="Run Local Commands",
+        category="terminal",
+        description="Run approved commands in the Agent workdir for analysis, scripts, or diagnostics.",
+        tools=("terminal.run",),
+        risk_level="high",
+        approval_required=True,
+        execution_actions=("run_command", "run_python"),
+        output_kinds=("terminal_output",),
+    ),
+    CapabilityDefinition(
+        capability_id="data.analysis",
+        title="Analyze Data",
+        category="data",
+        description="Inspect structured data, compute summaries, and generate charts or tables.",
+        tools=("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("find_dataset", "inspect_schema"),
+        execution_actions=("run_python_analysis", "summarize_data"),
+        output_kinds=("markdown", "csv", "chart", "json"),
+    ),
+    CapabilityDefinition(
+        capability_id="artifact.write",
+        title="Write Run Artifacts",
+        category="artifact",
+        description="Write markdown, text, report, or generated output artifacts for the current run.",
+        tools=("artifact.write",),
+        execution_actions=("write_artifact",),
+        output_kinds=("markdown", "text", "report"),
+    ),
+    CapabilityDefinition(
+        capability_id="browser.research",
+        title="Research Web Pages",
+        category="browser",
+        description="Open, read, screenshot, click, or type in browser pages.",
+        tools=(
+            "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "browser.current_page",
+            "browser.extract_text",
+            "browser.screenshot",
+            "browser.click",
+            "browser.type_text",
+        ),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("open_url", "extract_text", "screenshot"),
+        execution_actions=("click", "type"),
+        output_kinds=("web_text", "screenshot", "report"),
+    ),
+    CapabilityDefinition(
+        capability_id="schedule.reminder",
+        title="Create Reminders And Calendar Events",
+        category="schedule",
+        description="Create reminders, calendar events, or scheduled future tasks.",
+        tools=("reminders.create", "calendar.create_event", "future_task.schedule"),
+        risk_level="medium",
+        approval_required=True,
+        execution_actions=("create_reminder", "create_event", "schedule_task"),
+        output_kinds=("schedule_item",),
+    ),
+    CapabilityDefinition(
+        capability_id="workflow.orchestration",
+        title="Run Workflow Orchestration",
+        category="workflow",
+        description="Use Agent Studio workflows, approvals, branches, and artifacts for multi-step work.",
+        tools=(),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("select_workflow",),
+        execution_actions=("start_workflow", "resume_workflow"),
+        output_kinds=("workflow_run", "artifact"),
+    ),
+    CapabilityDefinition(
+        capability_id="group.multi_agent",
+        title="Coordinate Multiple Agents",
+        category="group",
+        description="Coordinate multi-agent group runs for parallel or role-based tasks.",
+        tools=(),
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=("select_group",),
+        execution_actions=("start_group_run", "merge_artifacts"),
+        output_kinds=("group_run", "artifact"),
+    ),
+)
+
+
+def capability_definitions() -> tuple[CapabilityDefinition, ...]:
+    return CAPABILITY_DEFINITIONS
+
+
+def capability_definition_map() -> dict[str, CapabilityDefinition]:
+    return {definition.capability_id: definition for definition in CAPABILITY_DEFINITIONS}
+
+
+def capability_snapshots(
+    *,
+    allowed_tools: Iterable[str] | None = None,
+    capability_ids: Iterable[str] | None = None,
+) -> list[CapabilitySnapshot]:
+    ids = {str(value or "").strip() for value in capability_ids or [] if str(value or "").strip()}
+    return [
+        definition.to_snapshot(allowed_tools)
+        for definition in CAPABILITY_DEFINITIONS
+        if not ids or definition.capability_id in ids
+    ]

@@ -13,6 +13,7 @@ from .contracts import (
     ApprovalDecision,
     ArtifactContentSnapshot,
     ChatRunnableCatalogSnapshot,
+    PlannerDecisionSnapshot,
     PublicRunEvent,
     ReadinessSnapshot,
     RunEventPageSnapshot,
@@ -21,6 +22,7 @@ from .contracts import (
 )
 from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .ports import ChatTaskStarter, RuntimePort
+from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 
@@ -44,6 +46,28 @@ class YachiyoAgentService:
         return chat_runnable_catalog_from_payloads(
             _payload_items(payload, "agents"),
             _payload_items(payload, "workflows"),
+        )
+
+    def plan_chat_task(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PlannerDecisionSnapshot:
+        port_planner = getattr(self._runtime_port, "plan_chat_task", None)
+        if callable(port_planner):
+            payload = port_planner(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata or {},
+            )
+            if payload is not None:
+                return PlannerDecisionSnapshot.model_validate(payload)
+        return RuntimePlanner().decision(
+            prompt,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
         )
 
     def start_chat_task(

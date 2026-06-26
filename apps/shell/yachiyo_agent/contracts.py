@@ -19,6 +19,34 @@ MemoryScope = Literal["shared", "per_agent", "hybrid"]
 ApprovalStatus = Literal["pending", "approved", "rejected", "cancelled", "expired"]
 DesktopExecutionRisk = Literal["low", "medium", "high"]
 RecoveryActionKind = Literal["permission_recovery", "retry_original"]
+TaskIntentKind = Literal[
+    "desktop_operation",
+    "data_analysis",
+    "report_generation",
+    "web_research",
+    "file_operation",
+    "communication",
+    "schedule",
+    "code_task",
+    "workflow_orchestration",
+    "multi_agent",
+    "general",
+]
+CapabilityCategory = Literal[
+    "desktop",
+    "data",
+    "file",
+    "terminal",
+    "browser",
+    "artifact",
+    "communication",
+    "schedule",
+    "workflow",
+    "group",
+    "memory",
+    "skill",
+    "general",
+]
 
 
 class _PublicSnapshot(BaseModel):
@@ -121,6 +149,84 @@ class ToolCatalogSnapshot(_PublicSnapshot):
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
     plugins: list[RestrictedToolPluginSnapshot] = Field(default_factory=list)
     source: str = "runtime"
+
+
+class CapabilitySnapshot(_PublicSnapshot):
+    capability_id: str
+    title: str
+    category: CapabilityCategory | str = "general"
+    description: str = ""
+    tools: list[str] = Field(default_factory=list)
+    available_tools: list[str] = Field(default_factory=list)
+    missing_tools: list[str] = Field(default_factory=list)
+    risk_level: DesktopExecutionRisk | str = "low"
+    approval_required: bool = False
+    discovery_actions: list[str] = Field(default_factory=list)
+    execution_actions: list[str] = Field(default_factory=list)
+    output_kinds: list[str] = Field(default_factory=list)
+    source: str = "capability_registry"
+
+
+class TaskIntentSnapshot(_PublicSnapshot):
+    intent_id: str
+    kind: TaskIntentKind | str
+    title: str
+    user_goal: str = ""
+    confidence: float = 0.0
+    description: str = ""
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    expected_outputs: list[str] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
+    preferred_capabilities: list[str] = Field(default_factory=list)
+    missing_inputs: list[str] = Field(default_factory=list)
+    risk_level: DesktopExecutionRisk | str = "low"
+    source: str = "task_intent_router"
+
+
+class ToolPlanStepSnapshot(_PublicSnapshot):
+    step_id: str
+    title: str
+    capability_id: str
+    tool_name: str | None = None
+    input_preview: dict[str, Any] = Field(default_factory=dict)
+    risk_level: DesktopExecutionRisk | str = "low"
+    approval_required: bool = False
+    depends_on: list[str] = Field(default_factory=list)
+    reason: str = ""
+    fallback_tools: list[str] = Field(default_factory=list)
+    status: Literal["planned", "unavailable", "skipped"] | str = "planned"
+
+
+class ToolPlanSnapshot(_PublicSnapshot):
+    plan_id: str
+    title: str
+    steps: list[ToolPlanStepSnapshot] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
+    missing_capabilities: list[str] = Field(default_factory=list)
+    approvals_required: list[str] = Field(default_factory=list)
+    artifacts_expected: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
+class RuntimePlanSnapshot(_PublicSnapshot):
+    plan_id: str
+    intent: TaskIntentSnapshot
+    capabilities: list[CapabilitySnapshot] = Field(default_factory=list)
+    tool_plan: ToolPlanSnapshot
+    route_to_studio: bool = False
+    timeline_preview: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
+class PlannerDecisionSnapshot(_PublicSnapshot):
+    decision_id: str
+    prompt: str
+    selected_intent: TaskIntentSnapshot
+    candidate_intents: list[TaskIntentSnapshot] = Field(default_factory=list)
+    plan: RuntimePlanSnapshot
+    created_at: str = ""
+    source: str = "runtime_planner"
 
 
 class PublicRunEvent(_PublicSnapshot):

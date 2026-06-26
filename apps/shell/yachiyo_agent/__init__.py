@@ -13,6 +13,8 @@ from .contracts import (
     ApprovalDecision,
     ArtifactContentSnapshot,
     ArtifactSnapshot,
+    CapabilityCategory,
+    CapabilitySnapshot,
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
@@ -26,6 +28,7 @@ from .contracts import (
     InstallRestrictedToolPluginRequest,
     MemorySnapshot,
     MemoryTraceSnapshot,
+    PlannerDecisionSnapshot,
     PublicRunEvent,
     ReadinessSnapshot,
     RestrictedPluginToolSnapshot,
@@ -49,6 +52,11 @@ from .contracts import (
     StartChatTaskRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
+    RuntimePlanSnapshot,
+    TaskIntentKind,
+    TaskIntentSnapshot,
+    ToolPlanSnapshot,
+    ToolPlanStepSnapshot,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
@@ -69,6 +77,11 @@ from .daily_desktop import (
     daily_desktop_user_metadata,
 )
 from .links import studio_run_url
+from .capability_registry import (
+    capability_definition_map,
+    capability_definitions,
+    capability_snapshots,
+)
 from .policy import (
     DESKTOP_ACTION_RISK_LEVELS,
     DESKTOP_EXECUTION_CAPABILITY_IDS,
@@ -90,6 +103,7 @@ from .recovery_actions import (
     recovery_action_metadata_snapshot,
     recovery_retry_context_payload,
 )
+from .runtime_planner import RuntimePlanner, TaskIntentRouter
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -108,6 +122,11 @@ __all__ = [
     "ApprovalDecision",
     "ArtifactContentSnapshot",
     "ArtifactSnapshot",
+    "CapabilityCategory",
+    "CapabilitySnapshot",
+    "capability_definition_map",
+    "capability_definitions",
+    "capability_snapshots",
     "ChatRunnableCatalogSnapshot",
     "ChatRunnableParticipantSnapshot",
     "ChatRunnableSnapshot",
@@ -140,6 +159,7 @@ __all__ = [
     "MEDIUM_RISK_DESKTOP_TOOLS",
     "MemorySnapshot",
     "MemoryTraceSnapshot",
+    "PlannerDecisionSnapshot",
     "PublicRunEvent",
     "ReadinessSnapshot",
     "RECOVERY_ACTION_TASK_METADATA_KEYS",
@@ -167,9 +187,16 @@ __all__ = [
     "StartChatTaskRequest",
     "StartGroupRunRequest",
     "StartWorkflowRunRequest",
+    "RuntimePlanner",
+    "RuntimePlanSnapshot",
     "ToolCatalogItemSnapshot",
     "ToolCatalogSnapshot",
     "ToolCallSnapshot",
+    "TaskIntentKind",
+    "TaskIntentRouter",
+    "TaskIntentSnapshot",
+    "ToolPlanSnapshot",
+    "ToolPlanStepSnapshot",
     "UpdateRestrictedToolPluginRequest",
     "WorkflowRunSnapshot",
     "WorkflowSnapshot",

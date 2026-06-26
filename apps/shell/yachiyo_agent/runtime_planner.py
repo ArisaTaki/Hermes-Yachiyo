@@ -1,0 +1,801 @@
+"""Task-intent router and capability planner for Yachiyo.
+
+This is the first stable boundary for the Hanako/Hermes-style runtime:
+understand the user task, select capabilities, then produce observable tool
+steps. Execution remains owned by the existing runtime and policy gates.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
+from typing import Any
+
+from .capability_registry import capability_snapshots
+from .contracts import (
+    PlannerDecisionSnapshot,
+    RuntimePlanSnapshot,
+    TaskIntentSnapshot,
+    ToolPlanSnapshot,
+    ToolPlanStepSnapshot,
+)
+
+
+class TaskIntentRouter:
+    """Deterministic first-pass task intent router.
+
+    Later phases can add model-assisted classification. This conservative
+    router gives Chat, Bubble, Live2D, and Studio the same public intent shape.
+    """
+
+    def candidate_intents(
+        self,
+        prompt: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> list[TaskIntentSnapshot]:
+        text = _clean_prompt(prompt)
+        metadata = metadata or {}
+        candidates = [
+            self._data_analysis_intent(text, metadata),
+            self._desktop_operation_intent(text, metadata),
+            self._web_research_intent(text, metadata),
+            self._report_generation_intent(text, metadata),
+            self._code_task_intent(text, metadata),
+            self._workflow_intent(text, metadata),
+            self._multi_agent_intent(text, metadata),
+            self._communication_intent(text, metadata),
+            self._schedule_intent(text, metadata),
+        ]
+        return sorted(
+            [intent for intent in candidates if intent.confidence > 0],
+            key=lambda intent: intent.confidence,
+            reverse=True,
+        )
+
+    def route(self, prompt: str, metadata: Mapping[str, Any] | None = None) -> TaskIntentSnapshot:
+        candidates = self.candidate_intents(prompt, metadata)
+        if candidates:
+            return candidates[0]
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "general", prompt),
+            kind="general",
+            title="General Task",
+            user_goal=_clean_prompt(prompt),
+            confidence=0.25,
+            description="General task without a stronger specialized route.",
+            preferred_capabilities=["artifact.write"],
+        )
+
+    def _data_analysis_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        score = _score_terms(
+            text,
+            [
+                "data analysis",
+                "analyze data",
+                "analyse data",
+                "dataset",
+                "csv",
+                "xlsx",
+                "excel",
+                "spreadsheet",
+                "table",
+                "pandas",
+                "chart",
+                "plot",
+                "visualization",
+                "数据分析",
+                "分析数据",
+                "数据集",
+                "表格",
+                "电子表格",
+                "可视化",
+                "图表",
+                "统计",
+            ],
+        )
+        if score <= 0:
+            return _empty_intent("data_analysis", text)
+        has_source = bool(_data_source_hint(text) or metadata.get("attachment") or metadata.get("file"))
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "data_analysis", text),
+            kind="data_analysis",
+            title="Data Analysis",
+            user_goal=text,
+            confidence=min(0.95, 0.48 + score),
+            description="Analyze structured data and produce a report or artifact.",
+            inputs={"data_source_hint": _data_source_hint(text)},
+            expected_outputs=_expected_outputs(text, default=["analysis_report"]),
+            required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
+            preferred_capabilities=["data.analysis", "desktop.app_control"],
+            missing_inputs=[] if has_source else ["data_source"],
+            risk_level="medium",
+        )
+
+    def _desktop_operation_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        score = _score_terms(
+            text,
+            [
+                "open ",
+                "launch ",
+                "focus ",
+                "click ",
+                "type ",
+                "press ",
+                "play ",
+                "pause ",
+                "desktop",
+                "app",
+                "window",
+                "finder",
+                "browser",
+                "music",
+                "打开",
+                "启动",
+                "切到",
+                "点击",
+                "输入",
+                "播放",
+                "暂停",
+                "窗口",
+                "应用",
+                "桌面",
+            ],
+        )
+        if score <= 0 and not metadata.get("daily_desktop_intent"):
+            return _empty_intent("desktop_operation", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "desktop_operation", text),
+            kind="desktop_operation",
+            title="Desktop Operation",
+            user_goal=text,
+            confidence=min(0.95, 0.42 + score),
+            description="Discover and operate local desktop apps through runtime tools.",
+            inputs={"app_name_hint": _app_name_hint(text), "operation_hint": _desktop_operation_hint(text)},
+            expected_outputs=["desktop_state"],
+            required_capabilities=["desktop.app_discovery"],
+            preferred_capabilities=["desktop.app_control", "desktop.ui_operation"],
+            risk_level="medium" if _looks_like_ui_operation(text) else "low",
+        )
+
+    def _web_research_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        score = _score_terms(
+            text,
+            ["research", "search web", "website", "url", "http", "web page", "网页", "网站", "搜索", "调研"],
+        )
+        if score <= 0:
+            return _empty_intent("web_research", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "web_research", text),
+            kind="web_research",
+            title="Web Research",
+            user_goal=text,
+            confidence=min(0.9, 0.38 + score),
+            description="Open, read, and summarize web content.",
+            inputs={"url_hint": _url_hint(text)},
+            expected_outputs=_expected_outputs(text, default=["summary"]),
+            required_capabilities=["browser.research"],
+            preferred_capabilities=["artifact.write"],
+            risk_level="medium",
+        )
+
+    def _report_generation_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["report", "write up", "summary", "deck", "报告", "总结", "汇报", "文档"])
+        if score <= 0:
+            return _empty_intent("report_generation", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "report_generation", text),
+            kind="report_generation",
+            title="Report Generation",
+            user_goal=text,
+            confidence=min(0.85, 0.34 + score),
+            description="Produce a written artifact from available context or gathered inputs.",
+            expected_outputs=_expected_outputs(text, default=["report"]),
+            required_capabilities=["artifact.write"],
+            preferred_capabilities=["file.workspace_read", "browser.research", "data.analysis"],
+            risk_level="low",
+        )
+
+    def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"])
+        if score <= 0:
+            return _empty_intent("code_task", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "code_task", text),
+            kind="code_task",
+            title="Code Task",
+            user_goal=text,
+            confidence=min(0.88, 0.4 + score),
+            description="Read, modify, or test code in the configured workspace.",
+            required_capabilities=["file.workspace_read"],
+            preferred_capabilities=["terminal.execution", "artifact.write"],
+            risk_level="high" if _contains_any(text, ["改", "写", "fix", "change", "modify"]) else "medium",
+        )
+
+    def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
+        if score <= 0 and metadata.get("runnable_kind") != "workflow":
+            return _empty_intent("workflow_orchestration", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "workflow_orchestration", text),
+            kind="workflow_orchestration",
+            title="Workflow Orchestration",
+            user_goal=text,
+            confidence=min(0.92, 0.5 + score),
+            description="Run or debug an Agent Studio workflow.",
+            required_capabilities=["workflow.orchestration"],
+            preferred_capabilities=["artifact.write"],
+            risk_level="medium",
+        )
+
+    def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
+        if score <= 0 and metadata.get("runnable_kind") != "group":
+            return _empty_intent("multi_agent", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "multi_agent", text),
+            kind="multi_agent",
+            title="Multi-Agent Coordination",
+            user_goal=text,
+            confidence=min(0.9, 0.48 + score),
+            description="Coordinate multiple agents or group runs.",
+            required_capabilities=["group.multi_agent"],
+            preferred_capabilities=["artifact.write"],
+            risk_level="medium",
+        )
+
+    def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["email", "message", "mail", "send to", "邮件", "消息", "发给", "发送"])
+        if score <= 0:
+            return _empty_intent("communication", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "communication", text),
+            kind="communication",
+            title="Communication",
+            user_goal=text,
+            confidence=min(0.82, 0.34 + score),
+            description="Draft or send communication through available apps or tools.",
+            required_capabilities=["desktop.app_discovery"],
+            preferred_capabilities=["desktop.app_control", "desktop.ui_operation", "artifact.write"],
+            risk_level="medium",
+        )
+
+    def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日程", "会议", "安排"])
+        if score <= 0:
+            return _empty_intent("schedule", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "schedule", text),
+            kind="schedule",
+            title="Schedule Or Reminder",
+            user_goal=text,
+            confidence=min(0.86, 0.38 + score),
+            description="Create reminders, calendar events, or future tasks.",
+            required_capabilities=["schedule.reminder"],
+            preferred_capabilities=["artifact.write"],
+            risk_level="medium",
+        )
+
+
+class RuntimePlanner:
+    def __init__(self, intent_router: TaskIntentRouter | None = None) -> None:
+        self._intent_router = intent_router or TaskIntentRouter()
+
+    def decision(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PlannerDecisionSnapshot:
+        candidates = self._intent_router.candidate_intents(prompt, metadata)
+        selected = candidates[0] if candidates else self._intent_router.route(prompt, metadata)
+        plan = self.plan_intent(selected, allowed_tools=allowed_tools)
+        return PlannerDecisionSnapshot(
+            decision_id=_stable_id("decision", selected.kind, prompt),
+            prompt=_clean_prompt(prompt),
+            selected_intent=selected,
+            candidate_intents=candidates,
+            plan=plan,
+            created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+
+    def plan(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> RuntimePlanSnapshot:
+        return self.decision(prompt, allowed_tools=allowed_tools, metadata=metadata).plan
+
+    def plan_intent(
+        self,
+        intent: TaskIntentSnapshot,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+    ) -> RuntimePlanSnapshot:
+        allowed = _allowed_tool_set(allowed_tools)
+        steps = self._steps_for_intent(intent, allowed)
+        capabilities = [*intent.required_capabilities, *intent.preferred_capabilities]
+        snapshots = capability_snapshots(
+            allowed_tools=allowed_tools,
+            capability_ids=capabilities,
+        )
+        missing = _missing_capabilities(snapshots, required_capability_ids=intent.required_capabilities)
+        tool_plan = ToolPlanSnapshot(
+            plan_id=_stable_id("tool-plan", intent.kind, intent.user_goal),
+            title=f"{intent.title} Tool Plan",
+            steps=steps,
+            required_capabilities=list(intent.required_capabilities),
+            missing_capabilities=missing,
+            approvals_required=[step.step_id for step in steps if step.approval_required],
+            artifacts_expected=_artifacts_expected(intent, steps),
+            open_questions=list(intent.missing_inputs),
+        )
+        return RuntimePlanSnapshot(
+            plan_id=_stable_id("runtime-plan", intent.kind, intent.user_goal),
+            intent=intent,
+            capabilities=snapshots,
+            tool_plan=tool_plan,
+            route_to_studio=_route_to_studio(intent, steps),
+            timeline_preview=_timeline_preview(intent, steps),
+        )
+
+    def _steps_for_intent(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        if intent.kind == "data_analysis":
+            return self._data_analysis_steps(intent, allowed)
+        if intent.kind == "desktop_operation":
+            return self._desktop_operation_steps(intent, allowed)
+        if intent.kind == "web_research":
+            return self._web_research_steps(intent, allowed)
+        if intent.kind == "report_generation":
+            return self._report_steps(intent, allowed)
+        if intent.kind == "code_task":
+            return self._code_steps(intent, allowed)
+        if intent.kind == "schedule":
+            return self._schedule_steps(intent, allowed)
+        if intent.kind == "workflow_orchestration":
+            return [_service_step(intent, "workflow.orchestration", "Select or start workflow")]
+        if intent.kind == "multi_agent":
+            return [_service_step(intent, "group.multi_agent", "Select or start group run")]
+        return self._report_steps(intent, allowed)
+
+    def _data_analysis_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        return [
+            _step(
+                intent,
+                "inspect-data-source",
+                "Inspect data source",
+                "file.workspace_read",
+                _first_allowed(("workspace.read", "workspace.list"), allowed),
+                reason="Find and inspect the dataset before analysis.",
+                fallback_tools=["desktop.open_path", "browser.current_page"],
+            ),
+            _step(
+                intent,
+                "run-analysis",
+                "Run reproducible data analysis",
+                "data.analysis",
+                _first_allowed(("terminal.run",), allowed),
+                input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
+                risk_level="high",
+                approval_required=True,
+                depends_on=["inspect-data-source"],
+                reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
+            ),
+            _step(
+                intent,
+                "write-analysis-artifact",
+                "Write analysis artifact",
+                "artifact.write",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview={"path": "analysis-report.md"},
+                depends_on=["run-analysis"],
+                reason="Return a durable report artifact that Studio and Chat can replay.",
+            ),
+        ]
+
+    def _desktop_operation_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        app_name = str(intent.inputs.get("app_name_hint") or "").strip()
+        steps = [
+            _step(
+                intent,
+                "discover-desktop-state",
+                "Discover desktop state",
+                "desktop.app_discovery",
+                _first_allowed(("desktop.running_apps", "desktop.active_window", "screen.capture"), allowed),
+                reason="Inspect the current app/window state before acting.",
+            )
+        ]
+        if app_name:
+            steps.append(
+                _step(
+                    intent,
+                    "open-or-focus-app",
+                    "Open or focus app",
+                    "desktop.app_control",
+                    _first_allowed(("app.open", "app.focus"), allowed),
+                    input_preview={"app_name": app_name},
+                    depends_on=["discover-desktop-state"],
+                    reason="Resolve the requested app by name at runtime.",
+                )
+            )
+        if _looks_like_ui_operation(intent.user_goal):
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui",
+                    "Operate foreground UI",
+                    "desktop.ui_operation",
+                    _first_allowed(
+                        (
+                            "desktop.click_ui_element",
+                            "desktop.type_into_ui_element",
+                            "desktop.safe_shortcut",
+                            "desktop.safe_key",
+                            "desktop.safe_type_text",
+                        ),
+                        allowed,
+                    ),
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=["open-or-focus-app"] if app_name else ["discover-desktop-state"],
+                    reason="Use observable UI operations after discovery, then verify.",
+                )
+            )
+        return steps
+
+    def _web_research_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        url = str(intent.inputs.get("url_hint") or "").strip()
+        return [
+            _step(
+                intent,
+                "open-or-read-web",
+                "Open or read web content",
+                "browser.research",
+                _first_allowed(("browser.open_url_and_extract_text", "browser.current_page", "browser.extract_text"), allowed),
+                input_preview={"url": url} if url else {},
+                risk_level="medium",
+                approval_required=True,
+                reason="Use browser tools for web content instead of desktop clicking when possible.",
+            ),
+            _step(
+                intent,
+                "write-research-artifact",
+                "Write research artifact",
+                "artifact.write",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview={"path": "research-summary.md"},
+                depends_on=["open-or-read-web"],
+                reason="Persist research output for replay.",
+            ),
+        ]
+
+    def _report_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        return [
+            _step(
+                intent,
+                "gather-context",
+                "Gather available context",
+                "file.workspace_read",
+                _first_allowed(("workspace.read", "workspace.list", "browser.current_page"), allowed),
+                reason="Inspect available context before writing.",
+            ),
+            _step(
+                intent,
+                "write-report-artifact",
+                "Write report artifact",
+                "artifact.write",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview={"path": "report.md"},
+                depends_on=["gather-context"],
+                reason="Produce the requested durable output.",
+            ),
+        ]
+
+    def _code_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        return [
+            _step(
+                intent,
+                "inspect-workspace",
+                "Inspect workspace",
+                "file.workspace_read",
+                _first_allowed(("workspace.list", "workspace.read"), allowed),
+                reason="Understand the repo before editing or testing.",
+            ),
+            _step(
+                intent,
+                "run-code-command",
+                "Run code command",
+                "terminal.execution",
+                _first_allowed(("terminal.run",), allowed),
+                risk_level="high",
+                approval_required=True,
+                depends_on=["inspect-workspace"],
+                reason="Use terminal only when the task needs tests, builds, or scripts.",
+            ),
+            _step(
+                intent,
+                "write-code-report",
+                "Write result artifact",
+                "artifact.write",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview={"path": "code-task-summary.md"},
+                depends_on=["inspect-workspace"],
+                reason="Summarize changes or findings for replay.",
+            ),
+        ]
+
+    def _schedule_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        return [
+            _step(
+                intent,
+                "create-schedule-item",
+                "Create schedule item",
+                "schedule.reminder",
+                _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                risk_level="medium",
+                approval_required=True,
+                reason="Create only explicit user-requested reminders, calendar events, or future tasks.",
+            )
+        ]
+
+
+def _empty_intent(kind: str, text: str) -> TaskIntentSnapshot:
+    return TaskIntentSnapshot(
+        intent_id=_stable_id("intent", kind, text),
+        kind=kind,
+        title=kind.replace("_", " ").title(),
+        user_goal=text,
+        confidence=0.0,
+    )
+
+
+def _step(
+    intent: TaskIntentSnapshot,
+    step_key: str,
+    title: str,
+    capability_id: str,
+    tool_name: str | None,
+    *,
+    input_preview: dict[str, Any] | None = None,
+    risk_level: str = "low",
+    approval_required: bool = False,
+    depends_on: list[str] | None = None,
+    reason: str = "",
+    fallback_tools: list[str] | None = None,
+) -> ToolPlanStepSnapshot:
+    return ToolPlanStepSnapshot(
+        step_id=step_key,
+        title=title,
+        capability_id=capability_id,
+        tool_name=tool_name,
+        input_preview=input_preview or {},
+        risk_level=risk_level,
+        approval_required=approval_required,
+        depends_on=depends_on or [],
+        reason=reason,
+        fallback_tools=fallback_tools or [],
+        status="planned" if tool_name else "unavailable",
+    )
+
+
+def _service_step(
+    intent: TaskIntentSnapshot,
+    capability_id: str,
+    title: str,
+) -> ToolPlanStepSnapshot:
+    return ToolPlanStepSnapshot(
+        step_id=capability_id.replace(".", "-"),
+        title=title,
+        capability_id=capability_id,
+        reason="Handled by Agent Studio service orchestration rather than a model-visible tool.",
+    )
+
+
+def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
+    for tool in tools:
+        if allowed is None or tool in allowed:
+            return tool
+    return None
+
+
+def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
+    if allowed_tools is None:
+        return None
+    return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+
+
+def _missing_capabilities(
+    snapshots: list[Any],
+    *,
+    required_capability_ids: Iterable[str] | None = None,
+) -> list[str]:
+    required = {
+        str(capability_id or "").strip()
+        for capability_id in required_capability_ids or []
+        if str(capability_id or "").strip()
+    }
+    missing = []
+    for snapshot in snapshots:
+        capability_id = str(getattr(snapshot, "capability_id", "") or "")
+        if required and capability_id not in required:
+            continue
+        tools = list(getattr(snapshot, "tools", []) or [])
+        available_tools = list(getattr(snapshot, "available_tools", []) or [])
+        if tools and not available_tools:
+            missing.append(capability_id)
+    return [item for item in missing if item]
+
+
+def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[str]:
+    if not any(step.tool_name == "artifact.write" for step in steps):
+        return []
+    if intent.kind == "data_analysis":
+        return ["analysis-report.md"]
+    if intent.kind == "web_research":
+        return ["research-summary.md"]
+    if intent.kind == "code_task":
+        return ["code-task-summary.md"]
+    return ["report.md"]
+
+
+def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> bool:
+    return (
+        intent.kind in {"workflow_orchestration", "multi_agent", "data_analysis", "code_task"}
+        or any(step.approval_required for step in steps)
+        or len(steps) >= 3
+    )
+
+
+def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[dict[str, Any]]:
+    events = [
+        {
+            "event_type": "agent.intent.selected",
+            "detail": intent.kind,
+            "payload": {
+                "intent_id": intent.intent_id,
+                "confidence": intent.confidence,
+                "required_capabilities": list(intent.required_capabilities),
+            },
+        }
+    ]
+    for index, step in enumerate(steps, start=1):
+        events.append(
+            {
+                "event_type": "agent.plan.step",
+                "detail": step.title,
+                "payload": {
+                    "sequence": index,
+                    "step_id": step.step_id,
+                    "capability_id": step.capability_id,
+                    "tool": step.tool_name,
+                    "status": step.status,
+                    "approval_required": step.approval_required,
+                },
+            }
+        )
+    return events
+
+
+def _clean_prompt(prompt: str) -> str:
+    return re.sub(r"\s+", " ", str(prompt or "").strip())
+
+
+def _stable_id(prefix: str, kind: Any, text: str) -> str:
+    digest = hashlib.sha1(f"{kind}\n{text}".encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}-{digest}"
+
+
+def _score_terms(text: str, terms: Iterable[str]) -> float:
+    lowered = text.lower()
+    score = 0.0
+    for term in terms:
+        if str(term).lower() in lowered:
+            score += 0.08
+    return min(score, 0.45)
+
+
+def _contains_any(text: str, terms: Iterable[str]) -> bool:
+    lowered = text.lower()
+    return any(str(term).lower() in lowered for term in terms)
+
+
+def _data_source_hint(text: str) -> str:
+    match = re.search(r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))", text, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _url_hint(text: str) -> str:
+    match = re.search(r"https?://[^\s)]+", text)
+    return match.group(0) if match else ""
+
+
+def _app_name_hint(text: str) -> str:
+    patterns = [
+        r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
+        r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app = re.split(r"(?:并|然后|and|to|播放|点击|输入|搜索)", match.group("app").strip(), maxsplit=1)[0]
+        return app.strip(" .，,。")
+    return ""
+
+
+def _desktop_operation_hint(text: str) -> str:
+    if _contains_any(text, ["click", "点击"]):
+        return "click"
+    if _contains_any(text, ["type", "input", "输入"]):
+        return "type"
+    if _contains_any(text, ["play", "播放"]):
+        return "play"
+    if _contains_any(text, ["open", "launch", "打开", "启动"]):
+        return "open"
+    return ""
+
+
+def _looks_like_ui_operation(text: str) -> bool:
+    return _contains_any(
+        text,
+        ["click", "type", "press", "shortcut", "scroll", "点击", "输入", "按", "快捷键", "滚动", "发送"],
+    )
+
+
+def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
+    outputs = []
+    if _contains_any(text, ["chart", "plot", "图表", "可视化"]):
+        outputs.append("chart")
+    if _contains_any(text, ["report", "报告"]):
+        outputs.append("report")
+    if _contains_any(text, ["csv", "表格"]):
+        outputs.append("table")
+    return outputs or list(default)
