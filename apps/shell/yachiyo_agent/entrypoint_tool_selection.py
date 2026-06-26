@@ -115,7 +115,7 @@ def planner_first_direct_tool_selection(
 def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return True
-    tools = [str(request.get("tool") or "").strip() for request in requests]
+    tools = _request_tools(requests)
     if _runtime_planner_model_followup_owns_selection(requests):
         return False
     if _runtime_planner_media_playback_owns_selection(requests):
@@ -165,47 +165,27 @@ def _runtime_planner_model_followup_owns_selection(requests: list[dict[str, Any]
         return False
     if not any(bool(request.get("continue_to_model")) for request in requests):
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     return bool(reasons) and reasons <= _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS
 
 
 def _runtime_planner_media_playback_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_media_playback"}:
         return False
-    tools = {
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    tools = _request_tool_set(requests)
     return bool(tools) and all(tool.startswith("media.") for tool in tools)
 
 
 def _runtime_planner_clipboard_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_clipboard"}:
         return False
-    tools = {
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    tools = _request_tool_set(requests)
     return bool(tools & {"clipboard.read", "clipboard.write"}) and tools <= {
         "clipboard.read",
         "clipboard.write",
@@ -216,18 +196,10 @@ def _runtime_planner_clipboard_owns_selection(requests: list[dict[str, Any]]) ->
 def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_web_research"}:
         return False
-    tools = {
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    tools = _request_tool_set(requests)
     return bool(tools) and tools <= {
         "browser.open_url",
         "browser.open_url_and_extract_text",
@@ -238,47 +210,27 @@ def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]])
 def _runtime_planner_communication_send_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     return reasons == {"planner_fallback_communication_send"}
 
 
 def _runtime_planner_desktop_discovery_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_desktop_operation"}:
         return False
-    tools = {
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    tools = _request_tool_set(requests)
     return tools == {"desktop.ui_elements"}
 
 
 def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_desktop_operation"}:
         return False
-    tools = [
-        str(request.get("tool") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    ]
+    tools = _request_tools(requests)
     if len(tools) != 2 or tools[1] != "desktop.ui_elements":
         return False
     if tools[0] not in {"app.open", "app.focus", "app.focus_window"}:
@@ -322,22 +274,33 @@ _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS = frozenset(
 def _runtime_planner_system_control_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in requests
-        if isinstance(request, dict)
-    }
+    reasons = _request_planning_reasons(requests)
     if reasons != {"planner_fallback_system_control"}:
         return False
-    tools = [
+    tool_set = _request_tool_set(requests)
+    return bool(tool_set & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS) and tool_set <= (
+        _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS | {"desktop.ui_elements"}
+    )
+
+
+def _request_tools(requests: list[dict[str, Any]]) -> list[str]:
+    return [
         str(request.get("tool") or "").strip()
         for request in requests
         if isinstance(request, dict)
     ]
-    tool_set = set(tools)
-    return bool(tool_set & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS) and tool_set <= (
-        _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS | {"desktop.ui_elements"}
-    )
+
+
+def _request_tool_set(requests: list[dict[str, Any]]) -> set[str]:
+    return {tool for tool in _request_tools(requests) if tool}
+
+
+def _request_planning_reasons(requests: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
 
 
 def _legacy_requests(
