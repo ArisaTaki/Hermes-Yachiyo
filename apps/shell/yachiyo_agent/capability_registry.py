@@ -28,14 +28,18 @@ class CapabilityDefinition:
     def to_snapshot(self, allowed_tools: Iterable[str] | None = None) -> CapabilitySnapshot:
         allowed_provided = allowed_tools is not None
         allowed = {str(tool or "").strip() for tool in allowed_tools or [] if str(tool or "").strip()}
-        available_tools = [tool for tool in self.tools if not allowed_provided or tool in allowed]
-        missing_tools = [tool for tool in self.tools if allowed_provided and tool not in allowed]
+        tools = [*self.tools]
+        for tool in _dynamic_tools_for_capability(self.capability_id, allowed if allowed_provided else set()):
+            if tool not in tools:
+                tools.append(tool)
+        available_tools = [tool for tool in tools if not allowed_provided or tool in allowed]
+        missing_tools = [tool for tool in tools if allowed_provided and tool not in allowed]
         return CapabilitySnapshot(
             capability_id=self.capability_id,
             title=self.title,
             category=self.category,
             description=self.description,
-            tools=list(self.tools),
+            tools=tools,
             available_tools=available_tools,
             missing_tools=missing_tools,
             risk_level=self.risk_level,
@@ -161,6 +165,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         tools=(
             "browser.open_url",
             "browser.open_url_and_extract_text",
+            "browser.open_url_and_screenshot",
             "browser.current_page",
             "browser.extract_text",
             "browser.screenshot",
@@ -229,12 +234,41 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
 )
 
 
+_DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "artifact.write": ("artifact.",),
+    "browser.research": ("browser.",),
+    "media.playback": ("media.",),
+    "terminal.execution": ("terminal.",),
+    "workflow.orchestration": ("workflow.",),
+    "group.multi_agent": ("group.",),
+}
+
+_DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
+    "data.analysis": ("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+    "file.workspace_read": ("workspace.list", "workspace.read"),
+    "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
+}
+
+
 def capability_definitions() -> tuple[CapabilityDefinition, ...]:
     return CAPABILITY_DEFINITIONS
 
 
 def capability_definition_map() -> dict[str, CapabilityDefinition]:
     return {definition.capability_id: definition for definition in CAPABILITY_DEFINITIONS}
+
+
+def _dynamic_tools_for_capability(capability_id: str, allowed_tools: Iterable[str]) -> list[str]:
+    allowed = sorted({str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()})
+    if not allowed:
+        return []
+    exact = set(_DYNAMIC_CAPABILITY_TOOL_NAMES.get(capability_id, ()))
+    prefixes = _DYNAMIC_CAPABILITY_TOOL_PREFIXES.get(capability_id, ())
+    return [
+        tool
+        for tool in allowed
+        if tool in exact or any(tool.startswith(prefix) for prefix in prefixes)
+    ]
 
 
 def capability_snapshots(

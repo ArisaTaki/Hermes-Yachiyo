@@ -9,6 +9,7 @@ from apps.shell.yachiyo_agent import (
     PlannerDecisionSnapshot,
     RuntimePlanner,
     YachiyoAgentService,
+    capability_snapshots,
 )
 from apps.shell.yachiyo_agent.planner_execution import planner_desktop_tool_requests
 
@@ -136,6 +137,41 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
     step = _step_by_id(decision, "control-media-playback")
     assert step.tool_name == "media.apple_music_play"
     assert step.input_preview == {"query": "超时空辉夜姬"}
+
+
+def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["browser.print_page"],
+        capability_ids=["browser.research"],
+    )
+
+    assert len(snapshots) == 1
+    assert "browser.print_page" in snapshots[0].tools
+    assert "browser.print_page" in snapshots[0].available_tools
+
+
+def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["workspace.write_patch"],
+        capability_ids=["file.workspace_read"],
+    )
+
+    assert len(snapshots) == 1
+    assert "workspace.write_patch" not in snapshots[0].tools
+    assert snapshots[0].available_tools == []
+
+
+def test_runtime_planner_uses_browser_screenshot_tool_from_catalog() -> None:
+    decision = RuntimePlanner().decision(
+        "请调研 https://example.com 并截图",
+        allowed_tools=["browser.open_url_and_screenshot", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.open_url_and_screenshot"
+    browser_capability = _capability_by_id(decision, "browser.research")
+    assert "browser.open_url_and_screenshot" in browser_capability.available_tools
 
 
 def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:

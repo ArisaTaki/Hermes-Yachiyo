@@ -578,7 +578,17 @@ class RuntimePlanner:
                 "open-or-read-web",
                 "Open or read web content",
                 "browser.research",
-                _first_allowed(("browser.open_url_and_extract_text", "browser.current_page", "browser.extract_text"), allowed),
+                _first_allowed(
+                    (
+                        "browser.open_url_and_extract_text",
+                        "browser.open_url_and_screenshot",
+                        "browser.current_page",
+                        "browser.extract_text",
+                        "browser.screenshot",
+                        "browser.open_url",
+                    ),
+                    allowed,
+                ),
                 input_preview={"url": url} if url else {},
                 risk_level="medium",
                 approval_required=True,
