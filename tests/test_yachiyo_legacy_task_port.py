@@ -110,8 +110,8 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
         "desktop_operation"
     )
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_tool"] == "desktop.list_apps"
-    assert metadata["daily_desktop_tools"][:2] == ["desktop.list_apps", "app.open"]
+    assert metadata["daily_desktop_tool"] == "app.open"
+    assert metadata["daily_desktop_tools"] == ["app.open"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == "planner_fallback_desktop_operation"
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]

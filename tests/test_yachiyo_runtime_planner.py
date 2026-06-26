@@ -12,8 +12,12 @@ from apps.shell.yachiyo_agent import (
     capability_snapshots,
 )
 from apps.shell.yachiyo_agent.planner_execution import (
+    planner_direct_tool_requests,
     planner_desktop_tool_requests,
     planner_tool_requests,
+)
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_decision_and_tool_requests,
 )
 from apps.shell.yachiyo_agent.planner_projection import planner_timeline_events
 
@@ -1271,6 +1275,93 @@ def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
+    ]
+
+
+def test_planner_direct_tool_requests_omits_discover_and_verify_steps() -> None:
+    requests = planner_direct_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_entrypoint_selection_uses_legacy_when_single_app_plan_is_less_specific() -> None:
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "system.settings_open",
+                "input": {"target": "蓝牙"},
+            }
+        ]
+
+    decision, requests = planner_first_direct_decision_and_tool_requests(
+        "打开蓝牙",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+            "system.settings_open",
+        ],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert decision is None
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "蓝牙"},
+        }
+    ]
+
+
+def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan() -> None:
+    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        raise AssertionError("strong runtime planner plan should not consult legacy")
+
+    decision, requests = planner_first_direct_decision_and_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        legacy_tool_requests=fail_legacy,
+    )
+
+    assert decision is not None
+    assert [request["tool"] for request in requests] == [
+        "app.open",
+        "desktop.click_ui_element",
     ]
 
 

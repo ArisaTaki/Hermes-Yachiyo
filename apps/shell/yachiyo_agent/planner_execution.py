@@ -28,6 +28,20 @@ def planner_tool_requests(
     return requests
 
 
+def planner_direct_tool_requests(
+    prompt: str,
+    allowed_tools: Iterable[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    _decision, requests = planner_direct_decision_and_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    return requests
+
+
 def planner_decision_and_tool_requests(
     prompt: str,
     allowed_tools: Iterable[str],
@@ -43,6 +57,23 @@ def planner_decision_and_tool_requests(
         metadata=metadata,
     )
     return decision, _tool_requests_for_decision(decision, allowed)
+
+
+def planner_direct_decision_and_tool_requests(
+    prompt: str,
+    allowed_tools: Iterable[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> tuple[Any | None, list[dict[str, Any]]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return None, []
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed,
+        metadata=metadata,
+    )
+    return decision, _direct_tool_requests_for_decision(decision, allowed)
 
 
 def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
@@ -91,6 +122,12 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
     return _desktop_tool_requests(decision, allowed)
 
 
+def _direct_tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if decision.selected_intent.kind != "desktop_operation":
+        return _tool_requests_for_decision(decision, allowed)
+    return _direct_desktop_tool_requests(decision, allowed)
+
+
 def planner_desktop_tool_requests(
     prompt: str,
     allowed_tools: Iterable[str],
@@ -122,6 +159,35 @@ def _request(
 def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
     for step in decision.plan.tool_plan.steps:
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            continue
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason=_desktop_step_planning_reason(step, tool_name),
+            )
+        )
+    if _weak_desktop_discovery_plan(decision, requests):
+        return []
+    return requests
+
+
+def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    step_ids = {
+        str(getattr(step, "step_id", "") or "").strip()
+        for step in decision.plan.tool_plan.steps
+    }
+    for step in decision.plan.tool_plan.steps:
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id in {"discover-desktop-state", "verify-desktop-result"}:
+            continue
+        if step_id == "list-app-windows" and "focus-app-window" in step_ids:
+            continue
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue

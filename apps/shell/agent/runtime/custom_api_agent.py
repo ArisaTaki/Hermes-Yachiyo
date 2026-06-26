@@ -13,6 +13,9 @@ from apps.shell.agent.runtime.desktop_intents import (
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_decision_and_tool_requests,
+)
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 _SAFE_SHORTCUT_HOTKEY_TOOLS = {
@@ -591,21 +594,25 @@ class RuntimeCustomApiAgentLoop:
             "planning_reason": "explicit_hotkey_requires_approval",
         }
 
-    @staticmethod
     def _runtime_planner_tool_requests(
+        self,
         planning_context: str,
         allowed_tools: list[str],
     ) -> tuple[Any | None, list[dict[str, Any]]]:
         try:
-            from apps.shell.yachiyo_agent.planner_execution import (
-                planner_decision_and_tool_requests,
-            )
-        except Exception:
-            return None, []
-        try:
-            return planner_decision_and_tool_requests(
+            return planner_first_direct_decision_and_tool_requests(
                 planning_context,
                 allowed_tools,
+                legacy_tool_requests=daily_desktop_intent_tool_requests,
+                legacy_postprocess=lambda requests: [
+                    self._approval_hotkey_request_for_safe_shortcut(
+                        planning_context,
+                        requests,
+                        allowed_tools,
+                    )
+                    or request
+                    for request in requests
+                ],
             )
         except Exception:
             return None, []
@@ -2869,10 +2876,36 @@ def _visible_daily_desktop_completed_steps(
         tool_name = str(step.get("tool") or "")
         if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS and index < first_primary:
             continue
-        if tool_name in _DAILY_DESKTOP_VERIFY_TOOLS and index > last_primary:
+        if (
+            tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
+            and index > last_primary
+            and not _is_requested_ui_readback(completed_steps, index, first_primary, last_primary)
+        ):
             continue
         visible_steps.append(step)
     return visible_steps or completed_steps
+
+
+def _is_requested_ui_readback(
+    completed_steps: list[dict[str, Any]],
+    index: int,
+    first_primary: int,
+    last_primary: int,
+) -> bool:
+    if str(completed_steps[index].get("tool") or "") != "desktop.ui_elements":
+        return False
+    primary_tools = {
+        str(step.get("tool") or "")
+        for step in completed_steps[first_primary : last_primary + 1]
+        if isinstance(step, dict)
+    }
+    return bool(primary_tools) and primary_tools.issubset(
+        {
+            "app.open",
+            "app.focus",
+            "system.settings_open",
+        }
+    )
 
 
 def _display_target_name(value: str, suffix: str = "") -> str:

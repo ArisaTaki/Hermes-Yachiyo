@@ -7,11 +7,15 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
+    daily_desktop_intent_tool_requests,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
 from apps.shell.agent.runtime.model_messages import message_visible_content_text, model_output_metadata
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_decision_and_tool_requests,
+)
 
 
 def build_runtime_main_chat_model_loop_runner(
@@ -268,9 +272,11 @@ class MainChatModelLoopRunner:
         if not intent_text:
             return False
         try:
-            from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
-
-            planned_requests = planner_tool_requests(intent_text, allowed_tools)
+            _decision, planned_requests = planner_first_direct_decision_and_tool_requests(
+                intent_text,
+                allowed_tools,
+                legacy_tool_requests=daily_desktop_intent_tool_requests,
+            )
             if planned_requests:
                 return not any(
                     bool(request.get("continue_to_model"))
