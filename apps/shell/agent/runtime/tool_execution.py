@@ -17,6 +17,32 @@ def _normalized_app_lookup(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
 
+def _app_lookups_related(left: Any, right: Any) -> bool:
+    clean_left = _normalized_app_lookup(left)
+    clean_right = _normalized_app_lookup(right)
+    if not clean_left or not clean_right:
+        return False
+    if clean_left == clean_right:
+        return True
+    shorter, longer = (
+        (clean_left, clean_right)
+        if len(clean_left) <= len(clean_right)
+        else (clean_right, clean_left)
+    )
+    return f" {shorter} " in f" {longer} "
+
+
+def _apps_from_list_apps_result(result: dict[str, Any]) -> list[Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    apps = data.get("apps")
+    if isinstance(apps, list):
+        return apps
+    matches = data.get("matches")
+    if isinstance(matches, list):
+        return matches
+    return []
+
+
 def _discovered_app_name_for_query(
     timeline: list[dict[str, Any]],
     query: str,
@@ -30,12 +56,10 @@ def _discovered_app_name_for_query(
         if str(event.get("detail") or "") != "desktop.list_apps":
             continue
         input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
-        if _normalized_app_lookup(input_preview.get("query")) != clean_query:
+        if not _app_lookups_related(input_preview.get("query"), clean_query):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
-        data = result.get("data") if isinstance(result.get("data"), dict) else {}
-        apps = data.get("apps") if isinstance(data.get("apps"), list) else []
-        for app in apps:
+        for app in _apps_from_list_apps_result(result):
             if not isinstance(app, dict):
                 continue
             app_name = str(app.get("name") or "").strip()

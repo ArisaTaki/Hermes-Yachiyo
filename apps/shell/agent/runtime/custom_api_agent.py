@@ -2328,6 +2328,8 @@ def _installed_apps_summary(result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     raw_apps = data.get("apps")
     if not isinstance(raw_apps, list):
+        raw_apps = data.get("matches")
+    if not isinstance(raw_apps, list):
         return ""
     query = str(data.get("query") or "").strip()
     names = []

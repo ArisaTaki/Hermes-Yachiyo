@@ -679,6 +679,64 @@ def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool(
     ]
 
 
+def test_runtime_tool_request_runner_uses_related_discovered_app_match_name() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "matches": [{"name": "Arc Browser", "path": "/Applications/Arc Browser.app"}],
+                },
+            }
+            if tool_name == "desktop.list_apps"
+            else {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": payload["app_name"], "launch_verified": True},
+            }
+        )
+        timeline.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "打开 Arc"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "Arc Browser", "limit": 20}},
+            {"tool": "app.open", "input": {"app_name": "Arc"}},
+        ],
+        ["desktop.list_apps", "app.open"],
+        FakeBroker({"ok": True}),
+        messages,
+        [],
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "Arc Browser", "limit": 20}),
+        ("app.open", {"app_name": "Arc Browser"}),
+    ]
+
+
 def test_runtime_tool_request_runner_uses_discovered_app_name_for_combined_app_tool() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
