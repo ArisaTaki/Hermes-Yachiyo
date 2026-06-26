@@ -106,6 +106,38 @@ def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> 
     assert "app.open_and_click_ui_element" in ui_capability.tools
 
 
+def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "能否帮我播放 Apple Music?",
+        allowed_tools=["media.apple_music_open_and_play"],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Music",
+        "query": "",
+    }
+    step = _step_by_id(decision, "control-media-playback")
+    assert step.tool_name == "media.apple_music_open_and_play"
+    assert step.input_preview == {}
+    media_capability = _capability_by_id(decision, "media.playback")
+    assert "media.apple_music_open_and_play" in media_capability.tools
+
+
+def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None:
+    decision = RuntimePlanner().decision(
+        "播放超时空辉夜姬",
+        allowed_tools=["media.apple_music_play"],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs["query"] == "超时空辉夜姬"
+    step = _step_by_id(decision, "control-media-playback")
+    assert step.tool_name == "media.apple_music_play"
+    assert step.input_preview == {"query": "超时空辉夜姬"}
+
+
 def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",
@@ -184,6 +216,23 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_typing_and_submit() ->
             "input": {"action": "confirm"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
+    requests = planner_desktop_tool_requests(
+        "播放 Spotify",
+        allowed_tools=["media.music_app_open_and_play"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         },
     ]
 

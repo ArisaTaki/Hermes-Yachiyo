@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from typing import Any
+
+_GENERIC_MUSIC_QUERIES = {
+    "",
+    "music",
+    "apple music",
+    "音乐",
+    "歌",
+    "歌曲",
+    "播放器",
+    "音乐播放器",
+    "apple",
+}
 
 
 def app_control_mode(text: str) -> str:
@@ -88,6 +101,109 @@ def submit_action_hint(text: str) -> str:
     return ""
 
 
+def media_playback_hint(text: str) -> dict[str, str]:
+    action = media_action_hint(text)
+    return {
+        "action": action,
+        "app_name": music_app_name_hint(text),
+        "query": media_query_hint(text) if action == "play" else "",
+    }
+
+
+def media_tool_preview(
+    inputs: Mapping[str, Any],
+    allowed_tools: Iterable[str] | None,
+) -> tuple[str | None, dict[str, Any]]:
+    allowed = _allowed_tool_set(allowed_tools)
+    action = str(inputs.get("action") or "").strip() or "play"
+    app_name = str(inputs.get("app_name") or "").strip()
+    query = str(inputs.get("query") or "").strip()
+    is_apple_music = not app_name or app_name == "Music"
+    if action == "status":
+        return _first_allowed(("media.apple_music_status",), allowed), {}
+    if query and is_apple_music:
+        return _first_allowed(("media.apple_music_play",), allowed), {"query": query}
+    if app_name and not is_apple_music:
+        if action == "play":
+            return _first_allowed(("media.music_app_open_and_play",), allowed), {"app_name": app_name}
+        tool_name = _first_allowed(("media.music_app_control", "media.system_control"), allowed)
+        payload = {"app_name": app_name, "action": action} if tool_name == "media.music_app_control" else {"action": action}
+        return tool_name, payload
+    if action == "play":
+        tool_name = _first_allowed(
+            ("media.apple_music_open_and_play", "media.apple_music_control", "media.system_control"),
+            allowed,
+        )
+        return tool_name, {"action": "play"} if tool_name in {"media.apple_music_control", "media.system_control"} else {}
+    tool_name = _first_allowed(("media.apple_music_control", "media.system_control"), allowed)
+    return tool_name, {"action": action} if tool_name else {}
+
+
+def media_action_hint(text: str) -> str:
+    lowered = str(text or "").lower()
+    if contains_any(lowered, ["当前播放", "现在播放", "正在播放", "播放什么", "status", "currently playing"]):
+        return "status"
+    if contains_any(lowered, ["下一首", "下一曲", "next"]):
+        return "next"
+    if contains_any(lowered, ["上一首", "上一曲", "previous", "back"]):
+        return "previous"
+    if contains_any(lowered, ["暂停", "停止播放", "pause", "stop playing"]):
+        return "pause"
+    if contains_any(lowered, ["继续", "恢复播放", "resume", "continue"]):
+        return "play"
+    if contains_any(lowered, ["播放", "播", "放", "play"]):
+        return "play"
+    return ""
+
+
+def music_app_name_hint(text: str) -> str:
+    lowered = str(text or "").lower()
+    if re.search(r"spotify", lowered):
+        return "Spotify"
+    if re.search(r"网易云|netease", lowered):
+        return "网易云音乐"
+    if re.search(r"qq\s*音乐|qq music", lowered):
+        return "QQ 音乐"
+    if re.search(r"apple\s*music|苹果音乐|音乐(?:应用|app)?", lowered):
+        return "Music"
+    return ""
+
+
+def media_query_hint(text: str) -> str:
+    value = clean(text)
+    patterns = (
+        r"(?:播放|播|放)(?:一下|一首|首)?\s*(?P<query>[^。！？!?，,]+)",
+        r"(?:play|start playing)\s+(?P<query_en>[^.!?,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = match.groupdict().get("query") or match.groupdict().get("query_en") or ""
+        query = _clean_media_query(query)
+        if query:
+            return query
+    return ""
+
+
+def _clean_media_query(value: str) -> str:
+    query = clean(value)
+    query = re.sub(
+        r"(?:用|在|打开|启动|通过)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)?|spotify|网易云音乐?|qq\s*音乐|qq music)",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.split(
+        r"(?:并|然后|再|接着|之后|后|and\s+then|then)",
+        query,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    query = query.strip(" .，,。")
+    return "" if query.lower() in _GENERIC_MUSIC_QUERIES else query
+
+
 def clean_target(value: str) -> str:
     target = clean(value)
     target = re.split(
@@ -151,3 +267,16 @@ def clean(value: str) -> str:
 def contains_any(text: str, needles: list[str] | tuple[str, ...]) -> bool:
     lowered = str(text or "").lower()
     return any(str(needle).lower() in lowered for needle in needles)
+
+
+def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
+    if allowed_tools is None:
+        return None
+    return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+
+
+def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
+    for tool in tools:
+        if allowed is None or tool in allowed:
+            return tool
+    return None

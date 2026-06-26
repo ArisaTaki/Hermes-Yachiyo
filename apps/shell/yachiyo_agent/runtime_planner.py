@@ -26,6 +26,8 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    media_playback_hint,
+    media_tool_preview,
     safe_type_text_hint,
     type_into_ui_hint,
 )
@@ -47,6 +49,7 @@ class TaskIntentRouter:
         metadata = metadata or {}
         candidates = [
             self._data_analysis_intent(text, metadata),
+            self._media_playback_intent(text, metadata),
             self._desktop_operation_intent(text, metadata),
             self._web_research_intent(text, metadata),
             self._report_generation_intent(text, metadata),
@@ -173,6 +176,47 @@ class TaskIntentRouter:
             required_capabilities=["desktop.app_discovery"],
             preferred_capabilities=["desktop.app_control", "desktop.ui_operation"],
             risk_level="medium" if _looks_like_ui_operation(text) else "low",
+        )
+
+    def _media_playback_intent(
+        self,
+        text: str,
+        metadata: Mapping[str, Any],
+    ) -> TaskIntentSnapshot:
+        score = _score_terms(
+            text,
+            [
+                "play music",
+                "apple music",
+                "spotify",
+                "music",
+                "currently playing",
+                "播放",
+                "暂停",
+                "继续播放",
+                "下一首",
+                "上一首",
+                "当前播放",
+                "音乐",
+                "网易云",
+                "QQ 音乐",
+            ],
+        )
+        hint = media_playback_hint(text)
+        if score <= 0 and not hint.get("action"):
+            return _empty_intent("media_playback", text)
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "media_playback", text),
+            kind="media_playback",
+            title="Media Playback",
+            user_goal=text,
+            confidence=min(0.94, 0.46 + score),
+            description="Control local media playback through existing runtime media tools.",
+            inputs=hint,
+            expected_outputs=["media_state"],
+            required_capabilities=["media.playback"],
+            preferred_capabilities=["desktop.app_control"],
+            risk_level="low",
         )
 
     def _web_research_intent(
@@ -376,6 +420,8 @@ class RuntimePlanner:
             return self._data_analysis_steps(intent, allowed)
         if intent.kind == "desktop_operation":
             return self._desktop_operation_steps(intent, allowed)
+        if intent.kind == "media_playback":
+            return self._media_playback_steps(intent, allowed)
         if intent.kind == "web_research":
             return self._web_research_steps(intent, allowed)
         if intent.kind == "report_generation":
@@ -501,6 +547,24 @@ class RuntimePlanner:
                 )
             )
         return steps
+
+    def _media_playback_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
+        return [
+            _step(
+                intent,
+                "control-media-playback",
+                "Control media playback",
+                "media.playback",
+                tool_name,
+                input_preview=input_preview,
+                reason="Use dedicated media tools for playback instead of explaining manual steps.",
+            )
+        ]
 
     def _web_research_steps(
         self,

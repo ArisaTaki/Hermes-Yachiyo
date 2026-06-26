@@ -10,6 +10,7 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    media_tool_preview,
     safe_type_text_hint,
     submit_action_hint,
     type_into_ui_hint,
@@ -31,6 +32,8 @@ def planner_desktop_tool_requests(
         allowed_tools=allowed,
         metadata=metadata,
     )
+    if decision.selected_intent.kind == "media_playback":
+        return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
 
@@ -131,14 +134,32 @@ def planner_desktop_tool_requests(
     return requests
 
 
-def _request(tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _request(
+    tool: str,
+    payload: dict[str, Any],
+    *,
+    planning_reason: str = "planner_fallback_desktop_operation",
+) -> dict[str, Any]:
     return {
         "protocol": "json_fallback",
         "tool": tool,
         "input": payload,
         "source": "runtime_planner",
-        "planning_reason": "planner_fallback_desktop_operation",
+        "planning_reason": planning_reason,
     }
+
+
+def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = media_tool_preview(inputs, allowed)
+    if not tool_name:
+        return []
+    return [
+        _request(
+            tool_name,
+            payload,
+            planning_reason="planner_fallback_media_playback",
+        )
+    ]
 
 
 def _app_tool(mode: str, action: str, allowed: set[str]) -> str:

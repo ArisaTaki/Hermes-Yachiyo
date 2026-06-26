@@ -10739,6 +10739,98 @@ def test_custom_api_agent_loop_uses_runtime_planner_desktop_fallback_when_legacy
     ]
 
 
+def test_custom_api_agent_loop_uses_runtime_planner_media_fallback_when_legacy_rules_miss(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool != "media.apple_music_open_and_play":
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result={
+                        "ok": True,
+                        "action": "media.apple_music_open_and_play",
+                        "data": {"playback_state_unverified": True},
+                    },
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["media.apple_music_open_and_play"]},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use media tools for playback intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime planner media fallback should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "能否帮我播放 Apple Music?",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-media-fallback",
+    )
+
+    assert "Apple Music" in str(result)
+    assert [request["tool"] for request in tool_runs[0]] == ["media.apple_music_open_and_play"]
+    assert tool_runs[0][0]["source"] == "runtime_planner"
+    assert tool_runs[0][0]["planning_reason"] == "planner_fallback_media_playback"
+    planned_events = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    ]
+    assert [event["detail"] for event in planned_events] == ["media.apple_music_open_and_play"]
+    assert planned_events[0]["planning_reason"] == "planner_fallback_media_playback"
+
+
 def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {
