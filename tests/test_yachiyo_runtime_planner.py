@@ -58,6 +58,39 @@ def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> 
     }
 
 
+def test_runtime_planner_treats_app_names_as_data_analysis_tool_hints() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Excel 分析 sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write", "app.open"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_hint"] == "sales.csv"
+    assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
+
+
+def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> None:
+    decision = RuntimePlanner().decision(
+        "分析一下这个文件",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        metadata={"file": "sales.csv"},
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.missing_inputs == []
+    assert _step_by_id(decision, "inspect-data-source").tool_name == "workspace.read"
+
+
+def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() -> None:
+    decision = RuntimePlanner().decision(
+        "打开浏览器调研 OpenAI 最新新闻并总结报告",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write", "app.open"],
+    )
+
+    assert decision.selected_intent.kind == "web_research"
+    assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
+
+
 def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> None:
     decision = RuntimePlanner().decision(
         "打开 SuperData Studio 并点击导入按钮",

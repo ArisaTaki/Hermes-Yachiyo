@@ -61,7 +61,7 @@ class TaskIntentRouter:
         ]
         return sorted(
             [intent for intent in candidates if intent.confidence > 0],
-            key=lambda intent: intent.confidence,
+            key=lambda intent: (_intent_rank_score(intent, text), intent.confidence),
             reverse=True,
         )
 
@@ -110,9 +110,11 @@ class TaskIntentRouter:
                 "统计",
             ],
         )
+        has_source = bool(_data_source_hint(text) or metadata.get("attachment") or metadata.get("file"))
+        if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
+            score = 0.16
         if score <= 0:
             return _empty_intent("data_analysis", text)
-        has_source = bool(_data_source_hint(text) or metadata.get("attachment") or metadata.get("file"))
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "data_analysis", text),
             kind="data_analysis",
@@ -832,6 +834,86 @@ def _clean_prompt(prompt: str) -> str:
 def _stable_id(prefix: str, kind: Any, text: str) -> str:
     digest = hashlib.sha1(f"{kind}\n{text}".encode("utf-8")).hexdigest()[:12]
     return f"{prefix}-{digest}"
+
+
+_TASK_DELIVERABLE_TERMS = (
+    "analyze",
+    "analysis",
+    "report",
+    "summary",
+    "research",
+    "search",
+    "test",
+    "bug",
+    "build",
+    "分析",
+    "数据分析",
+    "统计",
+    "汇总",
+    "报告",
+    "总结",
+    "文档",
+    "调研",
+    "搜索",
+    "输出",
+    "生成",
+    "测试",
+    "修复",
+    "代码",
+)
+
+_TASK_INTENT_KINDS = {"data_analysis", "web_research", "report_generation", "code_task"}
+
+_UI_CONTROL_TERMS = (
+    "search box",
+    "search field",
+    "address bar",
+    "input field",
+    "text box",
+    "搜索框",
+    "搜索栏",
+    "地址栏",
+    "输入框",
+    "输入栏",
+    "文本框",
+)
+
+
+def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
+    score = float(intent.confidence or 0)
+    if (
+        intent.kind == "desktop_operation"
+        and _contains_any(text, _TASK_DELIVERABLE_TERMS)
+        and not _looks_like_ui_operation(text)
+    ):
+        score -= 0.16
+    if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
+        score += 0.08
+    if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
+        score += 0.06
+    if intent.kind == "web_research" and _contains_any(text, _UI_CONTROL_TERMS):
+        score -= 0.24
+    if intent.kind == "web_research" and _contains_any(
+        text,
+        ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
+    ):
+        score += 0.14
+    if intent.kind == "report_generation":
+        if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
+            score += 0.04
+        if _contains_any(text, ["http://", "https://", "research", "search", "调研", "搜索"]):
+            score -= 0.04
+    if intent.kind == "data_analysis" and (
+        _data_source_hint(text)
+        or _contains_any(text, ["data analysis", "analyze data", "数据分析", "分析数据", "csv", "xlsx", "表格"])
+    ):
+        score += 0.08
+    if intent.kind == "code_task" and _contains_any(
+        text,
+        ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"],
+    ):
+        score += 0.08
+    return max(score, 0.0)
 
 
 def _score_terms(text: str, terms: Iterable[str]) -> float:
