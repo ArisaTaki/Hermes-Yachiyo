@@ -173,7 +173,7 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
-        if _direct_paste_communication_hint(text):
+        if _direct_communication_candidate_hint(text):
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
@@ -780,17 +780,10 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        paste_direct_hint = _direct_paste_communication_hint(text)
-        if _foreground_submit_action_hint(text) and not paste_direct_hint:
+        direct_hint = _direct_communication_candidate_hint(text)
+        if _foreground_submit_action_hint(text) and not direct_hint:
             return _empty_intent("communication", text)
         source = context_source_hint(text)
-        direct_hint = (
-            _direct_context_communication_hint(text, source)
-            if source
-            else paste_direct_hint or _direct_communication_hint(text)
-        )
-        if source and not direct_hint:
-            direct_hint = paste_direct_hint
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
             score = 0.24
@@ -4048,6 +4041,15 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     return {"browser_action": "open_url", "url_hint": url}
 
 
+def _direct_communication_candidate_hint(text: str) -> dict[str, str]:
+    source = context_source_hint(text)
+    if source:
+        direct_context_hint = _direct_context_communication_hint(text, source)
+        if direct_context_hint:
+            return direct_context_hint
+    return _direct_paste_communication_hint(text) or _direct_communication_hint(text)
+
+
 def _direct_paste_communication_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
@@ -4098,6 +4100,12 @@ def _direct_paste_communication_hint(text: str) -> dict[str, str]:
 def _direct_communication_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     patterns = (
+        (
+            r"^(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
+            r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+            r"(?:给|向|对|发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:发送|发出|发消息|发|说|message|send)\s*(?P<body>.+)$"
+        ),
         (
             r"^(?:打开|启动|开启)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
             r"(?:发消息|发送|发)\s*(?:给|到)?\s*(?P<recipient>[^：:，,。]+?)"
@@ -4165,7 +4173,10 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         "current_page_link": r"(?:当前网页链接|当前页面链接|当前链接|current\s+page\s+link|current\s+url)",
     }[source]
     patterns = (
-        rf"^(?P<app>[\w .·-]{{1,40}}?)\s*(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",
+        rf"^(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
+        rf"(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
+        rf"(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
+        rf"(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:send|message)\s+{source_pattern}\s+(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",

@@ -2552,6 +2552,86 @@ def test_runtime_planner_routes_implicit_chinese_direct_communication_send_seque
     ]
 
 
+def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> None:
+    allowed_tools = [
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "用微信给文件传输助手发送你好",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body": "你好",
+            "mode": "focus",
+            "send_action": "send",
+        }
+    }
+    assert planner_direct_tool_requests("用微信给文件传输助手发送你好", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "文件传输助手"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "你好"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
+
+    open_decision = RuntimePlanner().decision(
+        "打开微信给文件传输助手发送你好",
+        allowed_tools=allowed_tools,
+    )
+
+    assert open_decision.selected_intent.kind == "communication"
+    assert open_decision.selected_intent.inputs["direct_message_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "文件传输助手",
+        "body": "你好",
+        "mode": "open",
+        "send_action": "send",
+    }
+    assert _step_by_id(open_decision, "focus-communication-recipient-search").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+
+
 def test_runtime_planner_routes_direct_context_communication_send_sequence() -> None:
     decision = RuntimePlanner().decision(
         "send selected text in Slack to yachiyo",
@@ -2601,6 +2681,35 @@ def test_runtime_planner_routes_direct_context_communication_send_sequence() -> 
     assert send_step.depends_on == ["paste-communication-message"]
     assert send_step.approval_required is True
     assert send_step.risk_level == "high"
+
+
+def test_runtime_planner_cleans_app_prefix_for_context_communication() -> None:
+    decision = RuntimePlanner().decision(
+        "用微信给文件传输助手发送剪贴板内容",
+        allowed_tools=[
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body_source": "clipboard",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert _step_by_id(decision, "focus-communication-recipient-search").input_preview == {
+        "app_name": "WeChat",
+        "action": "find",
+    }
 
 
 def test_runtime_planner_routes_paste_to_recipient_as_communication() -> None:
