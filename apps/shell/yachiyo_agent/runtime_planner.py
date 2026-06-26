@@ -13,7 +13,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from .capture_plan_hints import capture_note_hint, capture_tool_preview
+from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
 from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
@@ -523,6 +523,7 @@ class TaskIntentRouter:
         score = _score_terms(text, ["email", "message", "mail", "send to", "邮件", "消息", "发给", "发送"])
         if score <= 0:
             return _empty_intent("communication", text)
+        source = context_source_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "communication", text),
             kind="communication",
@@ -530,8 +531,14 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.82, 0.34 + score),
             description="Draft or send communication through available apps or tools.",
+            inputs={"context_source": source} if source else {},
             required_capabilities=["communication.compose"],
             preferred_capabilities=[
+                *(
+                    ["clipboard.read_write", "browser.research", "desktop.ui_operation"]
+                    if source
+                    else []
+                ),
                 "desktop.app_discovery",
                 "desktop.app_control",
                 "desktop.ui_operation",
@@ -1459,6 +1466,7 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        context_source = str(intent.inputs.get("context_source") or "").strip()
         compose_tool = _first_allowed(
             (
                 "app.open_and_type_into_ui_element",
@@ -1471,6 +1479,33 @@ class RuntimePlanner:
             ),
             allowed,
         )
+        if context_source:
+            context_steps = _context_source_steps(
+                intent,
+                allowed,
+                context_source,
+                step_prefix="communication",
+                capability_id="communication.compose",
+            )
+            depends_on = [step.step_id for step in context_steps]
+            return [
+                *context_steps,
+                _step(
+                    intent,
+                    "draft-communication-from-context",
+                    "Draft communication from captured context",
+                    "communication.compose",
+                    compose_tool,
+                    input_preview={"body_source": context_source},
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=depends_on,
+                    reason=(
+                        "Inspect the requested source before drafting the communication; "
+                        "final sending remains approval-gated."
+                    ),
+                ),
+            ]
         depends_on = [] if compose_tool == "artifact.write" else ["discover-communication-surface"]
         return [
             _step(
@@ -1758,6 +1793,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id == "information.capture":
         return _context_source_action(tool_name)
     if capability_id == "communication.compose":
+        if _is_context_source_tool(tool_name):
+            return _context_source_action(tool_name)
         return "draft_message"
     if capability_id == "clipboard.read_write":
         return "read_clipboard" if tool_name == "clipboard.read" else "write_clipboard"
@@ -2065,6 +2102,19 @@ _TASK_DELIVERABLE_TERMS = (
 
 _TASK_INTENT_KINDS = {"data_analysis", "web_research", "report_generation", "code_task", "file_organization"}
 
+_COMMUNICATION_ACTION_TERMS = (
+    "send to",
+    "send ",
+    "message ",
+    "email ",
+    "mail ",
+    "发给",
+    "发到",
+    "发送",
+    "发消息",
+    "发邮件",
+)
+
 _UI_CONTROL_TERMS = (
     "search box",
     "search field",
@@ -2102,6 +2152,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
     ):
         score += 0.08
+    if intent.kind == "communication" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
+        score += 0.16
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
     if intent.kind == "web_research" and _contains_any(text, _UI_CONTROL_TERMS):
@@ -2111,6 +2163,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
     ):
         score += 0.14
+    if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
+        score -= 0.18
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04

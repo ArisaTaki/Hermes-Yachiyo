@@ -1197,6 +1197,29 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     assert draft_step.approval_required is True
 
 
+def test_runtime_planner_tracks_context_communication_source_without_body() -> None:
+    decision = RuntimePlanner().decision(
+        "把当前网页链接发给微信文件传输助手",
+        allowed_tools=["browser.current_page", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {"context_source": "current_page_link"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "draft-communication-from-context",
+    ]
+    read_step = _step_by_id(decision, "read-communication-context")
+    assert read_step.capability_id == "communication.compose"
+    assert read_step.tool_name == "browser.current_page"
+    assert read_step.action == "read_current_page"
+    draft_step = _step_by_id(decision, "draft-communication-from-context")
+    assert draft_step.tool_name == "artifact.write"
+    assert draft_step.input_preview == {"body_source": "current_page_link"}
+    assert draft_step.depends_on == ["read-communication-context"]
+    assert draft_step.approval_required is True
+
+
 def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
     decision = RuntimePlanner().decision(
         "新建备忘录内容是 今天要买牛奶",
@@ -2279,6 +2302,42 @@ def test_planner_tool_requests_prefetches_communication_surface_for_model_loop()
     ]
 
 
+def test_planner_tool_requests_prefetches_dynamic_communication_context() -> None:
+    assert planner_tool_requests(
+        "微信给文件传输助手发送选中的内容",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "把当前网页链接发给微信文件传输助手",
+        allowed_tools=["browser.current_page", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
     requests = planner_tool_requests(
         "创建提醒事项：买牛奶",
@@ -2484,6 +2543,26 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    communication_selection = planner_first_direct_tool_selection(
+        "把当前网页链接发给微信文件传输助手",
+        ["browser.current_page", "artifact.write", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert communication_selection.selected_source == "runtime_planner"
+    assert communication_selection.event_payload["selection_source"] == "runtime_planner"
+    assert communication_selection.event_payload["legacy_request_count"] == 0
+    assert communication_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,
         }
     ]

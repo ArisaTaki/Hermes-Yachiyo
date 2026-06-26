@@ -108,6 +108,14 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             planning_reason="planner_prefetch_file_scope",
         )
     if decision.selected_intent.kind == "communication":
+        context_requests = _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=("copy-selected-communication-context", "read-communication-context"),
+            planning_reason="planner_prefetch_communication_context",
+        )
+        if context_requests:
+            return context_requests
         return _context_prefetch_tool_requests(
             decision,
             allowed,
