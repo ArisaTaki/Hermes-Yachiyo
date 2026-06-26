@@ -152,6 +152,45 @@ def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
     ]
 
 
+def test_planner_first_direct_selection_owns_system_control_without_legacy() -> None:
+    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("legacy system planner should not run for planner-owned system control")
+
+    volume_selection = planner_first_direct_tool_selection(
+        "音量调大",
+        ["system.volume"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+    screen_saver_selection = planner_first_direct_tool_selection(
+        "打开屏保",
+        ["system.screen_saver_start"],
+        legacy_tool_requests=fail_legacy_requests,
+    )
+
+    assert volume_selection.selected_source == "runtime_planner"
+    assert volume_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "up"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
+    ]
+    assert volume_selection.event_payload["legacy_request_count"] == 0
+    assert screen_saver_selection.selected_source == "runtime_planner"
+    assert screen_saver_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.screen_saver_start",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
+    ]
+    assert screen_saver_selection.event_payload["legacy_request_count"] == 0
+
+
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()

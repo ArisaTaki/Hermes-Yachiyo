@@ -128,7 +128,7 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_observation_owns_selection(requests):
         return False
-    if _runtime_planner_system_settings_owns_selection(requests):
+    if _runtime_planner_system_control_owns_selection(requests):
         return False
     if any(bool(request.get("continue_to_model")) for request in requests):
         return True
@@ -284,7 +284,18 @@ def _runtime_observation_app_name_is_specific(app_name: str) -> bool:
     }
 
 
-def _runtime_planner_system_settings_owns_selection(requests: list[dict[str, Any]]) -> bool:
+_RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS = frozenset(
+    {
+        "system.settings_open",
+        "system.volume",
+        "system.brightness",
+        "system.display_sleep",
+        "system.screen_saver_start",
+    }
+)
+
+
+def _runtime_planner_system_control_owns_selection(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
     reasons = {
@@ -299,10 +310,10 @@ def _runtime_planner_system_settings_owns_selection(requests: list[dict[str, Any
         for request in requests
         if isinstance(request, dict)
     ]
-    return bool(tools) and tools[0] == "system.settings_open" and set(tools) <= {
-        "system.settings_open",
-        "desktop.ui_elements",
-    }
+    tool_set = set(tools)
+    return bool(tool_set & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS) and tool_set <= (
+        _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS | {"desktop.ui_elements"}
+    )
 
 
 def _legacy_requests(
