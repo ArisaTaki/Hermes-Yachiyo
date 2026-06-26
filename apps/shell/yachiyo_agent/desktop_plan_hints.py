@@ -32,6 +32,53 @@ _GENERIC_MUSIC_QUERIES = {
     "songs",
 }
 
+_FINDER_SAFE_SHORTCUT_PHRASES: tuple[tuple[str, str], ...] = (
+    ("finder_quick_look", "快速查看"),
+    ("finder_quick_look", "快速查看选中项"),
+    ("finder_quick_look", "快速查看选中文件"),
+    ("finder_quick_look", "快速预览"),
+    ("finder_quick_look", "预览选中项"),
+    ("finder_quick_look", "预览选中文件"),
+    ("finder_quick_look", "按空格"),
+    ("finder_quick_look", "按空格键"),
+    ("finder_quick_look", "空格"),
+    ("finder_quick_look", "space"),
+    ("finder_quick_look", "pressspace"),
+    ("new_folder", "新建文件夹"),
+    ("new_folder", "新建一个文件夹"),
+    ("new_folder", "创建文件夹"),
+    ("new_folder", "创建一个文件夹"),
+    ("new_folder", "新建目录"),
+    ("new_folder", "创建目录"),
+    ("new_folder", "newfolder"),
+    ("new_folder", "makeanewfolder"),
+    ("new_folder", "createanewfolder"),
+    ("rename_selected", "重命名选中项"),
+    ("rename_selected", "重命名选中文件"),
+    ("rename_selected", "重命名当前选中项"),
+    ("rename_selected", "重命名当前选中文件"),
+    ("rename_selected", "renameselected"),
+    ("rename_selected", "renameselectedfile"),
+    ("parent_folder", "上一级"),
+    ("parent_folder", "上一级文件夹"),
+    ("parent_folder", "上一级目录"),
+    ("parent_folder", "打开上一级文件夹"),
+    ("parent_folder", "回到上级目录"),
+    ("parent_folder", "parentfolder"),
+    ("parent_folder", "openparentfolder"),
+    ("finder_get_info", "显示简介"),
+    ("finder_get_info", "查看简介"),
+    ("finder_get_info", "显示选中文件简介"),
+    ("finder_get_info", "显示选中项简介"),
+    ("finder_get_info", "getinfo"),
+    ("finder_get_info", "showinfo"),
+    ("copy", "复制选中项"),
+    ("copy", "复制选中文件"),
+    ("copy", "复制当前选中项"),
+    ("copy", "复制当前选中文件"),
+    ("copy", "copyselectedfile"),
+)
+
 
 def app_control_mode(text: str) -> str:
     return (
@@ -1391,7 +1438,10 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "focusurlbar": "focus_address_bar",
         "addressbar": "focus_address_bar",
     }
-    return mapping.get(normalized, "")
+    action = mapping.get(normalized, "")
+    if action:
+        return action
+    return _finder_safe_shortcut_action(normalized, mode="exact")
 
 
 def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
@@ -1400,6 +1450,9 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         return ""
     if contains_any(normalized, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
         return ""
+    finder_action = _finder_safe_shortcut_action(normalized, mode="suffix")
+    if finder_action:
+        return finder_action
     full_screen_suffixes = (
         "窗口最大化",
         "当前窗口最大化",
@@ -1417,6 +1470,16 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         "enterfullscreen",
     )
     return "toggle_full_screen" if any(normalized.endswith(suffix) for suffix in full_screen_suffixes) else ""
+
+
+def _finder_safe_shortcut_action(normalized: str, *, mode: str) -> str:
+    for action, phrase in _FINDER_SAFE_SHORTCUT_PHRASES:
+        clean_phrase = re.sub(r"[\s._·-]+", "", phrase.lower())
+        if mode == "exact" and normalized == clean_phrase:
+            return action
+        if mode == "suffix" and normalized.endswith(clean_phrase):
+            return action
+    return ""
 
 
 def _compound_safe_shortcut_actions(value: str) -> list[str]:

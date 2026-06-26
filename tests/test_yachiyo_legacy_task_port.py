@@ -578,6 +578,14 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
                     "input": {"action": "paste"},
                 }
             ]
+        if "Finder" in prompt:
+            return [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Finder", "action": "new_folder"},
+                }
+            ]
         return [
             {
                 "protocol": "json_fallback",
@@ -614,6 +622,11 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
     paste_selection = planner_first_direct_tool_selection(
         "把剪贴板内容粘贴到当前输入框",
         ["clipboard.read", "desktop.safe_shortcut"],
+        legacy_tool_requests=legacy_requests,
+    )
+    finder_selection = planner_first_direct_tool_selection(
+        "Finder 新建文件夹",
+        ["desktop.list_apps", "app.focus_and_safe_shortcut", "desktop.safe_shortcut"],
         legacy_tool_requests=legacy_requests,
     )
 
@@ -686,6 +699,17 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert finder_selection.selected_source == "runtime_planner"
+    assert finder_selection.event_payload["legacy_request_count"] == 0
+    assert finder_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "new_folder"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }

@@ -285,11 +285,21 @@ class TaskIntentRouter:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
+            or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
             or _app_name_hint(text)
-            or app_scoped_safe_shortcut_app
             or ""
         ).strip()
+        safe_shortcut_missing_required_scope = False
+        if _safe_shortcut_requires_finder_scope_for_text(text, safe_shortcut):
+            if _is_finder_app_name(app_name_hint):
+                app_name_hint = "Finder"
+                app_management = None
+                safe_key = None
+            else:
+                safe_shortcut = None
+                safe_shortcut_sequence = []
+                safe_shortcut_missing_required_scope = True
         if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint):
             app_management = None
             app_name_hint = ""
@@ -306,6 +316,25 @@ class TaskIntentRouter:
         if not app_name_hint and app_search.get("app_name"):
             app_name_hint = str(app_search.get("app_name") or "").strip()
         operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
+        if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
+            operation_hint = ""
+        if _safe_shortcut_requires_finder_scope_for_text(text, safe_shortcut) and operation_hint == "safe_key":
+            operation_hint = "safe_shortcut"
+        if (
+            safe_shortcut_missing_required_scope
+            and score <= 0
+            and ui_inspection is None
+            and screen_capture is None
+            and app_management is None
+            and foreground_management is None
+            and safe_key is None
+            and safe_scroll is None
+            and safe_click is None
+            and desktop_discovery is None
+            and not app_search
+            and not spotlight_search_query
+        ):
+            return _empty_intent("desktop_operation", text)
         if (
             context_source in {"selection", "clipboard"}
             and _dynamic_context_browser_action_hint(text, context_source)
@@ -1034,12 +1063,20 @@ class RuntimePlanner:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
-            or (app_management or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or app_search.get("app_name")
             or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
+            or (app_management or {}).get("app_name")
             or ""
         ).strip()
+        if _safe_shortcut_requires_finder_scope_for_text(intent.user_goal, safe_shortcut):
+            if _is_finder_app_name(app_name):
+                app_name = "Finder"
+                app_management = None
+                safe_key = None
+            else:
+                safe_shortcut = None
+                safe_shortcut_sequence = []
         if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
             app_management = None
             app_name = ""
@@ -3263,7 +3300,7 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
+        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -3322,9 +3359,28 @@ def _app_scoped_safe_shortcut_app_name_hint(
     safe_shortcut: Mapping[str, Any] | None = None,
 ) -> str:
     hint = safe_shortcut or safe_shortcut_hint(text)
-    if str((hint or {}).get("action") or "").strip() != "toggle_full_screen":
+    action = str((hint or {}).get("action") or "").strip()
+    if not action:
         return ""
     value = _clean_prompt(text)
+    if _safe_shortcut_requires_finder_scope_for_text(value, hint):
+        patterns = (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
+            r"(?P<app>Finder|访达)\s*(?:然后|并|再|接着|之后|后)?\s*.+$",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在|用|通过)\s*"
+            r"(?P<app>Finder|访达)\s*(?:里|中|上|内)?\s*.+$",
+            r"^(?:open|launch|focus|start)?\s*(?:the\s+)?(?P<app>Finder)\b.+$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, value, flags=re.IGNORECASE)
+            if not match:
+                continue
+            app = _clean_app_name_hint(match.group("app"))
+            if _is_finder_app_name(app):
+                return "Finder"
+        return ""
+    if action != "toggle_full_screen":
+        return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:把|将)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:窗口)?"
@@ -3344,6 +3400,41 @@ def _app_scoped_safe_shortcut_app_name_hint(
             continue
         return app
     return ""
+
+
+def _safe_shortcut_requires_finder_scope(hint: Mapping[str, Any] | None) -> bool:
+    return str((hint or {}).get("action") or "").strip() in {
+        "finder_quick_look",
+        "finder_get_info",
+        "new_folder",
+        "rename_selected",
+        "parent_folder",
+    }
+
+
+def _safe_shortcut_requires_finder_scope_for_text(
+    text: str,
+    hint: Mapping[str, Any] | None,
+) -> bool:
+    if _safe_shortcut_requires_finder_scope(hint):
+        return True
+    if str((hint or {}).get("action") or "").strip() != "copy":
+        return False
+    return _contains_any(
+        text,
+        (
+            "复制选中项",
+            "复制选中文件",
+            "复制当前选中项",
+            "复制当前选中文件",
+            "copy selected file",
+            "copy selected item",
+        ),
+    )
+
+
+def _is_finder_app_name(value: str) -> bool:
+    return str(value or "").strip().lower() in {"finder", "访达"}
 
 
 def _desktop_operation_hint(text: str) -> str:

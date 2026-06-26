@@ -2068,6 +2068,50 @@ def test_runtime_planner_routes_app_scoped_fullscreen_shortcut_to_desktop_operat
     assert all(step.tool_name != "system.volume" for step in decision.plan.tool_plan.steps)
 
 
+def test_runtime_planner_routes_finder_scoped_safe_shortcuts() -> None:
+    cases = (
+        ("打开Finder然后按空格", "app.open_and_safe_shortcut", "finder_quick_look"),
+        ("Finder按空格", "app.focus_and_safe_shortcut", "finder_quick_look"),
+        ("打开 Finder 新建文件夹", "app.open_and_safe_shortcut", "new_folder"),
+        ("Finder 新建文件夹", "app.focus_and_safe_shortcut", "new_folder"),
+        ("打开 Finder 重命名选中文件", "app.open_and_safe_shortcut", "rename_selected"),
+        ("Finder 上一级目录", "app.focus_and_safe_shortcut", "parent_folder"),
+        ("在 Finder 里显示简介", "app.focus_and_safe_shortcut", "finder_get_info"),
+        ("Finder 复制选中文件", "app.focus_and_safe_shortcut", "copy"),
+    )
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    ]
+
+    for prompt, expected_tool, expected_action in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": "Finder",
+            "operation_hint": "safe_shortcut",
+            "safe_shortcut_hint": {"action": expected_action},
+        }
+        operate = _step_by_id(decision, "operate-foreground-ui")
+        assert operate.tool_name == expected_tool
+        assert operate.input_preview == {"app_name": "Finder", "action": expected_action}
+        assert operate.approval_required is False
+
+    chrome = RuntimePlanner().decision(
+        "Chrome 新建文件夹",
+        allowed_tools=allowed_tools,
+    )
+    bare = RuntimePlanner().decision(
+        "新建文件夹",
+        allowed_tools=allowed_tools,
+    )
+    assert chrome.selected_intent.kind == "general"
+    assert bare.selected_intent.kind == "general"
+
+
 def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
     for prompt in (
         "能否帮我播放 Apple Music?",
