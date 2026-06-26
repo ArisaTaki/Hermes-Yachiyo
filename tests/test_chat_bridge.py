@@ -1319,9 +1319,9 @@ def test_chat_bridge_quick_message_opens_named_music_app_without_model(
 
         assert result["ok"] is True
         assert agent_task["summary"] == f"已打开 {app_name}。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        open_tool_call = _agent_task_tool_call(agent_task, "app.open")
+        assert open_tool_call["input_preview"] == {"app_name": app_name}
+        assert open_tool_call["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
