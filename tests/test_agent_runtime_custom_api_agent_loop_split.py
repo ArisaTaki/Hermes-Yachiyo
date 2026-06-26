@@ -10788,6 +10788,7 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
     )
 
     budget = FakeBudget()
+    appended_events: list[tuple[str, str, dict[str, Any]]] = []
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
 
@@ -10853,6 +10854,9 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
         tool_loop_projection=FakeToolLoopProjection(),
         run_tool_requests=run_tool_requests,
         error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            (run_id, event_type, payload)
+        ),
     )
 
     result = loop.run(
@@ -10866,6 +10870,34 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
 
     assert "PixelForge" in str(result)
     assert "导出" in str(result)
+    planner_events = [
+        event
+        for event in timeline
+        if event["event"] == "agent.intent.selected" or event["event"].startswith("agent.plan.")
+    ]
+    assert [event["event"] for event in planner_events[:3]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert planner_events[0]["payload"]["intent"]["kind"] == "desktop_operation"
+    planner_tools = [
+        step["tool_name"]
+        for step in planner_events[1]["payload"]["plan"]["tool_plan"]["steps"]
+        if step.get("tool_name")
+    ]
+    assert planner_tools == ["app.open", "desktop.click_ui_element"]
+    assert [event_type for _run_id, event_type, _payload in appended_events[:3]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    appended_plan_tools = [
+        step["tool_name"]
+        for step in appended_events[1][2]["plan"]["tool_plan"]["steps"]
+        if step.get("tool_name")
+    ]
+    assert appended_plan_tools == ["app.open", "desktop.click_ui_element"]
     assert [request["tool"] for request in tool_runs[0]] == [
         "app.open",
         "desktop.click_ui_element",

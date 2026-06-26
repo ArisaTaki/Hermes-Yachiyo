@@ -15,6 +15,7 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_desktop_tool_requests,
     planner_tool_requests,
 )
+from apps.shell.yachiyo_agent.planner_projection import planner_timeline_events
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
@@ -161,6 +162,29 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert created["payload"]["approvals_required"] == ["run-analysis"]
     assert created["payload"]["artifacts_expected"] == ["analysis-report.md"]
     assert created["payload"]["route_to_studio"] is True
+
+
+def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=["app.open", "desktop.click_ui_element"],
+    )
+
+    events = planner_timeline_events(decision)
+
+    assert [event["event"] for event in events[:3]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.plan.step",
+    ]
+    assert events[0]["payload"]["intent"]["kind"] == "desktop_operation"
+    plan_tools = [
+        step["tool_name"]
+        for step in events[1]["payload"]["plan"]["tool_plan"]["steps"]
+        if step.get("tool_name")
+    ]
+    assert plan_tools == ["app.open", "desktop.click_ui_element"]
+    assert events[2]["payload"]["step"]["step_id"] == "discover-desktop-state"
 
 
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:

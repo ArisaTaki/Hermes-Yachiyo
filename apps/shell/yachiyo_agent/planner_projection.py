@@ -74,26 +74,34 @@ def planner_timeline_events(
 ) -> list[dict[str, Any]]:
     if decision is None:
         return []
-    events = []
-    for preview in decision.plan.timeline_preview:
-        if not isinstance(preview, Mapping):
-            continue
-        payload = preview.get("payload") if isinstance(preview.get("payload"), Mapping) else {}
-        event_type = str(preview.get("event_type") or "").strip()
-        if not event_type:
-            continue
+    events: list[dict[str, Any]] = []
+    for event_type, payload in planner_run_event_payloads(decision):
         events.append(
             {
                 "event": event_type,
-                "detail": str(preview.get("detail") or ""),
+                "detail": _planner_timeline_detail(event_type, payload),
                 "status": "planned",
                 "source": decision.source,
                 "decision_id": decision.decision_id,
                 "plan_id": decision.plan.plan_id,
-                "payload": dict(payload),
+                "payload": payload,
             }
         )
     return events
+
+
+def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str:
+    if event_type == "agent.intent.selected":
+        intent = payload.get("intent") if isinstance(payload.get("intent"), Mapping) else {}
+        return str(intent.get("kind") or "").strip()
+    if event_type == "agent.plan.created":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), Mapping) else {}
+        tool_plan = plan.get("tool_plan") if isinstance(plan.get("tool_plan"), Mapping) else {}
+        return str(tool_plan.get("title") or plan.get("plan_id") or "").strip()
+    if event_type == "agent.plan.step":
+        step = payload.get("step") if isinstance(payload.get("step"), Mapping) else {}
+        return str(step.get("title") or step.get("step_id") or "").strip()
+    return event_type
 
 
 def planner_run_event_payloads(

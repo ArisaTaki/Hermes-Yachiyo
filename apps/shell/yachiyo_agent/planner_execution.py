@@ -20,14 +20,32 @@ def planner_tool_requests(
     *,
     metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    _decision, requests = planner_decision_and_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    return requests
+
+
+def planner_decision_and_tool_requests(
+    prompt: str,
+    allowed_tools: Iterable[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> tuple[Any | None, list[dict[str, Any]]]:
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     if not allowed:
-        return []
+        return None, []
     decision = RuntimePlanner().decision(
         prompt,
         allowed_tools=allowed,
         metadata=metadata,
     )
+    return decision, _tool_requests_for_decision(decision, allowed)
+
+
+def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "data_analysis":

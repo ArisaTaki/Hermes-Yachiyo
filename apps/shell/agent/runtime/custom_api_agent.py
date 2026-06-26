@@ -312,14 +312,16 @@ class RuntimeCustomApiAgentLoop:
                 direct_tool_request,
                 allowed_tools,
             )
+            runtime_planner_decision = None
             if direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
             else:
-                planned_tool_requests = self._runtime_planner_tool_requests(
+                runtime_planner_decision, planned_tool_requests = self._runtime_planner_tool_requests(
                     planning_context,
                     allowed_tools,
                 )
                 if not planned_tool_requests:
+                    runtime_planner_decision = None
                     planned_tool_requests = daily_desktop_intent_tool_requests(
                         planning_context,
                         allowed_tools,
@@ -332,6 +334,12 @@ class RuntimeCustomApiAgentLoop:
                     if approval_hotkey_request:
                         planned_tool_requests = [approval_hotkey_request]
             if planned_tool_requests:
+                if runtime_planner_decision is not None:
+                    self._record_runtime_planner_events(
+                        runtime_planner_decision,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
                     planned_input = planned_tool_request.get("input") or {}
@@ -587,18 +595,56 @@ class RuntimeCustomApiAgentLoop:
     def _runtime_planner_tool_requests(
         planning_context: str,
         allowed_tools: list[str],
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[Any | None, list[dict[str, Any]]]:
         try:
-            from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+            from apps.shell.yachiyo_agent.planner_execution import (
+                planner_decision_and_tool_requests,
+            )
         except Exception:
-            return []
+            return None, []
         try:
-            return planner_tool_requests(
+            return planner_decision_and_tool_requests(
                 planning_context,
                 allowed_tools,
             )
         except Exception:
-            return []
+            return None, []
+
+    def _record_runtime_planner_events(
+        self,
+        decision: Any,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        decision_id = str(getattr(decision, "decision_id", "") or "").strip()
+        if decision_id and any(
+            str(event.get("decision_id") or "") == decision_id
+            or str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                ).get("decision_id")
+                or ""
+            )
+            == decision_id
+            for event in timeline
+            if isinstance(event, dict)
+        ):
+            return
+        try:
+            from apps.shell.yachiyo_agent.planner_projection import (
+                planner_run_event_payloads,
+                planner_timeline_events,
+            )
+        except Exception:
+            return
+        for event in planner_timeline_events(decision):
+            timeline.append(event)
+        if run_id and self._append_run_event is not None:
+            for event_type, payload in planner_run_event_payloads(decision):
+                self._append_run_event(run_id, event_type, payload)
 
     def _record_unavailable_desktop_intent(
         self,
