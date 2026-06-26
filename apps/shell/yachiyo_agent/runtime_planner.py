@@ -1752,9 +1752,11 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id == "system.control":
         return "control_system"
     if capability_id == "schedule.reminder":
+        if _is_context_source_tool(tool_name):
+            return _context_source_action(tool_name)
         return "schedule_task"
     if capability_id == "information.capture":
-        return _information_capture_action(tool_name)
+        return _context_source_action(tool_name)
     if capability_id == "communication.compose":
         return "draft_message"
     if capability_id == "clipboard.read_write":
@@ -1762,7 +1764,19 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     return ""
 
 
-def _information_capture_action(tool_name: str | None) -> str:
+def _is_context_source_tool(tool_name: str | None) -> bool:
+    clean_tool = str(tool_name or "")
+    return clean_tool in {
+        "clipboard.read",
+        "desktop.safe_shortcut",
+        "browser.current_page",
+        "browser.extract_text",
+        "desktop.ui_elements",
+        "screen.capture",
+    }
+
+
+def _context_source_action(tool_name: str | None) -> str:
     clean_tool = str(tool_name or "")
     if clean_tool == "notes.create":
         return "create_note"
@@ -1770,6 +1784,8 @@ def _information_capture_action(tool_name: str | None) -> str:
         return "read_clipboard"
     if clean_tool == "desktop.safe_shortcut":
         return "shortcut"
+    if clean_tool == "browser.current_page":
+        return "read_current_page"
     if clean_tool.startswith("browser."):
         return "extract_text"
     if clean_tool == "desktop.ui_elements":

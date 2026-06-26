@@ -1281,11 +1281,33 @@ def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     assert _step_by_id(decision, "copy-selected-schedule-context").input_preview == {
         "action": "copy"
     }
-    assert _step_by_id(decision, "read-schedule-context").tool_name == "clipboard.read"
+    read_step = _step_by_id(decision, "read-schedule-context")
+    assert read_step.tool_name == "clipboard.read"
+    assert read_step.action == "read_clipboard"
     create_step = _step_by_id(decision, "create-schedule-item-from-context")
     assert create_step.tool_name == "reminders.create"
     assert create_step.input_preview == {"body_source": "selection"}
     assert create_step.approval_required is True
+
+
+def test_runtime_planner_tracks_browser_context_sources() -> None:
+    note_decision = RuntimePlanner().decision(
+        "create a note from current page link",
+        allowed_tools=["notes.create", "browser.current_page"],
+    )
+    assert note_decision.selected_intent.kind == "information_capture"
+    note_read_step = _step_by_id(note_decision, "read-note-context")
+    assert note_read_step.tool_name == "browser.current_page"
+    assert note_read_step.action == "read_current_page"
+
+    schedule_decision = RuntimePlanner().decision(
+        "把当前页面内容创建成日历事件",
+        allowed_tools=["calendar.create_event", "browser.extract_text"],
+    )
+    assert schedule_decision.selected_intent.kind == "schedule"
+    schedule_read_step = _step_by_id(schedule_decision, "read-schedule-context")
+    assert schedule_read_step.tool_name == "browser.extract_text"
+    assert schedule_read_step.action == "extract_text"
 
 
 def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> None:
@@ -2350,6 +2372,19 @@ def test_planner_tool_requests_prefetches_dynamic_schedule_sources_for_model_loo
             "continue_to_model": True,
         }
     ]
+    assert planner_tool_requests(
+        "把当前页面内容创建成日历事件",
+        allowed_tools=["calendar.create_event", "browser.extract_text"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_schedule_context",
+            "continue_to_model": True,
+        }
+    ]
 
 
 def test_planner_tool_requests_maps_explicit_note_plan() -> None:
@@ -2397,6 +2432,19 @@ def test_planner_tool_requests_prefetches_context_note_for_model_loop() -> None:
         {
             "protocol": "json_fallback",
             "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "create a note from current page link",
+        allowed_tools=["notes.create", "browser.current_page"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_information_capture_context",
