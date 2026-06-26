@@ -7717,6 +7717,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.music_app_open_and_play",
         "input": {"app_name": "Spotify"},
     }
+    assert daily_desktop_intent_tool_request("让 Spotify 播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("让 Spotify 暂停", allowed_tools) is None
+    music_app_control_tools = [*allowed_tools, "media.music_app_control"]
+    assert daily_desktop_intent_tool_request("让 Spotify 暂停", music_app_control_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_control",
+        "input": {"app_name": "Spotify", "action": "pause"},
+    }
+    assert daily_desktop_intent_tool_request("让 Spotify 下一首", music_app_control_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.music_app_control",
+        "input": {"app_name": "Spotify", "action": "next"},
+    }
     assert daily_desktop_intent_tool_request("打开 Spotify 并播放", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.music_app_open_and_play",
@@ -7764,6 +7781,24 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "周杰伦"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+        },
+    ]
+    assert daily_desktop_intent_tool_requests("让 Spotify 播放周杰伦", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
             "input": {"app_name": "Spotify", "action": "find"},
         },
         {
@@ -7899,6 +7934,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Music"},
     }
     assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("让 Apple Music 播放", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_open_and_play",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("请 Apple Music 播放", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_open_and_play",
         "input": {},

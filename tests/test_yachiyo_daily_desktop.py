@@ -214,6 +214,13 @@ def test_daily_desktop_entrypoint_routes_finder_special_locations_to_app_safe_sh
             "input": {"target": "网络"},
         }
     ]
+    assert daily_desktop_entrypoint_requests("打开网络") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "网络"},
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
@@ -4041,6 +4048,8 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("能不能直接播个 Apple Music", "media.apple_music_open_and_play", {}),
         ("把 Apple Music 打开然后播放", "media.apple_music_open_and_play", {}),
         ("Apple Music 随便播一首", "media.apple_music_open_and_play", {}),
+        ("让 Apple Music 播放", "media.apple_music_open_and_play", {}),
+        ("请 Apple Music 播放", "media.apple_music_open_and_play", {}),
         ("你能不能帮我播放音乐", "media.apple_music_open_and_play", {}),
         ("帮我在 Apple Music 播放点音乐", "media.apple_music_open_and_play", {}),
         ("打开音乐听听", "media.apple_music_open_and_play", {}),
@@ -4049,6 +4058,7 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
         ("can you play some music?", "media.apple_music_open_and_play", {}),
         ("put on some music", "media.apple_music_open_and_play", {}),
         ("把 Spotify 打开然后播放", "media.music_app_open_and_play", {"app_name": "Spotify"}),
+        ("让 Spotify 播放", "media.music_app_open_and_play", {"app_name": "Spotify"}),
         ("把网易云打开然后播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
         ("Spotify 随便放一首", "media.music_app_open_and_play", {"app_name": "Spotify"}),
         ("网易云给我放点歌", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
@@ -4131,6 +4141,8 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
         ]
     for prompt, app_name, action in (
         ("Spotify 暂停", "Spotify", "pause"),
+        ("让 Spotify 暂停", "Spotify", "pause"),
+        ("让 Spotify 下一首", "Spotify", "next"),
         ("网易云下一首", "网易云音乐", "next"),
         ("QQ音乐上一首", "QQ音乐", "previous"),
         ("QQ Music next track", "QQ音乐", "next"),
@@ -4228,6 +4240,15 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
         "input": {"app_name": "网易云音乐", "action": "find"},
     }
     assert open_direct_play_requests[1]["input"] == {"text": "周杰伦"}
+
+    causative_play_requests = daily_desktop_entrypoint_requests("让 Spotify 播放周杰伦")
+
+    assert causative_play_requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Spotify", "action": "find"},
+    }
+    assert causative_play_requests[1]["input"] == {"text": "周杰伦"}
 
 
 def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music() -> None:

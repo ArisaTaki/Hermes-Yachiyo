@@ -875,8 +875,10 @@ def daily_desktop_intent_tool_requests(
     ):
         return music_app_search_play_sequence
     music_app_control = _music_app_control_request(context)
-    if music_app_control and str(music_app_control.get("tool") or "") in allowed:
-        return [music_app_control]
+    if music_app_control:
+        if str(music_app_control.get("tool") or "") in allowed:
+            return [music_app_control]
+        return []
     apple_music_prefix_control = _apple_music_prefix_control_action(context)
     if apple_music_prefix_control and "media.apple_music_control" in allowed:
         return [_request("media.apple_music_control", {"action": apple_music_prefix_control})]
@@ -8049,6 +8051,17 @@ def _finder_special_location_tool_request(text: str) -> dict[str, Any] | None:
     if not action:
         return None
     phrase = _normalize_named_hotkey_phrase(text)
+    if action == "finder_network" and phrase in {
+        "网络",
+        "打开网络",
+        "启动网络",
+        "显示网络",
+        "network",
+        "opennetwork",
+        "launchnetwork",
+        "shownetwork",
+    }:
+        return None
     open_prefixes = (
         "打开finder",
         "启动finder",
@@ -13277,6 +13290,12 @@ def _non_apple_music_named_play_app_name(text: str) -> str:
 def _non_apple_music_named_play_match(text: str) -> tuple[str, str, str, str] | None:
     patterns: tuple[tuple[str, str], ...] = (
         (
+            "open",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:让|叫)\s*"
+            r"(?P<app>[^。！？!?，,]+?)\s*"
+            r"(?:播放|播(?!放)|放)\s*(?P<query>[^。！？!?，,]+)$",
+        ),
+        (
             "focus",
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
@@ -13338,6 +13357,15 @@ def _music_app_generic_play_open_name(text: str) -> str:
     ):
         return ""
     patterns = (
+        r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:让|叫)?\s*(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:随便|随机)?(?:开始)?"
+        r"(?:(?:播放|播|放)(?:一下)?(?:音乐|music|歌|歌曲)?|"
+        r"(?:来|放|播放|播)(?:点|点儿|些|一点|一点儿)(?:音乐|歌|歌曲|东西)?|"
+        r"(?:来|放|播放|播)(?:个|一个)(?:东西)|"
+        r"(?:来|放|播放|播)(?:一首|首)(?:歌|歌曲)?|"
+        r"(?:听听|听一下|听下|听))"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
         r"^(?:能不能帮我|可不可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)\s*(?P<app>[^。！？!?，,]+?)\s*(?:里|中|上|内)?\s*"
         r"(?:随便|随机)?(?:开始)?"
@@ -14072,7 +14100,7 @@ def _music_control_followup_action(value: str) -> str:
 
 
 def _music_app_control_request(text: str) -> dict[str, Any] | None:
-    split = _known_app_prefix_split(text)
+    split = _known_app_prefix_split(text) or _known_music_app_causative_prefix_split(text)
     if not split:
         return None
     raw_app, app_name, followup = split
@@ -14090,6 +14118,18 @@ def _music_app_control_request(text: str) -> dict[str, Any] | None:
     if not action:
         return None
     return _request("media.music_app_control", {"app_name": music_app, "action": action})
+
+
+def _known_music_app_causative_prefix_split(value: str) -> tuple[str, str, str] | None:
+    stripped = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:让|叫)\s*",
+        "",
+        str(value or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    if stripped == str(value or "").strip():
+        return None
+    return _known_app_prefix_split(stripped)
 
 
 def _system_media_control_request(text: str) -> dict[str, Any] | None:
