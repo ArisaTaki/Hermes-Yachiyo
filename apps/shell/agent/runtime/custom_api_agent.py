@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.approval_tool_sets import (
+    APPROVAL_PLAN_TOOLS as _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS,
+    SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_HOTKEY_TOOLS,
+)
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_metadata_tool_request,
     daily_desktop_intent_candidates,
@@ -14,10 +18,6 @@ from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
-    HIGH_RISK_AGENT_TOOLS,
-    HIGH_RISK_DESKTOP_TOOL_NAMES,
-    MEDIUM_RISK_BROWSER_TOOL_NAMES,
-    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
 )
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
@@ -27,12 +27,6 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
 from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
 from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
-
-_SAFE_SHORTCUT_HOTKEY_TOOLS = {
-    "desktop.safe_shortcut": "desktop.hotkey",
-    "app.open_and_safe_shortcut": "app.open_and_hotkey",
-    "app.focus_and_safe_shortcut": "app.focus_and_hotkey",
-}
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     *DAILY_DESKTOP_TOOL_NAMES,
@@ -62,13 +56,6 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
 _DAILY_DESKTOP_PLAN_SOURCES = {
     "daily_desktop_intent",
     "runtime_planner",
-}
-
-_DAILY_DESKTOP_APPROVAL_PLAN_TOOLS = {
-    *HIGH_RISK_AGENT_TOOLS,
-    *HIGH_RISK_DESKTOP_TOOL_NAMES,
-    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
-    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
 }
 
 _APP_FOREGROUND_ACTION_TOOLS = {

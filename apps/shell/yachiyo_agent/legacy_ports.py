@@ -5,13 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
-from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.tools.policy import (
-    HIGH_RISK_AGENT_TOOLS,
-    HIGH_RISK_DESKTOP_TOOL_NAMES,
-    MEDIUM_RISK_BROWSER_TOOL_NAMES,
-    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+from apps.shell.agent.runtime.approval_tool_sets import (
+    APPROVAL_PLAN_TOOLS as _APPROVAL_PLAN_TOOLS,
+    SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_APPROVAL_TOOLS,
 )
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 from .daily_desktop import (
     daily_desktop_allowed_tools,
@@ -57,19 +55,6 @@ from .recovery_actions import (
 )
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
-
-_APPROVAL_PLAN_TOOLS = {
-    *HIGH_RISK_AGENT_TOOLS,
-    *HIGH_RISK_DESKTOP_TOOL_NAMES,
-    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
-    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
-}
-_SAFE_SHORTCUT_APPROVAL_TOOLS = {
-    "desktop.safe_shortcut": "desktop.hotkey",
-    "app.open_and_safe_shortcut": "app.open_and_hotkey",
-    "app.focus_and_safe_shortcut": "app.focus_and_hotkey",
-}
-
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
 
