@@ -388,6 +388,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 "capture-current-page",
                 "open-web-search",
                 "open-web-url",
+                "extract-web-url-text",
                 "capture-web-url",
             }
         ),

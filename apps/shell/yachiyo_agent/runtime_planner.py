@@ -1366,13 +1366,19 @@ class RuntimePlanner:
                 "screenshot": "browser.screenshot",
                 "open_search": "browser.open_url",
                 "open_url": "browser.open_url",
+                "open_url_extract": "browser.open_url_and_extract_text",
                 "open_url_screenshot": "browser.open_url_and_screenshot",
             }.get(browser_action)
             input_preview: dict[str, Any] = {}
             reason = str(intent.inputs.get("reason") or "").strip()
             if browser_action in {"screenshot", "open_url_screenshot"} and reason:
                 input_preview["reason"] = reason
-            if browser_action in {"open_search", "open_url", "open_url_screenshot"}:
+            if browser_action in {
+                "open_search",
+                "open_url",
+                "open_url_extract",
+                "open_url_screenshot",
+            }:
                 url = str(intent.inputs.get("url_hint") or "").strip()
                 if url:
                     input_preview["url"] = url
@@ -1385,6 +1391,7 @@ class RuntimePlanner:
                         "screenshot": "capture-current-page",
                         "open_search": "open-web-search",
                         "open_url": "open-web-url",
+                        "open_url_extract": "extract-web-url-text",
                         "open_url_screenshot": "capture-web-url",
                     }.get(browser_action, "read-current-page"),
                     {
@@ -1393,6 +1400,7 @@ class RuntimePlanner:
                         "screenshot": "Capture current page",
                         "open_search": "Open web search",
                         "open_url": "Open web URL",
+                        "open_url_extract": "Open and extract web URL",
                         "open_url_screenshot": "Open and capture web URL",
                     }.get(browser_action, "Read current page"),
                     "browser.research",
@@ -2668,6 +2676,11 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
             "url_hint": url,
             "reason": "user asked to capture the browser page after opening a URL",
         }
+    if _looks_like_direct_url_text_request(value):
+        hint = {"browser_action": "open_url_extract", "url_hint": url}
+        if _looks_like_url_summary_request(value):
+            hint["presentation"] = "summary"
+        return hint
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
@@ -2783,6 +2796,36 @@ def _looks_like_url_screenshot_request(text: str) -> bool:
     return _contains_any(
         text,
         ("screenshot", "screen capture", "截图", "截屏"),
+    )
+
+
+def _looks_like_direct_url_text_request(text: str) -> bool:
+    if _contains_any(text, ("research", "report", "调研", "报告")):
+        return False
+    return _contains_any(
+        text,
+        (
+            "summarize",
+            "summary",
+            "read",
+            "extract",
+            "content",
+            "总结",
+            "概括",
+            "摘要",
+            "读取",
+            "读一下",
+            "提取",
+            "内容",
+            "看看",
+        ),
+    )
+
+
+def _looks_like_url_summary_request(text: str) -> bool:
+    return _contains_any(
+        text,
+        ("summarize", "summary", "总结", "概括", "摘要"),
     )
 
 

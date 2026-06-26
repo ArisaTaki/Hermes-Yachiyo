@@ -630,6 +630,27 @@ def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
         "browser_action": "open_url",
     }
 
+    extract = RuntimePlanner().decision("打开 github.com 读一下内容", allowed_tools=allowed)
+
+    assert extract.selected_intent.inputs == {
+        "url_hint": "https://github.com",
+        "browser_action": "open_url_extract",
+    }
+    extract_step = _step_by_id(extract, "extract-web-url-text")
+    assert extract_step.tool_name == "browser.open_url_and_extract_text"
+    assert extract_step.input_preview == {"url": "https://github.com"}
+
+    summary = RuntimePlanner().decision("open github.com and summarize", allowed_tools=allowed)
+
+    assert summary.selected_intent.inputs == {
+        "url_hint": "https://github.com",
+        "browser_action": "open_url_extract",
+        "presentation": "summary",
+    }
+    assert _step_by_id(summary, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
+
     screenshot = RuntimePlanner().decision(
         "请调研 https://example.com 并截图",
         allowed_tools=allowed,
@@ -2145,6 +2166,37 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_open() -> N
     ]
 
 
+def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -> None:
+    def legacy_requests(prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        request = {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://github.com"},
+        }
+        if "summarize" in prompt:
+            request["presentation"] = "summary"
+        return [request]
+
+    selection = planner_first_direct_tool_selection(
+        "open github.com and summarize",
+        ["browser.open_url_and_extract_text", "browser.open_url"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+        }
+    ]
+
+
 def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
     search_selector = (
         'input[type="search"], input[name="q"], textarea[name="q"], '
@@ -2896,6 +2948,25 @@ def test_planner_tool_requests_maps_explicit_browser_url_open_actions() -> None:
             "input": {"url": "https://github.com"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("打开 github.com 读一下内容", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("open github.com and summarize", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
         }
     ]
     assert planner_tool_requests("请调研 https://example.com 并截图", allowed_tools=allowed) == [
