@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 APP_ALIASES: dict[str, str] = {
     "applemusic": "Music",
@@ -243,3 +245,20 @@ EMAIL_APP_NAMES = {
     "Mail",
     "Microsoft Outlook",
 }
+
+
+def compact_app_alias(value: str) -> str:
+    return re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+
+
+def known_app_followup_aliases() -> list[tuple[str, str]]:
+    candidates: dict[str, str] = {}
+    for alias, app_name in APP_ALIASES.items():
+        candidates.setdefault(alias, app_name)
+    for app_name in set(APP_ALIASES.values()):
+        candidates.setdefault(app_name, app_name)
+    return sorted(
+        candidates.items(),
+        key=lambda item: len(compact_app_alias(item[0])),
+        reverse=True,
+    )

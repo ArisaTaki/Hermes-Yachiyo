@@ -16,6 +16,7 @@ from apps.shell.agent.runtime.app_aliases import (
     BROWSER_INTERNAL_PAGE_SCHEMES as _BROWSER_INTERNAL_PAGE_SCHEMES,
     COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES,
     EMAIL_APP_NAMES as _EMAIL_APP_NAMES,
+    known_app_followup_aliases as _shared_known_app_followup_aliases,
 )
 from apps.shell.agent.runtime.hotkeys import parse_hotkey_combo
 from apps.shell.agent.runtime.media_apps import (
@@ -11541,16 +11542,7 @@ def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:
 
 
 def _known_app_followup_aliases() -> list[tuple[str, str]]:
-    candidates: dict[str, str] = {}
-    for alias, app_name in _APP_ALIASES.items():
-        candidates.setdefault(alias, app_name)
-    for app_name in set(_APP_ALIASES.values()):
-        candidates.setdefault(app_name, app_name)
-    return sorted(
-        candidates.items(),
-        key=lambda item: len(_compact_app_alias(item[0])),
-        reverse=True,
-    )
+    return _shared_known_app_followup_aliases()
 
 
 def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
