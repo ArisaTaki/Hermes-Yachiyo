@@ -102,13 +102,17 @@ def planner_selection_payload(
     planner_request_list = _request_list(planner_requests)
     legacy_request_list = _request_list(legacy_requests)
     selected_request_list = _request_list(selected_requests)
+    plan_tools = _plan_tool_names(decision)
+    plan_steps = _plan_steps(decision)
     payload: dict[str, Any] = {
         "source": "runtime_planner",
         "selection_source": str(selected_source or "").strip(),
         "selection_reason": str(selected_reason or "").strip(),
+        "plan_tools": plan_tools,
         "planner_tools": _tool_names(planner_request_list),
         "legacy_tools": _tool_names(legacy_request_list),
         "selected_tools": _tool_names(selected_request_list),
+        "plan_step_count": len(plan_steps),
         "planner_request_count": len(planner_request_list),
         "legacy_request_count": len(legacy_request_list),
         "selected_request_count": len(selected_request_list),
@@ -219,4 +223,19 @@ def _tool_names(requests: Iterable[Mapping[str, Any]]) -> list[str]:
         str(request.get("tool") or "").strip()
         for request in requests
         if str(request.get("tool") or "").strip()
+    ]
+
+
+def _plan_steps(decision: Any | None) -> list[Any]:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = getattr(tool_plan, "steps", None)
+    return [step for step in steps or [] if step is not None]
+
+
+def _plan_tool_names(decision: Any | None) -> list[str]:
+    return [
+        str(getattr(step, "tool_name", "") or "").strip()
+        for step in _plan_steps(decision)
+        if str(getattr(step, "tool_name", "") or "").strip()
     ]

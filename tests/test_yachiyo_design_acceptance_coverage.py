@@ -1194,6 +1194,8 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "agent.plan.created",
             "agent.plan.step",
             "agent.plan.selection",
+            "plan_tools",
+            "plan_step_count",
             'data-testid="agent-run-detail-planner-intent"',
             'data-testid="agent-run-detail-planner-selection"',
             'data-testid="agent-run-detail-planner-capabilities"',

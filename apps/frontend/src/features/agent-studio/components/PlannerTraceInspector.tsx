@@ -25,6 +25,8 @@ type PlannerTrace = {
 type PlannerSelection = {
   legacyTools: string[];
   legacyRequestCount: number;
+  planTools: string[];
+  planStepCount: number;
   plannerTools: string[];
   plannerRequestCount: number;
   reason: string;
@@ -124,6 +126,7 @@ export function PlannerTraceInspector({
         {trace.selection ? (
           <section
             data-legacy-request-count={trace.selection.legacyRequestCount}
+            data-plan-step-count={trace.selection.planStepCount}
             data-planner-request-count={trace.selection.plannerRequestCount}
             data-selected-request-count={trace.selection.selectedRequestCount}
             data-testid="agent-run-detail-planner-selection"
@@ -139,6 +142,9 @@ export function PlannerTraceInspector({
               <span className="studio-tool-permission" data-selection-count-kind="selected">
                 selected requests · {trace.selection.selectedRequestCount}
               </span>
+              <span className="studio-tool-permission" data-selection-count-kind="plan">
+                plan steps · {trace.selection.planStepCount}
+              </span>
               <span className="studio-tool-permission" data-selection-count-kind="planner">
                 planner requests · {trace.selection.plannerRequestCount}
               </span>
@@ -148,6 +154,11 @@ export function PlannerTraceInspector({
               {trace.selection.selectedTools.map((tool) => (
                 <span className="studio-tool-permission" data-selection-tool={tool} key={`selected:${tool}`}>
                   selected · {tool}
+                </span>
+              ))}
+              {trace.selection.planTools.map((tool) => (
+                <span className="studio-tool-permission" data-plan-tool={tool} key={`plan:${tool}`}>
+                  plan · {tool}
                 </span>
               ))}
               {trace.selection.plannerTools.map((tool) => (
@@ -521,15 +532,19 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const selectedSource = stringValue(payload.selection_source);
   const reason = stringValue(payload.selection_reason);
   const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
+  const planTools = uniqueStrings(Array.isArray(payload.plan_tools) ? payload.plan_tools : []);
   const plannerTools = uniqueStrings(Array.isArray(payload.planner_tools) ? payload.planner_tools : []);
   const legacyTools = uniqueStrings(Array.isArray(payload.legacy_tools) ? payload.legacy_tools : []);
   const selectedRequestCount = integerValue(payload.selected_request_count, selectedTools.length);
+  const planStepCount = integerValue(payload.plan_step_count, planTools.length);
   const plannerRequestCount = integerValue(payload.planner_request_count, plannerTools.length);
   const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
-  if (!selectedSource && !reason && !selectedTools.length && !plannerTools.length && !legacyTools.length) return null;
+  if (!selectedSource && !reason && !selectedTools.length && !planTools.length && !plannerTools.length && !legacyTools.length) return null;
   return {
     legacyTools,
     legacyRequestCount,
+    planTools,
+    planStepCount,
     plannerTools,
     plannerRequestCount,
     reason,

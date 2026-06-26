@@ -10732,8 +10732,10 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         compile_agent_runtime=lambda _agent: {
             "tool_policy": {
                 "allowed_tools": [
+                    "desktop.list_apps",
                     "app.open_and_safe_type_text",
                     "desktop.safe_shortcut",
+                    "desktop.ui_elements",
                 ]
             },
         },
@@ -10803,10 +10805,17 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
     assert selection_events[0]["selection_source"] == "runtime_planner"
+    assert selection_events[0]["plan_tools"] == [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
     assert selection_events[0]["selected_tools"] == [
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
     ]
+    assert selection_events[0]["plan_step_count"] == 4
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "desktop.safe_shortcut"
     assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]

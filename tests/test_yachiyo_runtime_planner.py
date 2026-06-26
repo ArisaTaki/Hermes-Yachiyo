@@ -219,7 +219,7 @@ def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() ->
 def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge",
-        allowed_tools=["app.open"],
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
     )
     planner_requests = [
         {
@@ -242,9 +242,11 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert payload["source"] == "runtime_planner"
     assert payload["selection_source"] == "runtime_planner"
     assert payload["selection_reason"] == "runtime_planner_direct"
+    assert payload["plan_tools"] == ["desktop.list_apps", "app.open", "desktop.active_window"]
     assert payload["planner_tools"] == ["app.open"]
     assert payload["legacy_tools"] == []
     assert payload["selected_tools"] == ["app.open"]
+    assert payload["plan_step_count"] == 3
     assert payload["planner_request_count"] == 1
     assert payload["legacy_request_count"] == 0
     assert payload["selected_request_count"] == 1
