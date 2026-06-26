@@ -635,14 +635,36 @@ class RuntimePlanner:
             safe_type_text=safe_type_text,
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        discovery_tool = _first_allowed(
+            (
+                "desktop.list_apps",
+                "desktop.running_apps",
+                "desktop.active_window",
+                "screen.capture",
+            )
+            if app_name
+            else ("desktop.running_apps", "desktop.active_window", "screen.capture"),
+            allowed,
+        )
+        discovery_preview = (
+            {"query": app_name, "limit": 20}
+            if discovery_tool == "desktop.list_apps" and app_name
+            else {}
+        )
+        discovery_reason = (
+            "Discover installed apps matching the requested name before opening or operating."
+            if discovery_tool == "desktop.list_apps"
+            else "Inspect the current app/window state before acting."
+        )
         steps = [
             _step(
                 intent,
                 "discover-desktop-state",
                 "Discover desktop state",
                 "desktop.app_discovery",
-                _first_allowed(("desktop.running_apps", "desktop.active_window", "screen.capture"), allowed),
-                reason="Inspect the current app/window state before acting.",
+                discovery_tool,
+                input_preview=discovery_preview,
+                reason=discovery_reason,
             )
         ]
         if app_name and not operation_uses_app_tool:

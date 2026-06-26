@@ -238,6 +238,21 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["operate-foreground-ui"]
 
 
+def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 SuperData Studio",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    discover = _step_by_id(decision, "discover-desktop-state")
+    assert discover.tool_name == "desktop.list_apps"
+    assert discover.action == "list_apps"
+    assert discover.input_preview == {"query": "SuperData Studio", "limit": 20}
+    assert "Discover installed apps" in discover.reason
+    assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -582,6 +597,54 @@ def test_planner_desktop_tool_requests_preserves_discover_operate_verify_steps()
             "protocol": "json_fallback",
             "tool": "desktop.running_apps",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
