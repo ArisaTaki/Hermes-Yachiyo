@@ -184,6 +184,8 @@ class TaskIntentRouter:
         safe_click = safe_click_hint(text)
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
+        if _browser_type_text_hint(text):
+            return _empty_intent("desktop_operation", text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
@@ -513,11 +515,13 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _direct_communication_hint(text):
             return _empty_intent("web_research", text)
-        if _app_scoped_desktop_operation_hint(text):
+        browser_type_text = _browser_type_text_hint(text)
+        if _app_scoped_desktop_operation_hint(text) and not browser_type_text:
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         browser_action = (
-            _browser_current_page_find_hint(text, dynamic_source)
+            browser_type_text
+            or _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
             or _dynamic_context_browser_action_hint(text, dynamic_source)
             or _browser_url_action_hint(text, dynamic_source)
@@ -568,6 +572,11 @@ class TaskIntentRouter:
             if browser_action_name == "find_current_page" or uses_dynamic_browser_context
             else ["browser.research"]
         )
+        risk_level = (
+            "medium"
+            if browser_action_name == "type_text"
+            else ("low" if browser_action else "medium")
+        )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "web_research", text),
             kind="web_research",
@@ -586,7 +595,7 @@ class TaskIntentRouter:
                 ),
                 "artifact.write",
             ],
-            risk_level="low" if browser_action else "medium",
+            risk_level=risk_level,
         )
 
     def _report_generation_intent(
@@ -1798,12 +1807,20 @@ class RuntimePlanner:
                 "current_page": "browser.current_page",
                 "extract_text": "browser.extract_text",
                 "screenshot": "browser.screenshot",
+                "type_text": "browser.type_text",
                 "open_search": "browser.open_url",
                 "open_url": "browser.open_url",
                 "open_url_extract": "browser.open_url_and_extract_text",
                 "open_url_screenshot": "browser.open_url_and_screenshot",
             }.get(browser_action)
             input_preview: dict[str, Any] = {}
+            if browser_action == "type_text":
+                selector = str(intent.inputs.get("selector") or "").strip()
+                text = str(intent.inputs.get("text") or "")
+                if selector:
+                    input_preview["selector"] = selector
+                if text:
+                    input_preview["text"] = text
             reason = str(intent.inputs.get("reason") or "").strip()
             if browser_action in {"screenshot", "open_url_screenshot"} and reason:
                 input_preview["reason"] = reason
@@ -1822,6 +1839,7 @@ class RuntimePlanner:
                         "current_page": "read-current-page",
                         "extract_text": "extract-current-page-text",
                         "screenshot": "capture-current-page",
+                        "type_text": "type-current-page-input",
                         "open_search": "open-web-search",
                         "open_url": "open-web-url",
                         "open_url_extract": "extract-web-url-text",
@@ -1831,6 +1849,7 @@ class RuntimePlanner:
                         "current_page": "Read current page",
                         "extract_text": "Extract current page text",
                         "screenshot": "Capture current page",
+                        "type_text": "Type into current page input",
                         "open_search": "Open web search",
                         "open_url": "Open web URL",
                         "open_url_extract": "Open and extract web URL",
@@ -1839,9 +1858,13 @@ class RuntimePlanner:
                     "browser.research",
                     _first_allowed((tool_name,), allowed) if tool_name else None,
                     input_preview=input_preview,
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Use the explicit current-page browser tool instead of desktop screen automation.",
+                    risk_level="medium" if browser_action == "type_text" else "low",
+                    approval_required=browser_action == "type_text",
+                    reason=(
+                        "Use the browser input tool so the runtime can enforce browser interaction approval."
+                        if browser_action == "type_text"
+                        else "Use the explicit current-page browser tool instead of desktop screen automation."
+                    ),
                 )
             ]
         if context_source and not url:
@@ -3148,6 +3171,17 @@ _UI_CONTROL_TERMS = (
     "文本框",
 )
 
+_BROWSER_SEARCH_INPUT_SELECTOR = (
+    'input[type="search"], input[name="q"], textarea[name="q"], '
+    'input[aria-label*="搜索" i], input[placeholder*="搜索" i], '
+    'input[aria-label*="search" i], input[placeholder*="search" i]'
+)
+
+_BROWSER_TEXT_INPUT_SELECTOR = (
+    'input:not([type]), input[type="text"], input[type="search"], '
+    'textarea, [contenteditable="true"]'
+)
+
 
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
@@ -3180,7 +3214,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.16
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
-    if intent.kind == "web_research" and _contains_any(text, _UI_CONTROL_TERMS):
+    if (
+        intent.kind == "web_research"
+        and _contains_any(text, _UI_CONTROL_TERMS)
+        and str(intent.inputs.get("browser_action") or "").strip() != "type_text"
+    ):
         score -= 0.24
     if (
         intent.kind == "web_research"
@@ -3195,6 +3233,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() == "find_current_page"
     ):
         score += 0.28
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip() == "type_text"
+    ):
+        score += 0.34
     if intent.kind == "web_research" and _contains_any(
         text,
         ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
@@ -4425,6 +4468,96 @@ def _clean_web_search_query(query: str) -> str:
     ):
         return ""
     return value
+
+
+def _browser_type_text_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not _has_browser_page_context(value):
+        return {}
+    patterns = (
+        r"\b(?:type|enter|fill)\s+(?P<text>[^.!?]+?)\s+"
+        r"(?:into|in)\s+(?:the\s+)?(?:current|this)?\s*"
+        r"(?:web\s*page|webpage|page|browser)\s+(?P<target>[^.!?]+)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|向|给)?\s*(?:当前)?(?:网页|页面|浏览器|当前页)"
+        r"(?:上|里|中|内)?(?:的)?\s*(?P<target>[^。！？!?，,]*?)"
+        r"(?:输入|填写|键入|打入|填入)\s*(?P<text>[^。！？!?]+)$",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:填写|填入|输入)\s*(?:当前)?(?:网页|页面|浏览器|当前页)?(?:的)?"
+        r"(?P<target>[^。！？!?，,]+?)\s*(?:为|成|:|：)\s*(?P<text>[^。！？!?]+)$",
+        r"\b(?:type|enter|fill)\s+(?P<text>[^.!?]+?)\s+"
+        r"(?:into|in)\s+(?P<target>[^.!?]+?)\s+"
+        r"(?:on|in)\s+(?:the\s+)?(?:current\s+)?(?:page|browser)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        typed_text = _clean_browser_typed_text(match.group("text"))
+        if not typed_text:
+            continue
+        target = _clean_browser_element_label(match.group("target"))
+        return {
+            "browser_action": "type_text",
+            "selector": _browser_input_selector_from_target(target),
+            "text": typed_text,
+        }
+    return {}
+
+
+def _has_browser_page_context(text: str) -> bool:
+    return bool(
+        re.search(r"(?:网页|页面|浏览器|当前页)", text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:browser|page|webpage|web\s+page)\b", text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:search\s+)?(?:result|link)s?\b", text, flags=re.IGNORECASE)
+    )
+
+
+def _clean_browser_typed_text(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
+    text = re.sub(r"^(?:text|内容)\s*[:：]\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s+(?:please|pls)$", "", text, flags=re.IGNORECASE).strip()
+    return re.sub(r"[。！？!?]+$", "", text).strip()
+
+
+def _clean_browser_element_label(value: str) -> str:
+    label = str(value or "").strip()
+    label = re.sub(r"^[：:，,\s]+", "", label)
+    label = re.sub(r"[。.,，；;！!？?]+$", "", label).strip()
+    label = re.sub(r"^(?:当前)?(?:网页|页面|浏览器|当前页)(?:上的|上|里|中|内|的)?\s*", "", label)
+    label = re.sub(
+        r"^(?:the\s+)?(?:current|this)?\s*(?:web\s*page|webpage|page|browser)\s+",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    )
+    label = re.sub(r"\s*(?:按钮|链接|元素|button|link|element|field|input|box)$", "", label, flags=re.IGNORECASE)
+    return label.strip()
+
+
+def _browser_input_selector_from_target(target: str) -> str:
+    clean = str(target or "").strip()
+    if _looks_like_css_selector(clean):
+        return clean
+    lowered = clean.lower()
+    if re.search(r"(?:搜索|查找|search|query|q)", lowered):
+        return _BROWSER_SEARCH_INPUT_SELECTOR
+    if re.search(r"(?:密码|password)", lowered):
+        return 'input[type="password"]'
+    if re.search(r"(?:邮箱|邮件|email|e-mail)", lowered):
+        return 'input[type="email"], input[name*="email" i], input[autocomplete="email"]'
+    if re.search(r"(?:用户名|账号|账户|user|username|login)", lowered):
+        return 'input[name*="user" i], input[autocomplete="username"], input[type="text"]'
+    return _BROWSER_TEXT_INPUT_SELECTOR
+
+
+def _looks_like_css_selector(value: str) -> bool:
+    stripped = str(value or "").strip()
+    return bool(
+        stripped.startswith(("#", ".", "[", "input", "textarea", "select", "button"))
+        or re.search(r"^(?:[a-z][a-z0-9_-]*)(?:[#.\[:][^\s]+)$", stripped, flags=re.IGNORECASE)
+    )
 
 
 def _browser_current_page_find_hint(text: str, context_source: str) -> dict[str, Any]:

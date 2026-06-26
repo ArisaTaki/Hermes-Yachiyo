@@ -513,6 +513,20 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     if browser_action == "find_current_page":
         return _current_page_find_tool_requests(decision, allowed)
+    if browser_action == "type_text":
+        if "browser.type_text" not in allowed:
+            return []
+        selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
+        text = str(decision.selected_intent.inputs.get("text") or "")
+        if not selector or not text:
+            return []
+        return [
+            _request(
+                "browser.type_text",
+                {"selector": selector, "text": text},
+                planning_reason="planner_fallback_web_research",
+            )
+        ]
     if _dynamic_context_browser_action(decision):
         return _dynamic_context_browser_tool_requests(decision, allowed)
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(

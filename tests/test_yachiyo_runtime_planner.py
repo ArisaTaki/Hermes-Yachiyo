@@ -3413,13 +3413,22 @@ def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
         legacy_tool_requests=legacy_requests,
     )
 
-    assert selection.selected_source == "daily_desktop_intent"
-    assert selection.event_payload["selection_reason"] == "legacy_more_specific_direct_plan"
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["selection_reason"] == "runtime_planner_direct"
+    assert selection.decision is not None
+    assert selection.decision.selected_intent.kind == "web_research"
+    assert selection.decision.selected_intent.inputs["browser_action"] == "type_text"
+    step = selection.decision.plan.tool_plan.steps[0]
+    assert step.step_id == "type-current-page-input"
+    assert step.tool_name == "browser.type_text"
+    assert step.approval_required is True
     assert selection.requests == [
         {
             "protocol": "json_fallback",
             "tool": "browser.type_text",
             "input": {"selector": search_selector, "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
         }
     ]
 
