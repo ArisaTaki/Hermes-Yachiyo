@@ -6,6 +6,8 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.path_aliases import common_desktop_path_marker
+
 
 def file_access_hint(prompt: str) -> dict[str, str]:
     text = _clean(prompt)
@@ -113,11 +115,7 @@ def _explicit_path(text: str) -> str:
 
 
 def _common_path(text: str) -> str:
-    normalized = re.sub(r"[\s._-]+", "", text.lower())
-    for marker, path in _COMMON_PATHS:
-        if marker in normalized:
-            return path
-    return ""
+    return common_desktop_path_marker(text)
 
 
 def _looks_like_open_request(text: str) -> bool:
@@ -147,50 +145,3 @@ def _clean(value: str) -> str:
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(term.lower() in text.lower() for term in terms)
-
-
-_COMMON_PATHS: tuple[tuple[str, str], ...] = (
-    ("icloud云盘", "~/Library/Mobile Documents/com~apple~CloudDocs"),
-    ("iclouddrive", "~/Library/Mobile Documents/com~apple~CloudDocs"),
-    ("applicationsfolder", "/Applications"),
-    ("应用程序文件夹", "/Applications"),
-    ("实用工具文件夹", "/Applications/Utilities"),
-    ("utilitiesfolder", "/Applications/Utilities"),
-    ("下载文件夹", "~/Downloads"),
-    ("下载目录", "~/Downloads"),
-    ("下载列表", "~/Downloads"),
-    ("下载记录", "~/Downloads"),
-    ("下载页面", "~/Downloads"),
-    ("downloads", "~/Downloads"),
-    ("documentsfolder", "~/Documents"),
-    ("我的文稿", "~/Documents"),
-    ("文稿文件夹", "~/Documents"),
-    ("desktopfolder", "~/Desktop"),
-    ("桌面文件夹", "~/Desktop"),
-    ("picturesfolder", "~/Pictures"),
-    ("图片文件夹", "~/Pictures"),
-    ("照片目录", "~/Pictures"),
-    ("publicfolder", "~/Public"),
-    ("公共文件夹", "~/Public"),
-    ("moviesfolder", "~/Movies"),
-    ("影片文件夹", "~/Movies"),
-    ("musicfolder", "~/Music"),
-    ("音乐目录", "~/Music"),
-    ("libraryfolder", "~/Library"),
-    ("资源库文件夹", "~/Library"),
-    ("userdirectory", "~"),
-    ("用户目录", "~"),
-    ("个人主目录", "~"),
-    ("家目录", "~"),
-    ("共享文件夹", "/Users/Shared"),
-    ("sharedfolder", "/Users/Shared"),
-    ("当前工作区", "."),
-    ("当前项目", "."),
-    ("当前仓库", "."),
-    ("项目目录", "."),
-    ("垃圾桶", "~/.Trash"),
-    ("回收站", "~/.Trash"),
-    ("trashfolder", "~/.Trash"),
-    ("临时目录", "/tmp"),
-    ("根目录", "/"),
-)

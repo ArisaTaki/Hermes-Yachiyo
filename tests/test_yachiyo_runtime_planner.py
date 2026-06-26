@@ -4028,6 +4028,30 @@ def test_planner_tool_requests_maps_local_file_access_plan() -> None:
             "planning_reason": "planner_fallback_file_access",
         }
     ]
+    assert planner_tool_requests(
+        "打开 Public 文件夹",
+        allowed_tools=["desktop.open_path", "app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "~/Public"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
+    assert planner_tool_requests(
+        "打开 Music 文件夹",
+        allowed_tools=["desktop.open_path", "app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "~/Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
 
 
 def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> None:
