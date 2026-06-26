@@ -9,6 +9,7 @@ import type {
   GroupRunSnapshot,
   InstallRestrictedToolPluginRequest,
   MemorySnapshot,
+  PlannerDecisionSnapshot,
   RestrictedToolPluginSnapshot,
   RunEventPageSnapshot,
   RerunRunRequest,
@@ -26,6 +27,12 @@ import type {
 export type YachiyoRunEventsPage = RunEventPageSnapshot;
 
 export type YachiyoRunArtifactPayload = ArtifactContentSnapshot;
+
+export type YachiyoStudioPlanTaskRequest = {
+  prompt: string;
+  allowed_tools?: string[];
+  metadata?: Record<string, unknown>;
+};
 
 export type YachiyoSkillSyncResult = {
   source?: string;
@@ -58,6 +65,12 @@ export type YachiyoSkillInstallResponse = {
 
 export async function getYachiyoStudioToolCatalog(): Promise<ToolCatalogSnapshot> {
   return apiGet<ToolCatalogSnapshot>('/yachiyo/studio/tools');
+}
+
+export async function planYachiyoStudioTask(
+  request: YachiyoStudioPlanTaskRequest,
+): Promise<PlannerDecisionSnapshot> {
+  return apiPost<PlannerDecisionSnapshot>('/yachiyo/studio/planner', request);
 }
 
 export async function listYachiyoRestrictedToolPlugins(): Promise<RestrictedToolPluginSnapshot[]> {

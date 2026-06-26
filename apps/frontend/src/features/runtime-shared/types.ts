@@ -3,6 +3,32 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' |
 export type GroupMode = 'moderated' | 'round_robin' | 'debate' | 'pipeline' | 'parallel' | 'custom';
 export type MemoryScope = 'shared' | 'per_agent' | 'hybrid';
 export type DesktopExecutionRisk = 'low' | 'medium' | 'high';
+export type TaskIntentKind =
+  | 'desktop_operation'
+  | 'data_analysis'
+  | 'report_generation'
+  | 'web_research'
+  | 'file_operation'
+  | 'communication'
+  | 'schedule'
+  | 'code_task'
+  | 'workflow_orchestration'
+  | 'multi_agent'
+  | 'general';
+export type CapabilityCategory =
+  | 'desktop'
+  | 'data'
+  | 'file'
+  | 'terminal'
+  | 'browser'
+  | 'artifact'
+  | 'communication'
+  | 'schedule'
+  | 'workflow'
+  | 'group'
+  | 'memory'
+  | 'skill'
+  | 'general';
 
 export type ReadinessSnapshot = {
   ready: boolean;
@@ -68,6 +94,84 @@ export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
   plugins?: RestrictedToolPluginSnapshot[];
+  source?: string;
+};
+
+export type CapabilitySnapshot = {
+  capability_id: string;
+  title: string;
+  category: CapabilityCategory | string;
+  description?: string;
+  tools?: string[];
+  available_tools?: string[];
+  missing_tools?: string[];
+  risk_level?: DesktopExecutionRisk | string;
+  approval_required?: boolean;
+  discovery_actions?: string[];
+  execution_actions?: string[];
+  output_kinds?: string[];
+  source?: string;
+};
+
+export type TaskIntentSnapshot = {
+  intent_id: string;
+  kind: TaskIntentKind | string;
+  title: string;
+  user_goal?: string;
+  confidence?: number;
+  description?: string;
+  inputs?: Record<string, unknown>;
+  expected_outputs?: string[];
+  required_capabilities?: string[];
+  preferred_capabilities?: string[];
+  missing_inputs?: string[];
+  risk_level?: DesktopExecutionRisk | string;
+  source?: string;
+};
+
+export type ToolPlanStepSnapshot = {
+  step_id: string;
+  title: string;
+  capability_id: string;
+  tool_name?: string | null;
+  input_preview?: Record<string, unknown>;
+  risk_level?: DesktopExecutionRisk | string;
+  approval_required?: boolean;
+  depends_on?: string[];
+  reason?: string;
+  fallback_tools?: string[];
+  status?: 'planned' | 'unavailable' | 'skipped' | string;
+};
+
+export type ToolPlanSnapshot = {
+  plan_id: string;
+  title: string;
+  steps?: ToolPlanStepSnapshot[];
+  required_capabilities?: string[];
+  missing_capabilities?: string[];
+  approvals_required?: string[];
+  artifacts_expected?: string[];
+  open_questions?: string[];
+  source?: string;
+};
+
+export type RuntimePlanSnapshot = {
+  plan_id: string;
+  intent: TaskIntentSnapshot;
+  capabilities?: CapabilitySnapshot[];
+  tool_plan: ToolPlanSnapshot;
+  route_to_studio?: boolean;
+  timeline_preview?: Array<Record<string, unknown>>;
+  source?: string;
+};
+
+export type PlannerDecisionSnapshot = {
+  decision_id: string;
+  prompt: string;
+  selected_intent: TaskIntentSnapshot;
+  candidate_intents?: TaskIntentSnapshot[];
+  plan: RuntimePlanSnapshot;
+  created_at?: string;
   source?: string;
 };
 

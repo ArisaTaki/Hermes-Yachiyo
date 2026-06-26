@@ -15,6 +15,8 @@ export type {
   ApprovalCardSnapshot,
   ArtifactContentSnapshot,
   ArtifactSnapshot,
+  CapabilityCategory,
+  CapabilitySnapshot,
   DesktopExecutionCapabilitySnapshot,
   DesktopExecutionRisk,
   FutureTaskSnapshot,
@@ -23,6 +25,7 @@ export type {
   InstallRestrictedToolPluginRequest,
   MemorySnapshot,
   MemoryTraceSnapshot,
+  PlannerDecisionSnapshot,
   PublicRunEvent,
   RerunRunRequest,
   RunEventPageSnapshot,
@@ -37,9 +40,14 @@ export type {
   ToolCatalogItemSnapshot,
   ToolCatalogSnapshot,
   ToolCallSnapshot,
+  ToolPlanSnapshot,
+  ToolPlanStepSnapshot,
+  RuntimePlanSnapshot,
   UpdateRestrictedToolPluginRequest,
   WorkflowRunSnapshot,
   WorkflowSnapshot,
+  TaskIntentKind,
+  TaskIntentSnapshot,
 } from '../runtime-shared/types';
 
 export type SaveAgentGroupRequest = {

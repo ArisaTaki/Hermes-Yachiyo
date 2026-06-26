@@ -2240,6 +2240,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/skills/sync",
             "/yachiyo/studio/skills/install",
             "/yachiyo/studio/skill-folders",
+            "/yachiyo/studio/planner",
             "/yachiyo/studio/tools",
             "/yachiyo/studio/tools/restricted-plugins",
             "/yachiyo/studio/memories",
@@ -2304,8 +2305,30 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "startYachiyoWorkflowRun",
             "WorkflowRunSnapshot",
             "ArtifactContentSnapshot",
+            "PlannerDecisionSnapshot",
             "deleteYachiyoWorkflow",
+            "YachiyoStudioPlanTaskRequest",
+            "planYachiyoStudioTask",
             "function createClientRunId()",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        [
+            "CapabilitySnapshot",
+            "TaskIntentSnapshot",
+            "ToolPlanStepSnapshot",
+            "ToolPlanSnapshot",
+            "RuntimePlanSnapshot",
+            "PlannerDecisionSnapshot",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "planYachiyoStudioTask",
+        [
+            "Promise<PlannerDecisionSnapshot>",
+            "apiPost<PlannerDecisionSnapshot>('/yachiyo/studio/planner', request)",
         ],
     )
     _assert_function_contains(
