@@ -355,11 +355,21 @@ class ToolBroker:
         target.write_text(safe_content, encoding="utf-8")
         return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
 
+    def artifact_write_bytes(self, path: str, content: bytes) -> dict[str, Any]:
+        rel = _safe_rel_path(path)
+        target = (self.artifact_root / rel).resolve()
+        if not _is_within(target, self.artifact_root):
+            raise AgentRuntimeError("artifact 路径越界")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(bytes(content or b""))
+        return {"ok": True, "path": rel, "bytes": target.stat().st_size}
+
     def data_analyze(
         self,
         path: str,
         *,
         artifact_path: str = "analysis-report.md",
+        artifact_paths: list[str] | None = None,
         max_rows: int = 1000,
     ) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
@@ -383,6 +393,7 @@ class ToolBroker:
             target,
             display_path=display_path,
             artifact_path=artifact_path or "analysis-report.md",
+            artifact_paths=artifact_paths,
             max_rows=max_rows,
         )
         if not result.get("ok"):
@@ -391,14 +402,50 @@ class ToolBroker:
             str(result.get("artifact_path") or "analysis-report.md"),
             str(result.get("artifact_content") or ""),
         )
-        return {
-            **{key: value for key, value in result.items() if key != "artifact_content"},
-            "artifact": {
+        artifacts = [
+            {
                 "path": artifact["path"],
                 "kind": "markdown",
                 "mime_type": "text/markdown",
                 "size_bytes": artifact["bytes"],
+            }
+        ]
+        for extra in result.get("extra_artifacts") or []:
+            if not isinstance(extra, dict):
+                continue
+            extra_path = str(extra.get("path") or "").strip()
+            if not extra_path:
+                continue
+            if extra.get("content_bytes") is not None:
+                written = self.artifact_write_bytes(extra_path, bytes(extra.get("content_bytes") or b""))
+            else:
+                written = self.artifact_write(extra_path, str(extra.get("content") or ""))
+            artifacts.append(
+                {
+                    "path": written["path"],
+                    "kind": str(extra.get("kind") or "artifact"),
+                    "mime_type": str(extra.get("mime_type") or ""),
+                    "size_bytes": written["bytes"],
+                    **(
+                        {"width": extra.get("width")}
+                        if extra.get("width") is not None
+                        else {}
+                    ),
+                    **(
+                        {"height": extra.get("height")}
+                        if extra.get("height") is not None
+                        else {}
+                    ),
+                }
+            )
+        return {
+            **{
+                key: value
+                for key, value in result.items()
+                if key not in {"artifact_content", "extra_artifacts"}
             },
+            "artifact": artifacts[0],
+            "artifacts": artifacts,
         }
 
     def screen_capture(self, *, reason: str = "") -> dict[str, Any]:

@@ -13,7 +13,11 @@ def data_source_hint(text: str, metadata: Mapping[str, Any] | None = None) -> st
         value = str(metadata.get(key) or "").strip()
         if value:
             return value
-    match = re.search(r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))", text, flags=re.IGNORECASE)
+    match = re.search(
+        r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))",
+        text,
+        flags=re.IGNORECASE,
+    )
     return match.group(1) if match else ""
 
 
@@ -23,7 +27,8 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     suffixes = (
         ((".csv",), "csv"),
         ((".tsv",), "tsv"),
-        ((".xlsx", ".xls"), "xlsx"),
+        ((".xlsx",), "xlsx"),
+        ((".xls",), "xls"),
         ((".json",), "json"),
         ((".parquet",), "parquet"),
         ((".txt",), "text"),
@@ -50,4 +55,3 @@ def data_analysis_artifacts_expected(
     if any(marker in lowered for marker in ("html", "网页报告", "web report")):
         artifacts.append("analysis-report.html")
     return list(dict.fromkeys(artifacts))
-

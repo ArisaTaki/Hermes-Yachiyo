@@ -90,6 +90,50 @@ def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> No
     assert "| East | 10 |" in content
 
 
+def test_tool_broker_call_analyzes_data_file_and_writes_requested_artifacts(tmp_path) -> None:
+    (tmp_path / "sales.csv").write_text(
+        "region,revenue\nEast,10\nWest,20\nEast,30\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {
+            "path": "sales.csv",
+            "artifact_path": "reports/sales.md",
+            "artifact_paths": [
+                "reports/sales.md",
+                "reports/sales-summary.csv",
+                "reports/sales.html",
+                "reports/sales-chart.png",
+            ],
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["artifact"]["path"] == "reports/sales.md"
+    assert result["artifact_paths"] == [
+        "reports/sales.md",
+        "reports/sales-summary.csv",
+        "reports/sales.html",
+        "reports/sales-chart.png",
+    ]
+    assert [artifact["path"] for artifact in result["artifacts"]] == result["artifact_paths"]
+    assert result["artifacts"][1]["mime_type"] == "text/csv"
+    assert result["artifacts"][2]["mime_type"] == "text/html"
+    assert result["artifacts"][3]["mime_type"] == "image/png"
+    assert (tmp_path / "artifacts" / "reports" / "sales-summary.csv").read_text(
+        encoding="utf-8"
+    ).startswith("column,type,count")
+    assert "<!doctype html>" in (tmp_path / "artifacts" / "reports" / "sales.html").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        tmp_path / "artifacts" / "reports" / "sales-chart.png"
+    ).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_tool_broker_call_analyzes_xlsx_file(tmp_path) -> None:
     workbook = tmp_path / "sales.xlsx"
     with zipfile.ZipFile(workbook, "w") as archive:
@@ -136,6 +180,14 @@ def test_data_analyze_schema_rejects_invalid_max_rows() -> None:
         ToolDescriptorRegistry.validate_payload(
             "data.analyze",
             {"path": "sales.csv", "max_rows": "many"},
+        )
+
+
+def test_data_analyze_schema_rejects_invalid_artifact_paths() -> None:
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 artifact_paths"):
+        ToolDescriptorRegistry.validate_payload(
+            "data.analyze",
+            {"path": "sales.csv", "artifact_paths": ["reports/out.md", 42]},
         )
 
 

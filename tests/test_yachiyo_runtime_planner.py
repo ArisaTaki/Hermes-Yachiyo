@@ -75,6 +75,72 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
     }
 
 
+def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> None:
+    decision = RuntimePlanner().decision(
+        "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "xlsx"
+    assert decision.plan.tool_plan.approvals_required == []
+    assert decision.plan.tool_plan.artifacts_expected == [
+        "analysis-report.md",
+        "analysis-chart.png",
+        "analysis-summary.csv",
+        "analysis-report.html",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file"
+    ]
+    step = _step_by_id(decision, "analyze-data-file")
+    assert step.tool_name == "data.analyze"
+    assert step.input_preview == {
+        "path": "metrics.xlsx",
+        "artifact_path": "analysis-report.md",
+        "artifact_paths": [
+            "analysis-report.md",
+            "analysis-chart.png",
+            "analysis-summary.csv",
+            "analysis-report.html",
+        ],
+    }
+
+
+def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 metrics.parquet 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "parquet"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
+    assert _step_by_id(decision, "run-analysis").approval_required is True
+
+
+def test_runtime_planner_keeps_legacy_xls_on_approved_python_path() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 legacy-report.xls 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "xls"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
+    assert _step_by_id(decision, "run-analysis").approval_required is True
+
+
 def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
@@ -1372,6 +1438,32 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
             "input": {
                 "path": "data/sales.csv",
                 "artifact_path": "analysis-report.md",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+
+
+def test_planner_tool_requests_passes_builtin_data_analysis_artifact_paths() -> None:
+    requests = planner_tool_requests(
+        "分析 data/metrics.xlsx 并输出 html 报告、csv 汇总和图表",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/metrics.xlsx",
+                "artifact_path": "analysis-report.md",
+                "artifact_paths": [
+                    "analysis-report.md",
+                    "analysis-chart.png",
+                    "analysis-summary.csv",
+                    "analysis-report.html",
+                ],
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",

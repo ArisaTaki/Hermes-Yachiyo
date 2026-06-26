@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import csv
+import binascii
+import html
 import io
 import json
 import math
 import re
+import struct
+import zlib
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -19,9 +23,12 @@ def analyze_data_file(
     *,
     display_path: str,
     artifact_path: str,
+    artifact_paths: list[str] | None = None,
     max_rows: int = 1000,
 ) -> dict[str, Any]:
     clean_max_rows = max(1, min(int(max_rows or 1000), 10000))
+    clean_artifact_paths = _artifact_paths(artifact_path, artifact_paths)
+    primary_artifact_path = clean_artifact_paths[0]
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
         table = _xlsx_table(path, max_rows=clean_max_rows)
@@ -45,7 +52,8 @@ def analyze_data_file(
         return _plain_text_report(
             path,
             display_path=display_path,
-            artifact_path=artifact_path,
+            artifact_path=primary_artifact_path,
+            artifact_paths=clean_artifact_paths,
             max_rows=clean_max_rows,
         )
 
@@ -53,7 +61,14 @@ def analyze_data_file(
     content = _markdown_report(
         display_path=display_path,
         source_kind=source_kind,
-        artifact_path=artifact_path,
+        artifact_path=primary_artifact_path,
+        table=table,
+        column_summaries=column_summaries,
+    )
+    extra_artifacts = _extra_table_artifacts(
+        clean_artifact_paths[1:],
+        display_path=display_path,
+        source_kind=source_kind,
         table=table,
         column_summaries=column_summaries,
     )
@@ -65,11 +80,13 @@ def analyze_data_file(
         "analyzed_rows": len(table["rows"]),
         "columns": table["columns"],
         "column_summaries": column_summaries,
-        "artifact_path": artifact_path,
+        "artifact_path": primary_artifact_path,
+        "artifact_paths": clean_artifact_paths,
         "artifact_content": content,
+        "extra_artifacts": extra_artifacts,
         "summary": (
             f"Analyzed {display_path}: {table['row_count']} rows, "
-            f"{len(table['columns'])} columns. Report: {artifact_path}."
+            f"{len(table['columns'])} columns. Report: {primary_artifact_path}."
         ),
     }
 
@@ -79,6 +96,7 @@ def _plain_text_report(
     *,
     display_path: str,
     artifact_path: str,
+    artifact_paths: list[str],
     max_rows: int,
 ) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
@@ -112,7 +130,16 @@ def _plain_text_report(
         "columns": [],
         "column_summaries": [],
         "artifact_path": artifact_path,
+        "artifact_paths": artifact_paths,
         "artifact_content": content,
+        "extra_artifacts": _extra_text_artifacts(
+            artifact_paths[1:],
+            display_path=display_path,
+            lines=lines,
+            words=words,
+            text=text,
+            preview=preview,
+        ),
         "summary": f"Analyzed text file {display_path}. Report: {artifact_path}.",
     }
 
@@ -409,3 +436,381 @@ def _stringify(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return str(value)
+
+
+def _artifact_paths(artifact_path: str, artifact_paths: list[str] | None) -> list[str]:
+    candidates = [str(artifact_path or "analysis-report.md").strip() or "analysis-report.md"]
+    candidates.extend(str(path or "").strip() for path in artifact_paths or [])
+    result: list[str] = []
+    for path in candidates:
+        if path and path not in result:
+            result.append(path)
+    return result or ["analysis-report.md"]
+
+
+def _extra_table_artifacts(
+    artifact_paths: list[str],
+    *,
+    display_path: str,
+    source_kind: str,
+    table: dict[str, Any],
+    column_summaries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for path in artifact_paths:
+        suffix = Path(path).suffix.lower()
+        if suffix == ".csv":
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "csv",
+                    "mime_type": "text/csv",
+                    "content": _summary_csv(column_summaries),
+                }
+            )
+        elif suffix == ".html":
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "html",
+                    "mime_type": "text/html",
+                    "content": _html_report(
+                        display_path=display_path,
+                        source_kind=source_kind,
+                        table=table,
+                        column_summaries=column_summaries,
+                    ),
+                }
+            )
+        elif suffix == ".png":
+            content = _chart_png(column_summaries)
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "content_bytes": content,
+                    "size_bytes": len(content),
+                    "width": 640,
+                    "height": 360,
+                }
+            )
+    return artifacts
+
+
+def _extra_text_artifacts(
+    artifact_paths: list[str],
+    *,
+    display_path: str,
+    lines: list[str],
+    words: list[str],
+    text: str,
+    preview: str,
+) -> list[dict[str, Any]]:
+    metrics = [
+        {
+            "name": "lines",
+            "type": "number",
+            "missing": 0,
+            "mean": len(lines),
+            "min": len(lines),
+            "max": len(lines),
+        },
+        {
+            "name": "words",
+            "type": "number",
+            "missing": 0,
+            "mean": len(words),
+            "min": len(words),
+            "max": len(words),
+        },
+        {
+            "name": "characters",
+            "type": "number",
+            "missing": 0,
+            "mean": len(text),
+            "min": len(text),
+            "max": len(text),
+        },
+    ]
+    artifacts: list[dict[str, Any]] = []
+    for path in artifact_paths:
+        suffix = Path(path).suffix.lower()
+        if suffix == ".csv":
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "csv",
+                    "mime_type": "text/csv",
+                    "content": _summary_csv(metrics),
+                }
+            )
+        elif suffix == ".html":
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "html",
+                    "mime_type": "text/html",
+                    "content": _text_html_report(
+                        display_path=display_path,
+                        lines=lines,
+                        words=words,
+                        text=text,
+                        preview=preview,
+                    ),
+                }
+            )
+        elif suffix == ".png":
+            content = _chart_png(metrics)
+            artifacts.append(
+                {
+                    "path": path,
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "content_bytes": content,
+                    "size_bytes": len(content),
+                    "width": 640,
+                    "height": 360,
+                }
+            )
+    return artifacts
+
+
+def _summary_csv(column_summaries: list[dict[str, Any]]) -> str:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        ["column", "type", "count", "missing", "min", "max", "mean", "unique", "top_values"]
+    )
+    for summary in column_summaries:
+        top_values = "; ".join(
+            f"{item.get('value', '')} ({item.get('count', 0)})"
+            for item in summary.get("top_values", [])
+            if isinstance(item, dict)
+        )
+        writer.writerow(
+            [
+                summary.get("name", ""),
+                summary.get("type", ""),
+                summary.get("count", ""),
+                summary.get("missing", ""),
+                summary.get("min", ""),
+                summary.get("max", ""),
+                summary.get("mean", ""),
+                summary.get("unique", ""),
+                top_values,
+            ]
+        )
+    return output.getvalue()
+
+
+def _html_report(
+    *,
+    display_path: str,
+    source_kind: str,
+    table: dict[str, Any],
+    column_summaries: list[dict[str, Any]],
+) -> str:
+    summary_rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(summary.get('name', '')))}</td>"
+        f"<td>{html.escape(str(summary.get('type', '')))}</td>"
+        f"<td>{html.escape(str(summary.get('missing', '')))}</td>"
+        f"<td>{html.escape(_summary_details(summary))}</td>"
+        "</tr>"
+        for summary in column_summaries
+    )
+    preview_rows = "\n".join(
+        "<tr>"
+        + "".join(
+            f"<td>{html.escape(str(row.get(column, '')))}</td>"
+            for column in table["columns"]
+        )
+        + "</tr>"
+        for row in table["rows"][:20]
+    )
+    preview_header = "".join(
+        f"<th>{html.escape(str(column))}</th>" for column in table["columns"]
+    )
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            "<title>Data Analysis Report</title>",
+            _html_style(),
+            "</head>",
+            "<body>",
+            "<main>",
+            "<h1>Data Analysis Report</h1>",
+            "<dl>",
+            f"<dt>Source</dt><dd>{html.escape(display_path)}</dd>",
+            f"<dt>Source kind</dt><dd>{html.escape(source_kind)}</dd>",
+            f"<dt>Rows analyzed</dt><dd>{len(table['rows'])}</dd>",
+            f"<dt>Total rows observed</dt><dd>{table['row_count']}</dd>",
+            f"<dt>Columns</dt><dd>{len(table['columns'])}</dd>",
+            "</dl>",
+            "<h2>Column Summary</h2>",
+            "<table><thead><tr><th>Column</th><th>Type</th><th>Missing</th><th>Summary</th></tr></thead>",
+            f"<tbody>{summary_rows}</tbody></table>",
+            "<h2>Preview</h2>",
+            f"<table><thead><tr>{preview_header}</tr></thead><tbody>{preview_rows}</tbody></table>",
+            "</main>",
+            "</body>",
+            "</html>",
+        ]
+    )
+
+
+def _text_html_report(
+    *,
+    display_path: str,
+    lines: list[str],
+    words: list[str],
+    text: str,
+    preview: str,
+) -> str:
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            "<title>Text Analysis Report</title>",
+            _html_style(),
+            "</head>",
+            "<body>",
+            "<main>",
+            "<h1>Text Analysis Report</h1>",
+            "<dl>",
+            f"<dt>Source</dt><dd>{html.escape(display_path)}</dd>",
+            f"<dt>Lines</dt><dd>{len(lines)}</dd>",
+            f"<dt>Words</dt><dd>{len(words)}</dd>",
+            f"<dt>Characters</dt><dd>{len(text)}</dd>",
+            "</dl>",
+            "<h2>Preview</h2>",
+            f"<pre>{html.escape(preview)}</pre>",
+            "</main>",
+            "</body>",
+            "</html>",
+        ]
+    )
+
+
+def _html_style() -> str:
+    return (
+        "<style>"
+        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;color:#172033;background:#f7f8fb}"
+        "main{max-width:1040px;margin:0 auto;padding:32px}"
+        "h1{font-size:28px;margin:0 0 20px}h2{font-size:18px;margin:28px 0 10px}"
+        "dl{display:grid;grid-template-columns:160px 1fr;gap:8px 16px}"
+        "dt{font-weight:700;color:#4b5875}dd{margin:0}"
+        "table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid #d8deea;padding:8px;text-align:left}"
+        "th{background:#edf1f7}pre{white-space:pre-wrap;background:#fff;border:1px solid #d8deea;padding:16px}"
+        "</style>"
+    )
+
+
+def _summary_details(summary: dict[str, Any]) -> str:
+    if summary.get("type") == "number":
+        return f"min={summary.get('min')}, max={summary.get('max')}, mean={summary.get('mean')}"
+    top = ", ".join(
+        f"{item.get('value', '')} ({item.get('count', 0)})"
+        for item in summary.get("top_values", [])
+        if isinstance(item, dict)
+    )
+    return f"unique={summary.get('unique', 0)}" + (f"; top={top}" if top else "")
+
+
+def _chart_png(column_summaries: list[dict[str, Any]]) -> bytes:
+    width = 640
+    height = 360
+    pixels = bytearray([248, 250, 252] * width * height)
+    _fill_rect(pixels, width, 48, 48, width - 96, height - 96, (255, 255, 255))
+    _stroke_rect(pixels, width, 48, 48, width - 96, height - 96, (211, 218, 230))
+    values = _chart_values(column_summaries)
+    if not values:
+        values = [1.0]
+    max_value = max(abs(value) for value in values) or 1.0
+    plot_x = 82
+    plot_y = 70
+    plot_w = width - 140
+    plot_h = height - 140
+    for index in range(5):
+        y = plot_y + round(plot_h * index / 4)
+        _fill_rect(pixels, width, plot_x, y, plot_w, 1, (230, 235, 244))
+    gap = max(8, round(plot_w / max(1, len(values)) * 0.18))
+    bar_w = max(14, round((plot_w - gap * (len(values) + 1)) / max(1, len(values))))
+    colors = [(20, 184, 166), (59, 130, 246), (245, 158, 11), (168, 85, 247), (16, 185, 129)]
+    for index, value in enumerate(values):
+        ratio = min(1.0, abs(value) / max_value)
+        bar_h = max(3, round(plot_h * ratio))
+        x = plot_x + gap + index * (bar_w + gap)
+        y = plot_y + plot_h - bar_h
+        _fill_rect(pixels, width, x, y, bar_w, bar_h, colors[index % len(colors)])
+    return _png_rgb(width, height, bytes(pixels))
+
+
+def _chart_values(column_summaries: list[dict[str, Any]]) -> list[float]:
+    values: list[float] = []
+    for summary in column_summaries:
+        if summary.get("type") == "number":
+            values.append(float(summary.get("mean") or 0))
+        elif summary.get("top_values"):
+            first = summary["top_values"][0]
+            if isinstance(first, dict):
+                values.append(float(first.get("count") or 0))
+        if len(values) >= 8:
+            break
+    return values
+
+
+def _fill_rect(
+    pixels: bytearray,
+    width: int,
+    x: int,
+    y: int,
+    rect_width: int,
+    rect_height: int,
+    color: tuple[int, int, int],
+) -> None:
+    for row in range(max(0, y), max(0, y) + max(0, rect_height)):
+        if row >= len(pixels) // (width * 3):
+            break
+        for col in range(max(0, x), min(width, x + max(0, rect_width))):
+            offset = (row * width + col) * 3
+            pixels[offset : offset + 3] = bytes(color)
+
+
+def _stroke_rect(
+    pixels: bytearray,
+    width: int,
+    x: int,
+    y: int,
+    rect_width: int,
+    rect_height: int,
+    color: tuple[int, int, int],
+) -> None:
+    _fill_rect(pixels, width, x, y, rect_width, 1, color)
+    _fill_rect(pixels, width, x, y + rect_height - 1, rect_width, 1, color)
+    _fill_rect(pixels, width, x, y, 1, rect_height, color)
+    _fill_rect(pixels, width, x + rect_width - 1, y, 1, rect_height, color)
+
+
+def _png_rgb(width: int, height: int, pixels: bytes) -> bytes:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        checksum = binascii.crc32(kind + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+    rows = []
+    stride = width * 3
+    for row in range(height):
+        rows.append(b"\x00" + pixels[row * stride : (row + 1) * stride])
+    raw = b"".join(rows)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw, level=6))
+        + chunk(b"IEND", b"")
+    )

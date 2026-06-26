@@ -111,9 +111,11 @@ def _artifact_write(broker: Any, payload: dict[str, Any], _approved: bool) -> di
 
 
 def _data_analyze(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    raw_artifact_paths = payload.get("artifact_paths")
     return broker.data_analyze(
         str(payload.get("path") or ""),
         artifact_path=str(payload.get("artifact_path") or "analysis-report.md"),
+        artifact_paths=list(raw_artifact_paths) if isinstance(raw_artifact_paths, list) else None,
         max_rows=int(payload.get("max_rows") or 1000),
     )
 

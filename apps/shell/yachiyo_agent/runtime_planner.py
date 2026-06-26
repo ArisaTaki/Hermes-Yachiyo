@@ -673,7 +673,17 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
         if _can_use_builtin_data_analysis(intent, allowed):
-            artifact_path = _data_analysis_primary_artifact_path(intent)
+            artifact_paths = data_analysis_artifacts_expected(
+                intent.expected_outputs,
+                intent.user_goal,
+            )
+            artifact_path = artifact_paths[0] if artifact_paths else "analysis-report.md"
+            input_preview = {
+                "path": source_hint,
+                "artifact_path": artifact_path,
+            }
+            if len(artifact_paths) > 1:
+                input_preview["artifact_paths"] = artifact_paths
             return [
                 _step(
                     intent,
@@ -681,13 +691,10 @@ class RuntimePlanner:
                     "Analyze data file",
                     "data.analysis",
                     _first_allowed(("data.analyze",), allowed),
-                    input_preview={
-                        "path": source_hint,
-                        "artifact_path": artifact_path,
-                    },
+                    input_preview=input_preview,
                     reason=(
                         "Use the built-in local parser for straightforward CSV, TSV, JSON, XLSX, "
-                        "or text-table summaries before escalating to terminal.run."
+                        "text-table, and standard report artifacts before escalating to terminal.run."
                     ),
                 )
             ]
@@ -1621,6 +1628,13 @@ def _required_capabilities_for_plan(
 def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[str]:
     for step in steps:
         if step.tool_name == "data.analyze":
+            artifact_paths = step.input_preview.get("artifact_paths")
+            if isinstance(artifact_paths, list):
+                return [
+                    str(path or "").strip()
+                    for path in artifact_paths
+                    if str(path or "").strip()
+                ]
             artifact_path = str(step.input_preview.get("artifact_path") or "").strip()
             return [artifact_path or "analysis-report.md"]
     if not any(step.tool_name == "artifact.write" for step in steps):
@@ -1658,27 +1672,7 @@ def _can_use_builtin_data_analysis(
         return False
     if source_kind not in {"csv", "tsv", "json", "xlsx", "text", "text_table"}:
         return False
-    return not _contains_any(
-        intent.user_goal,
-        [
-            "chart",
-            "plot",
-            "visualization",
-            "html",
-            "output csv",
-            "export csv",
-            "图表",
-            "可视化",
-            "输出 csv",
-            "导出 csv",
-            "html 报告",
-        ],
-    )
-
-
-def _data_analysis_primary_artifact_path(intent: TaskIntentSnapshot) -> str:
-    artifacts = data_analysis_artifacts_expected(intent.expected_outputs, intent.user_goal)
-    return artifacts[0] if artifacts else "analysis-report.md"
+    return True
 
 
 def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[dict[str, Any]]:

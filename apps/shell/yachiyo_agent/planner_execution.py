@@ -133,13 +133,23 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         input_preview = getattr(data_analyze_step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         if payload.get("path"):
+            request_input = {
+                "path": str(payload.get("path") or ""),
+                "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
+            }
+            artifact_paths = payload.get("artifact_paths")
+            if isinstance(artifact_paths, list):
+                request_input["artifact_paths"] = [
+                    str(path or "").strip()
+                    for path in artifact_paths
+                    if str(path or "").strip()
+                ]
+            if payload.get("max_rows"):
+                request_input["max_rows"] = int(payload.get("max_rows") or 1000)
             return [
                 _request(
                     "data.analyze",
-                    {
-                        "path": str(payload.get("path") or ""),
-                        "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
-                    },
+                    request_input,
                     planning_reason="planner_builtin_data_analysis",
                 )
             ]

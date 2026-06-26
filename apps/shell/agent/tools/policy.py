@@ -443,6 +443,12 @@ class ToolDescriptor:
         if self.name == "data.analyze":
             if "artifact_path" in payload and not isinstance(payload.get("artifact_path"), str):
                 raise AgentRuntimeError("data.analyze 参数 artifact_path 必须是字符串")
+            if "artifact_paths" in payload:
+                artifact_paths = payload.get("artifact_paths")
+                if not isinstance(artifact_paths, list) or len(artifact_paths) > 8:
+                    raise AgentRuntimeError("data.analyze 参数 artifact_paths 必须是不超过 8 项的字符串列表")
+                if any(not isinstance(path, str) for path in artifact_paths):
+                    raise AgentRuntimeError("data.analyze 参数 artifact_paths 必须是不超过 8 项的字符串列表")
             if "max_rows" in payload:
                 value = payload.get("max_rows")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10000:
@@ -1035,6 +1041,15 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "artifact_path": {
                 "type": "string",
                 "description": "Optional markdown artifact path. Defaults to analysis-report.md.",
+            },
+            "artifact_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 8,
+                "description": (
+                    "Optional ordered artifact paths to generate. Supports .md, .csv, .html, "
+                    "and .png chart outputs. The first path remains the primary artifact."
+                ),
             },
             "max_rows": {
                 "type": "integer",

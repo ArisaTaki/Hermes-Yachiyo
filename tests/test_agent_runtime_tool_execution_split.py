@@ -351,6 +351,60 @@ def test_runtime_tool_call_executor_projects_structured_tool_artifact_events() -
     ) in run_events
 
 
+def test_runtime_tool_call_executor_projects_multiple_structured_artifacts() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(tool_call_events=events, run_events=run_events)
+    artifacts: list[dict[str, Any]] = []
+    markdown_artifact = {
+        "path": "analysis-report.md",
+        "kind": "markdown",
+        "mime_type": "text/markdown",
+        "size_bytes": 120,
+    }
+    chart_artifact = {
+        "path": "analysis-chart.png",
+        "kind": "image",
+        "mime_type": "image/png",
+        "size_bytes": 321,
+        "width": 640,
+        "height": 360,
+    }
+
+    result = executor.execute(
+        {"tool": "data.analyze", "input": {"path": "sales.csv"}},
+        ["data.analyze"],
+        FakeBroker(
+            {
+                "ok": True,
+                "summary": "Analyzed data",
+                "artifact": markdown_artifact,
+                "artifacts": [markdown_artifact, chart_artifact],
+            }
+        ),
+        [],
+        artifacts=artifacts,
+        run_id="run-data",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert artifacts == [
+        {**markdown_artifact, "source_tool": "data.analyze"},
+        {**chart_artifact, "source_tool": "data.analyze"},
+    ]
+    assert (
+        "run-data",
+        "artifact.created",
+        {
+            "run_id": "run-data",
+            "path": "analysis-chart.png",
+            "source_tool": "data.analyze",
+            "artifact": {**chart_artifact, "source_tool": "data.analyze"},
+        },
+    ) in run_events
+
+
 def test_runtime_tool_call_executor_routes_restricted_plugin_tools_through_timeline(
     tmp_path,
 ) -> None:

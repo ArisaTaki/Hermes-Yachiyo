@@ -27,6 +27,29 @@ def _tool_result_artifact(tool_name: str, tool_result: dict[str, Any]) -> dict[s
     return artifact
 
 
+def _tool_result_extra_artifacts(
+    tool_name: str,
+    tool_result: dict[str, Any],
+    primary_artifact: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    raw_artifacts = tool_result.get("artifacts")
+    if not isinstance(raw_artifacts, list):
+        return []
+    primary_path = str((primary_artifact or {}).get("path") or "")
+    artifacts: list[dict[str, Any]] = []
+    for raw_artifact in raw_artifacts:
+        if not isinstance(raw_artifact, dict):
+            continue
+        artifact = {"kind": "tool_artifact", "source_tool": tool_name, **raw_artifact}
+        if not artifact.get("source_tool"):
+            artifact["source_tool"] = tool_name
+        if primary_path and str(artifact.get("path") or "") == primary_path:
+            continue
+        if artifact not in artifacts:
+            artifacts.append(artifact)
+    return artifacts
+
+
 class RuntimeToolCallExecutor:
     """Executes one tool call while preserving policy, budget, and event gates."""
 
@@ -173,9 +196,13 @@ class RuntimeToolCallExecutor:
                     trace_event["payload"],
                 )
         artifact = _tool_result_artifact(tool_name, tool_result)
+        extra_artifacts = _tool_result_extra_artifacts(tool_name, tool_result, artifact)
         if artifact is not None and artifacts is not None:
             if artifact not in artifacts:
                 artifacts.append(artifact)
+        for extra_artifact in extra_artifacts:
+            if artifacts is not None and extra_artifact not in artifacts:
+                artifacts.append(extra_artifact)
         if artifact is not None and run_id:
             self._append_run_event(
                 run_id,
@@ -186,6 +213,17 @@ class RuntimeToolCallExecutor:
                     source_tool=tool_name,
                 ),
             )
+        if run_id:
+            for extra_artifact in extra_artifacts:
+                self._append_run_event(
+                    run_id,
+                    "artifact.created",
+                    self._trace_events.artifact_created_payload(
+                        {"ok": True, "artifact": extra_artifact},
+                        run_id=run_id,
+                        source_tool=tool_name,
+                    ),
+                )
         return tool_result
 
 
