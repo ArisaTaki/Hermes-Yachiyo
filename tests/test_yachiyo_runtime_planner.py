@@ -2087,6 +2087,112 @@ def test_runtime_planner_keeps_plain_current_window_enter_as_hotkey() -> None:
     assert hotkey.input_preview == {"key": "return", "modifiers": []}
 
 
+def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
+    focus = planner_direct_tool_requests(
+        "微信输入 hello 并发送",
+        [
+            "app.focus_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    )
+    open_app = planner_direct_tool_requests(
+        "打开微信发送 hello",
+        [
+            "app.open_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert focus == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "WeChat", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert open_app == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "WeChat", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_runtime_planner_routes_paste_then_send() -> None:
+    foreground = planner_direct_tool_requests(
+        "当前输入框粘贴并发送",
+        [
+            "desktop.safe_shortcut",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.submit_foreground",
+        ],
+    )
+    open_app = planner_direct_tool_requests(
+        "打开微信粘贴后发送",
+        [
+            "desktop.safe_shortcut",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert foreground == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert open_app == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 搜索框输入 hello 并回车",

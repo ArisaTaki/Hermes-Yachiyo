@@ -184,6 +184,10 @@ class TaskIntentRouter:
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
         safe_click = safe_click_hint(text)
+        foreground_compose_text = _foreground_compose_text_hint(text)
+        foreground_paste = _foreground_paste_hint(text)
+        if foreground_paste and safe_shortcut is None:
+            safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
         if _browser_type_text_hint(text) or _browser_click_hint(text):
@@ -259,7 +263,7 @@ class TaskIntentRouter:
                 "回车发送",
             ],
         )
-        if score <= 0 and foreground_submit_action:
+        if score <= 0 and (foreground_submit_action or foreground_compose_text or foreground_paste):
             score = 0.18
         if score <= 0 and app_scoped_desktop_operation:
             score = 0.18
@@ -277,6 +281,8 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not foreground_compose_text
+            and not foreground_paste
             and desktop_discovery is None
             and not foreground_submit_action
         ):
@@ -299,6 +305,7 @@ class TaskIntentRouter:
             or (screen_capture or {}).get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
+            or _foreground_compose_app_name_hint(text)
             or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or _app_name_hint(text)
             or ""
@@ -313,7 +320,9 @@ class TaskIntentRouter:
                 safe_shortcut = None
                 safe_shortcut_sequence = []
                 safe_shortcut_missing_required_scope = True
-        if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint):
+        if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint) and not (
+            foreground_paste and _foreground_compose_app_name_hint(text)
+        ):
             app_management = None
             app_name_hint = ""
         if foreground_app_windows_shortcut:
@@ -348,6 +357,8 @@ class TaskIntentRouter:
             and safe_scroll is None
             and safe_click is None
             and desktop_discovery is None
+            and not foreground_compose_text
+            and not foreground_paste
             and not app_search
             and not spotlight_search_query
             and not foreground_submit_action
@@ -416,6 +427,10 @@ class TaskIntentRouter:
             inputs["safe_click_hint"] = safe_click
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
+        if foreground_compose_text:
+            inputs["foreground_compose_text_hint"] = foreground_compose_text
+        if foreground_paste:
+            inputs["foreground_paste_hint"] = {"action": "paste"}
         if foreground_submit_action:
             inputs["foreground_submit_action_hint"] = foreground_submit_action
         risk_level = (
@@ -1067,6 +1082,9 @@ class RuntimePlanner:
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         safe_click = safe_click_hint(intent.user_goal)
+        foreground_paste = _foreground_paste_hint(intent.user_goal)
+        if foreground_paste and safe_shortcut is None:
+            safe_shortcut = {"action": "paste"}
         foreground_app_windows_shortcut = (
             str((safe_shortcut or {}).get("action") or "").strip() == "application_windows"
         )
@@ -1098,6 +1116,7 @@ class RuntimePlanner:
             or app_search.get("app_name")
             or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             or (app_management or {}).get("app_name")
+            or _foreground_compose_app_name_hint(intent.user_goal)
             or ""
         ).strip()
         if _safe_shortcut_requires_finder_scope_for_text(intent.user_goal, safe_shortcut):
@@ -1108,7 +1127,9 @@ class RuntimePlanner:
             else:
                 safe_shortcut = None
                 safe_shortcut_sequence = []
-        if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name):
+        if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name) and not (
+            foreground_paste and _foreground_compose_app_name_hint(intent.user_goal)
+        ):
             app_management = None
             app_name = ""
         if foreground_app_windows_shortcut:
@@ -1129,13 +1150,22 @@ class RuntimePlanner:
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
-        safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
+        foreground_compose_text = str(
+            intent.inputs.get("foreground_compose_text_hint")
+            or _foreground_compose_text_hint(intent.user_goal)
+            or ""
+        ).strip()
+        safe_type_text = "" if type_target else (safe_type_text_hint(intent.user_goal) or foreground_compose_text)
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
             or _foreground_submit_action_hint(intent.user_goal)
             or ""
         ).strip()
-        if app_name and foreground_submit_action:
+        if (
+            app_name
+            and (foreground_submit_action or foreground_compose_text or foreground_paste)
+            and not _explicit_app_open_request(intent.user_goal)
+        ):
             mode = "focus"
         if foreground_submit_action:
             click_target = None
@@ -1500,7 +1530,7 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
-        if foreground_submit_action and not any(
+        pre_submit_operation = any(
             item
             for item in (
                 app_search,
@@ -1514,7 +1544,8 @@ class RuntimePlanner:
                 safe_click,
             )
             if item
-        ):
+        )
+        if foreground_submit_action and not pre_submit_operation:
             steps.append(
                 _step(
                     intent,
@@ -1676,7 +1707,7 @@ class RuntimePlanner:
             or safe_key
             or safe_scroll
             or safe_click
-        ) and not foreground_submit_action:
+        ) and (not foreground_submit_action or pre_submit_operation):
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
@@ -3573,6 +3604,158 @@ def _foreground_submit_action_hint(text: str) -> str:
     return ""
 
 
+def _foreground_compose_text_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
+        return ""
+    if _looks_like_recipient_message_request(value):
+        return ""
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写)\s*(?P<text>[^。！？!?，,]+?)"
+        r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)?$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:发送|发出|发)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:type|enter|write|send)\s+(?P<text>[^.!?]+?)(?:\s+(?:and|then)\s+send)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.groupdict().get("app") or ""
+        if _looks_like_too_short_cjk_app_label(raw_app):
+            continue
+        if re.search(r"(?:回车|return|enter)", raw_app, flags=re.IGNORECASE):
+            continue
+        app = _canonical_app_name_hint(raw_app)
+        if _is_generic_foreground_app_label(raw_app) or _is_generic_foreground_app_label(app):
+            continue
+        typed_text = _clean_foreground_compose_text(match.group("text"))
+        if not typed_text:
+            continue
+        if not app and not _looks_like_foreground_text_scope(value):
+            continue
+        if not app and not re.search(r"(?:输入|键入|填写|写入|type|enter|write)", value, flags=re.IGNORECASE):
+            continue
+        if typed_text in {"框", "栏", "送"}:
+            continue
+        if typed_text:
+            return typed_text
+    return ""
+
+
+def _foreground_paste_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
+        return False
+    return bool(
+        _contains_any(value, ("发送", "提交", "send", "submit"))
+        or _looks_like_foreground_submit_scope(value, value.lower())
+    )
+
+
+def _foreground_compose_app_name_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写|发送|发出|发|粘贴|paste)",
+        r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:type|enter|write|send|paste)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = match.group("app")
+        if _looks_like_too_short_cjk_app_label(raw_app):
+            continue
+        app = _canonical_app_name_hint(raw_app)
+        if app and not _is_generic_foreground_app_label(app):
+            return app
+    return ""
+
+
+def _clean_foreground_compose_text(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
+    text = re.sub(r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"[。！？!?]+$", "", text).strip()
+    return text
+
+
+def _looks_like_foreground_text_scope(value: str) -> bool:
+    return _contains_any(
+        value,
+        (
+            "当前输入框",
+            "当前文本框",
+            "前台输入框",
+            "前台文本框",
+            "current input",
+            "current field",
+            "foreground input",
+        ),
+    )
+
+
+def _is_generic_foreground_app_label(value: str) -> bool:
+    clean = str(value or "").strip().lower()
+    normalized = re.sub(r"[\s._·-]+", "", clean)
+    if any(
+        term in normalized
+        for term in (
+            "当前窗口",
+            "前台窗口",
+            "当前应用",
+            "前台应用",
+            "当前输入框",
+            "前台输入框",
+            "currentwindow",
+            "foregroundwindow",
+            "currentapp",
+            "foregroundapp",
+        )
+    ):
+        return True
+    return normalized in {
+        "当前",
+        "在当前",
+        "前台",
+        "在前台",
+        "当前输入框",
+        "前台输入框",
+        "当前文本框",
+        "前台文本框",
+        "当前消息",
+        "前台消息",
+        "current",
+        "foreground",
+        "currentinput",
+        "foregroundinput",
+        "currentfield",
+        "foregroundfield",
+        "currentmessage",
+        "foregroundmessage",
+    }
+
+
+def _looks_like_too_short_cjk_app_label(value: str) -> bool:
+    clean = str(value or "").strip()
+    return bool(re.fullmatch(r"[\u4e00-\u9fff]", clean))
+
+
+def _looks_like_recipient_message_request(value: str) -> bool:
+    return bool(
+        re.search(r"(?:发消息|发送|发)\s*(?:给|到)", value, flags=re.IGNORECASE)
+        or re.search(r"\b(?:send|message)\s+.+?\s+(?:to|for)\s+", value, flags=re.IGNORECASE)
+    )
+
+
+def _explicit_app_open_request(text: str) -> bool:
+    return _contains_any(text, ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "))
+
+
 def _looks_like_foreground_submit_scope(value: str, lowered: str) -> bool:
     return bool(
         _contains_any(
@@ -3894,7 +4077,7 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _clean_app_name_hint(groups.get("app") or "")
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
         recipient = _clean_communication_hint_text(groups.get("recipient") or "")
         body = _clean_communication_hint_text(groups.get("body") or "")
         if not app_name or not recipient or not body:
@@ -3931,7 +4114,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _clean_app_name_hint(groups.get("app") or "")
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
         recipient = _clean_communication_hint_text(groups.get("recipient") or "")
         if (not app_name or not recipient) and groups.get("target"):
             app_name, recipient = _split_communication_surface_and_recipient(
@@ -3973,12 +4156,12 @@ def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
         if lowered == surface.lower():
             return "", ""
         if lowered.startswith(surface.lower() + " "):
-            return surface, value[len(surface) :].strip()
+            return _canonical_app_name_hint(surface), value[len(surface) :].strip()
         if value.startswith(surface) and len(value) > len(surface):
-            return surface, value[len(surface) :].strip()
+            return _canonical_app_name_hint(surface), value[len(surface) :].strip()
     parts = value.split(None, 1)
     if len(parts) == 2:
-        return _clean_app_name_hint(parts[0]), _clean_communication_hint_text(parts[1])
+        return _canonical_app_name_hint(parts[0]), _clean_communication_hint_text(parts[1])
     return "", ""
 
 
