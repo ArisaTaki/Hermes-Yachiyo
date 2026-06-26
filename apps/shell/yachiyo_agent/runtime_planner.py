@@ -56,6 +56,7 @@ class TaskIntentRouter:
             self._web_research_intent(text, metadata),
             self._report_generation_intent(text, metadata),
             self._code_task_intent(text, metadata),
+            self._file_organization_intent(text, metadata),
             self._workflow_intent(text, metadata),
             self._multi_agent_intent(text, metadata),
             self._communication_intent(text, metadata),
@@ -286,6 +287,46 @@ class TaskIntentRouter:
             risk_level="high" if _contains_any(text, ["改", "写", "fix", "change", "modify"]) else "medium",
         )
 
+    def _file_organization_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        score = _score_terms(
+            text,
+            [
+                "organize files",
+                "sort files",
+                "move files",
+                "rename files",
+                "archive files",
+                "clean up files",
+                "delete files",
+                "整理文件",
+                "整理文件夹",
+                "文件整理",
+                "归档",
+                "重命名",
+                "移动文件",
+                "分类文件",
+                "清理文件",
+                "删除文件",
+            ],
+        )
+        if score <= 0:
+            return _empty_intent("file_organization", text)
+        destructive = _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"])
+        return TaskIntentSnapshot(
+            intent_id=_stable_id("intent", "file_organization", text),
+            kind="file_organization",
+            title="File Organization",
+            user_goal=text,
+            confidence=min(0.88, 0.42 + score),
+            description="Inspect files, produce a file organization plan, and apply explicit changes only after approval.",
+            inputs={"location_hint": _file_location_hint(text), "operation_hint": _file_operation_hint(text)},
+            expected_outputs=["file_plan", "report"],
+            required_capabilities=["file.organization"],
+            preferred_capabilities=["file.workspace_read", "artifact.write", "desktop.app_control"],
+            missing_inputs=[] if _file_location_hint(text) else ["file_location"],
+            risk_level="high" if destructive else "medium",
+        )
+
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         if score <= 0 and metadata.get("runnable_kind") != "workflow":
@@ -456,6 +497,8 @@ class RuntimePlanner:
             return self._report_steps(intent, allowed)
         if intent.kind == "code_task":
             return self._code_steps(intent, allowed)
+        if intent.kind == "file_organization":
+            return self._file_organization_steps(intent, allowed)
         if intent.kind == "schedule":
             return self._schedule_steps(intent, allowed)
         if intent.kind == "communication":
@@ -701,6 +744,45 @@ class RuntimePlanner:
             ),
         ]
 
+    def _file_organization_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        allowed: set[str] | None,
+    ) -> list[ToolPlanStepSnapshot]:
+        location_hint = str(intent.inputs.get("location_hint") or "").strip()
+        return [
+            _step(
+                intent,
+                "inspect-file-scope",
+                "Inspect file scope",
+                "file.organization",
+                _first_allowed(("workspace.list", "desktop.reveal_path", "desktop.open_path"), allowed),
+                input_preview={"path": location_hint} if location_hint else {},
+                reason="List or reveal the requested file scope before planning changes.",
+            ),
+            _step(
+                intent,
+                "write-file-organization-plan",
+                "Write file organization plan",
+                "artifact.write",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview={"path": "file-organization-plan.md"},
+                depends_on=["inspect-file-scope"],
+                reason="Create a reviewable plan before moving, renaming, archiving, or deleting files.",
+            ),
+            _step(
+                intent,
+                "apply-file-organization",
+                "Apply file organization",
+                "file.organization",
+                _first_allowed(("terminal.run",), allowed),
+                risk_level="high",
+                approval_required=True,
+                depends_on=["write-file-organization-plan"],
+                reason="Apply file changes only through an approval-gated execution step.",
+            ),
+        ]
+
     def _schedule_steps(
         self,
         intent: TaskIntentSnapshot,
@@ -910,6 +992,8 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
         return ["research-summary.md"]
     if intent.kind == "code_task":
         return ["code-task-summary.md"]
+    if intent.kind == "file_organization":
+        return ["file-organization-plan.md"]
     return ["report.md"]
 
 
@@ -1000,7 +1084,7 @@ _TASK_DELIVERABLE_TERMS = (
     "代码",
 )
 
-_TASK_INTENT_KINDS = {"data_analysis", "web_research", "report_generation", "code_task"}
+_TASK_INTENT_KINDS = {"data_analysis", "web_research", "report_generation", "code_task", "file_organization"}
 
 _UI_CONTROL_TERMS = (
     "search box",
@@ -1071,6 +1155,41 @@ def _contains_any(text: str, terms: Iterable[str]) -> bool:
 def _data_source_hint(text: str) -> str:
     match = re.search(r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))", text, flags=re.IGNORECASE)
     return match.group(1) if match else ""
+
+
+def _file_location_hint(text: str) -> str:
+    path_match = re.search(r"((?:~|/)[^\s，,。]+)", text)
+    if path_match:
+        return path_match.group(1).rstrip("。.,")
+    lowered = text.lower()
+    known_locations = (
+        ("downloads", "Downloads"),
+        ("download folder", "Downloads"),
+        ("下载文件夹", "Downloads"),
+        ("下载目录", "Downloads"),
+        ("desktop", "Desktop"),
+        ("桌面", "Desktop"),
+        ("documents", "Documents"),
+        ("文档", "Documents"),
+    )
+    for marker, location in known_locations:
+        if marker in lowered:
+            return location
+    return ""
+
+
+def _file_operation_hint(text: str) -> str:
+    if _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"]):
+        return "delete"
+    if _contains_any(text, ["rename", "重命名", "改名"]):
+        return "rename"
+    if _contains_any(text, ["archive", "归档", "压缩"]):
+        return "archive"
+    if _contains_any(text, ["move", "移动"]):
+        return "move"
+    if _contains_any(text, ["sort", "organize", "整理", "分类"]):
+        return "organize"
+    return "inspect"
 
 
 def _url_hint(text: str) -> str:

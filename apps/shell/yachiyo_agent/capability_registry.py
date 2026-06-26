@@ -126,6 +126,18 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         output_kinds=("text", "table", "source_file"),
     ),
     CapabilityDefinition(
+        capability_id="file.organization",
+        title="Organize Files",
+        category="file",
+        description="Plan and apply explicit file organization, renaming, moving, or cleanup work.",
+        tools=("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
+        risk_level="high",
+        approval_required=True,
+        discovery_actions=("list_files", "inspect_paths"),
+        execution_actions=("move_files", "rename_files", "archive_files", "cleanup_files"),
+        output_kinds=("file_plan", "desktop_state", "report"),
+    ),
+    CapabilityDefinition(
         capability_id="terminal.execution",
         title="Run Local Commands",
         category="terminal",
@@ -272,6 +284,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "communication.compose": ("communication.", "mail.", "messages.", "email."),
     "clipboard.read_write": ("clipboard.",),
     "terminal.execution": ("terminal.",),
+    "file.organization": ("file.",),
     "workflow.orchestration": ("workflow.",),
     "group.multi_agent": ("group.",),
 }
@@ -279,6 +292,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "data.analysis": ("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
+    "file.organization": ("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
     "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
     "clipboard.read_write": ("clipboard.read", "clipboard.write", "desktop.safe_shortcut"),
 }

@@ -106,6 +106,45 @@ def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> N
     assert _step_by_id(decision, "inspect-data-source").tool_name == "workspace.read"
 
 
+def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
+    decision = RuntimePlanner().decision(
+        "整理 Downloads 里的文件并按类型归档",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "archive",
+    }
+    assert decision.plan.route_to_studio is True
+    assert decision.plan.tool_plan.artifacts_expected == ["file-organization-plan.md"]
+    assert decision.plan.tool_plan.approvals_required == ["apply-file-organization"]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+        "apply-file-organization",
+    ]
+    assert _step_by_id(decision, "inspect-file-scope").tool_name == "workspace.list"
+    assert _step_by_id(decision, "write-file-organization-plan").tool_name == "artifact.write"
+    apply_step = _step_by_id(decision, "apply-file-organization")
+    assert apply_step.tool_name == "terminal.run"
+    assert apply_step.risk_level == "high"
+    assert apply_step.approval_required is True
+
+
+def test_runtime_planner_requires_file_location_for_file_organization() -> None:
+    decision = RuntimePlanner().decision(
+        "整理文件并删除重复项",
+        allowed_tools=["workspace.list", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.missing_inputs == ["file_location"]
+    assert decision.selected_intent.risk_level == "high"
+    assert _step_by_id(decision, "apply-file-organization").status == "unavailable"
+
+
 def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() -> None:
     decision = RuntimePlanner().decision(
         "打开浏览器调研 OpenAI 最新新闻并总结报告",
