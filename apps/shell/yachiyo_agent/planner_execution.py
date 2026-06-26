@@ -16,6 +16,7 @@ from .desktop_plan_hints import (
     type_into_ui_hint,
 )
 from .runtime_planner import RuntimePlanner
+from .schedule_plan_hints import schedule_tool_preview
 
 
 def planner_tool_requests(
@@ -36,6 +37,8 @@ def planner_tool_requests(
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
         return _web_tool_requests(decision, allowed)
+    if decision.selected_intent.kind == "schedule":
+        return _schedule_tool_requests(decision.selected_intent.user_goal, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
 
@@ -212,6 +215,19 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if _web_request_needs_model_followup(decision.selected_intent.user_goal):
         request["continue_to_model"] = True
     return [request]
+
+
+def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, Any]]:
+    tool_name, payload = schedule_tool_preview(prompt, allowed)
+    if not tool_name or not payload:
+        return []
+    return [
+        _request(
+            tool_name,
+            payload,
+            planning_reason="planner_fallback_schedule",
+        )
+    ]
 
 
 def _looks_like_current_page_request(prompt: str) -> bool:

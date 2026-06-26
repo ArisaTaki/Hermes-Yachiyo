@@ -232,6 +232,34 @@ def test_runtime_planner_uses_browser_screenshot_tool_from_catalog() -> None:
     assert "browser.open_url_and_screenshot" in browser_capability.available_tools
 
 
+def test_runtime_planner_routes_explicit_reminder_to_schedule_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "创建提醒事项：买牛奶",
+        allowed_tools=["reminders.create"],
+    )
+
+    assert decision.selected_intent.kind == "schedule"
+    step = _step_by_id(decision, "create-schedule-item")
+    assert step.tool_name == "reminders.create"
+    assert step.input_preview == {"title": "买牛奶"}
+    assert step.approval_required is True
+
+
+def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> None:
+    decision = RuntimePlanner().decision(
+        "创建日历事件：项目会 2026-06-27T15:00",
+        allowed_tools=["calendar.create_event"],
+    )
+
+    assert decision.selected_intent.kind == "schedule"
+    step = _step_by_id(decision, "create-schedule-item")
+    assert step.tool_name == "calendar.create_event"
+    assert step.input_preview == {
+        "title": "项目会",
+        "start_at": "2026-06-27T15:00",
+    }
+
+
 def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",
@@ -362,6 +390,23 @@ def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> No
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
+    requests = planner_tool_requests(
+        "创建提醒事项：买牛奶",
+        allowed_tools=["reminders.create"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
         }
     ]
 

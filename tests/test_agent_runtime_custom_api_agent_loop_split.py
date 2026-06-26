@@ -13308,6 +13308,90 @@ def test_custom_api_agent_loop_preserves_runtime_planner_source_on_direct_comple
     }
 
 
+def test_custom_api_agent_loop_preplans_runtime_reminder_without_model() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        request = tool_requests[0]
+        result = {
+            "ok": True,
+            "action": "reminders.create",
+            "data": {"title": request["input"]["title"]},
+        }
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                "reminders.create",
+                input_preview=request["input"],
+                result=result,
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["reminders.create"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for explicit reminders.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct runtime planner reminder should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "创建提醒事项：买牛奶",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-reminder",
+    )
+
+    assert str(result) == "已创建提醒事项：买牛奶。"
+    assert timeline[0] == {
+        "event": "agent.desktop.intent_planned",
+        "detail": "reminders.create",
+        "tool": "reminders.create",
+        "status": "planned",
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule",
+        "input_preview": {"title": "买牛奶"},
+    }
+    assert timeline[-1]["event"] == "agent.desktop.intent_completed"
+    assert timeline[-1]["source"] == "runtime_planner"
+    assert timeline[-1]["planning_reason"] == "planner_fallback_schedule"
+
+
 def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_missing() -> None:
     budget = FakeBudget()
     order: list[str] = []

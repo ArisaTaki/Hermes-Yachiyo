@@ -31,6 +31,7 @@ from .desktop_plan_hints import (
     safe_type_text_hint,
     type_into_ui_hint,
 )
+from .schedule_plan_hints import schedule_tool_preview
 
 
 class TaskIntentRouter:
@@ -332,7 +333,7 @@ class TaskIntentRouter:
         )
 
     def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日程", "会议", "安排"])
+        score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
         if score <= 0:
             return _empty_intent("schedule", text)
         return TaskIntentSnapshot(
@@ -676,13 +677,16 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        tool_name, input_preview = schedule_tool_preview(intent.user_goal, allowed)
         return [
             _step(
                 intent,
                 "create-schedule-item",
                 "Create schedule item",
                 "schedule.reminder",
-                _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                tool_name
+                or _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                input_preview=input_preview,
                 risk_level="medium",
                 approval_required=True,
                 reason="Create only explicit user-requested reminders, calendar events, or future tasks.",
