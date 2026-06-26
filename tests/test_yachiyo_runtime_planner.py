@@ -2022,6 +2022,71 @@ def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None
     ]
 
 
+def test_runtime_planner_routes_pure_foreground_submit_to_approval_gate() -> None:
+    for prompt, action in (
+        ("按回车提交", "submit"),
+        ("当前输入框发送", "send"),
+        ("前台发送", "send"),
+        ("发送前台内容", "send"),
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.running_apps",
+                "desktop.submit_foreground",
+                "desktop.active_window",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["operation_hint"] == "submit_foreground"
+        submit = _step_by_id(decision, "submit-foreground-ui")
+        assert submit.tool_name == "desktop.submit_foreground"
+        assert submit.input_preview == {"action": action}
+        assert submit.risk_level == "high"
+        assert submit.approval_required is True
+        assert submit.depends_on == ["discover-desktop-state"]
+
+
+def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
+    decision = RuntimePlanner().decision(
+        "微信按回车发送",
+        allowed_tools=[
+            "desktop.running_apps",
+            "app.focus",
+            "desktop.submit_foreground",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "WeChat"
+    focus = _step_by_id(decision, "open-or-focus-app")
+    assert focus.tool_name == "app.focus"
+    assert focus.input_preview == {"app_name": "WeChat"}
+    submit = _step_by_id(decision, "submit-foreground-ui")
+    assert submit.tool_name == "desktop.submit_foreground"
+    assert submit.input_preview == {"action": "send"}
+    assert submit.depends_on == ["open-or-focus-app"]
+
+
+def test_runtime_planner_keeps_plain_current_window_enter_as_hotkey() -> None:
+    decision = RuntimePlanner().decision(
+        "当前窗口按回车",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.hotkey",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert "foreground_submit_action_hint" not in decision.selected_intent.inputs
+    hotkey = _step_by_id(decision, "operate-foreground-ui")
+    assert hotkey.tool_name == "desktop.hotkey"
+    assert hotkey.input_preview == {"key": "return", "modifiers": []}
+
+
 def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 搜索框输入 hello 并回车",

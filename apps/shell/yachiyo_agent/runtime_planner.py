@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus
 
+from apps.shell.agent.runtime.app_aliases import APP_ALIASES as _APP_ALIASES
+from apps.shell.agent.runtime.app_aliases import compact_app_alias as _compact_app_alias
 from apps.shell.agent.runtime.web_destinations import known_web_destination_url_hint
 
 from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
@@ -186,6 +188,7 @@ class TaskIntentRouter:
         context_source = context_source_hint(text)
         if _browser_type_text_hint(text) or _browser_click_hint(text):
             return _empty_intent("desktop_operation", text)
+        foreground_submit_action = _foreground_submit_action_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
@@ -250,8 +253,14 @@ class TaskIntentRouter:
                 "scroll",
                 "page down",
                 "page up",
+                "发送",
+                "提交",
+                "回车提交",
+                "回车发送",
             ],
         )
+        if score <= 0 and foreground_submit_action:
+            score = 0.18
         if score <= 0 and app_scoped_desktop_operation:
             score = 0.18
         if score <= 0 and spotlight_search_query:
@@ -269,6 +278,7 @@ class TaskIntentRouter:
             and safe_scroll is None
             and safe_click is None
             and desktop_discovery is None
+            and not foreground_submit_action
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -289,6 +299,7 @@ class TaskIntentRouter:
             or (screen_capture or {}).get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
+            or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or _app_name_hint(text)
             or ""
         ).strip()
@@ -317,7 +328,11 @@ class TaskIntentRouter:
         app_search = _app_search_hint(text, app_name_hint)
         if not app_name_hint and app_search.get("app_name"):
             app_name_hint = str(app_search.get("app_name") or "").strip()
-        operation_hint = str((desktop_discovery or {}).get("action") or "") or _desktop_operation_hint(text)
+        operation_hint = (
+            str((desktop_discovery or {}).get("action") or "")
+            or ("submit_foreground" if foreground_submit_action else "")
+            or _desktop_operation_hint(text)
+        )
         if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
             operation_hint = ""
         if _safe_shortcut_requires_finder_scope_for_text(text, safe_shortcut) and operation_hint == "safe_key":
@@ -335,6 +350,7 @@ class TaskIntentRouter:
             and desktop_discovery is None
             and not app_search
             and not spotlight_search_query
+            and not foreground_submit_action
         ):
             return _empty_intent("desktop_operation", text)
         if (
@@ -400,6 +416,8 @@ class TaskIntentRouter:
             inputs["safe_click_hint"] = safe_click
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
+        if foreground_submit_action:
+            inputs["foreground_submit_action_hint"] = foreground_submit_action
         risk_level = (
             "medium"
             if operation_hint
@@ -421,6 +439,8 @@ class TaskIntentRouter:
             else "low"
         )
         if operation_hint in {"quit_app", "close_window"}:
+            risk_level = "high"
+        if operation_hint == "submit_foreground":
             risk_level = "high"
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "desktop_operation", text),
@@ -743,6 +763,8 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _foreground_submit_action_hint(text):
+            return _empty_intent("communication", text)
         source = context_source_hint(text)
         direct_hint = (
             _direct_context_communication_hint(text, source)
@@ -1108,6 +1130,15 @@ class RuntimePlanner:
         hotkey = hotkey_hint(intent.user_goal)
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
+        foreground_submit_action = str(
+            intent.inputs.get("foreground_submit_action_hint")
+            or _foreground_submit_action_hint(intent.user_goal)
+            or ""
+        ).strip()
+        if app_name and foreground_submit_action:
+            mode = "focus"
+        if foreground_submit_action:
+            click_target = None
         submit_action = submit_action_hint(intent.user_goal)
         if click_target and not any((type_target, safe_type_text, app_search)):
             submit_action = ""
@@ -1469,6 +1500,35 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
+        if foreground_submit_action and not any(
+            item
+            for item in (
+                app_search,
+                click_target,
+                type_target,
+                safe_type_text,
+                hotkey,
+                primary_safe_shortcut,
+                safe_key,
+                safe_scroll,
+                safe_click,
+            )
+            if item
+        ):
+            steps.append(
+                _step(
+                    intent,
+                    "submit-foreground-ui",
+                    "Submit foreground UI",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.submit_foreground",), allowed),
+                    input_preview={"action": foreground_submit_action},
+                    risk_level="high",
+                    approval_required=True,
+                    depends_on=["open-or-focus-app"] if app_name else ["discover-desktop-state"],
+                    reason="Submit the current foreground input only through the approval-gated submit tool.",
+                )
+            )
         if app_search:
             search_query = str(app_search.get("query") or "").strip()
             search_target = str(app_search.get("target") or "").strip() or "Search"
@@ -1616,7 +1676,7 @@ class RuntimePlanner:
             or safe_key
             or safe_scroll
             or safe_click
-        ):
+        ) and not foreground_submit_action:
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
@@ -3493,6 +3553,72 @@ def _safe_shortcut_requires_finder_scope_for_text(
 
 def _is_finder_app_name(value: str) -> bool:
     return str(value or "").strip().lower() in {"finder", "访达"}
+
+
+def _foreground_submit_action_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if _contains_any(value, ("发送", "send")) and _looks_like_foreground_submit_scope(value, lowered):
+        return "send"
+    if _contains_any(value, ("提交", "submit")) and _looks_like_foreground_submit_scope(value, lowered):
+        return "submit"
+    if re.search(r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:发送|send)", value, flags=re.IGNORECASE):
+        return "send"
+    if re.search(r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:提交|submit)", value, flags=re.IGNORECASE):
+        return "submit"
+    if re.search(r"(?:发送|send).{0,8}(?:回车|return|enter)", value, flags=re.IGNORECASE):
+        return "send"
+    if re.search(r"(?:提交|submit).{0,8}(?:回车|return|enter)", value, flags=re.IGNORECASE):
+        return "submit"
+    return ""
+
+
+def _looks_like_foreground_submit_scope(value: str, lowered: str) -> bool:
+    return bool(
+        _contains_any(
+            value,
+            (
+                "前台",
+                "当前输入框",
+                "当前文本框",
+                "当前消息",
+                "当前内容",
+                "foreground",
+                "current input",
+                "current field",
+                "current text box",
+                "current message",
+            ),
+        )
+        or re.search(r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter)", lowered, flags=re.IGNORECASE)
+    )
+
+
+def _foreground_submit_app_name_hint(text: str, action: str) -> str:
+    if not action:
+        return ""
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<app>[\w .·-]{1,40}?)"
+        r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:发送|提交|send|submit)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<app>[\w .·-]{1,40}?)"
+        r"(?:发送|提交|send|submit).{0,8}(?:回车|return|enter)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app = _canonical_app_name_hint(match.group("app"))
+        if app:
+            return app
+    return ""
+
+
+def _canonical_app_name_hint(value: str) -> str:
+    app = _clean_app_name_hint(value)
+    if not app:
+        return ""
+    return _APP_ALIASES.get(_compact_app_alias(app), app)
 
 
 def _desktop_operation_hint(text: str) -> str:
