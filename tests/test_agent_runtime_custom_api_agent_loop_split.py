@@ -757,6 +757,31 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.open",
         "input": {"app_name": "Activity Monitor"},
     }
+    assert daily_desktop_intent_tool_request("打开磁盘工具", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Disk Utility"},
+    }
+    assert daily_desktop_intent_tool_request("打开控制台", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Console"},
+    }
+    assert daily_desktop_intent_tool_request("打开字体册", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Font Book"},
+    }
+    assert daily_desktop_intent_tool_request("打开图片查看器", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Preview"},
+    }
+    assert daily_desktop_intent_tool_request("打开当前网页的开发者工具", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "open_devtools"},
+    }
     assert daily_desktop_intent_tool_request("把Chrome打开然后新建标签页", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "app.open_and_safe_shortcut",

@@ -79,6 +79,10 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         ("把日历启动起来", "Calendar"),
         ("把备忘录开起来", "Notes"),
         ("启动Chrome起来", "Google Chrome"),
+        ("打开磁盘工具", "Disk Utility"),
+        ("打开控制台", "Console"),
+        ("打开字体册", "Font Book"),
+        ("打开图片查看器", "Preview"),
         ("Could you launch Calendar for me?", "Calendar"),
         ("Would you open Notes please?", "Notes"),
     )
@@ -3838,6 +3842,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("把当前网页加入书签", "desktop.safe_shortcut", {"action": "bookmark_page"}),
         ("打开浏览器历史记录", "desktop.safe_shortcut", {"action": "show_history"}),
         ("打开开发者工具", "desktop.safe_shortcut", {"action": "open_devtools"}),
+        ("打开当前网页的开发者工具", "desktop.safe_shortcut", {"action": "open_devtools"}),
         ("网页放大", "desktop.safe_shortcut", {"action": "zoom_in"}),
         ("网页缩小", "desktop.safe_shortcut", {"action": "zoom_out"}),
         ("实际大小", "desktop.safe_shortcut", {"action": "reset_zoom"}),
