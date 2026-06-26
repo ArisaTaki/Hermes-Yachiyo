@@ -1361,26 +1361,41 @@ def app_open(app_name: str) -> dict[str, Any]:
     folder_path = _common_folder_path(clean_name)
     if folder_path is not None:
         return _open_common_folder(clean_name, folder_path)
+    resolved_name = clean_name
+    app_resolution = "requested_app_name"
     try:
-        result = subprocess.run(
-            ["open", "-a", clean_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        result = _run_open_app(resolved_name)
     except Exception as exc:
         return _error("app.open", exc)
     if result.returncode != 0:
-        return _app_open_failed(clean_name, result)
-    verification = _app_running_verification(clean_name)
+        resolved_name = _resolve_installed_app_name(clean_name)
+        if not resolved_name or resolved_name == clean_name:
+            return _app_open_failed(clean_name, result)
+        try:
+            resolved_result = _run_open_app(resolved_name)
+        except Exception as exc:
+            return _error("app.open", exc)
+        if resolved_result.returncode != 0:
+            return _app_open_failed(clean_name, result)
+        result = resolved_result
+        app_resolution = "installed_app_bundle"
+    verification = _app_running_verification(resolved_name)
+    data = {"app_name": resolved_name, **verification}
+    if resolved_name != clean_name:
+        data.update(
+            {
+                "requested_app_name": clean_name,
+                "resolved_app_name": resolved_name,
+                "app_resolution": app_resolution,
+            }
+        )
     return {
         "ok": True,
         "action": "app.open",
-        "summary": f"Opened {clean_name}",
-        "data": {"app_name": clean_name, **verification},
+        "summary": f"Opened {resolved_name}",
+        "data": data,
         "permission_error": False,
-        "fallback_used": False,
+        "fallback_used": resolved_name != clean_name,
     }
 
 
@@ -2106,6 +2121,94 @@ def _common_folder_path(value: str) -> Path | None:
         return None
     folder_name = _COMMON_FOLDER_TARGETS[compact]
     return Path.home() / folder_name if folder_name else Path.home()
+
+
+def _run_open_app(app_name: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["open", "-a", app_name],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+def _resolve_installed_app_name(app_name: str) -> str:
+    query = _compact_app_match_name(app_name)
+    if not query:
+        return ""
+    matches: list[tuple[int, int, str]] = []
+    for bundle in _iter_installed_app_bundles():
+        candidate = bundle.stem
+        score = _installed_app_match_score(app_name, candidate)
+        if score <= 0:
+            continue
+        matches.append((score, -len(candidate), candidate))
+    if not matches:
+        return ""
+    matches.sort(reverse=True)
+    return matches[0][2]
+
+
+def _application_search_dirs() -> list[Path]:
+    return [
+        Path("/Applications"),
+        Path("/Applications/Utilities"),
+        Path("/System/Applications"),
+        Path("/System/Applications/Utilities"),
+        Path.home() / "Applications",
+    ]
+
+
+def _iter_installed_app_bundles() -> list[Path]:
+    bundles: list[Path] = []
+    seen: set[str] = set()
+    for folder in _application_search_dirs():
+        try:
+            candidates = list(folder.glob("*.app"))
+            if folder.name == "Applications":
+                candidates.extend(folder.glob("*/*.app"))
+        except OSError:
+            continue
+        for candidate in candidates:
+            key = str(candidate)
+            if key in seen or not candidate.is_dir():
+                continue
+            seen.add(key)
+            bundles.append(candidate)
+    return bundles
+
+
+def _installed_app_match_score(query_name: str, candidate_name: str) -> int:
+    query_compact = _compact_app_match_name(query_name)
+    candidate_compact = _compact_app_match_name(candidate_name)
+    if not query_compact or not candidate_compact:
+        return 0
+    if candidate_compact == query_compact:
+        return 100
+    query_tokens = _app_match_tokens(query_name)
+    candidate_tokens = _app_match_tokens(candidate_name)
+    if query_tokens and all(token in candidate_tokens for token in query_tokens):
+        return 90
+    if candidate_tokens and all(token in query_tokens for token in candidate_tokens):
+        return 85
+    if candidate_compact.endswith(query_compact):
+        return 80
+    if query_compact.endswith(candidate_compact):
+        return 75
+    if query_compact in candidate_compact:
+        return 70
+    if candidate_compact in query_compact:
+        return 65
+    return 0
+
+
+def _compact_app_match_name(value: str) -> str:
+    return re.sub(r"[\W_]+", "", str(value or "").strip().casefold())
+
+
+def _app_match_tokens(value: str) -> list[str]:
+    return [token for token in re.split(r"[\W_]+", str(value or "").casefold()) if token]
 
 
 def app_focus(app_name: str) -> dict[str, Any]:

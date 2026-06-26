@@ -2331,6 +2331,7 @@ def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
 
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [])
 
     result = desktop_mod.app_open("Missing App")
 
@@ -2357,6 +2358,87 @@ def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
             "permission_target": "app_not_found",
             "risk_level": "low",
         },
+    ]
+
+
+def test_app_open_resolves_installed_bundle_after_open_failure(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Microsoft Word.app").mkdir(parents=True)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0 if command == ["open", "-a", "Microsoft Word"] else 1,
+            stdout="",
+            stderr="" if command == ["open", "-a", "Microsoft Word"] else "Application not found.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {"ok": True, "stdout": "running", "stderr": ""},
+    )
+
+    result = desktop_mod.app_open("Word")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.open"
+    assert result["summary"] == "Opened Microsoft Word"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is True
+    assert result["data"] == {
+        "app_name": "Microsoft Word",
+        "launch_verified": True,
+        "launch_status": "running",
+        "requested_app_name": "Word",
+        "resolved_app_name": "Microsoft Word",
+        "app_resolution": "installed_app_bundle",
+    }
+    assert [call[0] for call in calls] == [
+        ["open", "-a", "Word"],
+        ["open", "-a", "Microsoft Word"],
+    ]
+
+
+def test_app_open_resolves_shorter_bundle_from_qualified_request(monkeypatch, tmp_path) -> None:
+    app_dir = tmp_path / "Applications"
+    (app_dir / "Music.app").mkdir(parents=True)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0 if command == ["open", "-a", "Music"] else 1,
+            stdout="",
+            stderr="" if command == ["open", "-a", "Music"] else "Application not found.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {"ok": True, "stdout": "running", "stderr": ""},
+    )
+
+    result = desktop_mod.app_open("Apple Music")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened Music"
+    assert result["fallback_used"] is True
+    assert result["data"]["app_name"] == "Music"
+    assert result["data"]["requested_app_name"] == "Apple Music"
+    assert result["data"]["resolved_app_name"] == "Music"
+    assert [call[0] for call in calls] == [
+        ["open", "-a", "Apple Music"],
+        ["open", "-a", "Music"],
     ]
 
 
