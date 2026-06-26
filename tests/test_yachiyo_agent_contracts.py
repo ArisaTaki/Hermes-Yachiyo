@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
@@ -56,6 +57,7 @@ from apps.shell.yachiyo_agent import (
     SkillSourceRootSnapshot,
     SkillTraceSnapshot,
     StartChatTaskRequest,
+    TaskIntentKind,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
@@ -79,6 +81,14 @@ from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 
 def _json(model) -> dict:
     return json.loads(model.model_dump_json())
+
+
+def test_task_intent_kind_contract_covers_runtime_planner_routes() -> None:
+    assert {
+        "system_control",
+        "file_organization",
+        "clipboard_operation",
+    }.issubset(set(get_args(TaskIntentKind)))
 
 
 def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
