@@ -37,6 +37,7 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
     "desktop.ui_elements": "读取界面控件",
+    "data.analyze": "分析数据",
     "app.status": "检查应用状态",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",

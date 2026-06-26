@@ -8,6 +8,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools import browser, desktop
+from apps.shell.agent.tools.data_analysis import analyze_data_file
 from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
@@ -353,6 +354,52 @@ class ToolBroker:
         safe_content = _redact_secrets(content)
         target.write_text(safe_content, encoding="utf-8")
         return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
+
+    def data_analyze(
+        self,
+        path: str,
+        *,
+        artifact_path: str = "analysis-report.md",
+        max_rows: int = 1000,
+    ) -> dict[str, Any]:
+        target = self._resolve_workspace_path(path)
+        display_path = path or "."
+        if not target.exists():
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "路径不存在",
+                "hint": "请先用 workspace.list 查看父目录，确认要分析的文件相对路径。",
+            }
+        if target.is_dir():
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "data.analyze 只能分析文件",
+                "hint": "这是一个目录；请先用 workspace.list 选择目录中的数据文件。",
+                "suggested_tool": "workspace.list",
+            }
+        result = analyze_data_file(
+            target,
+            display_path=display_path,
+            artifact_path=artifact_path or "analysis-report.md",
+            max_rows=max_rows,
+        )
+        if not result.get("ok"):
+            return result
+        artifact = self.artifact_write(
+            str(result.get("artifact_path") or "analysis-report.md"),
+            str(result.get("artifact_content") or ""),
+        )
+        return {
+            **{key: value for key, value in result.items() if key != "artifact_content"},
+            "artifact": {
+                "path": artifact["path"],
+                "kind": "markdown",
+                "mime_type": "text/markdown",
+                "size_bytes": artifact["bytes"],
+            },
+        }
 
     def screen_capture(self, *, reason: str = "") -> dict[str, Any]:
         rel = Path("screenshots") / "current-screen.png"

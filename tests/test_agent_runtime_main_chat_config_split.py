@@ -80,6 +80,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "terminal.run" in config["instructions"]
     assert "权限缺失" in config["instructions"]
     assert "approval/policy gate" in config["instructions"]
+    assert "data.analyze" in config["instructions"]
     assert config["model_profile_id"] == "profile-chat"
     assert config["output_contract"] == "chat"
     assert config["workspace_policy"] == {
@@ -90,6 +91,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert projects_dir.exists()
     assert trusted == [(config["workspace_policy"], "main_chat", True)]
     assert "workspace.read" in config["tool_policy"]["allowed_tools"]
+    assert "data.analyze" in config["tool_policy"]["allowed_tools"]
     assert "artifact.write" in config["tool_policy"]["allowed_tools"]
     allowed_tools = set(config["tool_policy"]["allowed_tools"])
     assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
@@ -132,7 +134,7 @@ def test_main_chat_config_builder_overlays_daily_desktop_tools_on_explicit_polic
     assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
     assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
-    assert {"workspace.list", "workspace.read", "artifact.write", "terminal.run"}.issubset(
+    assert {"workspace.list", "workspace.read", "data.analyze", "artifact.write", "terminal.run"}.issubset(
         allowed_tools
     )
     assert policy["approval_required"]["terminal.run"] is True

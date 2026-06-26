@@ -52,6 +52,28 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     }
 
 
+def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["data.analyze", "workspace.read", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.plan.tool_plan.required_capabilities == ["data.analysis"]
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert decision.plan.tool_plan.approvals_required == []
+    assert decision.plan.tool_plan.artifacts_expected == ["analysis-report.md"]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file"
+    ]
+    step = _step_by_id(decision, "analyze-data-file")
+    assert step.tool_name == "data.analyze"
+    assert step.input_preview == {
+        "path": "sales.csv",
+        "artifact_path": "analysis-report.md",
+    }
+
+
 def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
@@ -705,6 +727,26 @@ def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> None:
+    requests = planner_tool_requests(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
         }
     ]
 

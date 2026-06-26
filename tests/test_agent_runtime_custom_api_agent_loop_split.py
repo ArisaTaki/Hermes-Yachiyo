@@ -12989,6 +12989,17 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
         {"command": "printf ok"},
         {"ok": True, "stdout": "ok\n", "stderr": "", "returncode": 0},
     )
+    data_analyze = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "data.analyze",
+        {"path": "sales.csv", "artifact_path": "analysis-report.md"},
+        {
+            "ok": True,
+            "path": "sales.csv",
+            "rows": 3,
+            "columns": ["region", "revenue"],
+            "artifact": {"path": "analysis-report.md"},
+        },
+    )
     terminal_failed = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "terminal.run",
         {"command": "false"},
@@ -13042,6 +13053,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert browser_type_text_point == "已在网页位置：120, 240 输入文字（5 个字符）。"
     assert submit_foreground == "已确认发送前台内容。"
     assert terminal_run == "已运行命令：printf ok。\n输出：ok"
+    assert data_analyze == "已分析「sales.csv」（3 行、2 列）。报告已写入 analysis-report.md。"
     assert terminal_failed == "命令执行失败：false。 退出码：1。 stderr：failed"
     assert app_not_found == (
         "已尝试启动 Missing App，但 macOS 没找到这个应用。 "

@@ -450,7 +450,7 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
     runtime = _runtime_with_chat_store(store)
     runtime.agent_runtime_service = SimpleNamespace(
         _main_chat_tool_policy=lambda: {
-            "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"]
+            "allowed_tools": ["data.analyze", "workspace.read", "terminal.run", "artifact.write"]
         }
     )
     bridge = ChatBridge(runtime)
@@ -477,11 +477,13 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         assert result["agent_task"]["task_id"] == "task-data-analysis"
         event = result["agent_task"]["recent_events"][0]
         assert event["event_type"] == "agent.desktop.intent_planned"
-        assert event["payload"]["tool"] == "workspace.read"
+        assert event["payload"]["tool"] == "data.analyze"
         assert event["payload"]["source"] == "runtime_planner"
-        assert event["payload"]["planning_reason"] == "planner_prefetch_data_source"
-        assert event["payload"]["input_preview"] == {"path": "data/sales.csv"}
-        assert event["payload"]["continue_to_model"] is True
+        assert event["payload"]["planning_reason"] == "planner_builtin_data_analysis"
+        assert event["payload"]["input_preview"] == {
+            "path": "data/sales.csv",
+            "artifact_path": "analysis-report.md",
+        }
     finally:
         store.close()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import zipfile
 
 import pytest
 
@@ -58,6 +59,84 @@ def test_tool_broker_call_uses_split_registry_for_workspace_read(tmp_path) -> No
         "path": "note.txt",
         "content": "hello",
     }
+
+
+def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> None:
+    (tmp_path / "sales.csv").write_text(
+        "region,revenue\nEast,10\nWest,20\nEast,30\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.csv", "artifact_path": "reports/sales.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["path"] == "sales.csv"
+    assert result["source_kind"] == "csv"
+    assert result["rows"] == 3
+    assert result["columns"] == ["region", "revenue"]
+    assert result["artifact"]["path"] == "reports/sales.md"
+    assert result["artifact"]["kind"] == "markdown"
+    assert result["artifact"]["mime_type"] == "text/markdown"
+    assert result["artifact"]["size_bytes"] > 0
+    artifact = tmp_path / "artifacts" / "reports" / "sales.md"
+    assert artifact.exists()
+    content = artifact.read_text(encoding="utf-8")
+    assert "# Data Analysis Report" in content
+    assert "mean=20.0" in content
+    assert "| East | 10 |" in content
+
+
+def test_tool_broker_call_analyzes_xlsx_file(tmp_path) -> None:
+    workbook = tmp_path / "sales.xlsx"
+    with zipfile.ZipFile(workbook, "w") as archive:
+        archive.writestr(
+            "xl/sharedStrings.xml",
+            (
+                '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                "<si><t>region</t></si><si><t>revenue</t></si>"
+                "<si><t>East</t></si><si><t>West</t></si>"
+                "</sst>"
+            ),
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            (
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                "<sheetData>"
+                '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>'
+                '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>10</v></c></row>'
+                '<row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>20</v></c></row>'
+                "</sheetData>"
+                "</worksheet>"
+            ),
+        )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.xlsx", "artifact_path": "reports/sales-xlsx.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "xlsx"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "revenue"]
+    content = (tmp_path / "artifacts" / "reports" / "sales-xlsx.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mean=15.0" in content
+
+
+def test_data_analyze_schema_rejects_invalid_max_rows() -> None:
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 max_rows"):
+        ToolDescriptorRegistry.validate_payload(
+            "data.analyze",
+            {"path": "sales.csv", "max_rows": "many"},
+        )
 
 
 def test_tool_dispatch_registry_keeps_terminal_approval_gate(tmp_path) -> None:

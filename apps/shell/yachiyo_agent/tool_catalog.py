@@ -219,6 +219,8 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
         return "browser_control"
     if tool_name.startswith("terminal."):
         return "terminal"
+    if tool_name.startswith("data."):
+        return "data"
     if tool_name.startswith("skill."):
         return "skill"
     if tool_name.startswith("artifact."):
@@ -241,7 +243,7 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
         return "low"
     if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
         return "medium"
-    if tool_name in {"workspace.list", "workspace.read", "artifact.write", "skill.read"}:
+    if tool_name in {"workspace.list", "workspace.read", "artifact.write", "data.analyze", "skill.read"}:
         return "low"
     if tool_name.startswith("memory.") or tool_name.startswith("future_task."):
         return "low"

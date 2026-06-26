@@ -93,6 +93,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.close_window",
     "desktop.quit_app",
     "terminal.run",
+    "data.analyze",
     "desktop.hotkey",
     "desktop.submit_foreground",
     "desktop.type_text",
@@ -126,6 +127,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.windows": "读取窗口列表",
     "desktop.ui_elements": "读取界面控件",
     "app.status": "检查应用状态",
+    "data.analyze": "分析数据",
     "desktop.reveal_path": "在 Finder 中显示",
     "desktop.open_path": "打开本地路径",
     "app.open": "打开应用",
@@ -1148,6 +1150,8 @@ class RuntimeCustomApiAgentLoop:
                 return "已关闭当前窗口。"
             if tool_name == "desktop.quit_app":
                 return "已请求退出当前应用。"
+            if tool_name == "data.analyze":
+                return _data_analyze_summary(result, planned_input) or result_summary or "已分析数据。"
             if tool_name == "terminal.run":
                 return _terminal_run_summary(result, planned_input)
             if tool_name == "browser.open_url":
@@ -2698,6 +2702,29 @@ def _terminal_run_summary(result: dict[str, Any], planned_input: dict[str, Any])
     elif stdout:
         parts.append(f"stdout：{_terminal_output_preview(stdout)}")
     return " ".join(parts)
+
+
+def _data_analyze_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    path = str(result.get("path") or planned_input.get("path") or "").strip()
+    artifact = result.get("artifact") if isinstance(result.get("artifact"), dict) else {}
+    artifact_path = str(
+        artifact.get("path")
+        or result.get("artifact_path")
+        or planned_input.get("artifact_path")
+        or ""
+    ).strip()
+    rows = result.get("rows")
+    columns = result.get("columns")
+    column_count = len(columns) if isinstance(columns, list) else None
+    source = f"「{path}」" if path else "数据文件"
+    facts = []
+    if rows not in (None, ""):
+        facts.append(f"{rows} 行")
+    if column_count is not None:
+        facts.append(f"{column_count} 列")
+    fact_text = f"（{ '、'.join(facts) }）" if facts else ""
+    artifact_text = f"报告已写入 {artifact_path}。" if artifact_path else ""
+    return f"已分析{source}{fact_text}。{artifact_text}".strip()
 
 
 def _terminal_output_preview(value: str) -> str:

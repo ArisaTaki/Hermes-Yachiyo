@@ -31,7 +31,7 @@ def planner_tool_requests(
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "data_analysis":
-        return _data_analysis_tool_requests(decision.selected_intent.inputs, allowed)
+        return _data_analysis_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "system_control":
         return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
@@ -117,7 +117,31 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
     return payload
 
 
-def _data_analysis_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    data_analyze_step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "tool_name", "") == "data.analyze"
+        ),
+        None,
+    )
+    if data_analyze_step is not None and "data.analyze" in allowed:
+        input_preview = getattr(data_analyze_step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        if payload.get("path"):
+            return [
+                _request(
+                    "data.analyze",
+                    {
+                        "path": str(payload.get("path") or ""),
+                        "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
+                    },
+                    planning_reason="planner_builtin_data_analysis",
+                )
+            ]
+
+    inputs = decision.selected_intent.inputs
     if "workspace.read" not in allowed:
         return []
     source_hint = str(inputs.get("data_source_hint") or "").strip()

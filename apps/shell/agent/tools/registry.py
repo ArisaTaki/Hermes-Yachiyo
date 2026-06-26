@@ -110,6 +110,14 @@ def _artifact_write(broker: Any, payload: dict[str, Any], _approved: bool) -> di
     )
 
 
+def _data_analyze(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.data_analyze(
+        str(payload.get("path") or ""),
+        artifact_path=str(payload.get("artifact_path") or "analysis-report.md"),
+        max_rows=int(payload.get("max_rows") or 1000),
+    )
+
+
 def _screen_capture(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.screen_capture(reason=str(payload.get("reason") or ""))
 
@@ -790,6 +798,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "workspace.write_patch": _workspace_write_patch,
     "terminal.run": _terminal_run,
     "artifact.write": _artifact_write,
+    "data.analyze": _data_analyze,
     "screen.capture": _screen_capture,
     "desktop.permissions": _desktop_permissions,
     "desktop.active_window": _desktop_active_window,

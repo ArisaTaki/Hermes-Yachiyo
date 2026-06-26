@@ -153,11 +153,11 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         title="Analyze Data",
         category="data",
         description="Inspect structured data, compute summaries, and generate charts or tables.",
-        tools=("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+        tools=("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
         risk_level="medium",
         approval_required=True,
         discovery_actions=("find_dataset", "inspect_schema"),
-        execution_actions=("run_python_analysis", "summarize_data"),
+        execution_actions=("analyze_data_file", "run_python_analysis", "summarize_data"),
         output_kinds=("markdown", "csv", "chart", "json"),
     ),
     CapabilityDefinition(
@@ -301,7 +301,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
-    "data.analysis": ("workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+    "data.analysis": ("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
     "file.organization": ("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
     "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),

@@ -245,6 +245,7 @@ class AppRuntime:
             "allowed_tools": [
                 "workspace.list",
                 "workspace.read",
+                "data.analyze",
                 "workspace.write_patch",
                 "terminal.run",
                 *DAILY_DESKTOP_TOOL_NAMES,

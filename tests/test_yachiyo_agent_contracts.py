@@ -484,6 +484,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
@@ -529,12 +530,12 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
         },
     )
 
-    assert capabilities["desktop_execution"]["available"] is True
+    assert capabilities["desktop_execution"]["available"] is False
     assert capabilities["screen_capture"]["available"] is False
     assert capabilities["screen_capture"]["missing_permissions"] == ["screen_recording"]
     assert capabilities["foreground_input"]["available"] is False
     assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
-    assert capabilities["media_control"]["available"] is True
+    assert capabilities["media_control"]["available"] is False
     assert capabilities["media_control"]["available_tools"] == [
         "media.apple_music_play",
         "media.apple_music_open_and_play",
@@ -597,6 +598,7 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
         "app.focus_window",
         "app.show",
         "app.quit",
+        "desktop.quit_app",
         "notes.create",
         "reminders.create",
         "calendar.create_event",

@@ -490,17 +490,18 @@ class RuntimePlanner:
     ) -> RuntimePlanSnapshot:
         allowed = _allowed_tool_set(allowed_tools)
         steps = self._steps_for_intent(intent, allowed)
-        capabilities = [*intent.required_capabilities, *intent.preferred_capabilities]
+        required_capabilities = _required_capabilities_for_plan(intent, steps)
+        capabilities = [*required_capabilities, *intent.preferred_capabilities]
         snapshots = capability_snapshots(
             allowed_tools=allowed_tools,
             capability_ids=capabilities,
         )
-        missing = _missing_capabilities(snapshots, required_capability_ids=intent.required_capabilities)
+        missing = _missing_capabilities(snapshots, required_capability_ids=required_capabilities)
         tool_plan = ToolPlanSnapshot(
             plan_id=_stable_id("tool-plan", intent.kind, intent.user_goal),
             title=f"{intent.title} Tool Plan",
             steps=steps,
-            required_capabilities=list(intent.required_capabilities),
+            required_capabilities=required_capabilities,
             missing_capabilities=missing,
             approvals_required=[step.step_id for step in steps if step.approval_required],
             artifacts_expected=_artifacts_expected(intent, steps),
@@ -553,6 +554,26 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
+        if _can_use_builtin_data_analysis(intent, allowed):
+            artifact_path = _data_analysis_primary_artifact_path(intent)
+            return [
+                _step(
+                    intent,
+                    "analyze-data-file",
+                    "Analyze data file",
+                    "data.analysis",
+                    _first_allowed(("data.analyze",), allowed),
+                    input_preview={
+                        "path": source_hint,
+                        "artifact_path": artifact_path,
+                    },
+                    reason=(
+                        "Use the built-in local parser for straightforward CSV, TSV, JSON, XLSX, "
+                        "or text-table summaries before escalating to terminal.run."
+                    ),
+                )
+            ]
         return [
             _step(
                 intent,
@@ -1081,7 +1102,20 @@ def _missing_capabilities(
     return [item for item in missing if item]
 
 
+def _required_capabilities_for_plan(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+) -> list[str]:
+    if intent.kind == "data_analysis" and any(step.tool_name == "data.analyze" for step in steps):
+        return ["data.analysis"]
+    return list(intent.required_capabilities)
+
+
 def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[str]:
+    for step in steps:
+        if step.tool_name == "data.analyze":
+            artifact_path = str(step.input_preview.get("artifact_path") or "").strip()
+            return [artifact_path or "analysis-report.md"]
     if not any(step.tool_name == "artifact.write" for step in steps):
         return []
     if intent.kind == "data_analysis":
@@ -1101,6 +1135,43 @@ def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapsho
         or any(step.approval_required for step in steps)
         or len(steps) >= 3
     )
+
+
+def _can_use_builtin_data_analysis(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> bool:
+    if _first_allowed(("data.analyze",), allowed) != "data.analyze":
+        return False
+    source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
+    source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
+    if not source_hint or source_hint.startswith(("/", "~")):
+        return False
+    if any(part == ".." for part in source_hint.replace("\\", "/").split("/")):
+        return False
+    if source_kind not in {"csv", "tsv", "json", "xlsx", "text", "text_table"}:
+        return False
+    return not _contains_any(
+        intent.user_goal,
+        [
+            "chart",
+            "plot",
+            "visualization",
+            "html",
+            "output csv",
+            "export csv",
+            "图表",
+            "可视化",
+            "输出 csv",
+            "导出 csv",
+            "html 报告",
+        ],
+    )
+
+
+def _data_analysis_primary_artifact_path(intent: TaskIntentSnapshot) -> str:
+    artifacts = data_analysis_artifacts_expected(intent.expected_outputs, intent.user_goal)
+    return artifacts[0] if artifacts else "analysis-report.md"
 
 
 def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[dict[str, Any]]:

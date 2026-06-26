@@ -56,13 +56,12 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
         "agent.intent.selected",
         "agent.plan.created",
         "agent.plan.step",
-        "agent.plan.step",
-        "agent.plan.step",
     ]
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
     assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["artifacts_expected"] == [
         "analysis-report.md",
     ]
+    assert planner_events[2][1]["payload"]["step"]["tool_name"] == "data.analyze"
 
 
 def test_legacy_runtime_port_appends_media_planner_events() -> None:
@@ -135,13 +134,13 @@ def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> 
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "data_analysis"
-    assert metadata["daily_desktop_tool"] == "workspace.read"
+    assert metadata["daily_desktop_tool"] == "data.analyze"
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_data_source"
+    assert metadata["daily_desktop_planning_reason"] == "planner_builtin_data_analysis"
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
     assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == (
-        "workspace.read"
+        "data.analyze"
     )
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
@@ -683,6 +682,6 @@ class _MainChatPlannerEventRuntime:
 class _MainChatDataAnalysisRuntime(_MainChatPlannerEventRuntime):
     def _main_chat_tool_policy(self) -> dict[str, Any]:
         return {
-            "allowed_tools": ["workspace.read", "terminal.run", "artifact.write"],
+            "allowed_tools": ["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
             "approval_required": {},
         }

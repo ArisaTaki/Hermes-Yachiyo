@@ -26,6 +26,7 @@ TOOL_FUNCTION_NAMES = {
     "workspace.write_patch": "workspace_write_patch",
     "terminal.run": "terminal_run",
     "artifact.write": "artifact_write",
+    "data.analyze": "data_analyze",
     "screen.capture": "screen_capture",
     "desktop.permissions": "desktop_permissions",
     "desktop.active_window": "desktop_active_window",
@@ -437,6 +438,13 @@ class ToolDescriptor:
                 raise AgentRuntimeError("future_task.cancel 参数 future_task_id 必须是非空字符串")
         if "path" in payload and not isinstance(payload.get("path"), str):
             raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
+        if self.name == "data.analyze":
+            if "artifact_path" in payload and not isinstance(payload.get("artifact_path"), str):
+                raise AgentRuntimeError("data.analyze 参数 artifact_path 必须是字符串")
+            if "max_rows" in payload:
+                value = payload.get("max_rows")
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10000:
+                    raise AgentRuntimeError("data.analyze 参数 max_rows 必须是 1-10000 的整数")
         if self.name == "desktop.reveal_path" and not str(payload.get("path") or "").strip():
             raise AgentRuntimeError("desktop.reveal_path 参数 path 必须是非空字符串")
         if self.name == "desktop.open_path" and not str(payload.get("path") or "").strip():
@@ -1005,6 +1013,28 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "content": {"type": "string", "description": "Artifact content."},
         },
         required=("path", "content"),
+    ),
+    "data.analyze": ToolDescriptor(
+        name="data.analyze",
+        description=(
+            "Analyze a workspace CSV, TSV, JSON, XLSX, or text table with the built-in "
+            "local parser and write a markdown report artifact. Prefer this before "
+            "terminal.run for straightforward data summaries."
+        ),
+        properties={
+            "path": {"type": "string", "description": "Relative data file path."},
+            "artifact_path": {
+                "type": "string",
+                "description": "Optional markdown artifact path. Defaults to analysis-report.md.",
+            },
+            "max_rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000,
+                "description": "Maximum rows to inspect. Defaults to 1000.",
+            },
+        },
+        required=("path",),
     ),
     "screen.capture": ToolDescriptor(
         name="screen.capture",
@@ -2206,6 +2236,7 @@ class RuntimePolicyCompiler:
             tools = [
                 "workspace.list",
                 "workspace.read",
+                "data.analyze",
                 "workspace.write_patch",
                 "terminal.run",
                 *memory_tools,
@@ -2216,6 +2247,7 @@ class RuntimePolicyCompiler:
             tools = [
                 "workspace.list",
                 "workspace.read",
+                "data.analyze",
                 *daily_tools,
                 *memory_tools,
                 *future_task_tools,
