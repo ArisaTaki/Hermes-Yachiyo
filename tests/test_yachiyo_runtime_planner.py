@@ -473,6 +473,64 @@ def test_runtime_planner_marks_named_app_quit_as_approval_required() -> None:
     assert decision.plan.tool_plan.approvals_required == ["manage-app"]
 
 
+def test_runtime_planner_routes_foreground_window_minimize_to_desktop_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "最小化当前窗口",
+        allowed_tools=["desktop.active_window", "desktop.minimize_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["operation_hint"] == "minimize_window"
+    assert decision.selected_intent.inputs["foreground_management_hint"] == {
+        "action": "minimize_window",
+        "scope": "window",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "manage-foreground",
+        "verify-desktop-result",
+    ]
+    manage = _step_by_id(decision, "manage-foreground")
+    assert manage.tool_name == "desktop.minimize_window"
+    assert manage.action == "minimize_window"
+    assert manage.risk_level == "low"
+    assert manage.approval_required is False
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "manage-foreground"
+    ]
+
+
+def test_runtime_planner_marks_foreground_close_and_quit_as_approval_required() -> None:
+    close_decision = RuntimePlanner().decision(
+        "关闭当前窗口",
+        allowed_tools=["desktop.active_window", "desktop.close_window"],
+    )
+    quit_decision = RuntimePlanner().decision(
+        "退出当前应用",
+        allowed_tools=["desktop.active_window", "desktop.quit_app"],
+    )
+
+    assert close_decision.selected_intent.risk_level == "high"
+    assert close_decision.selected_intent.inputs["operation_hint"] == "close_window"
+    close_step = _step_by_id(close_decision, "manage-foreground")
+    assert close_step.tool_name == "desktop.close_window"
+    assert close_step.action == "close_window"
+    assert close_step.risk_level == "high"
+    assert close_step.approval_required is True
+    assert close_decision.plan.tool_plan.approvals_required == ["manage-foreground"]
+
+    assert quit_decision.selected_intent.risk_level == "high"
+    assert quit_decision.selected_intent.inputs["operation_hint"] == "quit_app"
+    quit_step = _step_by_id(quit_decision, "manage-foreground")
+    assert quit_step.tool_name == "desktop.quit_app"
+    assert quit_step.action == "quit_app"
+    assert quit_step.risk_level == "high"
+    assert quit_step.approval_required is True
+    assert quit_decision.plan.tool_plan.approvals_required == ["manage-foreground"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -749,6 +807,19 @@ def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
     assert len(snapshots) == 1
     assert "workspace.write_patch" not in snapshots[0].tools
     assert snapshots[0].available_tools == []
+
+
+def test_capability_registry_exposes_foreground_management_tools() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["desktop.minimize_window", "desktop.close_window", "desktop.quit_app"],
+        capability_ids=["desktop.app_control"],
+    )
+
+    assert snapshots[0].available_tools == [
+        "desktop.minimize_window",
+        "desktop.close_window",
+        "desktop.quit_app",
+    ]
 
 
 def test_runtime_planner_uses_browser_screenshot_tool_from_catalog() -> None:
@@ -1099,6 +1170,37 @@ def test_planner_desktop_tool_requests_maps_named_app_management() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_foreground_window_management() -> None:
+    requests = planner_desktop_tool_requests(
+        "关闭当前窗口",
+        allowed_tools=["desktop.active_window", "desktop.close_window"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",

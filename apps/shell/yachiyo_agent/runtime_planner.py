@@ -34,6 +34,7 @@ from .desktop_plan_hints import (
     app_foreground_tool_candidates,
     click_target_hint,
     focus_window_hint,
+    foreground_management_hint,
     hotkey_hint,
     media_playback_hint,
     media_tool_preview,
@@ -160,6 +161,7 @@ class TaskIntentRouter:
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
         app_management = app_management_hint(text)
+        foreground_management = foreground_management_hint(text)
         score = _score_terms(
             text,
             [
@@ -201,6 +203,9 @@ class TaskIntentRouter:
                 "hide ",
                 "minimize",
                 "quit ",
+                "前台",
+                "current window",
+                "current app",
             ],
         )
         if (
@@ -209,6 +214,7 @@ class TaskIntentRouter:
             and ui_inspection is None
             and screen_capture is None
             and app_management is None
+            and foreground_management is None
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -237,6 +243,8 @@ class TaskIntentRouter:
             inputs["screen_capture_hint"] = screen_capture
         if app_management is not None:
             inputs["app_management_hint"] = app_management
+        if foreground_management is not None:
+            inputs["foreground_management_hint"] = foreground_management
         risk_level = (
             "medium"
             if operation_hint
@@ -248,11 +256,12 @@ class TaskIntentRouter:
                 "show_app",
                 "hide_app",
                 "minimize_app",
+                "minimize_window",
             }
             and _looks_like_ui_operation(text)
             else "low"
         )
-        if operation_hint == "quit_app":
+        if operation_hint in {"quit_app", "close_window"}:
             risk_level = "high"
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "desktop_operation", text),
@@ -694,6 +703,7 @@ class RuntimePlanner:
         ui_inspection = ui_inspection_hint(intent.user_goal)
         screen_capture = screen_capture_hint(intent.user_goal)
         app_management = app_management_hint(intent.user_goal)
+        foreground_management = foreground_management_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -752,6 +762,44 @@ class RuntimePlanner:
                 reason=discovery_reason,
             )
         ]
+        if foreground_management:
+            action = str(foreground_management.get("action") or "").strip()
+            tool_name = {
+                "hide_app": "desktop.hide_app",
+                "minimize_window": "desktop.minimize_window",
+                "close_window": "desktop.close_window",
+                "quit_app": "desktop.quit_app",
+            }.get(action)
+            requires_approval = action in {"close_window", "quit_app"}
+            steps.append(
+                _step(
+                    intent,
+                    "manage-foreground",
+                    "Manage foreground",
+                    "desktop.app_control",
+                    _first_allowed((tool_name,), allowed) if tool_name else None,
+                    risk_level="high" if requires_approval else "low",
+                    approval_required=requires_approval,
+                    depends_on=["discover-desktop-state"],
+                    reason="Run the requested foreground app/window management action through the desktop policy gate.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    _first_allowed(
+                        ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
+                        allowed,
+                    ),
+                    input_preview={},
+                    depends_on=["manage-foreground"],
+                    reason="Observe desktop state after the foreground management action.",
+                )
+            )
+            return steps
         if window_list is not None and not focus_window and not _looks_like_ui_operation(intent.user_goal):
             steps.append(
                 _step(
@@ -1364,6 +1412,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "capture_screen"
     if step_key == "manage-app":
         return _app_management_action(tool_name)
+    if step_key == "manage-foreground":
+        return _foreground_management_action(tool_name)
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
     if step_key == "operate-foreground-ui":
@@ -1417,6 +1467,19 @@ def _app_management_action(tool_name: str | None) -> str:
     if clean_tool == "app.quit":
         return "quit_app"
     return "manage_app"
+
+
+def _foreground_management_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if clean_tool == "desktop.hide_app":
+        return "hide_app"
+    if clean_tool == "desktop.minimize_window":
+        return "minimize_window"
+    if clean_tool == "desktop.close_window":
+        return "close_window"
+    if clean_tool == "desktop.quit_app":
+        return "quit_app"
+    return "manage_foreground"
 
 
 def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
@@ -1793,6 +1856,9 @@ def _desktop_operation_hint(text: str) -> str:
         return "read_ui"
     if screen_capture_hint(text) is not None:
         return "capture_screen"
+    foreground_management = foreground_management_hint(text)
+    if foreground_management:
+        return str(foreground_management.get("action") or "")
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"

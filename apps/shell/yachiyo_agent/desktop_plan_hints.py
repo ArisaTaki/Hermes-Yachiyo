@@ -203,6 +203,8 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
 
 def app_management_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
+    if foreground_management_hint(value):
+        return None
     patterns: tuple[tuple[str, str], ...] = (
         (
             "show",
@@ -263,6 +265,20 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         app_name = _clean_management_app_name_hint(raw_app)
         if app_name:
             return {"action": action, "app_name": app_name}
+    return None
+
+
+def foreground_management_hint(text: str) -> dict[str, str] | None:
+    value = clean(text)
+    lowered = value.lower()
+    if _is_foreground_window_close_request(value, lowered):
+        return {"action": "close_window", "scope": "window"}
+    if _is_foreground_app_quit_request(value, lowered):
+        return {"action": "quit_app", "scope": "app"}
+    if _is_foreground_window_minimize_request(value, lowered):
+        return {"action": "minimize_window", "scope": "window"}
+    if _is_foreground_app_hide_request(value, lowered):
+        return {"action": "hide_app", "scope": "app"}
     return None
 
 
@@ -469,6 +485,12 @@ def _clean_window_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     )
     app = app.strip(" .，,。")
+    if re.fullmatch(
+        r"(?:当前|现在|前台|这个|该)?(?:应用|app|软件|程序|窗口|window)",
+        app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
     generic = {
         "",
         "app",
@@ -760,6 +782,83 @@ def _clean_management_app_name_hint(value: str) -> str:
         "前台",
     }
     return "" if app.lower() in generic else app
+
+
+def _is_foreground_window_close_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:关闭|关掉|关上|关(?:一下|下|了)?)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
+            lowered,
+        )
+    )
+
+
+def _is_foreground_app_quit_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:退出|关闭|关掉|结束|终止)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:退出|关闭|关掉|结束|终止)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:quit|close|exit|terminate)\s+(?:the\s+)?"
+            r"(?:current|foreground|active|this)\s+(?:app|application)\b",
+            lowered,
+        )
+    )
+
+
+def _is_foreground_window_minimize_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:最小化|收起|收起来|隐藏)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)\s*(?:最小化|收起|收起来|隐藏)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
+            lowered,
+        )
+    )
+
+
+def _is_foreground_app_hide_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:隐藏|收起|藏起|藏起来)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起|藏起|藏起来)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bhide\s+(?:the\s+)?(?:current|foreground|active|this)\s+(?:app|application)\b",
+            lowered,
+        )
+    )
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
