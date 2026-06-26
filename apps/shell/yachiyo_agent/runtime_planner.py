@@ -173,6 +173,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _direct_paste_communication_hint(text):
+            return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
         app_management = app_management_hint(text)
@@ -778,14 +780,17 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        if _foreground_submit_action_hint(text):
+        paste_direct_hint = _direct_paste_communication_hint(text)
+        if _foreground_submit_action_hint(text) and not paste_direct_hint:
             return _empty_intent("communication", text)
         source = context_source_hint(text)
         direct_hint = (
             _direct_context_communication_hint(text, source)
             if source
-            else _direct_communication_hint(text)
+            else paste_direct_hint or _direct_communication_hint(text)
         )
+        if source and not direct_hint:
+            direct_hint = paste_direct_hint
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
             score = 0.24
@@ -4041,6 +4046,53 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
+
+
+def _direct_paste_communication_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
+        return {}
+    patterns = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
+            r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+            r"(?:给|发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:粘贴|paste)\s*(?:并|然后|再|后|之后)?\s*(?:发送|发出|send)?$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:把|将)?(?:剪贴板内容|粘贴板内容)?\s*(?:粘贴|paste)\s*"
+            r"(?:到|给|发给|发送给)\s*(?P<target>[^：:，,。]+?)\s*"
+            r"(?:并|然后|再|后|之后)?\s*(?:发送|发出|send)?$"
+        ),
+        (
+            r"^(?:paste|send)\s+(?:clipboard(?:\s+contents?)?|the\s+clipboard)?\s*"
+            r"(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+?)(?:\s+(?:and|then)\s+send)?$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
+        if (not app_name or not recipient) and groups.get("target"):
+            app_name, recipient = _split_communication_surface_and_recipient(
+                str(groups.get("target") or "")
+            )
+        if not app_name or not recipient:
+            continue
+        return {
+            "app_name": app_name,
+            "recipient": recipient,
+            "body_source": "clipboard",
+            "mode": _communication_app_mode(value),
+            "send_action": "send",
+        }
+    return {}
 
 
 def _direct_communication_hint(text: str) -> dict[str, str]:
