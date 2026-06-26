@@ -10571,6 +10571,117 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
     assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]
 
 
+def test_custom_api_agent_loop_uses_runtime_planner_desktop_fallback_when_legacy_rules_miss(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "app.open":
+                result = {
+                    "ok": True,
+                    "action": "app.open",
+                    "data": {"app_name": payload["app_name"]},
+                }
+            elif tool == "desktop.click_ui_element":
+                result = {
+                    "ok": True,
+                    "action": "desktop.click_ui_element",
+                    "data": {
+                        "target": payload["target"],
+                        "x": 120,
+                        "y": 240,
+                        "click_count": 1,
+                    },
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["app.open", "desktop.click_ui_element"]},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime planner fallback should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 并点击导出按钮",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-fallback",
+    )
+
+    assert "PixelForge" in str(result)
+    assert "导出" in str(result)
+    assert [request["tool"] for request in tool_runs[0]] == [
+        "app.open",
+        "desktop.click_ui_element",
+    ]
+    assert tool_runs[0][0]["source"] == "runtime_planner"
+    assert tool_runs[0][1]["input"] == {
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    planned_events = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    ]
+    assert [event["source"] for event in planned_events] == [
+        "runtime_planner",
+        "runtime_planner",
+    ]
+
+
 def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {

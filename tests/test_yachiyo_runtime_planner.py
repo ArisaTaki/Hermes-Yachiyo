@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent import (
     RuntimePlanner,
     YachiyoAgentService,
 )
+from apps.shell.yachiyo_agent.planner_execution import planner_desktop_tool_requests
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
@@ -71,6 +72,35 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     }
     assert _step_by_id(decision, "operate-foreground-ui").tool_name == "desktop.click_ui_element"
     assert _step_by_id(decision, "operate-foreground-ui").approval_required is True
+
+
+def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=["app.open", "desktop.click_ui_element"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:

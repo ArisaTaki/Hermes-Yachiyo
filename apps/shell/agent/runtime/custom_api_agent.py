@@ -289,6 +289,11 @@ class RuntimeCustomApiAgentLoop:
                 if direct_planned_tool_request
                 else daily_desktop_intent_tool_requests(planning_context, allowed_tools)
             )
+            if not planned_tool_requests and not direct_planned_tool_request:
+                planned_tool_requests = self._runtime_planner_desktop_tool_requests(
+                    planning_context,
+                    allowed_tools,
+                )
             if planned_tool_requests:
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
@@ -487,6 +492,23 @@ class RuntimeCustomApiAgentLoop:
             "tool": tool_name,
             "input": dict(payload),
         }
+
+    @staticmethod
+    def _runtime_planner_desktop_tool_requests(
+        planning_context: str,
+        allowed_tools: list[str],
+    ) -> list[dict[str, Any]]:
+        try:
+            from apps.shell.yachiyo_agent.planner_execution import planner_desktop_tool_requests
+        except Exception:
+            return []
+        try:
+            return planner_desktop_tool_requests(
+                planning_context,
+                allowed_tools,
+            )
+        except Exception:
+            return []
 
     def _record_unavailable_desktop_intent(
         self,
