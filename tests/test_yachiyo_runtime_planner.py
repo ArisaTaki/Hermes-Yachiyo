@@ -497,6 +497,36 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_click_plan() -> None:
     ]
 
 
+def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -> None:
+    decision = RuntimePlanner().decision(
+        "在 PixelForge 里点击导出按钮",
+        allowed_tools=["app.open_and_click_ui_element", "desktop.active_window"],
+    )
+    requests = planner_desktop_tool_requests(
+        "click Export in PixelForge",
+        allowed_tools=["app.open_and_click_ui_element"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == "app.open_and_click_ui_element"
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "Export",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_prefers_combined_app_foreground_tool() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",

@@ -1272,14 +1272,38 @@ def _app_name_hint(text: str) -> str:
     patterns = [
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
+        r"(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
+        r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app = re.split(r"(?:并|然后|and|to|播放|点击|输入|搜索)", match.group("app").strip(), maxsplit=1)[0]
-        return app.strip(" .，,。")
+        app = _clean_app_name_hint(match.group("app"))
+        if app:
+            return app
     return ""
+
+
+def _clean_app_name_hint(value: str) -> str:
+    app = re.split(
+        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|搜索|创建|新建|写|发送|分析|操作)",
+        str(value or "").strip(),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    generic = {
+        "app",
+        "application",
+        "desktop",
+        "window",
+        "应用",
+        "应用程序",
+        "桌面",
+        "窗口",
+    }
+    return "" if app.lower() in generic else app
 
 
 def _desktop_operation_hint(text: str) -> str:

@@ -239,6 +239,12 @@ def clean_target(value: str) -> str:
         target,
         flags=re.IGNORECASE,
     )
+    target = re.sub(
+        r"\s+(?:in|inside|within|using|with)\s+[A-Za-z][A-Za-z0-9 ._-]{1,40}$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
     return target.strip(" .，,。")
 
 
