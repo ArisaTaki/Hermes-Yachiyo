@@ -142,6 +142,9 @@ def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:
     run_dir = agent_root / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "report.md").write_text("hello secret", encoding="utf-8")
+    main_chat_run_dir = agent_root / "main-chat-run"
+    main_chat_run_dir.mkdir(parents=True)
+    (main_chat_run_dir / "report.md").write_text("main chat report", encoding="utf-8")
     screenshot_bytes = b"\x89PNG\r\n\x1a\nfake-screenshot"
     screenshot_dir = run_dir / "screenshots"
     screenshot_dir.mkdir()
@@ -151,7 +154,10 @@ def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:
         conn,
         agent_artifacts_dir=agent_root,
         workflow_artifacts_dir=workflow_root,
-        get_run=lambda run_id: {"run_id": run_id, "kind": "agent_run"},
+        get_run=lambda run_id: {
+            "run_id": run_id,
+            "kind": "main_chat_run" if run_id == "main-chat-run" else "agent_run",
+        },
         now=lambda: "2026-06-14T10:00:00Z",
         json_dump=_json_dump,
         redact_json_value=redact_json_value,
@@ -171,6 +177,8 @@ def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:
     preview = repo.read("run-1", "report.md")
     assert preview["content"] == "hello [redacted]"
     assert preview["truncated"] is False
+    main_chat_preview = repo.read("main-chat-run", "report.md")
+    assert main_chat_preview["content"] == "main chat report"
 
     screenshot_preview = repo.read("run-1", "screenshots/current-screen.png")
     assert screenshot_preview["mime_type"] == "image/png"

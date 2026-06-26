@@ -122,6 +122,6 @@ class RunArtifactRepository:
     def _artifact_base_dir(self, run: dict[str, Any]) -> Path:
         return (
             self._agent_artifacts_dir
-            if run.get("kind") == "agent_run"
+            if run.get("kind") in {"agent_run", "main_chat_run"}
             else self._workflow_artifacts_dir
         )
