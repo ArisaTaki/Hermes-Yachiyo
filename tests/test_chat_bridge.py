@@ -374,20 +374,19 @@ def test_chat_bridge_quick_message_plans_multi_step_desktop_request_for_lightwei
         assert result["agent_task"]["task_id"] == "task-multi-step"
         assert result["agent_task"]["conversation_id"] == "session-current"
         assert result["agent_task"]["status"] == "queued"
-        assert result["agent_task"]["current_step"] == "准备执行 · 打开应用并输入文字"
+        assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["payload"]["tool"] == (
-            "app.open_and_safe_type_text"
-        )
+        assert result["agent_task"]["recent_events"][0]["payload"]["tool"] == "desktop.list_apps"
+        assert result["agent_task"]["recent_events"][0]["payload"]["source"] == "runtime_planner"
         assert result["agent_task"]["recent_events"][0]["payload"]["input_preview"] == {
-            "app_name": "Notes",
-            "text": "hello",
+            "query": "Notes",
+            "limit": 20,
         }
     finally:
         store.close()
 
 
-def test_chat_bridge_quick_message_uses_runtime_planner_when_legacy_candidates_miss(
+def test_chat_bridge_quick_message_prefers_runtime_planner_before_legacy_candidates(
     tmp_path,
     monkeypatch,
 ):
@@ -420,7 +419,15 @@ def test_chat_bridge_quick_message_uses_runtime_planner_when_legacy_candidates_m
     monkeypatch.setattr(
         chat_bridge_mod,
         "_daily_desktop_candidates_for_quick_message",
-        lambda _text, **_kwargs: [],
+        lambda _text, **_kwargs: [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "Screen Saver"},
+                "source": "daily_desktop_intent",
+                "planning_reason": "clear_daily_desktop_intent",
+            }
+        ],
     )
     try:
         result = bridge.send_quick_message(
@@ -9810,17 +9817,17 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
         assert result["agent_task"]["task_id"] == "task-pending-browser"
         assert result["agent_task"]["conversation_id"] == "session-current"
         assert result["agent_task"]["status"] == "queued"
-        assert result["agent_task"]["current_step"] == "准备执行 · 打开网页"
-        assert result["agent_task"]["progress_text"] == "准备执行 · 打开网页"
+        assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
+        assert result["agent_task"]["progress_text"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["open_in_studio_url"] is None
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "browser.open_url"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
         assert result["agent_task"]["recent_events"][0]["payload"] == {
-            "input_preview": {"url": "https://github.com"},
-            "planning_reason": "clear_daily_desktop_intent",
-            "source": "daily_desktop_intent",
+            "input_preview": {"query": "GitHub", "limit": 20},
+            "planning_reason": "planner_fallback_desktop_operation",
+            "source": "runtime_planner",
             "status": "planned",
-            "tool": "browser.open_url",
+            "tool": "desktop.list_apps",
         }
         assert runtime.agent_runtime_service.calls == [
             ("get_task_run_link", "task-pending-browser")
@@ -9855,8 +9862,8 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
         assert result["agent_task"]["recent_events"][0]["detail"] == "screen.capture"
         assert result["agent_task"]["recent_events"][0]["payload"] == {
             "input_preview": {"reason": "user asked to capture the screen"},
-            "planning_reason": "clear_daily_desktop_intent",
-            "source": "daily_desktop_intent",
+            "planning_reason": "planner_fallback_desktop_operation",
+            "source": "runtime_planner",
             "status": "planned",
             "tool": "screen.capture",
         }
@@ -9885,15 +9892,15 @@ def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints
         assert result["task_id"] == "task-app-observe"
         assert result["agent_task"]["task_id"] == "task-app-observe"
         assert result["agent_task"]["status"] == "queued"
-        assert result["agent_task"]["current_step"] == "准备执行 · 聚焦应用"
+        assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "app.focus"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
         assert result["agent_task"]["recent_events"][0]["payload"] == {
-            "input_preview": {"app_name": "Google Chrome"},
-            "planning_reason": "clear_daily_desktop_intent",
-            "source": "daily_desktop_intent",
+            "input_preview": {"query": "Chrome", "limit": 20},
+            "planning_reason": "planner_fallback_desktop_operation",
+            "source": "runtime_planner",
             "status": "planned",
-            "tool": "app.focus",
+            "tool": "desktop.list_apps",
         }
     finally:
         store.close()
@@ -9922,15 +9929,15 @@ def test_chat_bridge_quick_message_plans_app_open_visual_followup_for_lightweigh
         assert result["task_id"] == "task-app-open-observe"
         assert result["agent_task"]["task_id"] == "task-app-open-observe"
         assert result["agent_task"]["status"] == "queued"
-        assert result["agent_task"]["current_step"] == "准备执行 · 打开应用"
+        assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
         assert result["agent_task"]["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-        assert result["agent_task"]["recent_events"][0]["detail"] == "app.open"
+        assert result["agent_task"]["recent_events"][0]["detail"] == "desktop.list_apps"
         assert result["agent_task"]["recent_events"][0]["payload"] == {
-            "input_preview": {"app_name": "WeChat"},
-            "planning_reason": "clear_daily_desktop_intent",
-            "source": "daily_desktop_intent",
+            "input_preview": {"query": "微信", "limit": 20},
+            "planning_reason": "planner_fallback_desktop_operation",
+            "source": "runtime_planner",
             "status": "planned",
-            "tool": "app.open",
+            "tool": "desktop.list_apps",
         }
     finally:
         store.close()

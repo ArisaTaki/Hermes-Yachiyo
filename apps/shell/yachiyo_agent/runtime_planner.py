@@ -782,6 +782,27 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        if (
+            not app_name
+            and screen_capture is not None
+            and not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
+        ):
+            capture_payload = {
+                key: screen_capture[key]
+                for key in ("reason",)
+                if key in screen_capture and screen_capture[key] not in (None, "")
+            }
+            return [
+                _step(
+                    intent,
+                    "capture-screen",
+                    "Capture screen",
+                    "desktop.app_discovery",
+                    _first_allowed(("screen.capture",), allowed),
+                    input_preview=capture_payload,
+                    reason="Capture visible desktop state for visual inspection before any action.",
+                )
+            ]
         discovery_tool = _first_allowed(
             (
                 "desktop.list_apps",
@@ -1867,7 +1888,7 @@ def _app_name_hint(text: str) -> str:
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
         r"(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
-        r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
+        r"(?:^|[\s，,。])(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -1881,7 +1902,7 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|搜索|创建|新建|写|发送|分析|操作)",
+        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|搜索|创建|新建|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -1898,6 +1919,9 @@ def _clean_app_name_hint(value: str) -> str:
         "应用程序",
         "桌面",
         "窗口",
+        "屏幕",
+        "界面",
+        "画面",
     }
     return "" if app.lower() in generic else app
 

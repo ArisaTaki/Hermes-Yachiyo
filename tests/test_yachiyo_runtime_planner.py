@@ -461,16 +461,44 @@ def test_runtime_planner_routes_screen_capture_to_desktop_discovery() -> None:
     assert decision.selected_intent.inputs["screen_capture_hint"] == {
         "reason": "user asked to capture the screen",
     }
-    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "discover-desktop-state",
-        "capture-screen",
-    ]
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == ["capture-screen"]
     capture = _step_by_id(decision, "capture-screen")
     assert capture.tool_name == "screen.capture"
     assert capture.action == "capture_screen"
     assert capture.input_preview == {"reason": "user asked to capture the screen"}
-    assert capture.depends_on == ["discover-desktop-state"]
+    assert capture.depends_on == []
     assert capture.approval_required is False
+
+
+def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我看看现在屏幕",
+        allowed_tools=["desktop.list_apps", "screen.capture", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == ["capture-screen"]
+    assert _step_by_id(decision, "capture-screen").tool_name == "screen.capture"
+
+
+def test_runtime_planner_cleans_current_interface_from_app_capture_hint() -> None:
+    decision = RuntimePlanner().decision(
+        "看一下 Chrome 当前界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Chrome",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Chrome",
+    }
+    assert _step_by_id(decision, "capture-screen").tool_name == "screen.capture"
 
 
 def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:

@@ -809,6 +809,12 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     )
+    app = re.sub(
+        r"\s*(?:当前|现在|这个|前台|该|current|active|foreground|this)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
     if re.fullmatch(
         r"(?:当前|现在|这个|前台|该)?(?:应用|app|界面|窗口|屏幕|ui|interface|window|screen)",
         app,

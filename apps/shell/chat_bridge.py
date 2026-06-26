@@ -247,6 +247,25 @@ def _runtime_planner_candidates_for_quick_message(
     return []
 
 
+def _desktop_candidates_for_quick_message(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    allowed_tools: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    planner_candidates = _runtime_planner_candidates_for_quick_message(
+        text,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+    )
+    if planner_candidates:
+        return planner_candidates
+    return _daily_desktop_candidates_for_quick_message(
+        text,
+        metadata=metadata,
+    )
+
+
 def agent_task_snapshot_for_task(
     runtime: "AppRuntime",
     task_id: str,
@@ -282,7 +301,7 @@ def planned_agent_task_snapshot_for_quick_message(
     candidates = (
         candidates
         if candidates is not None
-        else _daily_desktop_candidates_for_quick_message(text)
+        else _desktop_candidates_for_quick_message(text)
     )
     if not candidates:
         return None
@@ -377,16 +396,11 @@ class ChatBridge:
         planner_allowed_tools = main_chat_entrypoint_allowed_tools(
             _runtime_agent_service(self._runtime),
         )
-        desktop_candidates = _daily_desktop_candidates_for_quick_message(
+        desktop_candidates = _desktop_candidates_for_quick_message(
             text,
             metadata=metadata,
+            allowed_tools=planner_allowed_tools,
         )
-        if not desktop_candidates:
-            desktop_candidates = _runtime_planner_candidates_for_quick_message(
-                text,
-                metadata=metadata,
-                allowed_tools=planner_allowed_tools,
-            )
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,
