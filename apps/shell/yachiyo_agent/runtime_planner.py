@@ -3815,11 +3815,54 @@ def _explicit_browser_url_hint(text: str) -> str:
         flags=re.IGNORECASE,
     )
     if not domain_match:
-        return ""
+        return _known_web_destination_url_hint(value)
     candidate = _clean_browser_url(domain_match.group(0))
     if not _browser_url_context_allows_domain(value, candidate):
         return ""
     return _with_browser_url_scheme(candidate)
+
+
+_KNOWN_WEB_DESTINATION_URLS = {
+    "baidu": "https://www.baidu.com",
+    "bilibili": "https://www.bilibili.com",
+    "b站": "https://www.bilibili.com",
+    "github": "https://github.com",
+    "google": "https://www.google.com",
+    "yt": "https://www.youtube.com",
+    "youtube": "https://www.youtube.com",
+    "百度": "https://www.baidu.com",
+    "谷歌": "https://www.google.com",
+    "哔哩哔哩": "https://www.bilibili.com",
+}
+
+
+def _known_web_destination_url_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:打开|访问|浏览|前往|去|上)\s*(?P<site>[^。！？!?，,]+)",
+        r"(?P<site>[^。！？!?，,]+?)\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页)$",
+        r"\b(?:open|visit|browse|go\s+to)\s+(?P<site>[^.!?,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        url = _known_web_destination_url(match.group("site"))
+        if url:
+            return url
+    return ""
+
+
+def _known_web_destination_url(site_name: str) -> str:
+    site = re.sub(
+        r"\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页|首页面|site|website|homepage|home\s+page)$",
+        "",
+        str(site_name or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site).strip()
+    compact = re.sub(r"[\s._·-]+", "", site.lower())
+    return _KNOWN_WEB_DESTINATION_URLS.get(compact, "")
 
 
 def _clean_browser_url(url: str) -> str:

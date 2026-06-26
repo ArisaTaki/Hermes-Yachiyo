@@ -517,7 +517,7 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     ]
 
 
-def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> None:
+def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
     starter = LegacyChatTaskStarter(app_runtime, runtime)
@@ -530,26 +530,35 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_tool"] == "browser.open_url"
+    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_web_research"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in run_events[:2]] == [
         "agent.intent.selected",
         "agent.plan.created",
     ]
-    assert run_events[0][1]["payload"]["intent"]["kind"] == "desktop_operation"
+    assert run_events[0][1]["payload"]["intent"]["kind"] == "web_research"
     selection_events = [
         event for event in run_events if event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
-    assert selection_events[0][1]["payload"]["selection_reason"] == "legacy_more_specific_direct_plan"
-    assert selection_events[0][1]["payload"]["planner_tools"] == ["app.open"]
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
+    assert selection_events[0][1]["payload"]["planner_tools"] == ["browser.open_url"]
     assert selection_events[0][1]["payload"]["selected_tools"] == ["browser.open_url"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == []
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
 
 
 def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_planner() -> None:

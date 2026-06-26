@@ -2980,6 +2980,61 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
     assert legacy_calls == []
 
 
+def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开 GitHub",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    bilibili_selection = planner_first_direct_tool_selection(
+        "打开 B 站首页",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    app_selection = planner_first_direct_tool_selection(
+        "打开 Notion",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["intent_kind"] == "web_research"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert bilibili_selection.selected_source == "runtime_planner"
+    assert bilibili_selection.event_payload["intent_kind"] == "web_research"
+    assert bilibili_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.bilibili.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert app_selection.selected_source == "runtime_planner"
+    assert app_selection.event_payload["intent_kind"] == "desktop_operation"
+    assert app_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Notion"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
     search_selector = (
         'input[type="search"], input[name="q"], textarea[name="q"], '
