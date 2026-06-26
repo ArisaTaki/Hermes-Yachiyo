@@ -13,6 +13,7 @@ from apps.bridge.routes.yachiyo_models import (
     FutureTaskCancelBody,
     FutureTaskTriggerBody,
     MemoryBody,
+    PlanTaskBody,
     RerunRunBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
@@ -191,6 +192,14 @@ async def list_studio_agents(http_request: Request = None) -> dict[str, Any]:  #
 @router.get("/studio/tools")
 async def list_studio_tools(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     return await yachiyo_studio_handlers.list_tool_catalog(http_request)
+
+
+@router.post("/studio/planner")
+async def plan_studio_task(
+    request: PlanTaskBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.plan_task(request, http_request)
 
 
 @router.get("/studio/tools/restricted-plugins")

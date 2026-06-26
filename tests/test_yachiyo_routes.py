@@ -9,7 +9,12 @@ from typing import Any
 
 import pytest
 
-from apps.bridge.routes import yachiyo, yachiyo_chat_handlers, yachiyo_studio_run_handlers
+from apps.bridge.routes import (
+    yachiyo,
+    yachiyo_chat_handlers,
+    yachiyo_studio_run_handlers,
+    yachiyo_studio_tool_handlers,
+)
 from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
@@ -17,6 +22,7 @@ from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.chat_api import ChatAPI
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent import AgentTaskSnapshot, RunTimelineSnapshot, legacy_ports
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from packages.protocol.enums import TaskStatus
 
 
@@ -6852,6 +6858,61 @@ async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_studio_planner_route_returns_public_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PlannerService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def plan_task(
+            self,
+            prompt: str,
+            *,
+            allowed_tools: list[str] | None = None,
+            metadata: dict[str, Any] | None = None,
+        ):
+            self.calls.append(
+                {
+                    "prompt": prompt,
+                    "allowed_tools": allowed_tools,
+                    "metadata": metadata,
+                }
+            )
+            return RuntimePlanner().decision(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+            )
+
+    service = PlannerService()
+    monkeypatch.setattr(
+        yachiyo_studio_tool_handlers,
+        "studio_service",
+        lambda _request=None: service,
+    )
+
+    response = await yachiyo.plan_studio_task(
+        yachiyo.PlanTaskBody(
+            prompt="打开 PixelForge 并点击导出按钮",
+            allowed_tools=["desktop.running_apps", "app.open", "desktop.click_ui_element"],
+            metadata={"surface": "studio"},
+        ),
+        None,
+    )
+
+    assert response["selected_intent"]["kind"] == "desktop_operation"
+    assert response["plan"]["tool_plan"]["steps"][1]["tool_name"] == "app.open"
+    assert service.calls == [
+        {
+            "prompt": "打开 PixelForge 并点击导出按钮",
+            "allowed_tools": ["desktop.running_apps", "app.open", "desktop.click_ui_element"],
+            "metadata": {"surface": "studio"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) -> None:
     runtime = _FakeAgentRuntime()
     runtime.agent_workspaces_dir = tmp_path / "agent-workspaces"
@@ -7718,6 +7779,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
     assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
+    assert "return await yachiyo_studio_handlers.plan_task(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.list_restricted_tool_plugins(http_request)" in source
     assert "install_restricted_tool_plugin(" in source
     assert "update_restricted_tool_plugin(" in source
@@ -7743,6 +7805,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
     assert '@router.get("/studio/tools")' in source
+    assert '@router.post("/studio/planner")' in source
     assert '@router.get("/studio/agents/{agent_id}")' in source
     assert '@router.patch("/studio/agents/{agent_id}")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source

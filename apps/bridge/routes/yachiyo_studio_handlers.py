@@ -64,6 +64,7 @@ from apps.bridge.routes.yachiyo_studio_tool_handlers import (
     install_restricted_tool_plugin,
     list_restricted_tool_plugins,
     list_tool_catalog,
+    plan_task,
     uninstall_restricted_tool_plugin,
     update_restricted_tool_plugin,
 )
@@ -113,6 +114,7 @@ __all__ = [
     "list_restricted_tool_plugins",
     "list_tool_catalog",
     "list_workflows",
+    "plan_task",
     "read_run_artifact",
     "reject_run_approval",
     "rerun_run",

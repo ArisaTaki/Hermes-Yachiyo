@@ -67,6 +67,14 @@ class RestrictedToolPluginUpdateBody(BaseModel):
     enabled: bool | None = None
 
 
+class PlanTaskBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    prompt: str = Field(..., min_length=1, max_length=60000)
+    allowed_tools: list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class MemoryBody(BaseModel):
     content: str | None = Field(default=None, max_length=60000)
     old_content: str | None = Field(default=None, max_length=60000)

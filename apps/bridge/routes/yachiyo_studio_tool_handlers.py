@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from apps.bridge.routes.yachiyo_models import (
+    PlanTaskBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
 )
@@ -19,6 +20,19 @@ from apps.shell.agent_runtime import AgentRuntimeError
 async def list_tool_catalog(http_request: Request | None = None) -> dict[str, Any]:
     catalog = await asyncio.to_thread(studio_service(http_request).list_tool_catalog)
     return snapshot(catalog)
+
+
+async def plan_task(
+    request: PlanTaskBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    decision = await asyncio.to_thread(
+        studio_service(http_request).plan_task,
+        request.prompt,
+        allowed_tools=request.allowed_tools,
+        metadata=request.metadata,
+    )
+    return snapshot(decision)
 
 
 async def list_restricted_tool_plugins(http_request: Request | None = None) -> dict[str, Any]:
