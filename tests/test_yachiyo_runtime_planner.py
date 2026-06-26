@@ -1018,6 +1018,21 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     assert read_ui.depends_on == ["discover-desktop-state"]
     assert read_ui.approval_required is False
 
+    polite_current = RuntimePlanner().decision(
+        "你能看看现在有哪些按钮吗",
+        allowed_tools=["desktop.active_window", "app.focus", "desktop.ui_elements"],
+    )
+    assert polite_current.selected_intent.kind == "desktop_operation"
+    assert polite_current.selected_intent.inputs["app_name_hint"] == ""
+    assert polite_current.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert [step.step_id for step in polite_current.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+    ]
+
 
 def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     decision = RuntimePlanner().decision(
@@ -1111,6 +1126,18 @@ def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
     )
     assert english_decision.selected_intent.inputs["app_name_hint"] == ""
     assert [step.step_id for step in english_decision.plan.tool_plan.steps] == [
+        "capture-screen"
+    ]
+
+    current_interface = RuntimePlanner().decision(
+        "看一下我现在的界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+    assert current_interface.selected_intent.inputs["app_name_hint"] == ""
+    assert current_interface.selected_intent.inputs["screen_capture_hint"] == {
+        "reason": "user asked to capture the screen",
+    }
+    assert [step.step_id for step in current_interface.plan.tool_plan.steps] == [
         "capture-screen"
     ]
 

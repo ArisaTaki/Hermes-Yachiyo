@@ -861,7 +861,7 @@ def _ui_inspection_app_name_hint(value: str) -> str:
 def _clean_ui_app_name_hint(value: str) -> str:
     app = clean(value)
     app = re.sub(
-        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|识别|"
+        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|识别|"
         r"list|show|read|inspect|the)\s*",
         "",
         app,
@@ -914,8 +914,18 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "active",
         "foreground",
         "my",
+        "me",
         "the",
         "this",
+        "你能",
+        "我",
+        "我的",
+        "我现在的",
+        "现在的",
+        "当前的",
+        "这个",
+        "那个",
+        "该",
         "应用",
         "应用程序",
         "桌面",
