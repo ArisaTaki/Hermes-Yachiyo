@@ -152,9 +152,14 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
 
 _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS = frozenset(
     {
+        "planner_prefetch_code_context",
+        "planner_prefetch_data_source",
+        "planner_prefetch_file_scope",
+        "planner_prefetch_report_context",
         "planner_prefetch_information_capture_context",
         "planner_prefetch_schedule_context",
         "planner_prefetch_communication_context",
+        "planner_prefetch_communication_surface",
         "planner_prefetch_web_context",
     }
 )

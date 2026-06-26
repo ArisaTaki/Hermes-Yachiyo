@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -13,6 +14,16 @@ from apps.shell.yachiyo_agent.legacy_ports import (
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import planner_first_direct_tool_selection
+
+
+def _recording_legacy_requests(
+    calls: list[dict[str, Any]],
+) -> Callable[[str, list[str]], list[dict[str, Any]]]:
+    def record(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return []
+
+    return record
 
 
 def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
@@ -94,13 +105,12 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
 
 
 def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> None:
-    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("legacy media planner should not run for planner-owned playback")
+    legacy_calls: list[dict[str, Any]] = []
 
     selection = planner_first_direct_tool_selection(
         "播放超时空辉夜姬",
         ["media.apple_music_play"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert selection.selected_source == "runtime_planner"
@@ -116,21 +126,21 @@ def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> 
     assert selection.event_payload["selection_source"] == "runtime_planner"
     assert selection.event_payload["legacy_request_count"] == 0
     assert selection.event_payload["selected_tools"] == ["media.apple_music_play"]
+    assert legacy_calls == []
 
 
 def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
-    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("legacy clipboard planner should not run for planner-owned clipboard")
+    legacy_calls: list[dict[str, Any]] = []
 
     write_selection = planner_first_direct_tool_selection(
         "copy hello world to clipboard",
         ["clipboard.write"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
     read_selection = planner_first_direct_tool_selection(
         "read selected text",
         ["desktop.safe_shortcut", "clipboard.read"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert write_selection.selected_source == "runtime_planner"
@@ -150,21 +160,21 @@ def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
         "desktop.safe_shortcut",
         "clipboard.read",
     ]
+    assert legacy_calls == []
 
 
 def test_planner_first_direct_selection_owns_system_control_without_legacy() -> None:
-    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("legacy system planner should not run for planner-owned system control")
+    legacy_calls: list[dict[str, Any]] = []
 
     volume_selection = planner_first_direct_tool_selection(
         "音量调大",
         ["system.volume"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
     screen_saver_selection = planner_first_direct_tool_selection(
         "打开屏保",
         ["system.screen_saver_start"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert volume_selection.selected_source == "runtime_planner"
@@ -189,16 +199,16 @@ def test_planner_first_direct_selection_owns_system_control_without_legacy() -> 
         },
     ]
     assert screen_saver_selection.event_payload["legacy_request_count"] == 0
+    assert legacy_calls == []
 
 
 def test_planner_first_direct_selection_owns_web_research_without_legacy() -> None:
-    def fail_legacy_requests(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("legacy browser planner should not run for planner-owned web research")
+    legacy_calls: list[dict[str, Any]] = []
 
     selection = planner_first_direct_tool_selection(
         "open https://example.com",
         ["browser.open_url"],
-        legacy_tool_requests=fail_legacy_requests,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 
     assert selection.selected_source == "runtime_planner"
@@ -212,6 +222,48 @@ def test_planner_first_direct_selection_owns_web_research_without_legacy() -> No
         },
     ]
     assert selection.event_payload["legacy_request_count"] == 0
+    assert legacy_calls == []
+
+
+def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    data_selection = planner_first_direct_tool_selection(
+        "分析 sales.csv 并输出报告",
+        ["workspace.read"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    report_selection = planner_first_direct_tool_selection(
+        "写一份项目总结报告",
+        ["workspace.list", "workspace.read", "artifact.write"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    code_selection = planner_first_direct_tool_selection(
+        "检查这个仓库的代码并总结风险",
+        ["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert data_selection.selected_source == "runtime_planner"
+    assert data_selection.event_payload["legacy_request_count"] == 0
+    assert data_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.read",
+            "input": {"path": "sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        },
+    ]
+    assert report_selection.selected_source == "runtime_planner"
+    assert report_selection.event_payload["legacy_request_count"] == 0
+    assert report_selection.requests[0]["planning_reason"] == "planner_prefetch_report_context"
+    assert report_selection.requests[0]["continue_to_model"] is True
+    assert code_selection.selected_source == "runtime_planner"
+    assert code_selection.event_payload["legacy_request_count"] == 0
+    assert code_selection.requests[0]["planning_reason"] == "planner_prefetch_code_context"
+    assert code_selection.requests[0]["continue_to_model"] is True
+    assert legacy_calls == []
 
 
 def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() -> None:
