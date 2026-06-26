@@ -4052,6 +4052,10 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             r"\s*[:：]\s*(?P<body>.+)$"
         ),
         (
+            r"^(?:打开|启动|开启)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:发消息|发送|发)\s*(?:给|到)?\s*(?P<recipient_message_tail>[^：:，,。]+)$"
+        ),
+        (
             r"^(?:在|用|通过)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
             r"(?:搜索|查找|找)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:并|然后|再)\s*(?:发送|发消息|发)\s*(?P<body>.+)$"
@@ -4078,8 +4082,15 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             continue
         groups = match.groupdict()
         app_name = _canonical_app_name_hint(groups.get("app") or "")
-        recipient = _clean_communication_hint_text(groups.get("recipient") or "")
-        body = _clean_communication_hint_text(groups.get("body") or "")
+        recipient_tail = str(groups.get("recipient_message_tail") or "").strip()
+        if recipient_tail:
+            split_tail = _split_communication_implicit_recipient_message(recipient_tail)
+            if not split_tail:
+                continue
+            recipient, body = split_tail
+        else:
+            recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
+            body = _clean_communication_body_text(groups.get("body") or "")
         if not app_name or not recipient or not body:
             continue
         return {
@@ -4165,6 +4176,44 @@ def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
     return "", ""
 
 
+def _split_communication_implicit_recipient_message(value: str) -> tuple[str, str] | None:
+    text = _clean_communication_hint_text(value)
+    explicit = re.search(
+        r"^(?P<recipient>.+?)\s*(?:说|内容是|内容为|:|：)\s*(?P<body>.+)$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if explicit:
+        recipient = _clean_communication_recipient_text(explicit.group("recipient"))
+        body = _clean_communication_body_text(explicit.group("body"))
+        return (recipient, body) if recipient and body else None
+
+    greeting_pattern = r"hello\b.*|hi\b.*|hey\b.*|thanks\b.*|thank\s+you\b.*|ok\b.*|okay\b.*"
+    spaced = re.search(
+        rf"^(?P<recipient>.+?)\s+(?P<body>{greeting_pattern})$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if spaced:
+        recipient = _clean_communication_recipient_text(spaced.group("recipient"))
+        body = _clean_communication_body_text(spaced.group("body"))
+        return (recipient, body) if recipient and body else None
+
+    compact = re.search(
+        r"^(?P<recipient>.+?)(?P<body>"
+        r"你好.*|您好.*|在吗.*|早上好.*|中午好.*|下午好.*|晚上好.*|"
+        r"晚安.*|早安.*|谢谢.*|辛苦了.*|收到.*|好的.*|测试(?:一下)?"
+        r")$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if compact:
+        recipient = _clean_communication_recipient_text(compact.group("recipient"))
+        body = _clean_communication_body_text(compact.group("body"))
+        return (recipient, body) if recipient and body else None
+    return None
+
+
 def _communication_app_mode(text: str) -> str:
     value = _clean_prompt(text)
     if re.search(r"^(?:打开|启动|开启)\s*", value, flags=re.IGNORECASE):
@@ -4178,6 +4227,16 @@ def _clean_communication_hint_text(value: str) -> str:
     text = re.sub(r"^[：:，,\s]+", "", str(value or "").strip())
     text = re.sub(r"[。.,，；;！!？?]+$", "", text).strip()
     return text.strip("「」\"'“”‘’")
+
+
+def _clean_communication_recipient_text(value: str) -> str:
+    text = _clean_communication_hint_text(value)
+    text = re.sub(r"\s*(?:聊天|会话|对话|chat|conversation)$", "", text, flags=re.IGNORECASE)
+    return text.strip(" 「」『』“”\"'`")
+
+
+def _clean_communication_body_text(value: str) -> str:
+    return _clean_foreground_compose_text(_clean_communication_hint_text(value))
 
 
 def _app_scoped_desktop_operation_hint(text: str) -> bool:
