@@ -267,6 +267,13 @@ class MainChatModelLoopRunner:
         intent_text = _latest_user_intent_text(messages)
         if not intent_text:
             return False
+        try:
+            from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+
+            if planner_tool_requests(intent_text, allowed_tools):
+                return True
+        except Exception:
+            pass
         if daily_desktop_intent_tool_request(intent_text, allowed_tools):
             return True
         return bool(daily_desktop_intent_candidates(intent_text))

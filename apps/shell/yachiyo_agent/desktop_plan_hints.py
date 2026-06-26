@@ -306,6 +306,17 @@ def hotkey_hint(text: str) -> dict[str, Any] | None:
 def safe_shortcut_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     action = _safe_shortcut_action_from_hotkey_hint(value) or _safe_shortcut_action_from_phrase(value)
+    if not action:
+        for part in reversed(
+            [
+                item.strip()
+                for item in re.split(r"(?:然后|再|接着|之后|and\s+then|then|[,，。])", value)
+                if item.strip()
+            ]
+        ):
+            action = _safe_shortcut_action_from_phrase(part)
+            if action:
+                break
     return {"action": action} if action else None
 
 
@@ -1075,6 +1086,14 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     phrase = re.sub(r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
     normalized = re.sub(r"\s+", "", phrase).lower()
     mapping = {
+        "复制": "copy",
+        "复制这个": "copy",
+        "复制选中内容": "copy",
+        "复制选中的内容": "copy",
+        "复制当前选中内容": "copy",
+        "copy": "copy",
+        "copyselection": "copy",
+        "copyselectedtext": "copy",
         "粘贴": "paste",
         "前台粘贴": "paste",
         "粘贴到当前窗口": "paste",

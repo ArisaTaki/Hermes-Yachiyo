@@ -13,6 +13,57 @@ def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
     return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
 
 
+def _normalized_app_lookup(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _discovered_app_name_for_query(
+    timeline: list[dict[str, Any]],
+    query: str,
+) -> str:
+    clean_query = _normalized_app_lookup(query)
+    if not clean_query:
+        return ""
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "") != "desktop.list_apps":
+            continue
+        input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
+        if _normalized_app_lookup(input_preview.get("query")) != clean_query:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        apps = data.get("apps") if isinstance(data.get("apps"), list) else []
+        for app in apps:
+            if not isinstance(app, dict):
+                continue
+            app_name = str(app.get("name") or "").strip()
+            if app_name:
+                return app_name
+    return ""
+
+
+def _tool_request_with_discovered_app_name(
+    tool_request: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    requested_app_name = str(raw_input.get("app_name") or "").strip()
+    discovered_app_name = _discovered_app_name_for_query(timeline, requested_app_name)
+    if not discovered_app_name or _normalized_app_lookup(discovered_app_name) == _normalized_app_lookup(
+        requested_app_name
+    ):
+        return tool_request
+    return {
+        **tool_request,
+        "input": {
+            **raw_input,
+            "app_name": discovered_app_name,
+        },
+    }
+
+
 def _tool_result_artifact(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
     if not tool_result.get("ok"):
         return None
@@ -271,6 +322,7 @@ class RuntimeToolRequestRunner:
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
         for index, tool_request in enumerate(tool_requests):
+            tool_request = _tool_request_with_discovered_app_name(tool_request, timeline)
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
             raw_input = (
                 tool_request.get("input")

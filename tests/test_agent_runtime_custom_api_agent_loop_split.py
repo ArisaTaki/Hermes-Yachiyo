@@ -10744,11 +10744,15 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                 "protocol": "json_fallback",
                 "tool": "app.open_and_safe_type_text",
                 "input": {"app_name": "Notes", "text": "hello"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
             },
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.safe_shortcut",
                 "input": {"action": "copy"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
             },
         ]
     ]
@@ -10759,21 +10763,28 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
     ]
+    assert [event["source"] for event in planned_events] == [
+        "runtime_planner",
+        "runtime_planner",
+    ]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "desktop.safe_shortcut"
     assert completed[-1]["tools"] == ["app.open_and_safe_type_text", "desktop.safe_shortcut"]
 
 
-def test_custom_api_agent_loop_uses_runtime_planner_desktop_fallback_when_legacy_rules_miss(
+def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rules(
     monkeypatch,
 ) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run before runtime planner")
+
     monkeypatch.setattr(
         "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
+        fail_legacy_daily_planner,
     )
     monkeypatch.setattr(
         "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
+        fail_legacy_daily_planner,
     )
 
     budget = FakeBudget()
@@ -10875,16 +10886,19 @@ def test_custom_api_agent_loop_uses_runtime_planner_desktop_fallback_when_legacy
     ]
 
 
-def test_custom_api_agent_loop_uses_runtime_planner_media_fallback_when_legacy_rules_miss(
+def test_custom_api_agent_loop_prefers_runtime_planner_media_before_legacy_rules(
     monkeypatch,
 ) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run before runtime planner")
+
     monkeypatch.setattr(
         "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
+        fail_legacy_daily_planner,
     )
     monkeypatch.setattr(
         "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
+        fail_legacy_daily_planner,
     )
 
     budget = FakeBudget()

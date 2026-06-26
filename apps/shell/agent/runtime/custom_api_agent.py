@@ -101,6 +101,22 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.click",
 }
 
+_DAILY_DESKTOP_DISCOVERY_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+    "desktop.permissions",
+}
+
+_DAILY_DESKTOP_VERIFY_TOOLS = {
+    "desktop.active_window",
+    "desktop.ui_elements",
+}
+
+_DAILY_DESKTOP_PLAN_SOURCES = {
+    "daily_desktop_intent",
+    "runtime_planner",
+}
+
 _APP_FOREGROUND_ACTION_TOOLS = {
     "app.open_and_safe_type_text",
     "app.focus_and_safe_type_text",
@@ -299,22 +315,22 @@ class RuntimeCustomApiAgentLoop:
             if direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
             else:
-                planned_tool_requests = daily_desktop_intent_tool_requests(
+                planned_tool_requests = self._runtime_planner_tool_requests(
                     planning_context,
                     allowed_tools,
                 )
-                approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
-                    planning_context,
-                    planned_tool_requests,
-                    allowed_tools,
-                )
-                if approval_hotkey_request:
-                    planned_tool_requests = [approval_hotkey_request]
                 if not planned_tool_requests:
-                    planned_tool_requests = self._runtime_planner_tool_requests(
+                    planned_tool_requests = daily_desktop_intent_tool_requests(
                         planning_context,
                         allowed_tools,
                     )
+                    approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
+                        planning_context,
+                        planned_tool_requests,
+                        allowed_tools,
+                    )
+                    if approval_hotkey_request:
+                        planned_tool_requests = [approval_hotkey_request]
             if planned_tool_requests:
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
@@ -832,7 +848,6 @@ class RuntimeCustomApiAgentLoop:
         ]
         event_index = 0
         completed_steps: list[dict[str, Any]] = []
-        summaries: list[str] = []
         for planned_tool_request in planned_tool_requests:
             planned_tool = str(planned_tool_request.get("tool") or "")
             if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
@@ -877,8 +892,14 @@ class RuntimeCustomApiAgentLoop:
             if presentation:
                 completed_step["presentation"] = presentation
             completed_steps.append(completed_step)
-            summaries.append(summary)
-        summary = _combine_daily_desktop_summaries(summaries)
+        visible_steps = _visible_daily_desktop_completed_steps(completed_steps)
+        summary = _combine_daily_desktop_summaries(
+            [
+                str(step.get("summary") or "")
+                for step in visible_steps
+                if isinstance(step, dict)
+            ]
+        )
         if not summary:
             return ""
         last_step = completed_steps[-1]
@@ -1366,21 +1387,25 @@ class RuntimeCustomApiAgentLoop:
                 continue
             if event_type != "agent.desktop.intent_planned":
                 continue
-            if str(event.get("source") or "").strip() != "daily_desktop_intent":
+            source = str(event.get("source") or "").strip()
+            if source not in _DAILY_DESKTOP_PLAN_SOURCES:
                 continue
             tool_name = str(event.get("tool") or event.get("detail") or "").strip()
             if not tool_name:
                 continue
             input_preview = event.get("input_preview")
+            request = {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": dict(input_preview) if isinstance(input_preview, dict) else {},
+                "source": source,
+            }
+            planning_reason = str(event.get("planning_reason") or "").strip()
+            if planning_reason:
+                request["planning_reason"] = planning_reason
             if start_index < 0:
                 start_index = index
-            requests.append(
-                {
-                    "protocol": "json_fallback",
-                    "tool": tool_name,
-                    "input": dict(input_preview) if isinstance(input_preview, dict) else {},
-                }
-            )
+            requests.append(request)
         if start_index < 0 or len(requests) < 2:
             return None
         return {"start_index": start_index, "requests": requests}
@@ -1414,7 +1439,7 @@ class RuntimeCustomApiAgentLoop:
             event_tool = str(event.get("tool") or event.get("detail") or "").strip()
             if event_tool != tool_name:
                 continue
-            if str(event.get("source") or "") != "daily_desktop_intent":
+            if str(event.get("source") or "").strip() not in _DAILY_DESKTOP_PLAN_SOURCES:
                 continue
             input_preview = event.get("input_preview")
             return dict(input_preview) if isinstance(input_preview, dict) else {}
@@ -2778,6 +2803,30 @@ def _sentence(value: str) -> str:
 def _combine_daily_desktop_summaries(summaries: list[str]) -> str:
     sentences = [_sentence(summary) for summary in summaries if str(summary or "").strip()]
     return " ".join(sentences)
+
+
+def _visible_daily_desktop_completed_steps(
+    completed_steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    primary_indexes = [
+        index
+        for index, step in enumerate(completed_steps)
+        if str(step.get("tool") or "") not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        and str(step.get("tool") or "") not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if not primary_indexes:
+        return completed_steps
+    first_primary = primary_indexes[0]
+    last_primary = primary_indexes[-1]
+    visible_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(completed_steps):
+        tool_name = str(step.get("tool") or "")
+        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS and index < first_primary:
+            continue
+        if tool_name in _DAILY_DESKTOP_VERIFY_TOOLS and index > last_primary:
+            continue
+        visible_steps.append(step)
+    return visible_steps or completed_steps
 
 
 def _display_target_name(value: str, suffix: str = "") -> str:

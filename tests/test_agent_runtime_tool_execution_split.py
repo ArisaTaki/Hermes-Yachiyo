@@ -621,6 +621,64 @@ def test_runtime_tool_request_runner_blocks_tools_disallowed_by_user_goal() -> N
     assert "blocked_by_user_goal" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "apps": [{"name": "Music", "path": "/Applications/Music.app"}],
+                },
+            }
+            if tool_name == "desktop.list_apps"
+            else {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": payload["app_name"], "launch_verified": True},
+            }
+        )
+        timeline.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "打开 Apple Music"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "Apple Music", "limit": 20}},
+            {"tool": "app.open", "input": {"app_name": "Apple Music"}},
+        ],
+        ["desktop.list_apps", "app.open"],
+        FakeBroker({"ok": True}),
+        messages,
+        [],
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "Apple Music", "limit": 20}),
+        ("app.open", {"app_name": "Music"}),
+    ]
+
+
 def test_runtime_tool_request_runner_raises_pending_approval_with_remaining_requests() -> None:
     pending_builder = FakePendingApprovalBuilder()
     runner = _runner(

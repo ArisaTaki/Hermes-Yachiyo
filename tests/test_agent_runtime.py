@@ -4341,7 +4341,7 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         assert planned_event["payload"]["input_preview"] == {}
         assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
         assert tool_event["payload"]["result"]["ok"] is True
-        assert completed_event["payload"]["source"] == "daily_desktop_intent"
+        assert completed_event["payload"]["source"] == "runtime_planner"
     finally:
         service.close()
 
@@ -4454,16 +4454,28 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
-        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
-        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        tool_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.call" and event["payload"]["tool"] == "app.open"
+        )
 
         assert open_calls == ["Music"]
         assert updated["result"] == "已打开 Music。"
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "app.open"
-        assert planned_event["payload"]["input_preview"] == {"app_name": "Music"}
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+        ]
+        assert planned_events[1]["payload"]["source"] == "runtime_planner"
+        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Apple Music"}
         assert tool_event["payload"]["tool"] == "app.open"
+        assert tool_event["payload"]["input_preview"] == {"app_name": "Music"}
     finally:
         service.close()
 
@@ -4473,7 +4485,7 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
     from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 
     service = make_service(tmp_path)
-    hotkey_calls: list[tuple[str, list[str] | None]] = []
+    quit_calls = 0
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: FakeNoDefaultProfileService(),
@@ -4483,37 +4495,32 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
         lambda *_args, **_kwargs: pytest.fail("approved desktop intent should not require model"),
     )
 
-    def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
-        hotkey_calls.append((key, modifiers))
+    def fake_desktop_quit_app() -> dict[str, Any]:
+        nonlocal quit_calls
+        quit_calls += 1
         return {
             "ok": True,
-            "action": "desktop.hotkey",
-            "summary": "Sent hotkey",
-            "data": {
-                "key": key,
-                "modifiers": list(modifiers or []),
-            },
+            "action": "desktop.quit_app",
+            "summary": "Quit foreground app",
+            "data": {},
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_quit_app", fake_desktop_quit_app)
     try:
         run = service.start_main_chat_run(
-            task_id="task-main-hotkey-no-profile",
-            session_id="session-main-hotkey-no-profile",
-            user_goal="按 Command+L",
+            task_id="task-main-quit-no-profile",
+            session_id="session-main-quit-no-profile",
+            user_goal="退出当前应用",
         )
         waiting = service.execute_main_chat_model_loop(
             run["run_id"],
-            [{"role": "user", "content": "按 Command+L"}],
+            [{"role": "user", "content": "退出当前应用"}],
         )
 
         assert waiting["status"] == "approval_required"
-        assert waiting["pending_approval"]["tool"] == "desktop.hotkey"
-        assert waiting["pending_approval"]["input_preview"] == {
-            "key": "l",
-            "modifiers": ["command"],
-        }
-        assert hotkey_calls == []
+        assert waiting["pending_approval"]["tool"] == "desktop.quit_app"
+        assert waiting["pending_approval"]["input_preview"] == {}
+        assert quit_calls == 0
 
         resumed = service.approve_run_approval(run["run_id"])
         events = service.list_run_events(run["run_id"])["events"]
@@ -4522,19 +4529,26 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
 
         assert resumed["status"] == "running"
         assert resumed["pending_approval"] == {}
-        assert resumed["result"] == "已发送快捷键：Command+L。"
-        assert hotkey_calls == [("l", ["command"])]
+        assert resumed["result"] == "已请求退出当前应用。"
+        assert quit_calls == 1
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert completed_event["payload"]["tool"] == "desktop.hotkey"
-        assert completed_event["payload"]["source"] == "daily_desktop_intent"
+        assert completed_event["payload"]["tool"] == "desktop.active_window"
+        assert completed_event["payload"]["tools"] == [
+            "desktop.running_apps",
+            "desktop.quit_app",
+            "desktop.active_window",
+        ]
+        assert completed_event["payload"]["source"] == "runtime_planner"
         public_timeline = YachiyoAgentService(LegacyRuntimePort(service)).get_task_timeline(
-            "task-main-hotkey-no-profile"
+            "task-main-quit-no-profile"
         )
         assert public_timeline.run_id == run["run_id"]
-        assert public_timeline.task_id == "task-main-hotkey-no-profile"
-        assert public_timeline.tool_calls[-1].tool_name == "desktop.hotkey"
-        assert public_timeline.tool_calls[-1].status == "completed"
+        assert public_timeline.task_id == "task-main-quit-no-profile"
+        quit_tool_calls = [
+            call for call in public_timeline.tool_calls if call.tool_name == "desktop.quit_app"
+        ]
+        assert quit_tool_calls[-1].status == "completed"
         assert [event.event_type for event in public_timeline.events][-2:] == [
             "agent.desktop.intent_completed",
             "model.output.ready",

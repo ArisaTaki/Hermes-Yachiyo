@@ -20,6 +20,11 @@ _DAILY_DESKTOP_APPROVAL_TOOLS = {
     "terminal.run",
 }
 
+_DAILY_DESKTOP_PLAN_SOURCES = {
+    "daily_desktop_intent",
+    "runtime_planner",
+}
+
 
 class RuntimeToolApprovalResumeService:
     """Builds approval resume contexts and dispatches approved tool resumes."""
@@ -193,7 +198,7 @@ def _is_daily_desktop_approval_resume(run: dict[str, Any], pending: dict[str, An
             continue
         if str(event.get("event") or "").strip() != "agent.desktop.intent_approval_required":
             continue
-        if str(event.get("source") or "").strip() != "daily_desktop_intent":
+        if str(event.get("source") or "").strip() not in _DAILY_DESKTOP_PLAN_SOURCES:
             continue
         event_tool = str(event.get("tool") or event.get("detail") or "").strip()
         if event_tool == tool_name:
@@ -212,7 +217,7 @@ def _pending_tool_in_uncompleted_daily_desktop_plan(run: dict[str, Any], tool_na
             continue
         if event_type != "agent.desktop.intent_planned":
             continue
-        if str(event.get("source") or "").strip() != "daily_desktop_intent":
+        if str(event.get("source") or "").strip() not in _DAILY_DESKTOP_PLAN_SOURCES:
             continue
         event_tool = str(event.get("tool") or event.get("detail") or "").strip()
         if event_tool:

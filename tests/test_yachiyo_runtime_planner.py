@@ -676,6 +676,31 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     ]
 
 
+def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Notes，输入 hello，再复制",
+        allowed_tools=["app.open_and_safe_type_text", "desktop.safe_shortcut"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup",
+        "verify-desktop-result",
+    ]
+    type_step = _step_by_id(decision, "operate-foreground-ui")
+    assert type_step.tool_name == "app.open_and_safe_type_text"
+    assert type_step.input_preview == {"app_name": "Notes", "text": "hello"}
+    followup = _step_by_id(decision, "operate-foreground-ui-followup")
+    assert followup.tool_name == "desktop.safe_shortcut"
+    assert followup.input_preview == {"action": "copy"}
+    assert followup.depends_on == ["operate-foreground-ui"]
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui-followup"
+    ]
+
+
 def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> None:
     key_decision = RuntimePlanner().decision(
         "按下一页键",

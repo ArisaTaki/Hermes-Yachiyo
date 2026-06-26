@@ -767,12 +767,14 @@ class RuntimePlanner:
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         safe_type_text = "" if type_target else safe_type_text_hint(intent.user_goal)
         submit_action = submit_action_hint(intent.user_goal)
+        followup_safe_shortcut = safe_shortcut if safe_type_text and safe_shortcut else None
+        primary_safe_shortcut = None if followup_safe_shortcut else safe_shortcut
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
             mode=mode,
             allowed=allowed,
             click_target=click_target,
-            safe_shortcut=safe_shortcut,
+            safe_shortcut=primary_safe_shortcut,
             safe_key=safe_key,
             safe_scroll=safe_scroll,
             safe_click=safe_click,
@@ -1042,7 +1044,13 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
-        if _looks_like_ui_operation(intent.user_goal) or safe_shortcut or safe_key or safe_scroll or safe_click:
+        if (
+            _looks_like_ui_operation(intent.user_goal)
+            or primary_safe_shortcut
+            or safe_key
+            or safe_scroll
+            or safe_click
+        ):
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
@@ -1072,6 +1080,19 @@ class RuntimePlanner:
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
+        if followup_safe_shortcut and any(step.step_id == "operate-foreground-ui" for step in steps):
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui-followup",
+                    "Operate foreground UI",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_shortcut",), allowed),
+                    input_preview=dict(followup_safe_shortcut),
+                    depends_on=["operate-foreground-ui"],
+                    reason="Run the requested follow-up safe shortcut after the explicit foreground input.",
+                )
+            )
         if submit_action and any(step.step_id == "operate-foreground-ui" for step in steps):
             steps.append(
                 _step(
@@ -1090,6 +1111,8 @@ class RuntimePlanner:
         verify_depends_on = []
         if any(step.step_id == "submit-foreground-ui" for step in steps):
             verify_depends_on = ["submit-foreground-ui"]
+        elif any(step.step_id == "operate-foreground-ui-followup" for step in steps):
+            verify_depends_on = ["operate-foreground-ui-followup"]
         elif any(step.step_id == "operate-foreground-ui" for step in steps):
             verify_depends_on = ["operate-foreground-ui"]
         elif any(step.step_id == "focus-app-window" for step in steps):
@@ -1489,7 +1512,7 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return _foreground_management_action(tool_name)
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
-    if step_key == "operate-foreground-ui":
+    if step_key.startswith("operate-foreground-ui"):
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
         return "submit"

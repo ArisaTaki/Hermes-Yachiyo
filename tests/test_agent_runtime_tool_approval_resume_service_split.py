@@ -236,6 +236,44 @@ def test_tool_approval_resume_service_dispatches_main_chat_resume() -> None:
     assert prepared["workspace_policy"] == {"default_workdir": "/tmp/project"}
 
 
+def test_tool_approval_resume_service_accepts_runtime_planner_profileless_desktop_resume() -> None:
+    service, state = _service()
+    state["pending"] = {
+        "tool": "desktop.quit_app",
+        "tool_request": {"tool": "desktop.quit_app", "input": {}},
+        "messages": [{"role": "user", "content": "退出当前应用"}],
+        "remaining_tool_requests": [],
+        "next_iteration": 1,
+        "model_profile_id": "",
+        "tool_policy": {
+            "allowed_tools": ["desktop.quit_app"],
+            "approval_required": {"desktop.quit_app": True},
+        },
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+    service._default_chat_profile_id = lambda: ""
+    run = {
+        "run_id": "run-main",
+        "kind": "main_chat_run",
+        "runnable_id": "builtin:yachiyo-main",
+        "timeline": [
+            {
+                "event": "agent.desktop.intent_planned",
+                "tool": "desktop.quit_app",
+                "source": "runtime_planner",
+            }
+        ],
+        "artifacts": [],
+    }
+
+    result = service.approve_main_chat_run(run)
+
+    call = state["resume_calls"][0]
+    assert result["status"] == "resumed"
+    assert call["agent"]["model_profile_id"] == ""
+    assert call["pending"] is state["pending"]
+
+
 def test_native_runtime_installs_tool_approval_resume_service(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
