@@ -305,6 +305,8 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert "TaskIntent" in calls[0]["messages"][0]["content"]
     assert "discover -> act -> verify" in calls[0]["messages"][0]["content"]
     assert "choose capabilities before app-specific rules" in calls[0]["messages"][0]["content"]
+    assert "Resolve arbitrary app names through app/window/UI discovery" in calls[0]["messages"][0]["content"]
+    assert "instead of requiring app-specific aliases or manual user steps" in calls[0]["messages"][0]["content"]
     assert "memory.add" in calls[0]["messages"][0]["content"]
     assert "future_task.schedule" in calls[0]["messages"][0]["content"]
     assert "prefer structured desktop tools" in calls[0]["messages"][0]["content"]
