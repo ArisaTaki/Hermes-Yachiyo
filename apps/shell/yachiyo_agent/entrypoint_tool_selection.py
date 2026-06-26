@@ -117,6 +117,8 @@ def _should_consult_legacy(requests: list[dict[str, Any]]) -> bool:
     tools = [str(request.get("tool") or "").strip() for request in requests]
     if _runtime_planner_model_followup_owns_selection(requests):
         return False
+    if _runtime_planner_communication_send_owns_selection(requests):
+        return False
     if any(bool(request.get("continue_to_model")) for request in requests):
         return True
     if any(tool == "desktop.submit_foreground" for tool in tools):
@@ -156,6 +158,17 @@ def _runtime_planner_model_followup_owns_selection(requests: list[dict[str, Any]
         if isinstance(request, dict)
     }
     return bool(reasons) and reasons <= _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS
+
+
+def _runtime_planner_communication_send_owns_selection(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    return reasons == {"planner_fallback_communication_send"}
 
 
 def _legacy_requests(

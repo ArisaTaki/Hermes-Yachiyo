@@ -664,7 +664,11 @@ class TaskIntentRouter:
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         source = context_source_hint(text)
-        direct_hint = {} if source else _direct_communication_hint(text)
+        direct_hint = (
+            _direct_context_communication_hint(text, source)
+            if source
+            else _direct_communication_hint(text)
+        )
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
             score = 0.24
@@ -2196,8 +2200,13 @@ def _direct_communication_steps(
     app_name = str(direct_message.get("app_name") or "").strip()
     recipient = str(direct_message.get("recipient") or "").strip()
     body = str(direct_message.get("body") or "").strip()
+    body_source = str(direct_message.get("body_source") or "").strip()
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
-    if not app_name or not recipient or not body:
+    if (
+        not app_name
+        or not recipient
+        or (not body and body_source not in {"clipboard", "selection", "current_page_link"})
+    ):
         return []
     shortcut_tool = _first_allowed(
         app_foreground_tool_candidates(mode, "safe_shortcut"),
@@ -2206,50 +2215,107 @@ def _direct_communication_steps(
     type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
-    return [
-        _step(
-            intent,
-            "focus-communication-recipient-search",
-            "Focus communication recipient search",
-            "communication.compose",
-            shortcut_tool,
-            input_preview={"app_name": app_name, "action": "find"},
-            action="resolve_recipient",
-            reason="Open the app's recipient search with a safe shortcut before drafting the message.",
-        ),
-        _step(
-            intent,
-            "type-communication-recipient",
-            "Type communication recipient",
-            "communication.compose",
-            type_tool,
-            input_preview={"text": recipient},
-            depends_on=["focus-communication-recipient-search"],
-            action="type",
-            reason="Type only the explicit recipient from the user prompt.",
-        ),
-        _step(
-            intent,
-            "submit-communication-recipient-search",
-            "Submit communication recipient search",
-            "communication.compose",
-            search_submit_tool,
-            input_preview={},
-            depends_on=["type-communication-recipient"],
-            action="submit_search",
-            reason="Select or search the recipient with the dedicated safe search submit tool.",
-        ),
-        _step(
-            intent,
-            "draft-communication-message",
-            "Draft communication message",
-            "communication.compose",
-            type_tool,
-            input_preview={"text": body},
-            depends_on=["submit-communication-recipient-search"],
-            action="draft_message",
-            reason="Type only the explicit message body before the approval-gated send step.",
-        ),
+    steps: list[ToolPlanStepSnapshot] = []
+    source_step_id = ""
+    if body_source == "selection":
+        source_step_id = "copy-communication-body-source"
+        steps.append(
+            _step(
+                intent,
+                source_step_id,
+                "Copy communication body source",
+                "communication.compose",
+                _first_allowed(("desktop.safe_shortcut",), allowed),
+                input_preview={"action": "copy"},
+                action="copy_selection",
+                reason="Copy the explicit selection before using it as the message body.",
+            )
+        )
+    elif body_source == "current_page_link":
+        source_step_id = "copy-communication-body-source"
+        steps.append(
+            _step(
+                intent,
+                source_step_id,
+                "Copy communication body source",
+                "communication.compose",
+                _first_allowed(("desktop.safe_shortcut",), allowed),
+                input_preview={"action": "copy_current_page_link"},
+                action="copy_current_page_link",
+                reason="Copy the current page link before using it as the message body.",
+            )
+        )
+
+    focus_depends_on = [source_step_id] if source_step_id else []
+    steps.extend(
+        [
+            _step(
+                intent,
+                "focus-communication-recipient-search",
+                "Focus communication recipient search",
+                "communication.compose",
+                shortcut_tool,
+                input_preview={"app_name": app_name, "action": "find"},
+                action="resolve_recipient",
+                depends_on=focus_depends_on,
+                reason="Open the app's recipient search with a safe shortcut before drafting the message.",
+            ),
+            _step(
+                intent,
+                "type-communication-recipient",
+                "Type communication recipient",
+                "communication.compose",
+                type_tool,
+                input_preview={"text": recipient},
+                depends_on=["focus-communication-recipient-search"],
+                action="type",
+                reason="Type only the explicit recipient from the user prompt.",
+            ),
+            _step(
+                intent,
+                "submit-communication-recipient-search",
+                "Submit communication recipient search",
+                "communication.compose",
+                search_submit_tool,
+                input_preview={},
+                depends_on=["type-communication-recipient"],
+                action="submit_search",
+                reason="Select or search the recipient with the dedicated safe search submit tool.",
+            ),
+        ]
+    )
+    if body_source in {"clipboard", "selection", "current_page_link"}:
+        steps.append(
+            _step(
+                intent,
+                "paste-communication-message",
+                "Paste communication message",
+                "communication.compose",
+                _first_allowed(("desktop.safe_shortcut",), allowed),
+                input_preview={"action": "paste"},
+                depends_on=["submit-communication-recipient-search"],
+                action="paste",
+                reason="Paste the requested clipboard-backed context into the message draft.",
+            )
+        )
+        send_depends_on = ["paste-communication-message"]
+    else:
+        steps.append(
+            _step(
+                intent,
+                "draft-communication-message",
+                "Draft communication message",
+                "communication.compose",
+                type_tool,
+                input_preview={"text": body},
+                depends_on=["submit-communication-recipient-search"],
+                action="draft_message",
+                reason="Type only the explicit message body before the approval-gated send step.",
+            )
+        )
+        send_depends_on = ["draft-communication-message"]
+
+    steps.append(
         _step(
             intent,
             "send-communication-message",
@@ -2259,11 +2325,12 @@ def _direct_communication_steps(
             input_preview={"action": "send"},
             risk_level="high",
             approval_required=True,
-            depends_on=["draft-communication-message"],
+            depends_on=send_depends_on,
             action="send_message",
             reason="Final message sending remains approval-gated.",
-        ),
-    ]
+        )
+    )
+    return steps
 
 
 def _current_page_find_steps(
@@ -3275,6 +3342,79 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             "send_action": "send",
         }
     return {}
+
+
+def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]:
+    if source not in {"clipboard", "selection", "current_page_link"}:
+        return {}
+    value = _clean_prompt(text)
+    source_pattern = {
+        "clipboard": r"(?:剪贴板内容|粘贴板内容|clipboard\s+contents?|the\s+clipboard)",
+        "selection": r"(?:选中的内容|选中内容|选中文字|选中文本|selected\s+text|selected\s+content|selection)",
+        "current_page_link": r"(?:当前网页链接|当前页面链接|当前链接|current\s+page\s+link|current\s+url)",
+    }[source]
+    patterns = (
+        rf"^(?P<app>[\w .·-]{{1,40}}?)\s*(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",
+        rf"^(?:把|将)?\s*{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
+        rf"^(?:把|将)?\s*{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
+        rf"^(?:send|message)\s+{source_pattern}\s+(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
+        rf"^(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:send|message)\s+{source_pattern}\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
+        rf"^(?:send|message)\s+{source_pattern}\s+(?:to|for)\s+(?P<target>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _clean_app_name_hint(groups.get("app") or "")
+        recipient = _clean_communication_hint_text(groups.get("recipient") or "")
+        if (not app_name or not recipient) and groups.get("target"):
+            app_name, recipient = _split_communication_surface_and_recipient(
+                str(groups.get("target") or "")
+            )
+        if not app_name or not recipient:
+            continue
+        return {
+            "app_name": app_name,
+            "recipient": recipient,
+            "body_source": source,
+            "mode": _communication_app_mode(value),
+            "send_action": "send",
+        }
+    return {}
+
+
+def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
+    value = _clean_communication_hint_text(target)
+    known_surfaces = (
+        "Microsoft Teams",
+        "Google Chat",
+        "企业微信",
+        "Apple Messages",
+        "Messages",
+        "Telegram",
+        "WhatsApp",
+        "Discord",
+        "Slack",
+        "WeChat",
+        "微信",
+        "飞书",
+        "钉钉",
+        "QQ",
+        "Mail",
+    )
+    lowered = value.lower()
+    for surface in known_surfaces:
+        if lowered == surface.lower():
+            return "", ""
+        if lowered.startswith(surface.lower() + " "):
+            return surface, value[len(surface) :].strip()
+        if value.startswith(surface) and len(value) > len(surface):
+            return surface, value[len(surface) :].strip()
+    parts = value.split(None, 1)
+    if len(parts) == 2:
+        return _clean_app_name_hint(parts[0]), _clean_communication_hint_text(parts[1])
+    return "", ""
 
 
 def _communication_app_mode(text: str) -> str:

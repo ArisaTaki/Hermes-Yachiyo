@@ -1792,6 +1792,57 @@ def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
     assert send_step.risk_level == "high"
 
 
+def test_runtime_planner_routes_direct_context_communication_send_sequence() -> None:
+    decision = RuntimePlanner().decision(
+        "send selected text in Slack to yachiyo",
+        allowed_tools=[
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "selection",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "yachiyo",
+            "body_source": "selection",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-communication-body-source",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "paste-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(decision, "copy-communication-body-source").input_preview == {
+        "action": "copy"
+    }
+    focus_step = _step_by_id(decision, "focus-communication-recipient-search")
+    assert focus_step.tool_name == "app.focus_and_safe_shortcut"
+    assert focus_step.input_preview == {"app_name": "Slack", "action": "find"}
+    assert focus_step.depends_on == ["copy-communication-body-source"]
+    assert _step_by_id(decision, "type-communication-recipient").input_preview == {
+        "text": "yachiyo"
+    }
+    assert _step_by_id(decision, "paste-communication-message").input_preview == {
+        "action": "paste"
+    }
+    send_step = _step_by_id(decision, "send-communication-message")
+    assert send_step.tool_name == "desktop.submit_foreground"
+    assert send_step.depends_on == ["paste-communication-message"]
+    assert send_step.approval_required is True
+    assert send_step.risk_level == "high"
+
+
 def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> None:
     decision = RuntimePlanner().decision(
         "写一封邮件给 Alice 说明项目进展",
@@ -1808,23 +1859,23 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
 
 def test_runtime_planner_tracks_context_communication_source_without_body() -> None:
     decision = RuntimePlanner().decision(
-        "把当前网页链接发给微信文件传输助手",
-        allowed_tools=["browser.current_page", "artifact.write"],
+        "把当前网页内容发给微信文件传输助手",
+        allowed_tools=["browser.extract_text", "artifact.write"],
     )
 
     assert decision.selected_intent.kind == "communication"
-    assert decision.selected_intent.inputs == {"context_source": "current_page_link"}
+    assert decision.selected_intent.inputs == {"context_source": "current_page_content"}
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "read-communication-context",
         "draft-communication-from-context",
     ]
     read_step = _step_by_id(decision, "read-communication-context")
     assert read_step.capability_id == "communication.compose"
-    assert read_step.tool_name == "browser.current_page"
-    assert read_step.action == "read_current_page"
+    assert read_step.tool_name == "browser.extract_text"
+    assert read_step.action == "extract_text"
     draft_step = _step_by_id(decision, "draft-communication-from-context")
     assert draft_step.tool_name == "artifact.write"
-    assert draft_step.input_preview == {"body_source": "current_page_link"}
+    assert draft_step.input_preview == {"body_source": "current_page_content"}
     assert draft_step.depends_on == ["read-communication-context"]
     assert draft_step.approval_required is True
 
@@ -2215,7 +2266,7 @@ def test_planner_selection_owns_app_search_send_sequence_with_send_approval() ->
 
     assert selection.selected_source == "runtime_planner"
     assert selection.event_payload["intent_kind"] == "communication"
-    assert selection.event_payload["legacy_request_count"] == 5
+    assert selection.event_payload["legacy_request_count"] == 0
     assert selection.event_payload["selected_tools"] == [
         "app.focus_and_safe_shortcut",
         "desktop.safe_type_text",
@@ -3686,6 +3737,68 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
             "continue_to_model": True,
         }
     ]
+    assert planner_tool_requests(
+        "把当前网页内容发给微信文件传输助手",
+        allowed_tools=["browser.extract_text", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_maps_direct_context_communication_send_plan() -> None:
+    assert planner_tool_requests(
+        "send clipboard contents in Slack to yachiyo",
+        allowed_tools=[
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
 
 
 def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
@@ -3955,6 +4068,45 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
             "planning_reason": "planner_fallback_dynamic_browser_context",
         },
     ]
+
+
+def test_planner_first_owns_direct_context_communication_send_sequence() -> None:
+    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "copy"},
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "send selected text in Slack to yachiyo",
+        [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["selection_source"] == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+    assert all(
+        request["planning_reason"] == "planner_fallback_communication_send"
+        for request in selection.requests
+    )
 
 
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:

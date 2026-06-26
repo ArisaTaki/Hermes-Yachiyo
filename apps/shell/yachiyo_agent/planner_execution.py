@@ -122,6 +122,12 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         )
         if context_requests:
             return context_requests
+        direct_context_requests = _direct_communication_context_tool_requests(
+            decision,
+            allowed,
+        )
+        if direct_context_requests:
+            return direct_context_requests
         return _context_prefetch_tool_requests(
             decision,
             allowed,
@@ -171,6 +177,14 @@ def _request(
         "source": "runtime_planner",
         "planning_reason": planning_reason,
     }
+
+
+def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
+    for candidate in candidates:
+        tool_name = str(candidate or "").strip()
+        if tool_name and tool_name in allowed:
+            return tool_name
+    return ""
 
 
 def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
@@ -368,13 +382,24 @@ def _file_access_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> lis
 
 def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     inputs = decision.selected_intent.inputs
-    if not isinstance(inputs.get("direct_message_hint"), Mapping):
+    direct_hint = inputs.get("direct_message_hint")
+    if not isinstance(direct_hint, Mapping):
         return []
-    required_step_ids = (
+    body_source = str(direct_hint.get("body_source") or "").strip()
+    if body_source in {"selection", "current_page_link"}:
+        required_step_ids = ("copy-communication-body-source",)
+    else:
+        required_step_ids = ()
+    required_step_ids += (
         "focus-communication-recipient-search",
         "type-communication-recipient",
         "submit-communication-recipient-search",
-        "draft-communication-message",
+    )
+    if body_source in {"clipboard", "selection", "current_page_link"}:
+        required_step_ids += ("paste-communication-message",)
+    else:
+        required_step_ids += ("draft-communication-message",)
+    required_step_ids += (
         "send-communication-message",
     )
     steps_by_id = {
@@ -397,6 +422,62 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
             )
         )
     return requests
+
+
+def _direct_communication_context_tool_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    direct_hint = inputs.get("direct_message_hint")
+    if not isinstance(direct_hint, Mapping):
+        return []
+    source = str(direct_hint.get("body_source") or inputs.get("context_source") or "").strip()
+    planning_reason = "planner_prefetch_communication_context"
+
+    if source == "selection":
+        if "desktop.safe_shortcut" not in allowed or "clipboard.read" not in allowed:
+            return []
+        requests = [
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "copy"},
+                planning_reason=planning_reason,
+            ),
+            _request("clipboard.read", {}, planning_reason=planning_reason),
+        ]
+        requests[-1]["continue_to_model"] = True
+        return requests
+
+    if source == "clipboard":
+        if "clipboard.read" not in allowed:
+            return []
+        request = _request("clipboard.read", {}, planning_reason=planning_reason)
+        request["continue_to_model"] = True
+        return [request]
+
+    if source == "current_page_link":
+        if "browser.current_page" not in allowed:
+            return []
+        request = _request("browser.current_page", {}, planning_reason=planning_reason)
+        request["continue_to_model"] = True
+        return [request]
+
+    if source == "current_page_content":
+        tool_name = _first_allowed(
+            ("browser.extract_text", "browser.current_page", "desktop.ui_elements", "screen.capture"),
+            allowed,
+        )
+        if not tool_name:
+            return []
+        request_payload = _context_prefetch_payload(tool_name, {})
+        if request_payload is None:
+            return []
+        request = _request(tool_name, request_payload, planning_reason=planning_reason)
+        request["continue_to_model"] = True
+        return [request]
+
+    return []
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
