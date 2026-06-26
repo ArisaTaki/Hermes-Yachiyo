@@ -303,6 +303,12 @@ def hotkey_hint(text: str) -> dict[str, Any] | None:
     return None
 
 
+def safe_shortcut_hint(text: str) -> dict[str, str] | None:
+    value = clean(text)
+    action = _safe_shortcut_action_from_hotkey_hint(value) or _safe_shortcut_action_from_phrase(value)
+    return {"action": action} if action else None
+
+
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
     return {
@@ -885,6 +891,69 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
     if not key:
         return None
     return {"key": key, "modifiers": modifiers}
+
+
+def _safe_shortcut_action_from_hotkey_hint(value: str) -> str:
+    hotkey = hotkey_hint(value)
+    if not hotkey:
+        return ""
+    key = str(hotkey.get("key") or "").strip().lower()
+    modifiers = frozenset(str(item).strip().lower() for item in hotkey.get("modifiers") or [])
+    mapping = {
+        ("c", frozenset({"command"})): "copy",
+        ("v", frozenset({"command"})): "paste",
+        ("a", frozenset({"command"})): "select_all",
+        ("z", frozenset({"command"})): "undo",
+        ("z", frozenset({"command", "shift"})): "redo",
+        ("f", frozenset({"command"})): "find",
+        ("l", frozenset({"command"})): "focus_address_bar",
+        ("t", frozenset({"command"})): "new_tab",
+        ("n", frozenset({"command"})): "new_window",
+        ("r", frozenset({"command"})): "refresh",
+    }
+    return mapping.get((key, modifiers), "")
+
+
+def _safe_shortcut_action_from_phrase(value: str) -> str:
+    phrase = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接)\s*",
+        "",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    phrase = re.sub(r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
+    normalized = re.sub(r"\s+", "", phrase).lower()
+    mapping = {
+        "粘贴": "paste",
+        "前台粘贴": "paste",
+        "粘贴到当前窗口": "paste",
+        "paste": "paste",
+        "pasteintocurrentwindow": "paste",
+        "全选": "select_all",
+        "selectall": "select_all",
+        "撤销": "undo",
+        "undo": "undo",
+        "重做": "redo",
+        "redo": "redo",
+        "查找": "find",
+        "打开查找": "find",
+        "find": "find",
+        "刷新": "refresh",
+        "刷新当前页面": "refresh",
+        "刷新页面": "refresh",
+        "refresh": "refresh",
+        "reload": "refresh",
+        "新建标签页": "new_tab",
+        "打开新标签页": "new_tab",
+        "newtab": "new_tab",
+        "新建窗口": "new_window",
+        "打开新窗口": "new_window",
+        "newwindow": "new_window",
+        "聚焦地址栏": "focus_address_bar",
+        "选中地址栏": "focus_address_bar",
+        "focusaddressbar": "focus_address_bar",
+    }
+    return mapping.get(normalized, "")
 
 
 def _normalize_hotkey_token(value: str) -> str:

@@ -561,6 +561,27 @@ def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> 
     assert "app.open_and_click_ui_element" in ui_capability.tools
 
 
+def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
+    decision = RuntimePlanner().decision(
+        "刷新当前页面",
+        allowed_tools=["desktop.active_window", "desktop.safe_shortcut", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["operation_hint"] == "safe_shortcut"
+    assert decision.selected_intent.inputs["safe_shortcut_hint"] == {"action": "refresh"}
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.tool_name == "desktop.safe_shortcut"
+    assert operation.action == "shortcut"
+    assert operation.input_preview == {"action": "refresh"}
+    assert operation.risk_level == "low"
+    assert operation.approval_required is False
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui"
+    ]
+
+
 def test_runtime_planner_verifies_desktop_open_result() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge",
@@ -1340,6 +1361,23 @@ def test_planner_tool_requests_maps_explicit_hotkey_plan() -> None:
             "input": {"key": "l", "modifiers": ["command"]},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_hotkey",
+        }
+    ]
+
+
+def test_planner_tool_requests_prefers_safe_shortcut_for_whitelisted_hotkey() -> None:
+    requests = planner_tool_requests(
+        "Can you press Command C?",
+        allowed_tools=["desktop.safe_shortcut", "desktop.hotkey"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
 

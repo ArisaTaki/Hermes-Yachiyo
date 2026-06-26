@@ -39,6 +39,7 @@ from .desktop_plan_hints import (
     media_playback_hint,
     media_tool_preview,
     safe_type_text_hint,
+    safe_shortcut_hint,
     screen_capture_hint,
     submit_action_hint,
     type_into_ui_hint,
@@ -162,6 +163,7 @@ class TaskIntentRouter:
         screen_capture = screen_capture_hint(text)
         app_management = app_management_hint(text)
         foreground_management = foreground_management_hint(text)
+        safe_shortcut = safe_shortcut_hint(text)
         score = _score_terms(
             text,
             [
@@ -206,6 +208,14 @@ class TaskIntentRouter:
                 "前台",
                 "current window",
                 "current app",
+                "粘贴",
+                "全选",
+                "撤销",
+                "重做",
+                "刷新",
+                "新建标签页",
+                "new tab",
+                "refresh",
             ],
         )
         if (
@@ -215,6 +225,7 @@ class TaskIntentRouter:
             and screen_capture is None
             and app_management is None
             and foreground_management is None
+            and safe_shortcut is None
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -245,6 +256,8 @@ class TaskIntentRouter:
             inputs["app_management_hint"] = app_management
         if foreground_management is not None:
             inputs["foreground_management_hint"] = foreground_management
+        if safe_shortcut is not None:
+            inputs["safe_shortcut_hint"] = safe_shortcut
         risk_level = (
             "medium"
             if operation_hint
@@ -257,6 +270,7 @@ class TaskIntentRouter:
                 "hide_app",
                 "minimize_app",
                 "minimize_window",
+                "safe_shortcut",
             }
             and _looks_like_ui_operation(text)
             else "low"
@@ -704,6 +718,7 @@ class RuntimePlanner:
         screen_capture = screen_capture_hint(intent.user_goal)
         app_management = app_management_hint(intent.user_goal)
         foreground_management = foreground_management_hint(intent.user_goal)
+        safe_shortcut = safe_shortcut_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -724,6 +739,7 @@ class RuntimePlanner:
             mode=mode,
             allowed=allowed,
             click_target=click_target,
+            safe_shortcut=safe_shortcut,
             hotkey=hotkey,
             type_target=type_target,
             safe_type_text=safe_type_text,
@@ -969,7 +985,7 @@ class RuntimePlanner:
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
-        if _looks_like_ui_operation(intent.user_goal):
+        if _looks_like_ui_operation(intent.user_goal) or safe_shortcut:
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
@@ -993,8 +1009,8 @@ class RuntimePlanner:
                         allowed,
                     ),
                     input_preview=operation_preview,
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(operation_tool),
+                    approval_required=_desktop_operation_approval_required(operation_tool),
                     depends_on=operation_depends_on,
                     reason="Use observable UI operations after discovery, then verify.",
                 )
@@ -1456,6 +1472,17 @@ def _desktop_operation_action(tool_name: str | None) -> str:
     return "operate_ui"
 
 
+def _desktop_operation_risk_level(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "")
+    if "safe_shortcut" in clean_tool or "safe_key" in clean_tool or "safe_scroll" in clean_tool:
+        return "low"
+    return "medium"
+
+
+def _desktop_operation_approval_required(tool_name: str | None) -> bool:
+    return _desktop_operation_risk_level(tool_name) != "low"
+
+
 def _app_management_action(tool_name: str | None) -> str:
     clean_tool = str(tool_name or "")
     if clean_tool == "app.show":
@@ -1859,6 +1886,8 @@ def _desktop_operation_hint(text: str) -> str:
     foreground_management = foreground_management_hint(text)
     if foreground_management:
         return str(foreground_management.get("action") or "")
+    if safe_shortcut_hint(text):
+        return "safe_shortcut"
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"
@@ -1887,10 +1916,19 @@ def _desktop_operation_tool_preview(
     allowed: set[str] | None,
     click_target: dict[str, Any] | None,
     hotkey: dict[str, Any] | None,
+    safe_shortcut: dict[str, str] | None,
     type_target: dict[str, Any] | None,
     safe_type_text: str,
     allow_app_tools: bool = True,
 ) -> tuple[str | None, dict[str, Any]]:
+    if safe_shortcut:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_shortcut"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_shortcut}
+        shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+        if shortcut_tool:
+            return shortcut_tool, dict(safe_shortcut)
     if hotkey:
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
