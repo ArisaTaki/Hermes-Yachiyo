@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
 from .desktop_plan_hints import (
     app_control_mode,
@@ -38,6 +40,8 @@ def planner_tool_requests(
     )
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
+    if decision.selected_intent.kind == "data_analysis":
+        return _data_analysis_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "system_control":
         return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
@@ -194,6 +198,21 @@ def _request(
     }
 
 
+def _data_analysis_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    if "workspace.read" not in allowed:
+        return []
+    source_hint = str(inputs.get("data_source_hint") or "").strip()
+    if not _workspace_readable_data_source(source_hint, inputs):
+        return []
+    request = _request(
+        "workspace.read",
+        {"path": source_hint},
+        planning_reason="planner_prefetch_data_source",
+    )
+    request["continue_to_model"] = True
+    return [request]
+
+
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
@@ -333,6 +352,19 @@ def _web_request_needs_model_followup(prompt: str) -> bool:
             "输出",
         ),
     )
+
+
+def _workspace_readable_data_source(source_hint: str, inputs: Mapping[str, Any]) -> bool:
+    if not source_hint or source_hint.startswith(("/", "~")):
+        return False
+    if re.search(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", source_hint):
+        return False
+    if any(part == ".." for part in source_hint.replace("\\", "/").split("/")):
+        return False
+    source_kind = str(inputs.get("data_source_kind") or "").strip()
+    if not source_kind or source_kind == "unknown":
+        source_kind = data_source_kind_hint(source_hint)
+    return source_kind in {"csv", "tsv", "json", "text", "text_table"}
 
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:

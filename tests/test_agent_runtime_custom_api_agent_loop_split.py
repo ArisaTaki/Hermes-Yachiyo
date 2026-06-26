@@ -603,6 +603,81 @@ def test_custom_api_agent_loop_delegates_tool_requests_without_bypassing_runner(
     assert messages[2] == {"role": "assistant", "content": "need tool"}
 
 
+def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_model() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["workspace.read", "terminal.run", "artifact.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for data analysis.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "analysis ready"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs: tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-data-prefetch",
+    )
+
+    assert str(result) == "analysis ready"
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.read",
+            "input": {"path": "data/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert tool_runs[0]["allowed_tools"] == ["workspace.read", "terminal.run", "artifact.write"]
+    assert tool_runs[0]["kwargs"]["next_iteration"] == 0
+    assert timeline[0]["event"] == "agent.desktop.intent_planned"
+    assert timeline[0]["source"] == "runtime_planner"
+    assert model_calls[0][0]["role"] == "system"
+    assert "selected intent=data_analysis" in model_calls[0][0]["content"]
+
+
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
@@ -13071,8 +13146,6 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
             "protocol": "json_fallback",
             "tool": "media.apple_music_open_and_play",
             "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
         }
     ]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
@@ -13082,8 +13155,8 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
         "detail": "media.apple_music_open_and_play",
         "tool": "media.apple_music_open_and_play",
         "status": "planned",
-        "source": "runtime_planner",
-        "planning_reason": "planner_fallback_media_playback",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {},
     }
 
@@ -13314,7 +13387,7 @@ def test_custom_api_agent_loop_preserves_runtime_planner_source_on_direct_comple
     }
 
 
-def test_custom_api_agent_loop_preplans_runtime_reminder_without_model() -> None:
+def test_custom_api_agent_loop_preplans_daily_reminder_without_model() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
 
@@ -13389,13 +13462,12 @@ def test_custom_api_agent_loop_preplans_runtime_reminder_without_model() -> None
         "detail": "reminders.create",
         "tool": "reminders.create",
         "status": "planned",
-        "source": "runtime_planner",
-        "planning_reason": "planner_fallback_schedule",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"title": "买牛奶"},
     }
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
-    assert timeline[-1]["source"] == "runtime_planner"
-    assert timeline[-1]["planning_reason"] == "planner_fallback_schedule"
+    assert timeline[-1]["source"] == "daily_desktop_intent"
 
 
 def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_missing() -> None:

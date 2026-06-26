@@ -614,6 +614,41 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
     ]
 
 
+def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> None:
+    requests = planner_tool_requests(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.read",
+            "input": {"path": "data/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_does_not_prefetch_binary_or_external_data_sources() -> None:
+    assert (
+        planner_tool_requests(
+            "请分析 /tmp/sales.csv",
+            allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        )
+        == []
+    )
+    assert (
+        planner_tool_requests(
+            "请分析 report.xlsx",
+            allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        )
+        == []
+    )
+
+
 def test_planner_tool_requests_maps_explicit_hotkey_plan() -> None:
     requests = planner_tool_requests(
         "Can you press Command L?",
