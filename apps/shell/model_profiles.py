@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
+from apps.shell.config import load_config
 from apps.shell.hermes_capabilities import lookup_model_supports_vision
 from apps.shell.model_provider_adapters import resolve_provider_adapter
 from apps.shell.provider_catalog_sync import cached_model_metadata, cached_provider_models
@@ -35,22 +36,42 @@ class ModelProfileError(RuntimeError):
 
 
 _OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV = "HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS"
-OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 180
+OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 0
 
 
-def read_openai_compatible_chat_timeout() -> float:
-    raw_value = os.getenv(_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV, "").strip()
-    if not raw_value:
-        return float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
+def _configured_openai_compatible_chat_timeout() -> float:
     try:
-        timeout = float(raw_value)
-    except ValueError:
+        return float(load_config().model_runtime.chat_timeout_seconds)
+    except Exception:
         return float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
-    return timeout if timeout > 0 else float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
+
+
+def read_openai_compatible_chat_timeout() -> float | None:
+    raw_value = os.getenv(_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV, "").strip()
+    if raw_value:
+        try:
+            timeout = float(raw_value)
+        except ValueError:
+            timeout = _configured_openai_compatible_chat_timeout()
+        return timeout if timeout > 0 else None
+    timeout = _configured_openai_compatible_chat_timeout()
+    return timeout if timeout > 0 else None
 
 
 def _format_timeout_seconds(timeout: float) -> str:
     return str(int(timeout)) if timeout.is_integer() else f"{timeout:g}"
+
+
+def openai_compatible_chat_timeout_hint(timeout: float | None) -> str:
+    if timeout is None:
+        return (
+            "当前未设置响应超时限制；如需限制等待时间，可在模型提供商页面设置超时秒数，"
+            f"或通过 {_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV} 覆盖。"
+        )
+    return (
+        f"等待响应超过 {_format_timeout_seconds(timeout)} 秒；"
+        f"可在模型提供商页面调整，或通过 {_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV} 覆盖。"
+    )
 
 
 def _now() -> str:
@@ -1526,8 +1547,7 @@ def _openai_compatible_chat_payload(
     except TimeoutError as exc:
         raise ModelProfileError(
             "OpenAI-compatible Profile 调用超时："
-            f"等待响应超过 {_format_timeout_seconds(timeout)} 秒；"
-            f"可通过 {_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV} 调整。"
+            f"{openai_compatible_chat_timeout_hint(timeout)}"
         ) from exc
     except (urlerror.URLError, json.JSONDecodeError) as exc:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{exc}") from exc

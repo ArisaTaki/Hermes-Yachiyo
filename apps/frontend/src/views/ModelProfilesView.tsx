@@ -10,16 +10,19 @@ import {
   deleteModelProfile,
   deleteModelSource,
   fetchModelSourceModels,
+  getModelRuntimeSettings,
   listModelProfiles,
   syncHermesProfileDefault,
   testAndSaveModelProfile,
   testModelProfile,
   updateModelProfile,
   updateModelProfileDefaults,
+  updateModelRuntimeSettings,
   updateModelSource,
   type ModelCapability,
   type ModelProfile,
   type ModelProfileDefaults,
+  type ModelRuntimeSettings,
   type ModelSource,
   type RemoteModelInfo,
 } from '../lib/modelProfiles';
@@ -619,18 +622,41 @@ function modelToDraft(model: ModelProfileView): ModelDraft {
   };
 }
 
+function normalizeRuntimeSettings(settings?: ModelRuntimeSettings): ModelRuntimeSettings {
+  const seconds = Number(settings?.chat_timeout_seconds || 0);
+  return {
+    chat_timeout_seconds: Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0,
+    chat_timeout_unlimited: !(Number.isFinite(seconds) && seconds > 0),
+  };
+}
+
+function timeoutDraftFromRuntime(settings?: ModelRuntimeSettings): string {
+  const normalized = normalizeRuntimeSettings(settings);
+  return normalized.chat_timeout_seconds ? String(normalized.chat_timeout_seconds) : '';
+}
+
+function runtimeTimeoutLabel(settings?: ModelRuntimeSettings): string {
+  const normalized = normalizeRuntimeSettings(settings);
+  return normalized.chat_timeout_seconds ? `${normalized.chat_timeout_seconds} 秒` : '无限制';
+}
+
 async function loadModelProfileData(): Promise<{
   sources: ModelSourceView[];
   profiles: ModelProfileView[];
   defaults: ModelProfileDefaults;
+  runtimeSettings: ModelRuntimeSettings;
 }> {
-  const profilePayload = await listModelProfiles();
+  const [profilePayload, runtimePayload] = await Promise.all([
+    listModelProfiles(),
+    getModelRuntimeSettings(),
+  ]);
   const registrySources = (profilePayload.sources || []) as ModelSourceView[];
   const registryProfiles = (profilePayload.profiles || []) as ModelProfileView[];
   return {
     sources: registrySources,
     profiles: registryProfiles,
     defaults: profilePayload.defaults || {},
+    runtimeSettings: normalizeRuntimeSettings(runtimePayload.model_runtime),
   };
 }
 
@@ -665,6 +691,8 @@ export function ModelProfilesView() {
   const [activeCapability, setActiveCapability] = useState<ModelCapability>(() => initialCapabilityFromRoute());
   const [sourceDraft, setSourceDraft] = useState<SourceDraft>(emptySourceDraft);
   const [modelDraft, setModelDraft] = useState<ModelDraft>(emptyModelDraft);
+  const [runtimeSettings, setRuntimeSettings] = useState<ModelRuntimeSettings>(() => normalizeRuntimeSettings());
+  const [runtimeTimeoutDraft, setRuntimeTimeoutDraft] = useState('');
   const [modelCatalog, setModelCatalog] = useState<RemoteModelInfo[]>([]);
   const [modelCatalogFetched, setModelCatalogFetched] = useState(false);
   const [modelCatalogQuery, setModelCatalogQuery] = useState('');
@@ -710,6 +738,8 @@ export function ModelProfilesView() {
     setSources(nextSources);
     setProfiles(nextProfiles);
     setDefaults(payload.defaults);
+    setRuntimeSettings(payload.runtimeSettings);
+    setRuntimeTimeoutDraft(timeoutDraftFromRuntime(payload.runtimeSettings));
 
     const nextCapabilitySources = sourcesForCapability(nextSources, capability);
     const source = nextCapabilitySources.find((item) => item.source_id === nextSourceId) || nextCapabilitySources[0] || null;
@@ -745,6 +775,8 @@ export function ModelProfilesView() {
         setSources(nextSources);
         setProfiles(nextProfiles);
         setDefaults(payload.defaults);
+        setRuntimeSettings(payload.runtimeSettings);
+        setRuntimeTimeoutDraft(timeoutDraftFromRuntime(payload.runtimeSettings));
         const nextCapabilitySources = sourcesForCapability(nextSources, activeCapability);
         if (nextCapabilitySources.length) {
           const source = nextCapabilitySources[0];
@@ -796,6 +828,39 @@ export function ModelProfilesView() {
       || modelDraft.enabled !== modelBaseline.enabled;
 
     return sourceDirty || modelDirty;
+  }
+
+  async function saveRuntimeTimeout() {
+    if (busy) return;
+    const raw = runtimeTimeoutDraft.trim();
+    let seconds = 0;
+    if (raw) {
+      if (!/^\d+$/.test(raw)) {
+        setStatus('Agent 响应超时秒数必须为正整数，留空表示无限制。');
+        return;
+      }
+      seconds = Number(raw);
+      if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > 86_400) {
+        setStatus('Agent 响应超时秒数必须为 0 或 1-86400，留空表示无限制。');
+        return;
+      }
+    }
+    setBusy('runtime-save');
+    setStatus('正在保存 Agent 响应超时...');
+    try {
+      const result = await updateModelRuntimeSettings({ chat_timeout_seconds: seconds });
+      if (result.ok === false) throw new Error(result.error || '保存 Agent 响应超时失败');
+      const next = normalizeRuntimeSettings(
+        result.app_state?.model_runtime || result.model_runtime || { chat_timeout_seconds: seconds },
+      );
+      setRuntimeSettings(next);
+      setRuntimeTimeoutDraft(timeoutDraftFromRuntime(next));
+      setStatus(`Agent 响应超时已更新：${runtimeTimeoutLabel(next)}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存 Agent 响应超时失败');
+    } finally {
+      setBusy('');
+    }
   }
 
   function runAfterDiscardConfirmation(action: () => void) {
@@ -1271,7 +1336,35 @@ export function ModelProfilesView() {
         ))}
       </div>
 
-      {status ? <div className={/失败|错误|不能为空|不存在|不支持|必须/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
+      <section className="model-runtime-settings" aria-label="Agent 响应超时">
+        <div>
+          <strong>Agent 响应超时</strong>
+          <span>{runtimeTimeoutLabel(runtimeSettings)}</span>
+        </div>
+        <label htmlFor="model-runtime-chat-timeout">
+          <span>秒数</span>
+          <input
+            id="model-runtime-chat-timeout"
+            className="hy-input"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={runtimeTimeoutDraft}
+            disabled={Boolean(busy)}
+            onChange={(event) => setRuntimeTimeoutDraft(event.target.value.replace(/[^\d]/g, ''))}
+            placeholder="留空"
+          />
+        </label>
+        <button
+          type="button"
+          className="hy-btn hy-btn-primary"
+          disabled={Boolean(busy) || runtimeTimeoutDraft.trim() === timeoutDraftFromRuntime(runtimeSettings)}
+          onClick={() => void saveRuntimeTimeout()}
+        >
+          {busy === 'runtime-save' ? '保存中...' : '保存'}
+        </button>
+      </section>
+
+      {status ? <div className={/失败|错误|不能为空|不存在|不支持|必须|超时秒数/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
 
       {loading ? (
         <section className="model-provider-empty">正在读取模型提供商源...</section>

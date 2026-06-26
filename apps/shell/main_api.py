@@ -2149,6 +2149,10 @@ class MainWindowAPI:
                 },
                 "mode_settings": serialize_mode_settings(self._config),
                 "assistant": _assistant_settings_payload(self._config),
+                "model_runtime": {
+                    "chat_timeout_seconds": self._config.model_runtime.chat_timeout_seconds,
+                    "chat_timeout_unlimited": self._config.model_runtime.chat_timeout_seconds <= 0,
+                },
                 "tts": {
                     "enabled": self._config.tts.enabled,
                     "provider": self._config.tts.provider,
@@ -2242,6 +2246,10 @@ class MainWindowAPI:
             "display_mode": effective_display_mode(self._config),
             "mode_settings": serialize_mode_settings(self._config),
             "assistant": _assistant_settings_payload(self._config),
+            "model_runtime": {
+                "chat_timeout_seconds": self._config.model_runtime.chat_timeout_seconds,
+                "chat_timeout_unlimited": self._config.model_runtime.chat_timeout_seconds <= 0,
+            },
             "tts": {
                 "enabled": self._config.tts.enabled,
                 "provider": self._config.tts.provider,

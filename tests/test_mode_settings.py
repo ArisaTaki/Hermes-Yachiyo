@@ -84,6 +84,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.gsv_text_language == "zh"
     assert config.tts.gsv_top_k == 15
     assert config.tts.gsv_media_type == "wav"
+    assert config.model_runtime.chat_timeout_seconds == 0
 
 
 def test_legacy_live2d_default_position_migrates_to_right_bottom(monkeypatch, tmp_path):
@@ -282,6 +283,7 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
             "tts.timeout_seconds": 10,
+            "model_runtime.chat_timeout_seconds": 300,
             "tts.max_chars": 60,
             "tts.trigger_probability": 0.35,
             "tts.notification_prompt": "只说一句提醒。",
@@ -318,6 +320,7 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
     assert config.tts.timeout_seconds == 10
+    assert config.model_runtime.chat_timeout_seconds == 300
     assert config.tts.max_chars == 60
     assert config.tts.trigger_probability == 0.35
     assert config.tts.notification_prompt == "只说一句提醒。"
@@ -331,7 +334,21 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert result["mode_settings"]["bubble"]["config"]["proactive_trigger_probability"] == 0.45
+    assert result["mode_settings"]["bubble"]["config"]["model_runtime"]["chat_timeout_seconds"] == 300
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
+
+
+def test_apply_settings_changes_accepts_unlimited_model_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+    config.model_runtime.chat_timeout_seconds = 120
+
+    result = apply_settings_changes(config, {"model_runtime.chat_timeout_seconds": 0})
+
+    assert result["ok"] is True
+    assert config.model_runtime.chat_timeout_seconds == 0
+    assert result["mode_settings"]["bubble"]["config"]["model_runtime"]["chat_timeout_unlimited"] is True
 
 
 def test_apply_settings_changes_updates_start_minimized(tmp_path, monkeypatch):
@@ -704,6 +721,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.tts.max_chars = 66
     config.tts.trigger_probability = 0.4
     config.tts.notification_prompt = "短提醒"
+    config.model_runtime.chat_timeout_seconds = 450
 
     save_config(config)
     data = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
@@ -726,6 +744,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["max_chars"] == 66
     assert data["tts"]["trigger_probability"] == 0.4
     assert data["tts"]["notification_prompt"] == "短提醒"
+    assert data["model_runtime"]["chat_timeout_seconds"] == 450
 
 
 def test_save_config_writes_backup_and_load_config_recovers_from_backup(tmp_path, monkeypatch):

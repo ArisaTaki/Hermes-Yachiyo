@@ -12,6 +12,7 @@ from apps.shell.config import (
     BackupConfig,
     BubbleModeConfig,
     Live2DModeConfig,
+    ModelRuntimeConfig,
     ModelSummary,
     TTSConfig,
     save_config,
@@ -170,6 +171,9 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "gsv_repetition_penalty": float,
         "gsv_media_type": str,
     },
+    "model_runtime": {
+        "chat_timeout_seconds": int,
+    },
     "backup": {
         "auto_cleanup_enabled": bool,
         "retention_count": int,
@@ -222,6 +226,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "tts.max_chars 须在 20-240 字之间"
     if key == "tts.trigger_probability" and not (0.0 <= value <= 1.0):
         return "tts.trigger_probability 须在 0-1 之间"
+    if key == "model_runtime.chat_timeout_seconds" and not (0 <= value <= 86_400):
+        return "model_runtime.chat_timeout_seconds 须为 0 或 1-86400 秒"
     if key == "tts.gsv_top_k" and not (1 <= value <= 100):
         return "tts.gsv_top_k 须在 1-100 之间"
     if key in {"tts.gsv_top_p", "tts.gsv_temperature"} and not (0.0 <= value <= 2.0):
@@ -270,7 +276,7 @@ def _validate_field(key: str, value: Any) -> str | None:
 def _mode_object(
     config: AppConfig,
     mode_key: str,
-) -> BubbleModeConfig | Live2DModeConfig | AssistantConfig | TTSConfig | BackupConfig:
+) -> BubbleModeConfig | Live2DModeConfig | AssistantConfig | TTSConfig | ModelRuntimeConfig | BackupConfig:
     return getattr(config, mode_key)
 
 
@@ -314,6 +320,12 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
 
 def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
     return {
+        "model_runtime": {
+            "chat_timeout_seconds": config.model_runtime.chat_timeout_seconds,
+            "chat_timeout_unlimited": config.model_runtime.chat_timeout_seconds <= 0,
+        },
+        "model_chat_timeout_seconds": config.model_runtime.chat_timeout_seconds,
+        "model_chat_timeout_unlimited": config.model_runtime.chat_timeout_seconds <= 0,
         "tts": _serialize_tts(config),
         "tts_enabled": config.tts.enabled,
         "tts_provider": config.tts.provider,

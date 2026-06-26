@@ -106,6 +106,8 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                                   "旧版主动关怀概率配置已更新"),
     "tts.notification_prompt":   (EffectType.IMMEDIATE,
                                   "主动播报提示词已更新"),
+    "model_runtime.chat_timeout_seconds": (EffectType.IMMEDIATE,
+                                           "Agent 响应超时已更新"),
     # Live2D 嵌套字段（兼容旧 live2d.* 与新 live2d_mode.*）
     "live2d.model_name":         (EffectType.IMMEDIATE,
                                   "模型名称已更新"),

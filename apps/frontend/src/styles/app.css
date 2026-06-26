@@ -16977,6 +16977,39 @@ button.activity-item {
   box-shadow: 0 0 18px oklch(82% 0.135 76 / 0.14);
 }
 
+.model-runtime-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: var(--hy-radius-card);
+  background: color-mix(in oklch, var(--hy-surface) 88%, transparent);
+}
+
+.model-runtime-settings>div,
+.model-runtime-settings label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.model-runtime-settings strong {
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.model-runtime-settings span {
+  color: var(--hy-faint);
+  font-size: 12px;
+}
+
+.model-runtime-settings .hy-btn {
+  min-height: 38px;
+}
+
 .model-provider-layout {
   display: grid;
   grid-template-columns: minmax(280px, 324px) minmax(0, 1fr);
@@ -17986,6 +18019,7 @@ button.activity-item {
   .skill-import-hints,
   .model-profile-layout,
   .model-provider-layout,
+  .model-runtime-settings,
   .model-provider-grid,
   .model-preset-grid,
   .model-source-config-head,

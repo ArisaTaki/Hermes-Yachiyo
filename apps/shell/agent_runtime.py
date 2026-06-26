@@ -25,6 +25,7 @@ from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_profiles import (
     get_model_profile_service,
     openai_compatible_chat_message,
+    openai_compatible_chat_timeout_hint,
     read_openai_compatible_chat_timeout,
     supports_openai_compatible_api,
 )
@@ -3759,7 +3760,7 @@ class AgentRuntimeService:
             with urlopen_with_bundled_ca(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except TimeoutError as exc:
-            raise AgentRuntimeError(f"custom_api 调用超时：等待响应超过 {timeout:g} 秒") from exc
+            raise AgentRuntimeError(f"custom_api 调用超时：{openai_compatible_chat_timeout_hint(timeout)}") from exc
         except (urlerror.URLError, json.JSONDecodeError) as exc:
             raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc
         return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "")

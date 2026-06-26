@@ -9,6 +9,7 @@ import ssl
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.config import AppConfig
 from apps.shell.model_profiles import (
     OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     ModelProfileError,
@@ -395,14 +396,16 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
         def read(self):
             return json.dumps({"choices": [{"message": {"content": "", "reasoning_content": "red, blue"}}]}).encode("utf-8")
 
-    def fake_urlopen(request, timeout, context):
-        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+    def fake_urlopen(request, context=None, timeout=None):
+        assert timeout is None
         assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
         assert request.get_header("Authorization") == "Bearer sk-xiaomi"
         assert request.get_header("Api-key") == "sk-xiaomi"
         return FakeResponse()
 
+    monkeypatch.delenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setattr("apps.shell.model_profiles.load_config", lambda: AppConfig())
     monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
 
     result = openai_compatible_chat(
@@ -417,14 +420,22 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
 
 def test_openai_compatible_chat_timeout_is_configurable(monkeypatch):
     monkeypatch.delenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
-    assert OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS == 180
-    assert read_openai_compatible_chat_timeout() == 180
+    config = AppConfig()
+    monkeypatch.setattr("apps.shell.model_profiles.load_config", lambda: config)
+    assert OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS == 0
+    assert read_openai_compatible_chat_timeout() is None
+
+    config.model_runtime.chat_timeout_seconds = 300
+    assert read_openai_compatible_chat_timeout() == 300
 
     monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "240.5")
     assert read_openai_compatible_chat_timeout() == 240.5
 
+    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "0")
+    assert read_openai_compatible_chat_timeout() is None
+
     monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "invalid")
-    assert read_openai_compatible_chat_timeout() == 180
+    assert read_openai_compatible_chat_timeout() == 300
 
 
 def test_openai_compatible_chat_timeout_error_reports_limit(monkeypatch):
@@ -471,13 +482,15 @@ def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):
                 }
             ).encode("utf-8")
 
-    def fake_urlopen(request, timeout, context):
+    def fake_urlopen(request, context=None, timeout=None):
         body = json.loads(request.data.decode("utf-8"))
-        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert timeout is None
         assert isinstance(context, ssl.SSLContext)
         assert body["tools"][0]["function"]["name"] == "workspace_read"
         return FakeResponse()
 
+    monkeypatch.delenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setattr("apps.shell.model_profiles.load_config", lambda: AppConfig())
     monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
 
     message = openai_compatible_chat_message(

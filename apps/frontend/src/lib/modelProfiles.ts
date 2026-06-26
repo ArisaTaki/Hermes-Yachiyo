@@ -64,6 +64,11 @@ export type ModelProviderRuntime = {
 
 export type ModelProfileDefaults = Partial<Record<ModelCapability, string>>;
 
+export type ModelRuntimeSettings = {
+  chat_timeout_seconds?: number;
+  chat_timeout_unlimited?: boolean;
+};
+
 export type TtsProviderSyncRequest = {
   enabled?: boolean;
   provider?: string;
@@ -80,6 +85,15 @@ export type ModelProfilesPayload = {
   sources?: ModelSource[];
   profiles?: ModelProfile[];
   defaults?: ModelProfileDefaults;
+};
+
+export type SettingsUpdateResult = {
+  ok?: boolean;
+  error?: string;
+  app_state?: {
+    model_runtime?: ModelRuntimeSettings;
+  };
+  model_runtime?: ModelRuntimeSettings;
 };
 
 export type ModelProfileRequest = {
@@ -129,6 +143,18 @@ export type RemoteModelInfo = {
 
 export async function listModelProfiles(): Promise<ModelProfilesPayload> {
   return apiGet('/ui/model-profiles');
+}
+
+export async function getModelRuntimeSettings(): Promise<{ ok?: boolean; model_runtime?: ModelRuntimeSettings }> {
+  return apiGet('/ui/settings');
+}
+
+export async function updateModelRuntimeSettings(settings: ModelRuntimeSettings): Promise<SettingsUpdateResult> {
+  return apiPost('/ui/settings', {
+    changes: {
+      'model_runtime.chat_timeout_seconds': Number(settings.chat_timeout_seconds || 0),
+    },
+  });
 }
 
 export async function listModelSources(): Promise<{ ok?: boolean; sources?: ModelSource[] }> {

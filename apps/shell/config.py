@@ -742,6 +742,13 @@ class TTSConfig:
 
 
 @dataclass
+class ModelRuntimeConfig:
+    """模型运行时配置。0 表示不设置超时限制。"""
+
+    chat_timeout_seconds: int = 0
+
+
+@dataclass
 class BackupConfig:
     """本地资料备份策略。"""
 
@@ -946,6 +953,7 @@ class AppConfig:
     live2d_mode: Live2DModeConfig = field(default_factory=Live2DModeConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    model_runtime: ModelRuntimeConfig = field(default_factory=ModelRuntimeConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
 
     @property
@@ -1155,6 +1163,12 @@ def _normalize_config_values(config: AppConfig) -> None:
         {"wav", "mp3", "ogg", "flac"},
         "wav",
     )
+    config.model_runtime.chat_timeout_seconds = _normalize_int_range(
+        config.model_runtime.chat_timeout_seconds,
+        0,
+        86_400,
+        0,
+    )
     config.backup.auto_cleanup_enabled = bool(config.backup.auto_cleanup_enabled)
     config.backup.retention_count = _normalize_int_range(
         config.backup.retention_count,
@@ -1193,6 +1207,7 @@ def load_config() -> AppConfig:
                 )
                 assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
                 tts = _load_nested_dataclass(data, "tts", TTSConfig)
+                model_runtime = _load_nested_dataclass(data, "model_runtime", ModelRuntimeConfig)
                 backup = _load_nested_dataclass(data, "backup", BackupConfig)
                 if "display_mode" in data:
                     data["display_mode"] = normalize_display_mode(data.get("display_mode"))
@@ -1204,6 +1219,7 @@ def load_config() -> AppConfig:
                 config.live2d_mode = live2d_mode
                 config.assistant = assistant
                 config.tts = tts
+                config.model_runtime = model_runtime
                 config.backup = backup
                 _apply_default_resource_paths(config)
                 _normalize_config_values(config)
