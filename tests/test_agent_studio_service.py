@@ -19,6 +19,7 @@ from apps.shell.yachiyo_agent import (
     StartGroupRunRequest,
     StartWorkflowRunRequest,
 )
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
 class _FakeStudioPort:
@@ -728,6 +729,83 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             "default_input_schema": {"type": "object"},
         },
     ) in port.calls
+
+
+def test_agent_studio_service_plans_task_from_tool_catalog() -> None:
+    class PlannerCatalogPort(_FakeStudioPort):
+        def list_tool_catalog(self) -> dict[str, Any]:
+            self.calls.append(("list_tool_catalog", None))
+            return {
+                "source": "planner-catalog",
+                "tools": [
+                    {"tool_name": "workspace.read", "function_name": "workspace_read"},
+                    {"tool_name": "terminal.run", "function_name": "terminal_run"},
+                    {"tool_name": "artifact.write", "function_name": "artifact_write"},
+                ],
+                "capabilities": {},
+                "plugins": [],
+            }
+
+    port = PlannerCatalogPort()
+    service = AgentStudioService(port)
+
+    decision = service.plan_task("请分析 sales.csv 并输出数据分析报告")
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert port.calls == [("list_tool_catalog", None)]
+
+
+def test_agent_studio_service_prefers_port_planner_when_available() -> None:
+    class PlannerPort(_FakeStudioPort):
+        def plan_task(
+            self,
+            prompt: str,
+            *,
+            allowed_tools: list[str] | None = None,
+            metadata: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "plan_task",
+                    {
+                        "prompt": prompt,
+                        "allowed_tools": allowed_tools,
+                        "metadata": metadata,
+                    },
+                )
+            )
+            return RuntimePlanner().decision(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+            ).model_dump(mode="json")
+
+    port = PlannerPort()
+    service = AgentStudioService(port)
+
+    decision = service.plan_task(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=["desktop.running_apps", "app.open", "desktop.click_ui_element"],
+        metadata={"surface": "studio"},
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert port.calls == [
+        (
+            "plan_task",
+            {
+                "prompt": "打开 PixelForge 并点击导出按钮",
+                "allowed_tools": ["desktop.running_apps", "app.open", "desktop.click_ui_element"],
+                "metadata": {"surface": "studio"},
+            },
+        )
+    ]
 
 
 def test_agent_studio_service_redacts_sensitive_public_memory_and_future_task_text() -> None:

@@ -19,6 +19,7 @@ from .contracts import (
     GroupRunSnapshot,
     InstallRestrictedToolPluginRequest,
     MemorySnapshot,
+    PlannerDecisionSnapshot,
     PublicRunEvent,
     RerunRunRequest,
     RunEventPageSnapshot,
@@ -50,6 +51,7 @@ from .future_tasks import (
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
+from .runtime_planner import RuntimePlanner
 from .skills import (
     skill_folder_snapshot_from_payload,
     skill_snapshot_from_payload,
@@ -86,6 +88,29 @@ class AgentStudioService:
             return tool_catalog_snapshot_from_payload(list_catalog())
         return runtime_tool_catalog_snapshot()
 
+    def plan_task(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PlannerDecisionSnapshot:
+        port_planner = getattr(self._studio_port, "plan_task", None)
+        if callable(port_planner):
+            payload = port_planner(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata or {},
+            )
+            if payload is not None:
+                return PlannerDecisionSnapshot.model_validate(payload)
+        tools = list(allowed_tools) if allowed_tools is not None else self._catalog_tool_names()
+        return RuntimePlanner().decision(
+            prompt,
+            allowed_tools=tools or None,
+            metadata=metadata,
+        )
+
     def list_restricted_tool_plugins(self) -> list[RestrictedToolPluginSnapshot]:
         list_plugins = getattr(self._studio_port, "list_restricted_tool_plugins", None)
         if callable(list_plugins):
@@ -94,6 +119,17 @@ class AgentStudioService:
                 for item in _payload_items(list_plugins(), "plugins")
             ]
         return self.list_tool_catalog().plugins
+
+    def _catalog_tool_names(self) -> list[str]:
+        try:
+            catalog = self.list_tool_catalog()
+        except Exception:
+            return []
+        return [
+            str(tool.tool_name or "").strip()
+            for tool in catalog.tools
+            if str(tool.tool_name or "").strip()
+        ]
 
     def install_restricted_tool_plugin(
         self,
