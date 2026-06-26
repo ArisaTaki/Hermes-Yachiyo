@@ -369,6 +369,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.list_apps",
+        "desktop.windows",
         "screen.capture",
     ]
 
@@ -394,6 +395,11 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
     )
     capture_selection = planner_first_direct_tool_selection(
         "截取当前屏幕",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    windows_selection = planner_first_direct_tool_selection(
+        "显示 Slack 窗口列表",
         allowed,
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
@@ -449,6 +455,17 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "protocol": "json_fallback",
             "tool": "screen.capture",
             "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert windows_selection.selected_source == "runtime_planner"
+    assert windows_selection.event_payload["legacy_request_count"] == 0
+    assert windows_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }

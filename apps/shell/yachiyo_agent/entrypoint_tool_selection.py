@@ -241,6 +241,7 @@ _RUNTIME_PLANNER_DESKTOP_DISCOVERY_TOOLS = frozenset(
         "desktop.permissions",
         "desktop.running_apps",
         "desktop.ui_elements",
+        "desktop.windows",
         "screen.capture",
     }
 )
