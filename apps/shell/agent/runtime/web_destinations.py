@@ -49,6 +49,12 @@ KNOWN_WEB_DESTINATION_URLS: dict[str, str] = {
     "谷歌": "https://www.google.com",
 }
 
+BROWSER_ONLY_WEB_DESTINATION_URLS: dict[str, str] = {
+    "applemusic": "https://music.apple.com",
+    "music": "https://music.apple.com",
+    "音乐": "https://music.apple.com",
+}
+
 
 def known_web_destination_url_hint(text: str) -> str:
     value = str(text or "").strip()
@@ -84,3 +90,14 @@ def known_web_destination_url(site_name: str) -> str:
     site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site).strip()
     compact = re.sub(r"[\s._·-]+", "", site.lower())
     return KNOWN_WEB_DESTINATION_URLS.get(compact, "")
+
+
+def browser_only_web_destination_url(site_name: str) -> str:
+    site = re.sub(
+        r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$",
+        "",
+        str(site_name or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    compact = re.sub(r"[\s._-]+", "", site.lower())
+    return BROWSER_ONLY_WEB_DESTINATION_URLS.get(compact, "")

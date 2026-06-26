@@ -24,7 +24,10 @@ from apps.shell.agent.runtime.media_apps import (
     known_music_app_name,
 )
 from apps.shell.agent.runtime.path_aliases import common_desktop_path_alias
-from apps.shell.agent.runtime.web_destinations import known_web_destination_url
+from apps.shell.agent.runtime.web_destinations import (
+    browser_only_web_destination_url,
+    known_web_destination_url,
+)
 
 _TERMINAL_COMMAND_HEADS = {
     "awk",
@@ -3074,14 +3077,7 @@ def _has_browser_open_context(text: str) -> bool:
 
 def _normalize_browser_site_name(value: str) -> str:
     site = _strip_polite_suffix(_strip_browser_followup(_strip_query(value)))
-    site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
-    compact = re.sub(r"[\s._-]+", "", site.lower())
-    aliases = {
-        "applemusic": "https://music.apple.com",
-        "music": "https://music.apple.com",
-        "音乐": "https://music.apple.com",
-    }
-    return aliases.get(compact, "")
+    return browser_only_web_destination_url(site)
 
 
 def _explicit_browser_search_url(text: str) -> str:

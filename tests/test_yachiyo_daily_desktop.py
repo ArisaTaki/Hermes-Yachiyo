@@ -2189,6 +2189,11 @@ def test_daily_desktop_entrypoint_routes_direct_browser_and_finder_targets() -> 
             {"url": "https://www.bilibili.com"},
         ),
         (
+            "用浏览器打开 Apple Music",
+            "browser.open_url",
+            {"url": "https://music.apple.com"},
+        ),
+        (
             "打开推特首页",
             "browser.open_url",
             {"url": "https://x.com"},
