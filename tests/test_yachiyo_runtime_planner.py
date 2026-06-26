@@ -33,9 +33,13 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["data_source_hint"] == "sales.csv"
+    assert decision.selected_intent.inputs["data_source_kind"] == "csv"
     assert decision.plan.route_to_studio is True
     assert decision.plan.tool_plan.missing_capabilities == []
-    assert decision.plan.tool_plan.artifacts_expected == ["analysis-report.md"]
+    assert decision.plan.tool_plan.artifacts_expected == [
+        "analysis-report.md",
+        "analysis-chart.png",
+    ]
     step_ids = ["inspect-data-source", "run-analysis", "write-analysis-artifact"]
     assert [_step_by_id(decision, step_id).tool_name for step_id in step_ids] == [
         "workspace.read",
@@ -43,6 +47,9 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
         "artifact.write",
     ]
     assert _step_by_id(decision, "run-analysis").approval_required is True
+    assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png"]
+    }
 
 
 def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
@@ -103,7 +110,33 @@ def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> N
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.missing_inputs == []
+    assert decision.selected_intent.inputs["data_source_hint"] == "sales.csv"
+    assert decision.selected_intent.inputs["data_source_kind"] == "csv"
     assert _step_by_id(decision, "inspect-data-source").tool_name == "workspace.read"
+
+
+def test_runtime_planner_predicts_data_analysis_artifacts_by_requested_outputs() -> None:
+    decision = RuntimePlanner().decision(
+        "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "xlsx"
+    assert decision.plan.tool_plan.artifacts_expected == [
+        "analysis-report.md",
+        "analysis-chart.png",
+        "analysis-summary.csv",
+        "analysis-report.html",
+    ]
+    assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
+        "paths": [
+            "analysis-report.md",
+            "analysis-chart.png",
+            "analysis-summary.csv",
+            "analysis-report.html",
+        ]
+    }
 
 
 def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:

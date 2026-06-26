@@ -22,6 +22,11 @@ from .contracts import (
     ToolPlanSnapshot,
     ToolPlanStepSnapshot,
 )
+from .data_analysis_plan_hints import (
+    data_analysis_artifacts_expected,
+    data_source_hint,
+    data_source_kind_hint,
+)
 from .desktop_plan_hints import (
     app_control_mode,
     app_control_tool_candidates,
@@ -116,7 +121,8 @@ class TaskIntentRouter:
                 "统计",
             ],
         )
-        has_source = bool(_data_source_hint(text) or metadata.get("attachment") or metadata.get("file"))
+        source_hint = data_source_hint(text, metadata)
+        has_source = bool(source_hint)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
         if score <= 0:
@@ -128,7 +134,10 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.95, 0.48 + score),
             description="Analyze structured data and produce a report or artifact.",
-            inputs={"data_source_hint": _data_source_hint(text)},
+            inputs={
+                "data_source_hint": source_hint,
+                "data_source_kind": data_source_kind_hint(source_hint, text),
+            },
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
             required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
             preferred_capabilities=["data.analysis", "desktop.app_control"],
@@ -570,7 +579,12 @@ class RuntimePlanner:
                 "Write analysis artifact",
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
-                input_preview={"path": "analysis-report.md"},
+                input_preview={
+                    "paths": data_analysis_artifacts_expected(
+                        intent.expected_outputs,
+                        intent.user_goal,
+                    )
+                },
                 depends_on=["run-analysis"],
                 reason="Return a durable report artifact that Studio and Chat can replay.",
             ),
@@ -1049,7 +1063,7 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
     if not any(step.tool_name == "artifact.write" for step in steps):
         return []
     if intent.kind == "data_analysis":
-        return ["analysis-report.md"]
+        return data_analysis_artifacts_expected(intent.expected_outputs, intent.user_goal)
     if intent.kind == "web_research":
         return ["research-summary.md"]
     if intent.kind == "code_task":
@@ -1188,7 +1202,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         if _contains_any(text, ["http://", "https://", "research", "search", "调研", "搜索"]):
             score -= 0.04
     if intent.kind == "data_analysis" and (
-        _data_source_hint(text)
+        data_source_hint(text)
         or _contains_any(text, ["data analysis", "analyze data", "数据分析", "分析数据", "csv", "xlsx", "表格"])
     ):
         score += 0.08
@@ -1212,11 +1226,6 @@ def _score_terms(text: str, terms: Iterable[str]) -> float:
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = text.lower()
     return any(str(term).lower() in lowered for term in terms)
-
-
-def _data_source_hint(text: str) -> str:
-    match = re.search(r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|json|parquet|txt))", text, flags=re.IGNORECASE)
-    return match.group(1) if match else ""
 
 
 def _file_location_hint(text: str) -> str:
@@ -1331,6 +1340,6 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
         outputs.append("chart")
     if _contains_any(text, ["report", "报告"]):
         outputs.append("report")
-    if _contains_any(text, ["csv", "表格"]):
+    if _contains_any(text, ["output csv", "export csv", "csv 汇总", "输出 csv", "导出 csv", "表格汇总"]):
         outputs.append("table")
     return outputs or list(default)
