@@ -302,6 +302,9 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
         {"name": "browser.open_url"},
     ]
     assert "Follow approval gates." in calls[0]["messages"][0]["content"]
+    assert "TaskIntent" in calls[0]["messages"][0]["content"]
+    assert "discover -> act -> verify" in calls[0]["messages"][0]["content"]
+    assert "choose capabilities before app-specific rules" in calls[0]["messages"][0]["content"]
     assert "memory.add" in calls[0]["messages"][0]["content"]
     assert "future_task.schedule" in calls[0]["messages"][0]["content"]
     assert "prefer structured desktop tools" in calls[0]["messages"][0]["content"]
@@ -369,6 +372,7 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
     )
 
     assert "Runtime planner guidance" in system_prompt
+    assert "discover -> act -> verify" in system_prompt
     assert "selected intent=data_analysis" in system_prompt
     assert "workspace.read -> terminal.run -> artifact.write" in system_prompt
     assert "artifact expected=analysis-report.md" in system_prompt

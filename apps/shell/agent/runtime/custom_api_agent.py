@@ -12,6 +12,7 @@ from apps.shell.agent.runtime.desktop_intents import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_DOCTRINE
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
@@ -1494,6 +1495,7 @@ class RuntimeCustomApiAgentLoop:
             "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
             "If those instructions require an exact phrase or format, return exactly that final output. "
             "Return concise final output unless the Agent instructions require otherwise. "
+            f"{YACHIYO_RUNTIME_DOCTRINE} "
             f"{self._operating_doctrine}\n"
             "Prefer native tool_calls when available. "
             "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
