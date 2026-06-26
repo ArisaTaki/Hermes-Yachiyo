@@ -434,6 +434,9 @@ def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
         ("把微信打开", "微信", "app.open"),
         ("把 Slack 切到前台", "Slack", "app.focus"),
         ("把 Obsidian 聚焦", "Obsidian", "app.focus"),
+        ("帮我打开一下 CleanMyMac 可以吗", "CleanMyMac", "app.open"),
+        ("麻烦启动下飞书好吗", "飞书", "app.open"),
+        ("能不能切到 Slack 一下", "Slack", "app.focus"),
     )
 
     for prompt, expected_app_name, expected_tool in cases:
