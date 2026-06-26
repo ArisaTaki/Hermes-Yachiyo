@@ -185,6 +185,37 @@ def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts() -> None:
     assert daily_desktop_entrypoint_requests("Finder 把选中文件移到废纸篓") == []
 
 
+def test_daily_desktop_entrypoint_routes_finder_special_locations_to_app_safe_shortcuts() -> None:
+    cases = (
+        ("打开隔空投送", "app.open_and_safe_shortcut", "finder_airdrop"),
+        ("打开 AirDrop", "app.open_and_safe_shortcut", "finder_airdrop"),
+        ("Finder 打开隔空投送", "app.focus_and_safe_shortcut", "finder_airdrop"),
+        ("打开网络位置", "app.open_and_safe_shortcut", "finder_network"),
+        ("打开 Finder 网络", "app.open_and_safe_shortcut", "finder_network"),
+        ("Finder 打开网络", "app.focus_and_safe_shortcut", "finder_network"),
+        ("打开最近使用", "app.open_and_safe_shortcut", "finder_recents"),
+        ("打开最近项目", "app.open_and_safe_shortcut", "finder_recents"),
+        ("Finder 打开最近使用", "app.focus_and_safe_shortcut", "finder_recents"),
+    )
+
+    for prompt, tool_name, action in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Finder", "action": action},
+            }
+        ]
+
+    assert daily_desktop_entrypoint_requests("打开网络设置") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "网络"},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     cases = (
         ("打开备忘录新建", "app.open_and_safe_shortcut", "Notes", "new_note"),

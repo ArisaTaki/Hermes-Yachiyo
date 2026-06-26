@@ -569,6 +569,18 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         {"app_name": "Finder", "action": "parent_folder"},
     )
     ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "finder_airdrop"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "finder_network"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "app.focus_and_safe_shortcut",
+        {"app_name": "Finder", "action": "finder_recents"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "app.open_and_safe_key",
         {"app_name": "Google Chrome", "action": "tab"},
     )
@@ -620,6 +632,21 @@ def test_app_foreground_action_schemas_require_app_and_explicit_action() -> None
         ToolDescriptorRegistry.validate_payload(
             "app.focus_and_safe_shortcut",
             {"app_name": "Slack", "action": "finder_get_info"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "finder_airdrop"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "finder_network"},
+        )
+    with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Slack", "action": "finder_recents"},
         )
     with pytest.raises(AgentRuntimeError, match="仅支持 app_name=Finder"):
         ToolDescriptorRegistry.validate_payload(
@@ -717,6 +744,12 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_quick_look"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_get_info"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_airdrop"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_network"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "finder_recents"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "new_message"})
     with pytest.raises(AgentRuntimeError, match="desktop.safe_shortcut 参数 action 必须是"):
@@ -4355,6 +4388,7 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
     screenshot_toolbar = desktop_mod.desktop_safe_shortcut("screenshot_toolbar")
     lock_screen = desktop_mod.desktop_safe_shortcut("lock_screen")
     finder_quick_look = desktop_mod.desktop_safe_shortcut("finder_quick_look")
+    finder_airdrop = desktop_mod.desktop_safe_shortcut("finder_airdrop")
 
     assert spotlight["summary"] == "Executed safe shortcut: spotlight search"
     assert spotlight["data"] == {
@@ -4400,6 +4434,13 @@ def test_desktop_safe_shortcut_system_overlays_use_whitelisted_shortcuts(monkeyp
         "key_code": 49,
         "shortcut_action": "finder_quick_look",
         "shortcut_label": "Finder Quick Look",
+    }
+    assert finder_airdrop["summary"] == "Executed safe shortcut: Finder AirDrop"
+    assert finder_airdrop["data"] == {
+        "key": "r",
+        "modifiers": ["command", "shift"],
+        "shortcut_action": "finder_airdrop",
+        "shortcut_label": "Finder AirDrop",
     }
     assert "key code keyCodeValue using {command down}" in calls[0][0][2]
     assert calls[0][0][-1] == "49"

@@ -743,6 +743,41 @@ def test_daily_desktop_intent_planner_handles_postposed_open_observe_and_finder_
         "tool": "app.focus_and_safe_shortcut",
         "input": {"app_name": "Finder", "action": "copy"},
     }
+    assert daily_desktop_intent_tool_request("打开隔空投送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_airdrop"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 打开隔空投送", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_airdrop"},
+    }
+    assert daily_desktop_intent_tool_request("打开网络位置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_network"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 打开网络", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_network"},
+    }
+    assert daily_desktop_intent_tool_request("打开最近使用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_recents"},
+    }
+    assert daily_desktop_intent_tool_request("Finder 打开最近使用", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Finder", "action": "finder_recents"},
+    }
+    assert daily_desktop_intent_tool_request("打开网络设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "system.settings_open",
+        "input": {"target": "网络"},
+    }
     assert daily_desktop_intent_tool_request("Slack按空格", allowed_tools) != {
         "protocol": "json_fallback",
         "tool": "app.focus_and_safe_shortcut",

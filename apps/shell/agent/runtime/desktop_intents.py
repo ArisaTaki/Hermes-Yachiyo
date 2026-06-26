@@ -550,6 +550,11 @@ def daily_desktop_intent_tool_requests(
         ):
             return app_command_palette_sequence
         return []
+    finder_special_location = _finder_special_location_tool_request(context)
+    if finder_special_location:
+        if str(finder_special_location.get("tool") or "") in allowed:
+            return [finder_special_location]
+        return []
     known_app_alias = _known_open_app_alias_name(context)
     if known_app_alias:
         if "app.open" in allowed:
@@ -1843,6 +1848,9 @@ def _safe_shortcut_recovery_prompt(action: str) -> str:
         "new_folder": "新建文件夹",
         "rename_selected": "重命名 Finder 选中项",
         "finder_get_info": "显示 Finder 选中项简介",
+        "finder_airdrop": "打开隔空投送",
+        "finder_network": "打开网络位置",
+        "finder_recents": "打开最近使用",
         "parent_folder": "打开上一级文件夹",
         "new_note": "新建笔记",
         "new_reminder": "新建提醒事项",
@@ -2709,6 +2717,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     system_hotkey = _system_desktop_hotkey_request(text)
     if system_hotkey:
         candidates.append(_request("desktop.hotkey", system_hotkey))
+
+    finder_special_location = _finder_special_location_tool_request(text)
+    if finder_special_location:
+        candidates.append(finder_special_location)
 
     known_app_alias = _known_open_app_alias_name(text)
     if known_app_alias:
@@ -8028,7 +8040,74 @@ def _finder_safe_shortcut_action(app_name: str, followup: str) -> str:
         or _finder_parent_folder_shortcut_action(app_name, followup)
         or _finder_get_info_shortcut_action(app_name, followup)
         or _finder_copy_selected_shortcut_action(app_name, followup)
+        or _finder_special_location_shortcut_action(app_name, followup)
     )
+
+
+def _finder_special_location_tool_request(text: str) -> dict[str, Any] | None:
+    action = _finder_special_location_shortcut_action("Finder", text)
+    if not action:
+        return None
+    phrase = _normalize_named_hotkey_phrase(text)
+    open_prefixes = (
+        "打开finder",
+        "启动finder",
+        "显示finder",
+        "openfinder",
+        "launchfinder",
+        "showfinder",
+    )
+    focus_finder = phrase.startswith("finder") and not phrase.startswith(open_prefixes)
+    tool = "app.focus_and_safe_shortcut" if focus_finder else "app.open_and_safe_shortcut"
+    return _request(tool, {"app_name": "Finder", "action": action})
+
+
+def _finder_special_location_shortcut_action(app_name: str, followup: str) -> str:
+    if str(app_name or "").strip() != "Finder":
+        return ""
+    phrase = _normalize_named_hotkey_phrase(followup)
+    variants = {phrase}
+    for prefix in (
+        "打开finder里的",
+        "打开finder的",
+        "启动finder里的",
+        "显示finder里的",
+        "openfinder",
+        "launchfinder",
+        "showfinder",
+        "finder打开",
+        "finder显示",
+        "finderopen",
+        "findershow",
+        "finder里的",
+        "finder的",
+        "finder",
+        "打开",
+        "启动",
+        "显示",
+        "open",
+        "launch",
+        "show",
+    ):
+        if phrase.startswith(prefix):
+            stripped = phrase[len(prefix) :].strip()
+            if stripped:
+                variants.add(stripped)
+    if variants & {"隔空投送", "airdrop"}:
+        return "finder_airdrop"
+    if variants & {"网络位置", "网络", "networklocation", "network"}:
+        return "finder_network"
+    if variants & {
+        "最近使用",
+        "最近项目",
+        "最近使用项目",
+        "最近",
+        "recents",
+        "recentitems",
+        "recentfiles",
+    }:
+        return "finder_recents"
+    return ""
 
 
 def _finder_quick_look_shortcut_action(app_name: str, followup: str) -> str:

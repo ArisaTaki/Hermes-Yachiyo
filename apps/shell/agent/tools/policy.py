@@ -157,6 +157,9 @@ APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + (
     "new_message",
     "rename_selected",
     "parent_folder",
+    "finder_airdrop",
+    "finder_network",
+    "finder_recents",
 )
 SAFE_KEY_ACTIONS = (
     "escape",
@@ -634,6 +637,9 @@ class ToolDescriptor:
                     "new_folder",
                     "rename_selected",
                     "parent_folder",
+                    "finder_airdrop",
+                    "finder_network",
+                    "finder_recents",
                 }
                 and app_name != "Finder"
             ):
