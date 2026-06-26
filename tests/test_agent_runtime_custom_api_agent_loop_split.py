@@ -313,7 +313,8 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     )
     assert "discover available applications/windows/UI first" in calls[0]["messages"][0]["content"]
     assert (
-        "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports"
+        "prefer data.analyze for straightforward CSV/TSV/JSON/XLSX/text-table reports, "
+        "CSV summaries, HTML reports, and simple chart artifacts"
         in calls[0]["messages"][0]["content"]
     )
     assert "Resolve arbitrary app names through app/window/UI discovery" in calls[0]["messages"][0]["content"]
