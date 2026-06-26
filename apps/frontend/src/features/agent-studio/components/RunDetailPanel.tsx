@@ -20,6 +20,7 @@ import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector'
 import { ArtifactInspector } from './ArtifactInspector';
 import { GroupRunDetailPanel } from './GroupRunDetailPanel';
 import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
+import { PlannerTraceInspector } from './PlannerTraceInspector';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
 import { WorkflowChildApprovalBridge } from './WorkflowChildApprovalBridge';
@@ -195,6 +196,12 @@ export function RunDetailPanel({
   const approvalHistorySource = replayApprovals.length
     ? 'RunTimelineSnapshot + RunEvent replay approval facts'
     : 'RunTimelineSnapshot approval facts';
+  const selectedRunPlannerEvents = selectedRunReplayEvents.length
+    ? selectedRunReplayEvents
+    : selectedPublicRunTimeline?.events || [];
+  const plannerTraceSource = selectedRunReplayEvents.length
+    ? 'RunEvent replay planner facts · Intent / Capability / Plan'
+    : 'RunTimelineSnapshot planner facts · Intent / Capability / Plan';
   const rerunSourceRunId = selectedPublicRunTimeline?.rerun_of_run_id || selectedRun?.rerun_of_run_id || '';
   const rerunSourceLabel = selectedPublicRunTimeline?.rerun_of_runnable_name
     || selectedRun?.rerun_of_runnable_name
@@ -364,6 +371,10 @@ export function RunDetailPanel({
             runStatusTone={runStatusTone}
             selectedPublicRunTimeline={selectedPublicRunTimeline}
             selectedRun={selectedRun}
+          />
+          <PlannerTraceInspector
+            events={selectedRunPlannerEvents}
+            sourceLabel={plannerTraceSource}
           />
           {selectedPublicRunTimeline || selectedRunToolCalls.length ? (
             <ToolCallInspector

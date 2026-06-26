@@ -1153,9 +1153,22 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "ToolCallInspector",
             "ApprovalInspector",
             "ArtifactInspector",
+            "PlannerTraceInspector",
             "RunTimeline",
             "selectedRunReplayEvents",
             'data-testid="agent-run-detail-rerun-source"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/PlannerTraceInspector.tsx",
+        [
+            "export function PlannerTraceInspector",
+            "agent.intent.selected",
+            "agent.plan.created",
+            "agent.plan.step",
+            'data-testid="agent-run-detail-planner-intent"',
+            'data-testid="agent-run-detail-planner-capabilities"',
+            'data-testid="agent-run-detail-planner-step"',
         ],
     )
     _assert_smoke_script(
@@ -1548,6 +1561,7 @@ def test_agent_studio_view_preservation_acceptance_path_is_guarded() -> None:
             "ToolCallInspector",
             "ApprovalInspector",
             "ArtifactInspector",
+            "PlannerTraceInspector",
             "RunTimeline",
         ],
     )

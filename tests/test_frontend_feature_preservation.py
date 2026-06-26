@@ -3390,6 +3390,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RunTimelineSnapshot + RunEvent replay tool facts",
             "toolCalls={selectedRunToolCalls}",
             "MemorySkillTraceInspector",
+            "PlannerTraceInspector",
             "const timelineMemoryTraces = selectedPublicRunTimeline?.memory_traces || [];",
             "const timelineSkillTraces = selectedPublicRunTimeline?.skill_traces || [];",
             "const hasTimelineMemorySkillTraces = Boolean(timelineMemoryTraces.length || timelineSkillTraces.length);",
@@ -3405,6 +3406,24 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "selectedGroupRunSnapshot={selectedGroupRunSnapshot}",
             "selectedRouteGroupRunId={selectedRouteGroupRunId}",
             "selectedRunGroup={selectedRunGroup}",
+            "const selectedRunPlannerEvents = selectedRunReplayEvents.length",
+            "RunEvent replay planner facts · Intent / Capability / Plan",
+            "events={selectedRunPlannerEvents}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/PlannerTraceInspector.tsx",
+        [
+            "export function PlannerTraceInspector",
+            "testId = 'agent-run-detail-planner-trace'",
+            "agent.intent.selected",
+            "agent.plan.created",
+            "agent.plan.step",
+            "publicRunEventIsSecret",
+            'data-testid="agent-run-detail-planner-intent"',
+            'data-testid="agent-run-detail-planner-capabilities"',
+            'data-testid="agent-run-detail-planner-step"',
+            'data-testid="agent-run-detail-planner-outputs"',
         ],
     )
     _assert_contains(
@@ -6156,11 +6175,13 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "ArtifactInspector",
             "ToolCallInspector",
             "MemorySkillTraceInspector",
+            "PlannerTraceInspector",
             "selectedRun.task_id ? <code>Task {selectedRun.task_id}</code> : null",
             "selectedRun.session_id ? <code>Session {selectedRun.session_id}</code> : null",
             "selectedRun.task_run_link_run_status ? <span>Task link {runStatusLabel(selectedRun.task_run_link_run_status)}</span> : null",
             "selectedRun.task_run_link_last_event_sequence !== undefined && selectedRun.task_run_link_last_event_sequence !== null",
             "Task link updated {formatRunDate(selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at)}",
+            "selectedRunPlannerEvents",
         ],
     )
     _assert_contains(
@@ -6567,11 +6588,24 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-open-workflow-studio\"",
             "ApprovalInspector",
             "ToolCallInspector",
+            "PlannerTraceInspector",
             "WorkflowChildApprovalBridge",
             "WorkflowStepResults",
             "data-testid=\"agent-run-detail-task\"",
             "data-testid=\"agent-run-detail-result\"",
             "ArtifactInspector",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/PlannerTraceInspector.tsx",
+        [
+            "data-testid={testId}",
+            "data-decision-id={trace.decisionId}",
+            "data-intent-kind={intent?.kind || ''}",
+            "data-route-to-studio={trace.routeToStudio === undefined ? '' : String(trace.routeToStudio)}",
+            "data-testid=\"agent-run-detail-planner-intent\"",
+            "data-testid=\"agent-run-detail-planner-steps\"",
+            "data-testid=\"agent-run-detail-planner-step\"",
         ],
     )
     _assert_contains(
