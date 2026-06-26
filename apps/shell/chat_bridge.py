@@ -261,6 +261,12 @@ def _desktop_candidates_for_quick_message(
     metadata: dict[str, Any] | None = None,
     allowed_tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Return lightweight launcher candidates with Runtime Planner as the default.
+
+    The legacy daily desktop parser remains a fallback for prompts the planner
+    cannot project. Full task execution still records its planner/legacy
+    selection event inside LegacyChatTaskStarter.
+    """
     planner_candidates = _runtime_planner_candidates_for_quick_message(
         text,
         metadata=metadata,

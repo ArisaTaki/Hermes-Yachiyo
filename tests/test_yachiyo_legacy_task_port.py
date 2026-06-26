@@ -142,15 +142,15 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
     starter = LegacyChatTaskStarter(app_runtime, runtime)
 
     task = starter.execute_existing_main_chat_task(
-        task_id="task-settings",
+        task_id="task-github",
         conversation_id="chat-1",
-        prompt="打开蓝牙",
+        prompt="打开 GitHub",
     )
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_source"] == "daily_desktop_intent"
-    assert metadata["daily_desktop_tool"] == "system.settings_open"
+    assert metadata["daily_desktop_tool"] == "browser.open_url"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in run_events[:2]] == [
         "agent.intent.selected",
@@ -163,7 +163,7 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
     assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
     assert selection_events[0][1]["payload"]["selection_reason"] == "legacy_more_specific_direct_plan"
     assert selection_events[0][1]["payload"]["planner_tools"] == ["app.open"]
-    assert selection_events[0][1]["payload"]["selected_tools"] == ["system.settings_open"]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["browser.open_url"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -221,27 +221,34 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_tool"] == "browser.current_page"
-    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_communication_context"
+    assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
+    assert metadata["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_communication_send"
     selection_events = [
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
+    assert selection_events[0][1]["payload"]["selected_tools"] == [
+        "desktop.safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "browser.current_page",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_communication_context",
-            "continue_to_model": True,
-        }
-    ]
+    assert model_loop_call[1]["direct_tool_requests"] == []
 
     runtime.calls.clear()
     app_runtime.chat_session.metadata_calls.clear()
@@ -254,19 +261,39 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_tool"] == "clipboard.read"
-    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_web_context"
+    assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
+    assert metadata["daily_desktop_tools"] == [
+        "desktop.safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
+    ]
+    assert metadata["daily_desktop_planning_reason"] == (
+        "planner_fallback_dynamic_browser_context"
+    )
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_requests"] == [
         {
             "protocol": "json_fallback",
-            "tool": "clipboard.read",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_web_context",
-            "continue_to_model": True,
+            "planning_reason": "planner_fallback_dynamic_browser_context",
         }
     ]
 

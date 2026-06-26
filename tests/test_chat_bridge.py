@@ -9992,6 +9992,53 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
         store.close()
 
 
+def test_chat_bridge_quick_message_uses_runtime_planner_for_launcher_modes(tmp_path):
+    for mode in ("bubble", "live2d"):
+        store = ChatStore(db_path=str(tmp_path / f"chat-{mode}.db"))
+        runtime = _runtime_with_chat_store(store)
+        runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
+        bridge = ChatBridge(runtime)
+        bridge._chat_api = SimpleNamespace(
+            send_message=lambda text, **_kwargs: {
+                "ok": True,
+                "message_id": f"message-screen-{mode}",
+                "task_id": f"task-screen-{mode}",
+                "status": "pending",
+                "echo": text,
+            }
+        )
+        try:
+            result = bridge.send_quick_message(
+                "帮我看看现在屏幕",
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": mode,
+                    "launcher_surface": "quick_message",
+                },
+            )
+
+            assert result["ok"] is True
+            assert result["agent_task"]["task_id"] == f"task-screen-{mode}"
+            _assert_planner_trace_prefix(
+                result["agent_task"],
+                intent_kind="desktop_operation",
+            )
+            selection_event = _agent_task_event(
+                result["agent_task"],
+                "agent.plan.selection",
+            )
+            assert selection_event["payload"]["selection_source"] == "runtime_planner"
+            planned_event = _agent_task_event(
+                result["agent_task"],
+                "agent.desktop.intent_planned",
+                detail="screen.capture",
+            )
+            assert planned_event["payload"]["source"] == "runtime_planner"
+            assert planned_event["payload"]["planning_reason"] == "planner_fallback_desktop_operation"
+        finally:
+            store.close()
+
+
 def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
