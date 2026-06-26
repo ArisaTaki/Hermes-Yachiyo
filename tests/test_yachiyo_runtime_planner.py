@@ -301,6 +301,16 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
 
 
+def test_runtime_planner_report_generation_prefers_workspace_list_for_context() -> None:
+    decision = RuntimePlanner().decision(
+        "写一份项目总结报告",
+        allowed_tools=["workspace.read", "workspace.list", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert _step_by_id(decision, "gather-context").tool_name == "workspace.list"
+
+
 def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> None:
     decision = RuntimePlanner().decision(
         "打开 SuperData Studio 并点击导入按钮",
@@ -1729,6 +1739,78 @@ def test_planner_tool_requests_keeps_research_deliverables_in_model_loop() -> No
             "input": {"url": "https://example.com"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> None:
+    requests = planner_tool_requests(
+        "写一份项目总结报告",
+        allowed_tools=["workspace.read", "workspace.list", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_prefetches_code_context_for_model_loop() -> None:
+    requests = planner_tool_requests(
+        "检查这个仓库的代码并总结风险",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_code_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
+    requests = planner_tool_requests(
+        "整理 Downloads 里的文件并按类型归档",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_tool_requests_prefetches_communication_surface_for_model_loop() -> None:
+    requests = planner_tool_requests(
+        "发送消息给 Alice：今晚八点见",
+        allowed_tools=["desktop.active_window", "desktop.type_into_ui_element", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_surface",
             "continue_to_model": True,
         }
     ]

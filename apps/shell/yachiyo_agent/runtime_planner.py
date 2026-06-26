@@ -1227,7 +1227,7 @@ class RuntimePlanner:
                 "gather-context",
                 "Gather available context",
                 "file.workspace_read",
-                _first_allowed(("workspace.read", "workspace.list", "browser.current_page"), allowed),
+                _first_allowed(("workspace.list", "browser.current_page", "workspace.read"), allowed),
                 reason="Inspect available context before writing.",
             ),
             _step(

@@ -690,8 +690,10 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     ]
     assert tool_runs[0]["allowed_tools"] == ["workspace.read", "terminal.run", "artifact.write"]
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
-    assert timeline[0]["event"] == "agent.desktop.intent_planned"
-    assert timeline[0]["source"] == "runtime_planner"
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event["source"] == "runtime_planner"
     assert model_calls[0][0]["role"] == "system"
     assert "selected intent=data_analysis" in model_calls[0][0]["content"]
 
@@ -13353,7 +13355,10 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
             "continue_to_model": True,
         }
     ]
-    assert timeline[0] == {
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event == {
         "event": "agent.desktop.intent_planned",
         "detail": "browser.open_url_and_extract_text",
         "tool": "browser.open_url_and_extract_text",
@@ -13533,17 +13538,20 @@ def test_custom_api_agent_loop_preplans_daily_reminder_without_model() -> None:
     )
 
     assert str(result) == "已创建提醒事项：买牛奶。"
-    assert timeline[0] == {
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event == {
         "event": "agent.desktop.intent_planned",
         "detail": "reminders.create",
         "tool": "reminders.create",
         "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule",
         "input_preview": {"title": "买牛奶"},
     }
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
-    assert timeline[-1]["source"] == "daily_desktop_intent"
+    assert timeline[-1]["source"] == "runtime_planner"
 
 
 def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_missing() -> None:

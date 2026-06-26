@@ -54,6 +54,34 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
         return _web_tool_requests(decision, allowed)
+    if decision.selected_intent.kind == "report_generation":
+        return _context_prefetch_tool_requests(
+            decision,
+            allowed,
+            step_ids=("gather-context",),
+            planning_reason="planner_prefetch_report_context",
+        )
+    if decision.selected_intent.kind == "code_task":
+        return _context_prefetch_tool_requests(
+            decision,
+            allowed,
+            step_ids=("inspect-workspace",),
+            planning_reason="planner_prefetch_code_context",
+        )
+    if decision.selected_intent.kind == "file_organization":
+        return _context_prefetch_tool_requests(
+            decision,
+            allowed,
+            step_ids=("inspect-file-scope",),
+            planning_reason="planner_prefetch_file_scope",
+        )
+    if decision.selected_intent.kind == "communication":
+        return _context_prefetch_tool_requests(
+            decision,
+            allowed,
+            step_ids=("discover-communication-surface",),
+            planning_reason="planner_prefetch_communication_surface",
+        )
     if decision.selected_intent.kind == "schedule":
         return _schedule_tool_requests(decision.selected_intent.user_goal, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
@@ -248,6 +276,78 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if _web_request_needs_model_followup(decision.selected_intent.user_goal):
         request["continue_to_model"] = True
     return [request]
+
+
+def _context_prefetch_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    step_ids: tuple[str, ...],
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    for step_id in step_ids:
+        step = next(
+            (
+                item
+                for item in decision.plan.tool_plan.steps
+                if getattr(item, "step_id", "") == step_id
+            ),
+            None,
+        )
+        request = _context_prefetch_request_for_step(
+            step,
+            allowed,
+            planning_reason=planning_reason,
+        )
+        if request:
+            return [request]
+    return []
+
+
+def _context_prefetch_request_for_step(
+    step: Any,
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> dict[str, Any] | None:
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name not in allowed:
+        return None
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    request_payload = _context_prefetch_payload(tool_name, payload)
+    if request_payload is None:
+        return None
+    request = _request(
+        tool_name,
+        request_payload,
+        planning_reason=planning_reason,
+    )
+    request["continue_to_model"] = True
+    return request
+
+
+def _context_prefetch_payload(
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool_name == "workspace.list":
+        path = str(payload.get("path") or "").strip()
+        return {"path": path} if path else {}
+    if tool_name == "workspace.read":
+        path = str(payload.get("path") or "").strip()
+        return {"path": path} if path else None
+    if tool_name in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
+        return {}
+    if tool_name in {"desktop.active_window", "desktop.running_apps"}:
+        return {}
+    if tool_name == "screen.capture":
+        reason = str(payload.get("reason") or "").strip()
+        return {"reason": reason} if reason else {}
+    if tool_name in {"desktop.reveal_path", "desktop.open_path"}:
+        path = str(payload.get("path") or "").strip()
+        return {"path": path} if path else None
+    return None
 
 
 def _schedule_tool_requests(prompt: str, allowed: set[str]) -> list[dict[str, Any]]:

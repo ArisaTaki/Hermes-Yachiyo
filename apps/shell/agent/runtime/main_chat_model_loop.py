@@ -270,8 +270,13 @@ class MainChatModelLoopRunner:
         try:
             from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
 
-            if planner_tool_requests(intent_text, allowed_tools):
-                return True
+            planned_requests = planner_tool_requests(intent_text, allowed_tools)
+            if planned_requests:
+                return not any(
+                    bool(request.get("continue_to_model"))
+                    for request in planned_requests
+                    if isinstance(request, dict)
+                )
         except Exception:
             pass
         if daily_desktop_intent_tool_request(intent_text, allowed_tools):

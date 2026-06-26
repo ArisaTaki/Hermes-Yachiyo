@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.main_chat_model_loop import (
@@ -256,6 +258,26 @@ def test_main_chat_model_loop_runner_uses_runtime_planner_without_profile_before
             "workspace_policy": {"default_workdir": "/tmp/project"},
         }
     ]
+
+
+def test_main_chat_model_loop_runner_keeps_profile_required_for_planner_model_followup() -> None:
+    runner, _state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["workspace.list", "workspace.read", "artifact.write"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+
+    def continue_custom_api_agent(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("model-followup planner requests should not bypass profile readiness")
+
+    runner._continue_custom_api_agent = continue_custom_api_agent
+
+    with pytest.raises(
+        agent_runtime.AgentRuntimeError,
+        match="native_agent_not_ready:chat_model_profile_required",
+    ):
+        runner.execute("run-1", [{"role": "user", "content": "写一份项目总结报告"}])
 
 
 def test_main_chat_model_loop_runner_projects_approval_required_without_bypassing_gate() -> None:
