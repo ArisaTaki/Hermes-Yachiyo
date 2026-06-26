@@ -364,13 +364,26 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
     tool_name, payload = system_tool_preview(inputs, allowed)
     if not tool_name:
         return []
-    return [
+    requests = [
         _request(
             tool_name,
             payload,
             planning_reason="planner_fallback_system_control",
         )
     ]
+    if (
+        tool_name == "system.settings_open"
+        and bool(inputs.get("inspect_ui"))
+        and "desktop.ui_elements" in allowed
+    ):
+        requests.append(
+            _request(
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80},
+                planning_reason="planner_fallback_system_control",
+            )
+        )
+    return requests
 
 
 def _file_access_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:

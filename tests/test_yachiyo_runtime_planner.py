@@ -1806,6 +1806,47 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
     assert _step_by_id(display_sleep, "control-system-state").tool_name == "system.display_sleep"
 
 
+def test_runtime_planner_routes_system_settings_open_to_system_control() -> None:
+    decision = RuntimePlanner().decision(
+        "打开蓝牙",
+        allowed_tools=["system.settings_open", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "system_control"
+    assert decision.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "蓝牙"},
+        "inspect_ui": False,
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-system-settings"
+    ]
+    step = _step_by_id(decision, "open-system-settings")
+    assert step.capability_id == "system.control"
+    assert step.tool_name == "system.settings_open"
+    assert step.action == "open_settings"
+    assert step.input_preview == {"target": "蓝牙"}
+
+    inspect = RuntimePlanner().decision(
+        "打开系统设置看看有哪些选项",
+        allowed_tools=["system.settings_open", "desktop.ui_elements"],
+    )
+    assert inspect.selected_intent.kind == "system_control"
+    assert inspect.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "系统设置"},
+        "inspect_ui": True,
+    }
+    assert [step.step_id for step in inspect.plan.tool_plan.steps] == [
+        "open-system-settings",
+        "read-system-settings-ui",
+    ]
+    assert _step_by_id(inspect, "read-system-settings-ui").tool_name == "desktop.ui_elements"
+    assert _step_by_id(inspect, "read-system-settings-ui").depends_on == [
+        "open-system-settings"
+    ]
+
+
 def test_runtime_planner_routes_communication_to_compose_capability() -> None:
     decision = RuntimePlanner().decision(
         "发送消息给 Alice：今晚八点见",
@@ -2562,15 +2603,9 @@ def test_planner_direct_tool_requests_maps_foreground_browser_safe_shortcuts() -
         ]
 
 
-def test_entrypoint_selection_uses_legacy_when_single_app_plan_is_less_specific() -> None:
-    def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
-        return [
-            {
-                "protocol": "json_fallback",
-                "tool": "system.settings_open",
-                "input": {"target": "蓝牙"},
-            }
-        ]
+def test_entrypoint_selection_keeps_runtime_planner_for_system_settings_open() -> None:
+    def fail_legacy(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
+        raise AssertionError("system settings open should be owned by runtime planner")
 
     decision, requests = planner_first_direct_decision_and_tool_requests(
         "打开蓝牙",
@@ -2580,16 +2615,18 @@ def test_entrypoint_selection_uses_legacy_when_single_app_plan_is_less_specific(
             "desktop.active_window",
             "system.settings_open",
         ],
-        legacy_tool_requests=legacy_requests,
+        legacy_tool_requests=fail_legacy,
     )
 
     assert decision is not None
-    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.kind == "system_control"
     assert requests == [
         {
             "protocol": "json_fallback",
             "tool": "system.settings_open",
             "input": {"target": "蓝牙"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
         }
     ]
 
@@ -3112,6 +3149,38 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_system_control",
         }
+    ]
+
+    assert planner_tool_requests(
+        "open sound settings",
+        allowed_tools=["system.settings_open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "声音"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        }
+    ]
+    assert planner_tool_requests(
+        "打开系统设置看看有哪些选项",
+        allowed_tools=["system.settings_open", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "系统设置"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
     ]
 
 

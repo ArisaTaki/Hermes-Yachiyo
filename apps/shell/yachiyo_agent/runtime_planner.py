@@ -439,6 +439,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if metadata.get("desktop_permission_recovery") and metadata.get("recovery_tool"):
+            return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
             return _empty_intent("system_control", text)
@@ -1570,6 +1572,32 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         tool_name, input_preview = system_tool_preview(intent.inputs, allowed)
+        if tool_name == "system.settings_open":
+            steps = [
+                _step(
+                    intent,
+                    "open-system-settings",
+                    "Open system settings",
+                    "system.control",
+                    tool_name,
+                    input_preview=input_preview,
+                    reason="Use the dedicated System Settings tool instead of treating settings panes as apps.",
+                )
+            ]
+            if bool(intent.inputs.get("inspect_ui")):
+                steps.append(
+                    _step(
+                        intent,
+                        "read-system-settings-ui",
+                        "Read system settings UI",
+                        "desktop.app_discovery",
+                        _first_allowed(("desktop.ui_elements",), allowed),
+                        input_preview={"role_filter": "", "limit": 80},
+                        depends_on=["open-system-settings"],
+                        reason="Read the opened settings pane when the user asks what options or controls are visible.",
+                    )
+                )
+            return steps
         return [
             _step(
                 intent,
@@ -2536,6 +2564,10 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "type"
     if step_key == "submit-browser-context":
         return "submit"
+    if step_key == "open-system-settings":
+        return "open_settings"
+    if step_key == "read-system-settings-ui":
+        return "read_ui"
     if capability_id == "desktop.app_discovery":
         return _desktop_discovery_action(tool_name)
     if capability_id == "data.analysis":
@@ -2557,6 +2589,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if capability_id == "media.playback":
         return "play"
     if capability_id == "system.control":
+        if tool_name == "system.settings_open":
+            return "open_settings"
         return "control_system"
     if capability_id == "schedule.reminder":
         if _is_context_source_tool(tool_name):
