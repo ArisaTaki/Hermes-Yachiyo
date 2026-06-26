@@ -370,6 +370,12 @@ class RuntimeCustomApiAgentLoop:
                         pending_approval=exc.pending_approval,
                         timeline=timeline,
                         run_id=run_id,
+                        source=str(
+                            planned_tool_requests[0].get("source") or "daily_desktop_intent"
+                        ),
+                        planning_reason=str(
+                            planned_tool_requests[0].get("planning_reason") or ""
+                        ),
                     )
                     raise
                 continue_to_model = any(
@@ -659,14 +665,19 @@ class RuntimeCustomApiAgentLoop:
         pending_approval: dict[str, Any],
         timeline: list[dict[str, Any]],
         run_id: str,
+        source: str = "daily_desktop_intent",
+        planning_reason: str = "",
     ) -> None:
         event_payload = {
             "tool": tool_name,
             "status": "approval_required",
-            "source": "daily_desktop_intent",
+            "source": str(source or "daily_desktop_intent"),
             "reason": "tool_policy_requires_approval",
             "input_preview": tool_input,
         }
+        clean_planning_reason = str(planning_reason or "").strip()
+        if clean_planning_reason:
+            event_payload["planning_reason"] = clean_planning_reason
         for key in ("approval_id", "risk_level", "policy_reason"):
             value = str(pending_approval.get(key) or "").strip()
             if value:

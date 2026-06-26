@@ -13942,6 +13942,99 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
     }
 
 
+def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_required(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+
+    def run_tool_requests(*_args, **_kwargs):
+        raise AgentApprovalRequired(
+            {
+                "approval_id": "approval-export",
+                "tool": "app.open_and_click_ui_element",
+                "input_preview": {
+                    "app_name": "PixelForge",
+                    "target": "导出",
+                    "role_filter": "button",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "risk_level": "medium",
+                "policy_reason": "点击前台控件需要确认。",
+            }
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["app.open_and_click_ui_element"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approval-required runtime planner intent should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    try:
+        loop.run(
+            {"name": "Yachiyo"},
+            "打开 PixelForge 并点击导出按钮",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            run_id="run-runtime-planner-approval",
+        )
+    except AgentApprovalRequired as exc:
+        assert exc.pending_approval["approval_id"] == "approval-export"
+    else:
+        raise AssertionError("expected AgentApprovalRequired")
+
+    assert timeline[-1]["event"] == "agent.desktop.intent_approval_required"
+    assert timeline[-1]["source"] == "runtime_planner"
+    assert timeline[-1]["planning_reason"] == "planner_fallback_desktop_operation"
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
+    assert appended_events[-1]["payload"]["source"] == "runtime_planner"
+    assert appended_events[-1]["payload"]["planning_reason"] == (
+        "planner_fallback_desktop_operation"
+    )
+
+
 def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_response() -> None:
     budget = FakeBudget()
     order: list[str] = []
