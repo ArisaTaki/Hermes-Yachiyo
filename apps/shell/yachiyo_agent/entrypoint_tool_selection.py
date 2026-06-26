@@ -266,6 +266,8 @@ def _runtime_planner_app_launch_owns_selection(
 ) -> bool:
     if not requests:
         return False
+    if _prompt_contains_terminal_command(prompt):
+        return False
     if _prompt_contains_shortcut_or_window_followup(prompt):
         return False
     reasons = _request_planning_reasons(requests)
@@ -281,6 +283,27 @@ def _runtime_planner_app_launch_owns_selection(
         if not _runtime_app_name_is_specific(str(request_input.get("app_name") or "")):
             return False
     return True
+
+
+def _prompt_contains_terminal_command(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:终端|命令行|terminal|shell).{0,16}"
+            r"(?:运行|执行|跑|run|execute)\s*"
+            r"(?!起来|一下|下|吧|吗|嘛|呢|$)\S+",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:运行|执行|跑|run|execute)\s+\S+.+"
+            r"(?:在|用|通过|in|with|using)\s*(?:终端|命令行|terminal|shell)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _prompt_contains_shortcut_or_window_followup(prompt: str) -> bool:

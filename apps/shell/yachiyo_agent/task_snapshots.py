@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_tool_labels import (
+    TASK_PROGRESS_DESKTOP_TOOL_LABELS as _DESKTOP_TOOL_PROGRESS_LABELS,
+)
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .approval_event_snapshots import (
@@ -30,82 +33,6 @@ _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_re
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
-_DESKTOP_TOOL_PROGRESS_LABELS = {
-    "screen.capture": "截取屏幕",
-    "desktop.permissions": "检查桌面权限",
-    "desktop.active_window": "读取当前窗口",
-    "desktop.running_apps": "读取运行中应用",
-    "desktop.list_apps": "发现已安装应用",
-    "desktop.windows": "读取窗口列表",
-    "desktop.ui_elements": "读取界面控件",
-    "data.analyze": "分析数据",
-    "app.status": "检查应用状态",
-    "app.open": "打开应用",
-    "app.focus": "聚焦应用",
-    "app.focus_window": "聚焦应用窗口",
-    "app.open_and_safe_type_text": "打开应用并输入文字",
-    "app.focus_and_safe_type_text": "聚焦应用并输入文字",
-    "app.open_and_safe_shortcut": "打开应用并执行快捷动作",
-    "app.focus_and_safe_shortcut": "聚焦应用并执行快捷动作",
-    "app.open_and_safe_key": "打开应用并按导航键",
-    "app.focus_and_safe_key": "聚焦应用并按导航键",
-    "app.open_and_hotkey": "打开应用并发送快捷键",
-    "app.focus_and_hotkey": "聚焦应用并发送快捷键",
-    "app.open_and_safe_scroll": "打开应用并滚动",
-    "app.focus_and_safe_scroll": "聚焦应用并滚动",
-    "app.open_and_safe_click": "打开应用并点击",
-    "app.focus_and_safe_click": "聚焦应用并点击",
-    "app.open_and_click_ui_element": "打开应用并点击控件",
-    "app.focus_and_click_ui_element": "聚焦应用并点击控件",
-    "app.open_and_type_into_ui_element": "打开应用并填写控件",
-    "app.focus_and_type_into_ui_element": "聚焦应用并填写控件",
-    "app.show": "显示应用",
-    "app.hide": "隐藏应用",
-    "app.minimize": "最小化应用",
-    "app.quit": "退出应用",
-    "desktop.quit_app": "退出当前应用",
-    "desktop.reveal_path": "在 Finder 中显示",
-    "desktop.open_path": "打开本地路径",
-    "media.apple_music_play": "播放 Apple Music",
-    "media.apple_music_open_and_play": "打开并播放 Apple Music",
-    "media.apple_music_control": "控制 Apple Music",
-    "media.music_app_open_and_play": "打开并播放音乐应用",
-    "media.music_app_control": "控制音乐应用",
-    "media.system_control": "控制当前媒体",
-    "system.settings_open": "打开系统设置",
-    "system.volume": "控制系统音量",
-    "system.brightness": "调整屏幕亮度",
-    "system.display_sleep": "让显示器睡眠",
-    "system.screen_saver_start": "启动屏幕保护程序",
-    "clipboard.write": "写入剪贴板",
-    "clipboard.read": "读取剪贴板",
-    "notes.create": "创建备忘录",
-    "reminders.create": "创建提醒事项",
-    "calendar.create_event": "创建日历事件",
-    "desktop.safe_shortcut": "执行快捷动作",
-    "desktop.safe_key": "按前台导航键",
-    "desktop.safe_type_text": "输入前台文字",
-    "desktop.safe_click": "点击前台界面",
-    "desktop.safe_scroll": "滚动前台界面",
-    "desktop.click_ui_element": "点击前台控件",
-    "desktop.type_into_ui_element": "填写前台控件",
-    "desktop.hide_app": "隐藏当前应用",
-    "desktop.show_all_apps": "显示隐藏应用",
-    "desktop.minimize_window": "最小化当前窗口",
-    "desktop.close_window": "关闭当前窗口",
-    "desktop.hotkey": "发送快捷键",
-    "desktop.submit_foreground": "发送/提交前台内容",
-    "desktop.type_text": "输入前台文字",
-    "desktop.click": "点击前台界面",
-    "browser.open_url": "打开网页",
-    "browser.open_url_and_extract_text": "打开并读取网页",
-    "browser.open_url_and_screenshot": "打开并截取网页",
-    "browser.current_page": "读取当前网页",
-    "browser.extract_text": "提取网页文本",
-    "browser.screenshot": "截取网页",
-    "browser.click": "点击网页元素",
-    "browser.type_text": "填写网页输入",
-}
 
 
 def agent_task_snapshot_from_payload(
@@ -403,9 +330,13 @@ def _has_desktop_recovery_user_action(
 
 def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) -> bool:
     for event in reversed(events):
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE:
+            if _has_recovery_signal(payload):
+                return True
+            continue
         if event.event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
             continue
-        payload = event.payload if isinstance(event.payload, Mapping) else {}
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
         return _has_recovery_signal(result, count_success_recovery_actions=False)
     return False

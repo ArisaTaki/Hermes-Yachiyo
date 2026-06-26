@@ -4573,6 +4573,43 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
     ]
 
 
+def test_planner_first_keeps_terminal_command_on_legacy_approval_path() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "terminal.run",
+                "input": {"command": "ls"},
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "打开终端运行 ls",
+        ["app.open", "desktop.list_apps", "terminal.run"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "daily_desktop_intent"
+    assert selection.event_payload["selection_source"] == "daily_desktop_intent"
+    assert selection.event_payload["legacy_request_count"] == 1
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "ls"},
+        }
+    ]
+    assert legacy_calls == [
+        {
+            "prompt": "打开终端运行 ls",
+            "allowed_tools": ["app.open", "desktop.list_apps", "terminal.run"],
+        }
+    ]
+
+
 def test_planner_first_owns_direct_context_communication_send_sequence() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [
