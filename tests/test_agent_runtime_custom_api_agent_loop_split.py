@@ -394,6 +394,7 @@ def test_custom_api_agent_loop_injects_runtime_planner_guidance_for_data_analysi
     assert "artifact expected=analysis-report.md" in system_prompt
     assert "route to Studio=yes" in system_prompt
     assert "2. Run reproducible data analysis: terminal.run" in system_prompt
+    assert "action=run_python_analysis" in system_prompt
     assert "approval required" in system_prompt
     assert "approval gates still apply" in system_prompt
 

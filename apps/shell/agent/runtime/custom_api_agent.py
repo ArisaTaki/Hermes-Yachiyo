@@ -1600,11 +1600,13 @@ class RuntimeCustomApiAgentLoop:
             if not tool_or_capability:
                 continue
             approval = "approval required" if step.approval_required else "approval not preflagged"
+            action = str(getattr(step, "action", "") or "").strip()
+            action_text = f"action={action}; " if action else ""
             reason = str(step.reason or "").strip()
             reason_text = f"; reason={reason}" if reason else ""
             step_guidance.append(
                 f"{index}. {step.title}: {tool_or_capability} "
-                f"(capability={step.capability_id}; status={step.status}; "
+                f"({action_text}capability={step.capability_id}; status={step.status}; "
                 f"risk={step.risk_level}; {approval}{reason_text})"
             )
         steps_text = " ".join(step_guidance)
