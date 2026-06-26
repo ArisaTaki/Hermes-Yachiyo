@@ -6,6 +6,12 @@ from typing import Any
 
 from apps.shell.chat_api import ChatAPI
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.tools.policy import (
+    HIGH_RISK_AGENT_TOOLS,
+    HIGH_RISK_DESKTOP_TOOL_NAMES,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+)
 
 from .daily_desktop import (
     daily_desktop_allowed_tools,
@@ -16,6 +22,9 @@ from .daily_desktop import (
     daily_desktop_user_metadata,
     main_chat_entrypoint_allowed_tools,
 )
+from .desktop_permissions import desktop_permission_missing_by_capability
+from .desktop_plan_hints import hotkey_hint
+from .desk import LocalAgentDeskStore
 from .entrypoint_tool_selection import planner_first_direct_tool_selection
 from .legacy_event_pages import (
     is_replay_enrichment_event as _is_replay_enrichment_event,
@@ -45,10 +54,20 @@ from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
 )
-from .desktop_permissions import desktop_permission_missing_by_capability
-from .desk import LocalAgentDeskStore
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
+
+_APPROVAL_PLAN_TOOLS = {
+    *HIGH_RISK_AGENT_TOOLS,
+    *HIGH_RISK_DESKTOP_TOOL_NAMES,
+    *MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+}
+_SAFE_SHORTCUT_APPROVAL_TOOLS = {
+    "desktop.safe_shortcut": "desktop.hotkey",
+    "app.open_and_safe_shortcut": "app.open_and_hotkey",
+    "app.focus_and_safe_shortcut": "app.focus_and_hotkey",
+}
 
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
@@ -229,6 +248,7 @@ class LegacyChatTaskStarter:
             allowed_tools=allowed_daily_desktop_tools,
         )
         planner_decision, selected_requests = (None, [])
+        direct_tool_requests: list[dict[str, Any]] = []
         direct_tool_selection_payload: dict[str, Any] = {}
         selected_source = ""
         if not direct_tool_request:
@@ -246,6 +266,13 @@ class LegacyChatTaskStarter:
             selected_requests = selection.requests
             selected_source = selection.selected_source
             direct_tool_selection_payload = selection.event_payload
+            if selected_source == "runtime_planner":
+                direct_tool_requests = _safe_runtime_planner_tool_requests(
+                    prompt or execution_prompt,
+                    allowed_entrypoint_tools,
+                    metadata=metadata,
+                    selected_requests=selected_requests,
+                )
         if not task_id:
             return None
         if not direct_tool_request and not selected_requests:
@@ -287,6 +314,7 @@ class LegacyChatTaskStarter:
                 run_id,
                 [{"role": "user", "content": execution_prompt or prompt or "执行恢复后的原操作"}],
                 direct_tool_request=direct_tool_request,
+                direct_tool_requests=direct_tool_requests,
             )
             status = str(run.get("status") or "").strip()
             result_text = str(run.get("result") or "").strip()
@@ -911,6 +939,59 @@ class LegacyStudioPort:
 
 def _chat_task_payload(run: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
     return _LEGACY_RUN_PROJECTOR.chat_task_payload(run, conversation_id=conversation_id)
+
+
+def _safe_runtime_planner_tool_requests(
+    prompt: str,
+    allowed_tools: list[str],
+    *,
+    metadata: dict[str, Any] | None = None,
+    selected_requests: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    selected_requests = selected_requests or []
+    if _has_approval_plan_tool(selected_requests):
+        return []
+    if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
+        return []
+    requests = planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    if _has_approval_plan_tool(requests):
+        return []
+    if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
+        return []
+    return requests
+
+
+def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(request, dict)
+        and str(request.get("tool") or "").strip() in _APPROVAL_PLAN_TOOLS
+        for request in tool_requests
+    )
+
+
+def _has_explicit_hotkey_safe_shortcut(
+    prompt: str,
+    tool_requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> bool:
+    if not hotkey_hint(prompt):
+        return False
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    for request in tool_requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        approval_tool = _SAFE_SHORTCUT_APPROVAL_TOOLS.get(tool_name, "")
+        if not approval_tool or approval_tool not in allowed:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if str(payload.get("action") or "").strip() == "focus_address_bar":
+            return True
+    return False
 
 
 def _group_artifacts(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:

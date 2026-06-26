@@ -125,6 +125,15 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["selected_tools"] == ["app.open"]
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
 
 
 def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> None:
@@ -155,6 +164,73 @@ def test_legacy_chat_task_starter_records_direct_selection_fallback_event() -> N
     assert selection_events[0][1]["payload"]["selection_reason"] == "legacy_more_specific_direct_plan"
     assert selection_events[0][1]["payload"]["planner_tools"] == ["app.open"]
     assert selection_events[0][1]["payload"]["selected_tools"] == ["system.settings_open"]
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == []
+
+
+def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-quit",
+        conversation_id="chat-1",
+        prompt="退出 Slack",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["daily_desktop_tool"] == "app.quit"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == []
+    selection_events = [
+        event for event in runtime.calls if event[0] == "append_run_event"
+        and event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["plan_tools"] == [
+        "desktop.list_apps",
+        "app.quit",
+        "desktop.running_apps",
+    ]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["app.quit"]
+
+
+def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-hotkey",
+        conversation_id="chat-1",
+        prompt="你能帮我按Command L吗",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == []
+    selection_events = [
+        event for event in runtime.calls if event[0] == "append_run_event"
+        and event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["desktop.safe_shortcut"]
 
 
 def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> None:
@@ -185,6 +261,9 @@ def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> 
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
+    assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "data.analyze"
+    ]
 
 
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
@@ -700,6 +779,7 @@ class _MainChatPlannerEventRuntime:
         messages: list[dict[str, Any]],
         *,
         direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             (
@@ -708,6 +788,7 @@ class _MainChatPlannerEventRuntime:
                     "run_id": run_id,
                     "messages": messages,
                     "direct_tool_request": direct_tool_request,
+                    "direct_tool_requests": direct_tool_requests,
                 },
             )
         )
