@@ -172,6 +172,21 @@ def focus_window_hint(text: str) -> dict[str, str] | None:
     return None
 
 
+def ui_inspection_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    lowered = value.lower()
+    if not _looks_like_ui_inspection_request(value, lowered):
+        return None
+    payload: dict[str, Any] = {
+        "role_filter": _ui_role_filter_hint(value),
+        "limit": 80,
+    }
+    app_name = _ui_inspection_app_name_hint(value)
+    if app_name:
+        payload["app_name"] = app_name
+    return payload
+
+
 def hotkey_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     if not contains_any(
@@ -408,6 +423,168 @@ def _clean_window_title_hint(value: str) -> str:
     )
     title = re.sub(r"\s*(?:窗口|window)$", "", title, flags=re.IGNORECASE)
     return title.strip(" .，,。")
+
+
+def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
+    if _looks_like_foreground_mutation(value, lowered):
+        return False
+    return bool(
+        re.search(
+            r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r".{0,8}(?:文字|文本|内容|正文)"
+            r".{0,8}(?:是什么|是啥|有哪些|有什么|读取|读一下|查看|看看|识别)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:读取|阅读|读一下|读下|读一读|读|查看|看看|识别|提取|抓取|获取)"
+            r".{0,8}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r".{0,8}(?:文字|文本|内容|正文)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)?"
+            r".{0,10}(?:有哪些|有什么|列出|列一下|显示|查看|看看|看一下|读取|识别)"
+            r".{0,10}(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)"
+            r".{0,10}(?:有哪些|有什么|列表|列一下|显示|查看|看看|看一下|读取|识别)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:read|inspect|show|extract)\b.{0,16}\b"
+            r"(?:current|this|active|foreground)\s+(?:window|ui|interface|screen)\b"
+            r"(?:.{0,16}\b(?:text|content)\b)?",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:list|show|read|inspect)\b.{0,24}\b(?:ui elements|buttons|text fields|controls)\b",
+            lowered,
+        )
+        or re.search(r"\b(?:what|which)\b.{0,24}\b(?:buttons|controls|ui elements)\b", lowered)
+        or re.search(
+            r"\b(?:visible|shown|available)\s+(?:buttons|controls|ui elements|text fields)\b",
+            lowered,
+        )
+        or re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered)
+    )
+
+
+def _looks_like_foreground_mutation(value: str, lowered: str) -> bool:
+    if re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered):
+        return False
+    return bool(
+        re.search(
+            r"(?:双击|点击|点一下|点按|单击|按一下|按下|输入|键入|填写|填入|写入|发送|提交)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"\b(?:double\s+click|click|press|tap|type|enter|fill|send|submit)\b", lowered)
+    )
+
+
+def _ui_role_filter_hint(value: str) -> str:
+    if re.search(r"(?:文字|文本|正文|content|text)", value, flags=re.IGNORECASE):
+        return "text"
+    if re.search(r"(?:按钮|button)", value, flags=re.IGNORECASE):
+        return "button"
+    if re.search(r"(?:输入框|文本框|输入栏|text field|textbox|input)", value, flags=re.IGNORECASE):
+        return "text"
+    if re.search(r"(?:菜单|menu)", value, flags=re.IGNORECASE):
+        return "menu"
+    if re.search(r"(?:复选框|checkbox)", value, flags=re.IGNORECASE):
+        return "checkbox"
+    return ""
+
+
+def _ui_inspection_app_name_hint(value: str) -> str:
+    patterns = (
+        r"\b(?:list|show|read|inspect)\s+(?:the\s+)?"
+        r"(?:ui\s+elements|buttons|text\s+fields|controls)\s+(?:in|on|for|of)\s+(?P<app_en>[^.!?]+)",
+        r"\b(?:what|which)\s+(?:buttons|controls|ui\s+elements|text\s+fields)\s+"
+        r"(?:are\s+)?(?:visible|shown|available|there)?\s*(?:in|on|for|of)\s+(?P<app_en2>[^.!?]+)",
+        r"\bwhat\s+can\s+i\s+(?:click|press|use)\s+(?:in|on)\s+(?P<app_en3>[^.!?]+)",
+        r"\b(?:list|show|read|inspect)\s+(?P<app_en4>[^.!?]+?)\s+"
+        r"(?:ui\s+elements|buttons|text\s+fields|controls)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?P<app>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
+        r".{0,6}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?P<app2>[^。！？!?，,]+?)\s*(?:的)?\s*(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<app3>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
+        r".{0,6}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app_name = _clean_ui_app_name_hint(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
+def _clean_ui_app_name_hint(value: str) -> str:
+    app = clean(value)
+    app = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|识别|"
+        r"list|show|read|inspect|the)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
+    app = re.sub(
+        r"\s*(?:有哪些|有什么|有啥|有哪个|有哪几个|visible|shown|available|there)?\s*"
+        r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作|"
+        r"ui\s+elements|buttons|text\s+fields|controls)?$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if re.fullmatch(
+        r"(?:当前|现在|这个|前台|该)?(?:应用|app|界面|窗口|屏幕|ui|interface|window|screen)",
+        app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    generic = {
+        "",
+        "app",
+        "application",
+        "desktop",
+        "window",
+        "interface",
+        "screen",
+        "ui",
+        "current",
+        "active",
+        "foreground",
+        "应用",
+        "应用程序",
+        "桌面",
+        "窗口",
+        "界面",
+        "屏幕",
+        "当前",
+        "前台",
+    }
+    return "" if app.lower().strip(" .，,。") in generic else app.strip(" .，,。")
 
 
 def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:

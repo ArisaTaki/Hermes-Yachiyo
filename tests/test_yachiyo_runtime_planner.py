@@ -328,6 +328,61 @@ def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["focus-app-window"]
 
 
+def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
+    decision = RuntimePlanner().decision(
+        "当前界面有哪些按钮",
+        allowed_tools=["desktop.active_window", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert decision.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+    ]
+    read_ui = _step_by_id(decision, "read-foreground-ui")
+    assert read_ui.tool_name == "desktop.ui_elements"
+    assert read_ui.action == "read_ui"
+    assert read_ui.input_preview == {"role_filter": "button", "limit": 80}
+    assert read_ui.depends_on == ["discover-desktop-state"]
+    assert read_ui.approval_required is False
+
+
+def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
+    decision = RuntimePlanner().decision(
+        "Slack 有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert decision.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert decision.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "Slack",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "read-foreground-ui",
+    ]
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Slack",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
+    read_ui = _step_by_id(decision, "read-foreground-ui")
+    assert read_ui.tool_name == "desktop.ui_elements"
+    assert read_ui.input_preview == {"role_filter": "button", "limit": 80}
+    assert read_ui.depends_on == ["open-or-focus-app"]
+
+
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
     decision = RuntimePlanner().decision(
         "打开 PixelForge 并点击导出按钮",
@@ -862,6 +917,37 @@ def test_planner_desktop_tool_requests_maps_focus_window_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.active_window",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_app_scoped_ui_inspection() -> None:
+    requests = planner_desktop_tool_requests(
+        "Slack 有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

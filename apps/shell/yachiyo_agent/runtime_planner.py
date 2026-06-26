@@ -39,6 +39,7 @@ from .desktop_plan_hints import (
     safe_type_text_hint,
     submit_action_hint,
     type_into_ui_hint,
+    ui_inspection_hint,
     window_list_hint,
 )
 from .schedule_plan_hints import schedule_tool_preview
@@ -154,6 +155,7 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        ui_inspection = ui_inspection_hint(text)
         score = _score_terms(
             text,
             [
@@ -181,26 +183,39 @@ class TaskIntentRouter:
                 "窗口",
                 "应用",
                 "桌面",
+                "界面",
+                "控件",
+                "按钮",
             ],
         )
-        if score <= 0 and not metadata.get("daily_desktop_intent"):
+        if score <= 0 and not metadata.get("daily_desktop_intent") and ui_inspection is None:
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
         window_list = window_list_hint(text)
         app_name_hint = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
+            or (ui_inspection or {}).get("app_name")
             or _app_name_hint(text)
             or ""
         ).strip()
+        operation_hint = _desktop_operation_hint(text)
         inputs: dict[str, Any] = {
             "app_name_hint": app_name_hint,
-            "operation_hint": _desktop_operation_hint(text),
+            "operation_hint": operation_hint,
         }
         if window_list is not None:
             inputs["window_list_hint"] = window_list
         if focus_window:
             inputs["focus_window_hint"] = focus_window
+        if ui_inspection is not None:
+            inputs["ui_inspection_hint"] = ui_inspection
+        risk_level = (
+            "medium"
+            if operation_hint not in {"focus_window", "list_windows", "read_ui"}
+            and _looks_like_ui_operation(text)
+            else "low"
+        )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "desktop_operation", text),
             kind="desktop_operation",
@@ -212,7 +227,7 @@ class TaskIntentRouter:
             expected_outputs=["desktop_state"],
             required_capabilities=["desktop.app_discovery"],
             preferred_capabilities=["desktop.app_control", "desktop.ui_operation"],
-            risk_level="medium" if _looks_like_ui_operation(text) else "low",
+            risk_level=risk_level,
         )
 
     def _media_playback_intent(
@@ -638,9 +653,11 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         focus_window = focus_window_hint(intent.user_goal)
         window_list = window_list_hint(intent.user_goal)
+        ui_inspection = ui_inspection_hint(intent.user_goal)
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
+            or (ui_inspection or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or ""
         ).strip()
@@ -734,6 +751,44 @@ class RuntimePlanner:
                 )
             )
             focus_step_added = True
+        if ui_inspection is not None and not any(
+            item for item in (hotkey, type_target, safe_type_text, submit_action) if item
+        ):
+            ui_payload = {
+                key: ui_inspection[key]
+                for key in ("role_filter", "limit")
+                if key in ui_inspection and ui_inspection[key] not in (None, "")
+            }
+            if app_name and not focus_step_added:
+                steps.append(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        input_preview={"app_name": app_name},
+                        depends_on=["discover-desktop-state"],
+                        reason="Focus the requested app before reading its foreground UI.",
+                    )
+                )
+            steps.append(
+                _step(
+                    intent,
+                    "read-foreground-ui",
+                    "Read foreground UI",
+                    "desktop.app_discovery",
+                    _first_allowed(("desktop.ui_elements",), allowed),
+                    input_preview=ui_payload,
+                    depends_on=(
+                        ["focus-app-window"]
+                        if focus_step_added
+                        else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
+                    ),
+                    reason="Read visible UI controls or text as a discovery step before any action.",
+                )
+            )
+            return steps
         if app_name and not operation_uses_app_tool and not focus_step_added:
             steps.append(
                 _step(
@@ -1184,6 +1239,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "list_windows"
     if step_key == "focus-app-window":
         return "focus_window"
+    if step_key == "read-foreground-ui":
+        return "read_ui"
     if step_key == "verify-desktop-result":
         return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
     if step_key == "operate-foreground-ui":
@@ -1596,6 +1653,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "focus_window"
     if window_list_hint(text) is not None:
         return "list_windows"
+    if ui_inspection_hint(text) is not None:
+        return "read_ui"
     if _contains_any(text, ["click", "点击"]):
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):
