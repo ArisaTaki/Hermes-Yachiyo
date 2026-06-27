@@ -454,11 +454,11 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   for (const event of events) {
     if (publicRunEventIsSecret(event)) continue;
     const eventType = String(event.event_type || '').trim();
+    const plannerEventType = runtimePlannerEventType(eventType);
     const payload = objectRecord(event.payload);
-    const isPlannerEvent = eventType.startsWith('agent.plan.') || eventType === 'agent.intent.selected';
     const isRuntimePlannerDesktopIntentEvent = eventType === 'agent.desktop.intent_planned'
       && runtimePlannerDesktopIntentPayload(payload);
-    if (!isPlannerEvent && !isRuntimePlannerDesktopIntentEvent) continue;
+    if (!plannerEventType && !isRuntimePlannerDesktopIntentEvent) continue;
     eventCount += 1;
     source = stringValue(payload.source) || source || (isRuntimePlannerDesktopIntentEvent ? 'runtime_planner' : '');
     decisionId = stringValue(payload.decision_id) || decisionId;
@@ -473,7 +473,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
-    if (eventType === 'agent.intent.selected') {
+    if (plannerEventType === 'agent.intent.selected') {
       intent = taskIntentSnapshot(payload.intent) || intent;
       candidateIntents = arrayRecords(payload.candidate_intents)
         .map(taskIntentSnapshot)
@@ -482,13 +482,13 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
-    if (eventType === 'agent.plan.selection') {
+    if (plannerEventType === 'agent.plan.selection') {
       selection = plannerSelectionFromPayload(payload) || selection;
       routeToStudio = booleanValue(payload.route_to_studio, routeToStudio);
       continue;
     }
 
-    if (eventType === 'agent.plan.created') {
+    if (plannerEventType === 'agent.plan.created') {
       plan = runtimePlanSnapshot(payload.plan) || plan;
       if (plan) {
         intent = intent || plan.intent;
@@ -502,7 +502,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
-    if (eventType === 'agent.plan.step') {
+    if (plannerEventType === 'agent.plan.step') {
       const step = toolPlanStepSnapshot(payload.step);
       if (step) addPlannerStep(stepById, step);
     }
@@ -531,6 +531,16 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     steps,
     toolPlan: effectiveToolPlan,
   };
+}
+
+function runtimePlannerEventType(eventType: string): string {
+  if (eventType === 'agent.intent.selected') return eventType;
+  if (eventType.startsWith('agent.plan.')) return eventType;
+  if (eventType === 'group.run.intent.selected') return 'agent.intent.selected';
+  if (eventType === 'group.run.plan.created') return 'agent.plan.created';
+  if (eventType === 'group.run.plan.step') return 'agent.plan.step';
+  if (eventType === 'group.run.plan.selection') return 'agent.plan.selection';
+  return '';
 }
 
 function addPlannerStep(stepById: Map<string, ToolPlanStepSnapshot>, step: ToolPlanStepSnapshot) {

@@ -19,6 +19,7 @@ import {
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
 } from '../../runtime-shared/runEventFacts';
+import { PlannerTraceInspector } from './PlannerTraceInspector';
 
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;
@@ -207,6 +208,11 @@ export function GroupRunDetailPanel({
           </div>
         </section>
       ) : null}
+      <PlannerTraceInspector
+        events={groupRunReplayEvents}
+        sourceLabel="GroupRun planner facts · Intent / Capability / Plan"
+        testId="agent-run-detail-group-run-planner-trace"
+      />
       {groupRunApprovalFacts.length ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-approvals">
           <div className="group-run-runtime-section-head">
