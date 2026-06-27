@@ -1861,18 +1861,6 @@ def _latest_sequence_search_text_request(
     return text_request
 
 
-def _typed_input_request_targets_search(input_request: dict[str, Any]) -> bool:
-    payload = input_request.get("input") if isinstance(input_request.get("input"), dict) else {}
-    target = str(payload.get("target") or "").strip()
-    return bool(
-        re.search(
-            r"(?:搜索|查找|检索|search|find|query)",
-            target,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
 def _is_input_return_followup(text: str, input_request: dict[str, Any]) -> bool:
     hotkey = _desktop_hotkey(text)
     if hotkey == {"key": "return", "modifiers": []}:
@@ -14044,42 +14032,6 @@ def _is_maximize_current_window_request(text: str) -> bool:
         or re.search(
             r"\b(?:make|put)\s+(?:the\s+)?(?:current|active|foreground|frontmost)\s+"
             r"(?:window|app|application)\s+(?:full\s*screen|maximized)\b",
-            lowered,
-        )
-    )
-
-
-def _is_previous_app_switch_request(text: str) -> bool:
-    value = str(text or "").strip()
-    lowered = value.lower()
-    return bool(
-        re.search(
-            r"(?:切换到|切换|切到|切回|回到)\s*(?:上一个|上个|前一个|前个|之前|刚才)\s*(?:应用|app|程序|软件)",
-            value,
-            flags=re.IGNORECASE,
-        )
-        or re.search(
-            r"\b(?:switch|go|return)\s+(?:back\s+)?to\s+(?:the\s+)?"
-            r"(?:previous|last)\s+(?:app|application)\b",
-            lowered,
-        )
-        or re.search(r"\b(?:switch|go)\s+to\s+(?:the\s+)?previous\s+app\b", lowered)
-    )
-
-
-def _is_next_app_switch_request(text: str) -> bool:
-    value = str(text or "").strip()
-    lowered = value.lower()
-    return bool(
-        re.search(
-            r"(?:切换到|切换|切到|切去|跳到|转到)\s*"
-            r"(?:下一个|下个|后一个|后个)\s*(?:应用|app|程序|软件)",
-            value,
-            flags=re.IGNORECASE,
-        )
-        or re.search(
-            r"\b(?:switch|go|move)\s+(?:to\s+)?(?:the\s+)?next\s+"
-            r"(?:app|application)\b",
             lowered,
         )
     )
