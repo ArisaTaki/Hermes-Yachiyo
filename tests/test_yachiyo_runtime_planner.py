@@ -414,7 +414,10 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
         "desktop.app_control",
         "desktop.ui_operation",
     ]
-    assert payload["required_capabilities"] == ["desktop.app_discovery"]
+    assert payload["required_capabilities"] == [
+        "desktop.app_discovery",
+        "desktop.app_control",
+    ]
     assert payload["missing_capabilities"] == []
     assert payload["approvals_required"] == []
     assert payload["artifacts_expected"] == []
@@ -484,6 +487,31 @@ def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> 
         "artifact.write",
         "terminal.execution",
     }
+
+
+def test_runtime_planner_marks_unavailable_desktop_step_capabilities() -> None:
+    app_open = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps"],
+    )
+    app_search = RuntimePlanner().decision(
+        "打开 AtlasLab 搜索 revenue",
+        allowed_tools=["desktop.list_apps", "app.open"],
+    )
+
+    assert app_open.plan.tool_plan.required_capabilities == [
+        "desktop.app_discovery",
+        "desktop.app_control",
+    ]
+    assert app_open.plan.tool_plan.missing_capabilities == ["desktop.app_control"]
+    assert _step_by_id(app_open, "open-or-focus-app").status == "unavailable"
+    assert app_search.plan.tool_plan.required_capabilities == [
+        "desktop.app_discovery",
+        "desktop.app_control",
+        "desktop.ui_operation",
+    ]
+    assert app_search.plan.tool_plan.missing_capabilities == ["desktop.ui_operation"]
+    assert _step_by_id(app_search, "focus-app-search-field").status == "unavailable"
 
 
 def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested() -> None:

@@ -394,7 +394,10 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     assert metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]
     assert metadata["yachiyo_plan_artifacts_expected"] == []
     assert metadata["yachiyo_plan_open_questions"] == []
-    assert metadata["yachiyo_required_capabilities"] == ["desktop.app_discovery"]
+    assert metadata["yachiyo_required_capabilities"] == [
+        "desktop.app_discovery",
+        "desktop.ui_operation",
+    ]
     assert metadata["yachiyo_missing_capabilities"] == []
 
 

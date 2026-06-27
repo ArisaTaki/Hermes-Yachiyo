@@ -4206,13 +4206,8 @@ def _required_capabilities_for_plan(
     intent: TaskIntentSnapshot,
     steps: list[ToolPlanStepSnapshot],
 ) -> list[str]:
-    if intent.kind == "media_playback":
-        required: list[str] = []
-        for step in steps:
-            capability_id = str(step.capability_id or "").strip()
-            if capability_id and capability_id not in required:
-                required.append(capability_id)
-        return required or list(intent.required_capabilities)
+    if intent.kind in {"desktop_operation", "media_playback"}:
+        return _step_required_capabilities(steps) or list(intent.required_capabilities)
     if intent.kind == "data_analysis":
         required = (
             ["data.analysis"]
@@ -4225,6 +4220,15 @@ def _required_capabilities_for_plan(
             required.insert(0, "desktop.app_control")
         return required
     return list(intent.required_capabilities)
+
+
+def _step_required_capabilities(steps: Iterable[ToolPlanStepSnapshot]) -> list[str]:
+    required: list[str] = []
+    for step in steps:
+        capability_id = str(step.capability_id or "").strip()
+        if capability_id and capability_id not in required:
+            required.append(capability_id)
+    return required
 
 
 def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[str]:
