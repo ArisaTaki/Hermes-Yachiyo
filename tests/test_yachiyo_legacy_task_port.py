@@ -395,6 +395,7 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
         "desktop.safe_shortcut",
         "desktop.click_ui_element",
         "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
     ]
@@ -403,6 +404,14 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
         (
             "把当前网页链接粘贴到 Slack",
             ["desktop.safe_shortcut", "app.focus_and_safe_shortcut"],
+        ),
+        (
+            "在 Slack 粘贴当前页面内容",
+            ["desktop.safe_shortcut", "desktop.safe_shortcut", "app.focus_and_safe_shortcut"],
+        ),
+        (
+            "打开 Slack 粘贴当前页面内容",
+            ["desktop.safe_shortcut", "desktop.safe_shortcut", "app.open_and_safe_shortcut"],
         ),
         (
             "把剪贴板内容粘贴到 Slack",

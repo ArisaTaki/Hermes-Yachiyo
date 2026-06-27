@@ -8259,6 +8259,26 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "planning_reason": "planner_fallback_desktop_operation",
             },
         ]),
+        ("在 Slack 粘贴当前页面内容", [
+            *current_content_copy,
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+        ]),
+        ("打开 Slack 粘贴当前页面内容", [
+            *current_content_copy,
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+        ]),
         ("把剪贴板内容粘贴到 Slack", [
             {
                 "protocol": "json_fallback",
