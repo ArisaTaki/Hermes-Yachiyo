@@ -779,6 +779,246 @@ class ChatAPI:
             "yachiyo_orchestration_planning_reason": str(request.get("planning_reason") or ""),
         }
 
+    def _record_planner_group_run_start(
+        self,
+        *,
+        task_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if str(request.get("orchestration_kind") or "").strip() != "group_run":
+            return None
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        target_name = str(payload.get("target_name") or "").strip()
+        if not target_name:
+            return None
+
+        group = self._planner_orchestration_group_target(target_name)
+        if group is None:
+            return None
+        group_id = str(group.get("group_id") or group.get("agent_group_id") or group.get("id") or "").strip()
+        if not group_id:
+            return None
+
+        objective = str(payload.get("objective") or "").strip()
+        title = str(payload.get("title") or target_name).strip() or target_name
+        try:
+            from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
+            from apps.shell.yachiyo_agent.studio_service import AgentStudioService
+
+            studio = AgentStudioService(LegacyStudioPort(self._agent_runtime_service()))
+            group_run = studio.start_group_run(
+                {
+                    "group_id": group_id,
+                    "objective": objective,
+                    "title": title,
+                    "client_run_id": f"chat-{task_id}",
+                    "metadata": {
+                        "source": "chat_runtime_planner",
+                        "task_id": task_id,
+                        "decision_id": str(request.get("decision_id") or ""),
+                        "plan_id": str(request.get("plan_id") or ""),
+                    },
+                }
+            )
+        except Exception as exc:
+            logger.debug("Planner group run start failed: %s", target_name, exc_info=True)
+            return self._record_planner_group_run_error(
+                task_id=task_id,
+                request=request,
+                target_name=target_name,
+                error=redact_api_error_text(exc),
+            )
+
+        group_run_payload = self._snapshot_payload(group_run)
+        group_run_id = str(
+            group_run_payload.get("group_run_id")
+            or group_run_payload.get("run_group_id")
+            or ""
+        ).strip()
+        run_group_id = str(group_run_payload.get("run_group_id") or group_run_id).strip()
+        status = str(group_run_payload.get("status") or "running").strip() or "running"
+        content = self._format_planner_group_run_started(
+            request,
+            group,
+            group_run_payload,
+            target_name=target_name,
+        )
+        self._state.update_task_status(
+            task_id,
+            self._task_status_from_group_run_status(status),
+            result=content,
+            progress_label="GroupRun",
+        )
+        assistant_id = self._session.upsert_assistant_message(
+            task_id=task_id,
+            content=content,
+            status=self._message_status_from_group_run_status(status),
+            metadata={
+                "sender": self._main_model_sender_from_runtime(),
+                "planner_orchestration": True,
+                "planner_orchestration_started": True,
+                "planner_orchestration_kind": "group_run",
+                "planner_orchestration_target": target_name,
+                "route_to_studio": bool(request.get("route_to_studio")),
+                "intent_kind": str(request.get("intent_kind") or ""),
+                "decision_id": str(request.get("decision_id") or ""),
+                "plan_id": str(request.get("plan_id") or ""),
+                "group_id": group_id,
+                "group_run_id": group_run_id,
+                "run_group_id": run_group_id,
+                "group_run_status": status,
+            },
+        )
+        return {
+            "assistant_message_id": assistant_id,
+            "status": self._response_status_from_group_run_status(status),
+            "group_id": group_id,
+            "group_run_id": group_run_id,
+            "run_group_id": run_group_id,
+            "group_run_status": status,
+        }
+
+    def _planner_orchestration_group_target(self, target_name: str) -> dict[str, Any] | None:
+        target_key = self._planner_orchestration_lookup_key(target_name)
+        if not target_key:
+            return None
+        try:
+            from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
+            from apps.shell.yachiyo_agent.studio_service import AgentStudioService
+
+            studio = AgentStudioService(LegacyStudioPort(self._agent_runtime_service()))
+            groups = studio.list_groups()
+        except Exception:
+            logger.debug("Planner group target list unavailable: %s", target_name, exc_info=True)
+            return None
+
+        for group_snapshot in groups:
+            group = self._snapshot_payload(group_snapshot)
+            if self._planner_orchestration_group_matches(group, target_key):
+                return group
+        return None
+
+    @classmethod
+    def _planner_orchestration_group_matches(
+        cls,
+        group: dict[str, Any],
+        target_key: str,
+    ) -> bool:
+        values = (
+            group.get("group_id"),
+            group.get("agent_group_id"),
+            group.get("id"),
+            group.get("name"),
+            group.get("title"),
+            group.get("nickname"),
+        )
+        return any(cls._planner_orchestration_lookup_key(value) == target_key for value in values)
+
+    @staticmethod
+    def _planner_orchestration_lookup_key(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+    @staticmethod
+    def _snapshot_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return dict(model_dump(mode="json"))
+            except TypeError:
+                return dict(model_dump())
+        return {}
+
+    def _record_planner_group_run_error(
+        self,
+        *,
+        task_id: str,
+        request: dict[str, Any],
+        target_name: str,
+        error: str,
+    ) -> dict[str, Any]:
+        content = f"已识别为 GroupRun / 多 Agent 编排请求，但启动「{target_name}」失败：{error}"
+        self._state.update_task_status(
+            task_id,
+            TaskStatus.FAILED,
+            result=content,
+            error=error,
+            progress_label="GroupRun",
+        )
+        assistant_id = self._session.upsert_assistant_message(
+            task_id=task_id,
+            content=content,
+            status=MessageStatus.FAILED,
+            metadata={
+                "sender": self._main_model_sender_from_runtime(),
+                "planner_orchestration": True,
+                "planner_orchestration_kind": "group_run",
+                "planner_orchestration_target": target_name,
+                "planner_orchestration_error": True,
+                "route_to_studio": bool(request.get("route_to_studio")),
+                "intent_kind": str(request.get("intent_kind") or ""),
+                "decision_id": str(request.get("decision_id") or ""),
+                "plan_id": str(request.get("plan_id") or ""),
+            },
+        )
+        return {
+            "assistant_message_id": assistant_id,
+            "status": "failed",
+            "error": error,
+        }
+
+    @staticmethod
+    def _task_status_from_group_run_status(status: str) -> TaskStatus:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"completed", "succeeded", "success"}:
+            return TaskStatus.COMPLETED
+        if normalized in {"failed", "error"}:
+            return TaskStatus.FAILED
+        if normalized in {"cancelled", "canceled"}:
+            return TaskStatus.CANCELLED
+        return TaskStatus.RUNNING
+
+    @staticmethod
+    def _message_status_from_group_run_status(status: str) -> MessageStatus:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"completed", "succeeded", "success"}:
+            return MessageStatus.COMPLETED
+        if normalized in {"failed", "error"}:
+            return MessageStatus.FAILED
+        return MessageStatus.PROCESSING
+
+    @staticmethod
+    def _response_status_from_group_run_status(status: str) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"completed", "succeeded", "success"}:
+            return "completed"
+        if normalized in {"failed", "error"}:
+            return "failed"
+        if normalized in {"cancelled", "canceled"}:
+            return "cancelled"
+        return "processing"
+
+    @staticmethod
+    def _format_planner_group_run_started(
+        request: dict[str, Any],
+        group: dict[str, Any],
+        group_run: dict[str, Any],
+        *,
+        target_name: str,
+    ) -> str:
+        group_name = str(group.get("name") or target_name).strip() or target_name
+        group_run_id = str(group_run.get("group_run_id") or group_run.get("run_group_id") or "").strip()
+        status = str(group_run.get("status") or "running").strip() or "running"
+        objective = str(
+            (request.get("input") if isinstance(request.get("input"), dict) else {}).get("objective")
+            or group_run.get("objective")
+            or ""
+        ).strip()
+        suffix = f"目标：{objective}" if objective else "可在 Agent Studio 的 Groups / Run Timeline 中查看执行进度。"
+        run_detail = f"（{group_run_id}）" if group_run_id else ""
+        return f"已通过 Agent Studio 启动「{group_name}」GroupRun{run_detail}，当前状态：{status}。{suffix}"
+
     def _record_planner_orchestration_handoff(
         self,
         *,
@@ -786,6 +1026,12 @@ class ChatAPI:
         requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
         request = requests[0] if requests else {}
+        group_run_start = self._record_planner_group_run_start(
+            task_id=task_id,
+            request=request,
+        )
+        if group_run_start is not None:
+            return group_run_start
         content = self._format_planner_orchestration_handoff(request)
         self._state.update_task_status(
             task_id,
@@ -1458,16 +1704,21 @@ class ChatAPI:
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
                 }
             if direct_planner_orchestration_task is not None:
-                return {
+                response = {
                     "ok": True,
                     "message_id": message_id,
                     "task_id": task_id,
                     "assistant_message_id": direct_planner_orchestration_task["assistant_message_id"],
-                    "status": "completed",
+                    "status": str(direct_planner_orchestration_task.get("status") or "completed"),
                     "planner_orchestration": True,
                     "attachments": self._serialize_attachments(saved_attachments),
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
                 }
+                for key in ("group_id", "group_run_id", "run_group_id", "group_run_status", "error"):
+                    value = direct_planner_orchestration_task.get(key)
+                    if value:
+                        response[key] = value
+                return response
             if direct_daily_desktop_task is not None:
                 payload = direct_daily_desktop_task["payload"]
                 agent_task = direct_daily_desktop_task["agent_task"]

@@ -459,6 +459,72 @@ def test_send_message_routes_named_workflow_planner_request_without_at_mention(t
         store.close()
 
 
+def test_send_message_starts_named_agent_group_planner_request_without_at_mention(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeGroupService:
+        def __init__(self) -> None:
+            self.start_calls: list[dict[str, object]] = []
+
+        def list_agent_groups(self):
+            return {
+                "ok": True,
+                "groups": [
+                    {
+                        "group_id": "group_research",
+                        "name": "Research Team",
+                        "description": "Research agents",
+                        "members": [],
+                        "enabled": True,
+                    }
+                ],
+            }
+
+        def start_agent_group_run(self, request):
+            self.start_calls.append(dict(request))
+            return {
+                "group_run_id": "group-run-1",
+                "run_group_id": "run-group-1",
+                "group_id": request["group_id"],
+                "title": request.get("title") or "Research Team",
+                "status": "running",
+                "objective": request.get("objective") or "",
+                "runs": [],
+                "events": [],
+            }
+
+    service = FakeGroupService()
+    runtime.agent_runtime_service = service
+    try:
+        result = api.send_message("运行 Research Team group 调研 Hanako")
+        task = runtime.state.get_task(result["task_id"])
+        user = runtime.chat_session.get_messages()[0]
+        assistant = runtime.chat_session.get_messages()[1]
+
+        assert result["ok"] is True
+        assert result["status"] == "processing"
+        assert result["planner_orchestration"] is True
+        assert result["group_id"] == "group_research"
+        assert result["group_run_id"] == "group-run-1"
+        assert result["run_group_id"] == "run-group-1"
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING
+        assert service.start_calls[0]["group_id"] == "group_research"
+        assert service.start_calls[0]["objective"] == "运行 Research Team group 调研 Hanako"
+        assert service.start_calls[0]["metadata"]["source"] == "chat_runtime_planner"
+        assert user.metadata["yachiyo_runtime_planner"] is True
+        assert user.metadata["yachiyo_intent_kind"] == "multi_agent"
+        assert user.metadata["yachiyo_orchestration_kind"] == "group_run"
+        assert user.metadata["yachiyo_orchestration_target"] == "Research Team"
+        assert assistant.status == MessageStatus.PROCESSING
+        assert assistant.metadata["planner_orchestration_started"] is True
+        assert assistant.metadata["planner_orchestration_kind"] == "group_run"
+        assert assistant.metadata["group_id"] == "group_research"
+        assert assistant.metadata["group_run_id"] == "group-run-1"
+    finally:
+        store.close()
+
+
 def test_send_message_handoffs_ambiguous_multi_agent_planner_request_to_studio(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     runtime.agent_runtime_service = SimpleNamespace(
