@@ -209,6 +209,9 @@ function RuntimePlannerPreview({
   const toolPlan = plan?.tool_plan;
   const steps = toolPlan?.steps || [];
   const missingCapabilities = toolPlan?.missing_capabilities || [];
+  const requiredCapabilities = toolPlan?.required_capabilities || [];
+  const openQuestions = toolPlan?.open_questions || [];
+  const candidateIntents = decision?.candidate_intents || [];
   return (
     <div className="studio-tool-inspector-section studio-planner-preview" data-testid="studio-runtime-planner-preview">
       <div className="studio-tool-inspector-heading">
@@ -247,7 +250,46 @@ function RuntimePlannerPreview({
               <small>Missing</small>
               <strong>{missingCapabilities.length || 'None'}</strong>
             </span>
+            <span>
+              <small>Open Questions</small>
+              <strong>{openQuestions.length || 'None'}</strong>
+            </span>
+            <span>
+              <small>Candidates</small>
+              <strong>{candidateIntents.length || 'None'}</strong>
+            </span>
           </div>
+          {requiredCapabilities.length || openQuestions.length || candidateIntents.length ? (
+            <div className="studio-tool-pill-row" data-testid="studio-runtime-planner-debug-pills">
+              {requiredCapabilities.map((capabilityId) => (
+                <span
+                  className="studio-tool-permission"
+                  data-required-capability={capabilityId}
+                  key={`required:${capabilityId}`}
+                >
+                  required · {capabilityId}
+                </span>
+              ))}
+              {openQuestions.map((question) => (
+                <span
+                  className="studio-tool-permission missing"
+                  data-open-question={question}
+                  key={`question:${question}`}
+                >
+                  question · {question}
+                </span>
+              ))}
+              {candidateIntents.map((intent) => (
+                <span
+                  className="studio-tool-permission"
+                  data-candidate-intent={intent.kind}
+                  key={`candidate:${intent.intent_id || intent.kind}`}
+                >
+                  candidate · {intent.kind}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {missingCapabilities.length ? (
             <div className="studio-tool-pill-row">
               {missingCapabilities.map((capabilityId) => (
