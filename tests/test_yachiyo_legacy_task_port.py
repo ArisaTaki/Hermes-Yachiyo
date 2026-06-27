@@ -1531,6 +1531,26 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     ]
 
 
+def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequence() -> None:
+    starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
+
+    timeline = starter._planner_first_planned_timeline("打开 PixelForge")
+
+    assert [event["event"] for event in timeline] == [
+        "agent.desktop.intent_planned",
+        "agent.desktop.intent_planned",
+        "agent.desktop.intent_planned",
+    ]
+    assert [event["tool"] for event in timeline] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert timeline[0]["input_preview"] == {"query": "PixelForge", "limit": 20}
+    assert timeline[1]["input_preview"] == {"app_name": "PixelForge"}
+    assert timeline[2]["input_preview"] == {}
+
+
 def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
