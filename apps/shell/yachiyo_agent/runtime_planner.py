@@ -233,6 +233,8 @@ class TaskIntentRouter:
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
             app_scoped_safe_operation = {}
+        if _foreground_safe_shortcut_hint(safe_shortcut):
+            app_management = None
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -257,6 +259,8 @@ class TaskIntentRouter:
         ) and not app_scoped_desktop_operation and not dynamic_context_transfer:
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
+        if hotkey and not _contains_any(text, ("发送", "提交", "send", "submit")):
+            foreground_submit_action = ""
         foreground_search_submit = _foreground_search_submit_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
@@ -371,6 +375,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not hotkey
             and not foreground_compose_text
             and not foreground_paste
             and desktop_discovery is None
@@ -425,6 +430,15 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
         if (
+            _system_foreground_safe_shortcut_hint(safe_shortcut)
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
+            app_name_hint = ""
+            app_management = None
+        if safe_key and not app_scoped_safe_operation.get("safe_key"):
+            app_name_hint = ""
+            app_management = None
+        if (
             window_list is not None
             and not str((window_list or {}).get("app_name") or "").strip()
         ):
@@ -476,6 +490,7 @@ class TaskIntentRouter:
             or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
             or ("safe_scroll" if safe_scroll else "")
+            or ("hotkey" if hotkey and foreground_management is None else "")
             or _desktop_operation_hint(text)
         )
         if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
@@ -492,6 +507,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not hotkey
             and desktop_discovery is None
             and not foreground_compose_text
             and not foreground_paste
@@ -516,6 +532,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not hotkey
             and not app_search
             and not command_palette
             and not dynamic_context_transfer
@@ -534,6 +551,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not hotkey
             and not app_search
             and not command_palette
             and not dynamic_context_transfer
@@ -581,10 +599,13 @@ class TaskIntentRouter:
             inputs["safe_scroll_hint"] = safe_scroll
         if safe_click is not None:
             inputs["safe_click_hint"] = safe_click
+        if hotkey and operation_hint == "hotkey":
+            inputs["hotkey_hint"] = hotkey
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
-        if finder_special_location.get("mode"):
-            inputs["operation_mode_hint"] = str(finder_special_location.get("mode") or "")
+        finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
+        if finder_operation_mode:
+            inputs["operation_mode_hint"] = finder_operation_mode
         if foreground_compose_text:
             inputs["foreground_compose_text_hint"] = foreground_compose_text
         if foreground_paste:
@@ -1448,6 +1469,8 @@ class RuntimePlanner:
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
             app_scoped_safe_operation = {}
+        if _foreground_safe_shortcut_hint(safe_shortcut):
+            app_management = None
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -1520,6 +1543,15 @@ class RuntimePlanner:
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
             app_name = ""
             app_management = None
+        if (
+            _system_foreground_safe_shortcut_hint(safe_shortcut)
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
+            app_name = ""
+            app_management = None
+        if safe_key and not app_scoped_safe_operation.get("safe_key"):
+            app_name = ""
+            app_management = None
         if _safe_shortcut_requires_finder_scope_for_text(intent.user_goal, safe_shortcut):
             if _is_finder_app_name(app_name):
                 app_name = "Finder"
@@ -1550,7 +1582,11 @@ class RuntimePlanner:
             ["打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "],
         ):
             mode = "focus"
-        operation_mode_hint = str(intent.inputs.get("operation_mode_hint") or "").strip()
+        operation_mode_hint = str(
+            intent.inputs.get("operation_mode_hint")
+            or app_scoped_safe_operation.get("mode")
+            or ""
+        ).strip()
         if operation_mode_hint in {"open", "focus"}:
             mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
@@ -1564,6 +1600,13 @@ class RuntimePlanner:
         ):
             safe_shortcut = None
             safe_shortcut_sequence = []
+        if (
+            hotkey
+            and "desktop.hotkey" in allowed
+            and str((foreground_management or {}).get("action") or "").strip()
+            in {"quit_app", "close_window"}
+        ):
+            foreground_management = None
         if app_name and hotkey and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         if app_name and click_target and not _explicit_app_open_request(intent.user_goal):
@@ -1604,7 +1647,9 @@ class RuntimePlanner:
             mode = "focus"
         if foreground_submit_action:
             click_target = None
-        submit_action = submit_action_hint(intent.user_goal)
+        submit_action = submit_action_hint(intent.user_goal) or foreground_submit_action
+        if hotkey and not _contains_any(intent.user_goal, ("发送", "提交", "send", "submit")):
+            submit_action = ""
         if click_target and not any((type_target, safe_type_text, app_search)):
             submit_action = ""
         followup_safe_shortcut = safe_shortcut if safe_type_text and safe_shortcut else None
@@ -1612,6 +1657,11 @@ class RuntimePlanner:
             dict(item) for item in safe_shortcut_sequence[1:] if isinstance(item, Mapping)
         ]
         primary_safe_shortcut = None if followup_safe_shortcut else safe_shortcut
+        if (
+            str((primary_safe_shortcut or {}).get("action") or "").strip() == "spotlight_search"
+            and not any((app_search, type_target, safe_type_text, foreground_submit_action))
+        ):
+            submit_action = ""
         if (
             str((primary_safe_shortcut or {}).get("action") or "").strip() == "find"
             and not any((type_target, safe_type_text, app_search))
@@ -2524,6 +2574,7 @@ class RuntimePlanner:
             or safe_key
             or safe_scroll
             or safe_click
+            or hotkey
             or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
             operation_depends_on = ["discover-desktop-state"]
@@ -2546,6 +2597,7 @@ class RuntimePlanner:
                             "desktop.type_into_ui_element",
                             "desktop.safe_shortcut",
                             "desktop.safe_key",
+                            "desktop.hotkey",
                             "desktop.safe_type_text",
                         ),
                         allowed,
@@ -5075,6 +5127,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() == "click"
     ):
         score += 0.34
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip()
+        in {"open_url", "open_url_extract", "open_url_screenshot"}
+    ):
+        score += 0.42
     if intent.kind == "web_research" and _contains_any(
         text,
         ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索", "网页", "网站"],
@@ -5502,7 +5560,7 @@ def _app_name_hint(text: str) -> str:
             "",
         )
         app = _clean_app_name_hint(raw_app)
-        if app:
+        if app and not _invalid_app_scoped_followup_app(app):
             return app
     return ""
 
@@ -5737,8 +5795,12 @@ def _foreground_submit_action_hint(text: str) -> str:
     value = _clean_prompt(text)
     lowered = value.lower()
     app_scoped_submit = bool(_app_scoped_foreground_submit_app_name_hint(value))
-    if _contains_any(value, ("发送", "send")) and (
+    looks_like_send = _contains_any(value, ("发送", "发出", "send")) or bool(
+        re.search(r"(?<!开)发", value)
+    )
+    if looks_like_send and (
         _looks_like_foreground_submit_scope(value, lowered) or app_scoped_submit
+        or bool(_foreground_compose_text_hint(value))
     ):
         return "send"
     if _contains_any(value, ("提交", "submit")) and (
@@ -6613,6 +6675,12 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "previous_window",
         "switch_next_app",
         "switch_previous_app",
+        "hide_other_apps",
+        "mission_control",
+        "spotlight_search",
+        "emoji_picker",
+        "lock_screen",
+        "force_quit_dialog",
         "browser_forward",
         "browser_back",
         "bookmark_page",
@@ -6623,6 +6691,19 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "screenshot_selection",
         "screenshot_toolbar",
         "paste",
+    }
+
+
+def _system_foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
+    if not isinstance(hint, Mapping):
+        return False
+    return str(hint.get("action") or "").strip() in {
+        "hide_other_apps",
+        "mission_control",
+        "spotlight_search",
+        "emoji_picker",
+        "lock_screen",
+        "force_quit_dialog",
     }
 
 
@@ -7351,6 +7432,8 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"复制|粘贴|全选|撤销|重做|查找|搜索|打开搜索|刷新|后退|前进|最大化|全屏|"
         r"新建|创建|"
         r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
+        r"下一个标签|下一个标签页|切到下一个标签页|切换到下一个标签页|"
+        r"上一个标签|上一个标签页|切到上一个标签页|切换到上一个标签页|"
         r"新建提醒事项|新建提醒|新提醒|创建提醒事项|创建提醒|"
         r"新建日程|新建日历事件|新建事件|新建会议|新日程|新事件|新会议|创建日程|创建事件|"
         r"新建备忘录|新建笔记|新笔记|新备忘录|创建备忘录|创建笔记|"
@@ -7375,7 +7458,7 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
             r"(?P<app>[\w .·-]{1,40}?)\s*(?P<mode>打开|启动|开启|切到|聚焦)\s*"
-            r"(?:起来|到前台|前台)?\s*"
+            r"(?:起来|到前台|前台)?\s*(?:[，,]\s*)?"
             r"(?:(?:并且|并|然后|之后|后(?!退)|再|接着)\s*)?"
             rf"{safe_followup}$",
             "",
@@ -7383,7 +7466,7 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?P<mode>打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s*"
-            r"(?:起来|到前台|前台)?\s*"
+            r"(?:起来|到前台|前台)?\s*(?:[，,]\s*)?"
             r"(?:(?:并且|并|然后|之后|后(?!退)|再|接着)\s*)?"
             rf"{safe_followup}$",
             "",
@@ -7445,16 +7528,51 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "开启",
         "切到",
         "聚焦",
+        "浏览器",
+        "网页",
+        "页面",
+        "当前页",
+        "当前页面",
+        "标签",
+        "标签页",
+        "当前标签",
+        "当前标签页",
+        "关闭的标签",
+        "关闭的标签页",
+        "刚关闭的标签",
+        "刚关闭的标签页",
         "在",
         "用",
         "通过",
         "把",
         "将",
+        "一个",
+        "一个标签",
+        "一个标签页",
+        "下一个",
+        "下一个标签",
+        "下一个标签页",
+        "下一个输入框",
+        "上一个",
+        "上一个标签",
+        "上一个标签页",
+        "上一个输入框",
+        "翻到",
+        "滚动",
+        "滑动",
         "please",
         "can",
         "canyou",
         "couldyou",
         "wouldyou",
+        "browser",
+        "webbrowser",
+        "page",
+        "currentpage",
+        "currenttab",
+        "tab",
+        "closedtab",
+        "lastclosedtab",
     }
 
 
@@ -8187,11 +8305,43 @@ def _explicit_browser_url_hint(text: str) -> str:
         flags=re.IGNORECASE,
     )
     if not domain_match:
-        return legacy_known_web_destination_url_hint(value)
+        return _known_web_destination_request_url_hint(value)
     candidate = _clean_browser_url(domain_match.group(0))
     if not _browser_url_context_allows_domain(value, candidate):
         return ""
     return _with_browser_url_scheme(candidate)
+
+
+def _known_web_destination_request_url_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?"
+        r"(?:浏览器|chrome|google\s*chrome|google|谷歌|safari)?(?:里|中|上|内)?\s*"
+        r"(?:打开|访问|浏览|前往|去|上)\s*"
+        r"(?P<site>[\w .·-]{1,60}?)\s*"
+        r"(?:看看|看一下|看下|读一下|读取|提取|概括|总结|摘要|内容).*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?"
+        r"(?:浏览器|chrome|google\s*chrome|google|谷歌|safari)?(?:里|中|上|内)?\s*"
+        r"(?:打开|访问|浏览|前往|去|上)\s*"
+        r"(?P<site>[\w .·-]{1,60}?)(?:\s*(?:并|然后|再|接着|之后|后).*)?$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:open|visit|browse|go\s+to)\s+(?:the\s+)?"
+        r"(?P<site>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)(?:\s+(?:and|then).*)?$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:summari[sz]e|read|extract|screenshot)\s+(?:the\s+)?"
+        r"(?P<site>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)(?:\s+after\s+opening\s+it)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        site = _clean_web_destination_site_hint(match.group("site"))
+        url = legacy_known_web_destination_url_hint(f"打开 {site}")
+        if url:
+            return url
+    return legacy_known_web_destination_url_hint(value)
 
 
 def _clean_browser_url(url: str) -> str:
@@ -8234,6 +8384,7 @@ def _browser_url_context_allows_domain(text: str, candidate: str) -> bool:
             "打开",
             "访问",
             "上",
+            "地址栏",
             "网页",
             "网址",
             "链接",
@@ -8366,6 +8517,8 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
         followup = _web_search_followup_hint(value)
         if followup:
             hint.update(followup)
+        else:
+            hint.update(_web_search_results_output_hint(value))
         return hint
     query = _web_search_query(value)
     if not query:
@@ -8379,7 +8532,33 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
     followup = _web_search_followup_hint(value)
     if followup:
         hint.update(followup)
+    else:
+        hint.update(_web_search_results_output_hint(value))
     return hint
+
+
+def _web_search_results_output_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if _looks_like_url_screenshot_request(value):
+        return {
+            "browser_action": "open_url_screenshot",
+            "reason": "user asked to capture the browser page after opening a URL",
+        }
+    if re.search(
+        r"(?:并|然后|并且|再|接着|之后|后).{0,4}"
+        r"(?:读|读取|看看|看一下|看下|概括|总结|摘要).{0,8}(?:结果|内容|搜索结果)$",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:and|then)\s+(?:read|extract|summari[sz]e)\s+results?\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        hint: dict[str, Any] = {"browser_action": "open_url_extract"}
+        if _looks_like_url_summary_request(value):
+            hint["presentation"] = "summary"
+        return hint
+    return {}
 
 
 def _web_search_query(text: str) -> str:
@@ -8629,6 +8808,21 @@ def _clean_web_search_query(query: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
+        r"\s*(?:并|然后|并且|再|接着|之后|后|\b(?:and|then)\b)?\s*"
+        r"(?:截图|截屏|screen\s*capture|screenshot)(?:\s+results?)?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"\s*(?:并|然后|并且|再|接着|之后|后|\b(?:and|then)\b)?\s*"
+        r"(?:读|读取|看看|看一下|看下|概括|总结|摘要)(?:一下|下)?"
+        r"(?:搜索)?(?:结果|内容)?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
         r"(?:并|然后|并且|再)?(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
         r"(?:报告|总结|文档|结果)?$",
         "",
@@ -8677,7 +8871,9 @@ def _browser_click_hint(text: str) -> dict[str, Any]:
                 "selector": f"search-result={index}",
                 "click_count": 1,
             }
-    if not _has_browser_page_context(value):
+    if _looks_like_browser_app_field_typing(value):
+        return {}
+    if not (_has_browser_page_context(value) or _explicit_browser_app_name_hint(value)):
         return {}
     point = _browser_click_point(value)
     if point:
@@ -8710,6 +8906,18 @@ def _browser_click_hint(text: str) -> dict[str, Any]:
             "click_count": 1,
         }
     return {}
+
+
+def _looks_like_browser_app_field_typing(text: str) -> bool:
+    return bool(
+        _explicit_browser_app_name_hint(text)
+        and re.search(
+            r"(?:搜索框|搜索栏|地址栏|search\s+(?:box|field|bar)|address\s+bar|url\s+bar).{0,20}"
+            r"(?:输入|键入|填写|填入|搜索|type|enter|fill|search)",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _browser_click_point(text: str) -> dict[str, Any]:
@@ -8801,18 +9009,27 @@ def _browser_type_text_hint(text: str) -> dict[str, Any]:
 def _has_browser_page_context(text: str) -> bool:
     return bool(
         re.search(r"(?:网页|页面|浏览器|当前页)", text, flags=re.IGNORECASE)
-        or re.search(
-            r"\b(?:browser|page|webpage|web\s+page|chrome|google\s+chrome|safari|firefox|edge|brave)\b",
-            text,
-            flags=re.IGNORECASE,
-        )
+        or re.search(r"\b(?:browser|page|webpage|web\s+page)\b", text, flags=re.IGNORECASE)
         or re.search(r"\b(?:search\s+)?(?:result|link)s?\b", text, flags=re.IGNORECASE)
     )
 
 
 def _browser_action_app_name_hint(text: str, browser_action: str) -> str:
-    if browser_action not in {"click", "type_text", "open_search", "open_url", "open_url_extract", "open_url_screenshot"}:
+    if browser_action not in {
+        "click",
+        "type_text",
+        "open_search",
+        "open_url",
+        "open_url_extract",
+        "open_url_screenshot",
+        "extract_text",
+        "current_page",
+        "screenshot",
+    }:
         return ""
+    explicit_browser_app = _explicit_browser_app_name_hint(text)
+    if explicit_browser_app and _browser_app_prepare_needed(text, browser_action):
+        return explicit_browser_app
     app_name = _app_name_hint(text)
     if (
         app_name
@@ -8832,19 +9049,44 @@ def _browser_action_app_name_hint(text: str, browser_action: str) -> str:
     return ""
 
 
+def _explicit_browser_app_name_hint(text: str) -> str:
+    value = str(text or "")
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦)\s*"
+        r"(?P<app>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave)\b",
+        r"^(?P<app>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave)\s*"
+        r"(?:点击|点一下|点按|单击|点|输入|填写|键入)",
+        r"\b(?:open|launch|start|focus|switch\s+to|activate)\s+"
+        r"(?P<app>google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave)\b",
+        r"^(?P<app>google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave)\s+"
+        r"(?:click|press|tap|type|enter|fill)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = legacy_app_name_hint(match.group("app"))
+        if app_name and not _is_generic_browser_app_label(app_name):
+            return app_name
+    return ""
+
+
 def _browser_app_prepare_needed(text: str, browser_action: str) -> bool:
     if browser_action in {"click", "type_text"}:
         return True
+    if browser_action in {"open_search", "open_url", "open_url_extract", "open_url_screenshot"}:
+        return False
     value = str(text or "")
     return bool(
         re.search(
-            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启)\s*"
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)\s*"
             r"(?:Chrome|Google\s*Chrome|谷歌浏览器|浏览器|Safari|Firefox|Edge|Brave)\b",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"\b(?:open|launch|start)\s+"
+            r"\b(?:open|launch|start|focus|switch\s+to|activate)\s+"
             r"(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave|browser)\b",
             value,
             flags=re.IGNORECASE,
@@ -8873,6 +9115,7 @@ def _clean_browser_element_label(value: str) -> str:
     label = re.sub(r"^[：:，,\s]+", "", label)
     label = re.sub(r"[。.,，；;！!？?]+$", "", label).strip()
     label = re.sub(r"^(?:当前)?(?:网页|页面|浏览器|当前页)(?:上的|上|里|中|内|的)?\s*", "", label)
+    label = re.sub(r"^(?:上的|的|上|里|中|内)\s*", "", label)
     label = re.sub(
         r"^(?:the\s+)?(?:current|this)?\s*(?:web\s*page|webpage|page|browser)\s+",
         "",
@@ -9089,6 +9332,10 @@ def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
         or re.search(
             r"\b(?:read|extract|summari[sz]e)\s+(?:the\s+)?(?:current|this)"
             r"\s+(?:web\s*)?page(?:\s+text)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:read|extract|summari[sz]e)\s+(?:the\s+)?(?:web\s*)?page\s+(?:text|content)\b",
             lowered,
         )
         or re.search(

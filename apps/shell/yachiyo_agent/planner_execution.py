@@ -45,6 +45,20 @@ def planner_direct_tool_requests(
     return requests
 
 
+def planner_execution_tool_requests(
+    requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Normalize direct requests into the execution shape used by Chat entrypoints."""
+
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    normalized_requests = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not normalized_requests:
+        return []
+    normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
+    return _drop_redundant_execution_verification_requests(normalized_requests)
+
+
 def planner_orchestration_requests(
     prompt: str,
     *,
@@ -297,6 +311,135 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     return requests
 
 
+def _skip_desktop_direct_execution_step(step: Any) -> bool:
+    return str(getattr(step, "step_id", "") or "").strip() in {
+        "discover-desktop-state",
+        "verify-desktop-result",
+    }
+
+
+_APP_FOREGROUND_DIRECT_OPERATION_SUFFIX = {
+    "desktop.safe_shortcut": "safe_shortcut",
+    "desktop.safe_key": "safe_key",
+    "desktop.safe_scroll": "safe_scroll",
+    "desktop.safe_click": "safe_click",
+    "desktop.safe_type_text": "safe_type_text",
+    "desktop.type_text": "safe_type_text",
+    "desktop.hotkey": "hotkey",
+    "desktop.click_ui_element": "click_ui_element",
+    "desktop.type_into_ui_element": "type_into_ui_element",
+}
+
+
+def _collapse_app_foreground_direct_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    collapsed: list[dict[str, Any]] = []
+    index = 0
+    while index < len(requests):
+        request = requests[index]
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in {"app.open", "app.focus"}:
+            collapsed.append(request)
+            index += 1
+            continue
+        input_preview = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(input_preview.get("app_name") or "").strip()
+        if not app_name:
+            collapsed.append(request)
+            index += 1
+            continue
+        operation_index = index + 1
+        mode = "open" if tool_name == "app.open" else "focus"
+        if (
+            tool_name == "app.open"
+            and operation_index < len(requests)
+            and _same_app_control_request(requests[operation_index], "app.focus", app_name)
+        ):
+            operation_index += 1
+        if operation_index >= len(requests):
+            collapsed.append(request)
+            index += 1
+            continue
+        operation = requests[operation_index]
+        operation_tool = str(operation.get("tool") or "").strip()
+        suffix = _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX.get(operation_tool, "")
+        combined_tool = f"app.{mode}_and_{suffix}" if suffix else ""
+        if not combined_tool or combined_tool not in allowed:
+            collapsed.append(request)
+            index += 1
+            continue
+        operation_input = operation.get("input") if isinstance(operation.get("input"), Mapping) else {}
+        combined_payload = {"app_name": app_name, **dict(operation_input)}
+        collapsed.append(
+            _request(
+                combined_tool,
+                _desktop_request_payload(combined_tool, combined_payload),
+                planning_reason=str(operation.get("planning_reason") or request.get("planning_reason") or "planner_desktop_operation"),
+            )
+        )
+        index = operation_index + 1
+    return collapsed
+
+
+_EXECUTION_VERIFICATION_TOOLS = {
+    "desktop.active_window",
+    "desktop.ui_elements",
+    "screen.capture",
+}
+
+_EXECUTION_MUTATION_TOOLS = {
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
+    "desktop.safe_shortcut",
+    "desktop.safe_key",
+    "desktop.safe_scroll",
+    "desktop.safe_click",
+    "desktop.safe_type_text",
+    "desktop.hotkey",
+    "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
+    "desktop.submit_foreground",
+}
+
+
+def _drop_redundant_execution_verification_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(requests) <= 1:
+        return requests
+    filtered: list[dict[str, Any]] = []
+    saw_mutation = False
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if saw_mutation and tool_name in _EXECUTION_VERIFICATION_TOOLS:
+            continue
+        filtered.append(request)
+        if tool_name in _EXECUTION_MUTATION_TOOLS:
+            saw_mutation = True
+    return filtered
+
+
+def _same_app_control_request(request: dict[str, Any], tool_name: str, app_name: str) -> bool:
+    if str(request.get("tool") or "").strip() != tool_name:
+        return False
+    input_preview = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return str(input_preview.get("app_name") or "").strip() == app_name
+
+
 def _expanded_desktop_step_requests(
     step: Any,
     tool_name: str,
@@ -351,6 +494,10 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        expanded = _expanded_desktop_step_requests(step, tool_name, payload, allowed)
+        if expanded:
+            requests.extend(expanded)
+            continue
         requests.append(
             _request(
                 tool_name,

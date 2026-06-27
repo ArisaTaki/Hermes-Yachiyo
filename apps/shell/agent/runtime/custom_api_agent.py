@@ -27,7 +27,10 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
 )
-from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+from apps.shell.yachiyo_agent.planner_execution import (
+    planner_execution_tool_requests,
+    planner_tool_requests,
+)
 from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
@@ -290,17 +293,20 @@ class RuntimeCustomApiAgentLoop:
                         if isinstance(pending_approval.get("input"), dict)
                         else planned_tool_requests[0].get("input") or {}
                     )
+                    approval_request = self._planned_request_for_tool(
+                        planned_tool_requests,
+                        planned_tool,
+                    )
                     self._record_desktop_intent_approval_required(
                         planned_tool,
                         planned_input,
                         pending_approval=exc.pending_approval,
                         timeline=timeline,
                         run_id=run_id,
-                        source=str(
-                            planned_tool_requests[0].get("source") or "daily_desktop_intent"
-                        ),
-                        planning_reason=str(
-                            planned_tool_requests[0].get("planning_reason") or ""
+                        source=self._approval_event_source(approval_request, planned_tool),
+                        planning_reason=self._approval_event_planning_reason(
+                            approval_request,
+                            planned_tool,
                         ),
                     )
                     raise
@@ -456,7 +462,43 @@ class RuntimeCustomApiAgentLoop:
             )
             if cleaned_request:
                 cleaned.append(cleaned_request)
-        return cleaned
+        return planner_execution_tool_requests(cleaned, allowed_tools)
+
+    @staticmethod
+    def _planned_request_for_tool(
+        planned_tool_requests: list[dict[str, Any]],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        clean_tool = str(tool_name or "").strip()
+        for request in planned_tool_requests:
+            if str(request.get("tool") or "").strip() == clean_tool:
+                return request
+        return planned_tool_requests[0] if planned_tool_requests else {}
+
+    @staticmethod
+    def _approval_event_source(
+        planned_request: dict[str, Any],
+        tool_name: str,
+    ) -> str:
+        planning_reason = str(planned_request.get("planning_reason") or "").strip()
+        if planning_reason == "planner_desktop_hotkey" or "hotkey" in str(tool_name or ""):
+            return "daily_desktop_intent"
+        return str(planned_request.get("source") or "daily_desktop_intent")
+
+    @staticmethod
+    def _approval_event_planning_reason(
+        planned_request: dict[str, Any],
+        tool_name: str,
+    ) -> str:
+        planning_reason = str(planned_request.get("planning_reason") or "").strip()
+        if planning_reason == "planner_desktop_hotkey" or "hotkey" in str(tool_name or ""):
+            return ""
+        if (
+            planning_reason == "planner_desktop_operation"
+            and str(tool_name or "").strip().endswith("_click_ui_element")
+        ):
+            return "planner_fallback_desktop_operation"
+        return planning_reason
 
     @staticmethod
     def _approval_hotkey_request_for_safe_shortcut(
@@ -515,20 +557,42 @@ class RuntimeCustomApiAgentLoop:
                     planning_context,
                     allowed_tools,
                 )
-                if full_plan_requests and not self._has_approval_plan_tool(full_plan_requests):
+                execution_requests = planner_execution_tool_requests(
+                    full_plan_requests,
+                    allowed_tools,
+                )
+                if execution_requests and not self._has_approval_plan_tool(execution_requests):
                     return (
                         selection.decision,
-                        full_plan_requests,
+                        execution_requests,
                         planner_selection_payload(
                             decision=selection.decision,
                             planner_requests=full_plan_requests,
                             legacy_requests=[],
-                            selected_requests=full_plan_requests,
+                            selected_requests=execution_requests,
                             selected_source="runtime_planner",
-                            selected_reason="runtime_planner_full_plan",
+                            selected_reason="runtime_planner_full_plan_execution",
                         ),
                     )
-            return selection.decision, selection.requests, selection.event_payload
+            execution_requests = planner_execution_tool_requests(
+                selection.requests,
+                allowed_tools,
+            )
+            event_payload = selection.event_payload
+            if execution_requests != selection.requests:
+                execution_tools = [
+                    str(request.get("tool") or "").strip()
+                    for request in execution_requests
+                    if str(request.get("tool") or "").strip()
+                ]
+                event_payload = {
+                    **selection.event_payload,
+                    "selected_tools": execution_tools,
+                    "selected_request_count": len(execution_requests),
+                    "execution_tools": execution_tools,
+                    "execution_request_count": len(execution_requests),
+                }
+            return selection.decision, execution_requests, event_payload
         except Exception:
             return None, [], {}
 

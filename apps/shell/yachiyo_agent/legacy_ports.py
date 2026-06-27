@@ -51,7 +51,11 @@ from .planner_projection import (
     runtime_planner_decision,
     runtime_planner_metadata,
 )
-from .planner_execution import planner_direct_tool_requests
+from .planner_execution import (
+    planner_direct_tool_requests,
+    planner_execution_tool_requests,
+    planner_tool_requests,
+)
 from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
@@ -74,6 +78,19 @@ def _entrypoint_planning_context(prompt: str, metadata: dict[str, Any] | None) -
         if planning_context:
             return planning_context
     return str(prompt or "").strip()
+
+
+def _prefer_execution_requests_for_metadata(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    source = str(metadata.get("source") or "").strip()
+    launcher_mode = str(metadata.get("launcher_mode") or "").strip()
+    launcher_surface = str(metadata.get("launcher_surface") or "").strip()
+    return source == "launcher" or bool(launcher_mode) or bool(launcher_surface)
+
+
+def _legacy_hotkey_compat_required(runtime: Any) -> bool:
+    return not callable(getattr(runtime, "_main_chat_tool_policy", None))
 
 
 class LegacyChatTaskStarter:
@@ -252,8 +269,26 @@ class LegacyChatTaskStarter:
                 prompt or execution_prompt,
                 selection.requests,
             )
+            raw_selected_requests = list(selected_requests)
+            if _legacy_hotkey_compat_required(self._runtime):
+                selected_requests = _apply_legacy_hotkey_safe_shortcut_request(
+                    prompt or execution_prompt,
+                    selected_requests,
+                    allowed_entrypoint_tools,
+                )
             selected_source = selection.selected_source
-            direct_tool_selection_payload = selection.event_payload
+            direct_tool_selection_payload = (
+                _selection_payload_with_selected_requests(
+                    selection.event_payload,
+                    selected_requests,
+                )
+                if selected_requests != raw_selected_requests
+                else selection.event_payload
+            )
+            direct_tool_selection_payload = _approval_first_selection_payload(
+                direct_tool_selection_payload,
+                selected_requests,
+            )
             if selected_source == "runtime_planner":
                 direct_tool_requests = _safe_runtime_planner_tool_requests(
                     planning_prompt,
@@ -265,11 +300,19 @@ class LegacyChatTaskStarter:
             return None
         if not direct_tool_request and not selected_requests:
             return None
-        metadata_tool_requests = (
-            [direct_tool_request]
-            if direct_tool_request
-            else (direct_tool_requests or selected_requests)
-        )
+        if direct_tool_request:
+            metadata_tool_requests = [direct_tool_request]
+        elif _prefer_execution_requests_for_metadata(metadata):
+            metadata_tool_requests = (
+                planner_execution_tool_requests(
+                    direct_tool_requests or selected_requests,
+                    allowed_entrypoint_tools,
+                )
+                or direct_tool_requests
+                or selected_requests
+            )
+        else:
+            metadata_tool_requests = selected_requests or direct_tool_requests
         self._sync_chat_user_daily_desktop_metadata(
             task_id,
             metadata_tool_requests,
@@ -976,9 +1019,24 @@ def _safe_runtime_planner_tool_requests(
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
-        return selected_requests
+        return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
+    if selected_requests:
+        requests = planner_tool_requests(
+            prompt,
+            allowed_tools,
+            metadata=metadata,
+        )
+        requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
+        requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
+        requests = _apply_legacy_search_field_target_label(prompt, requests)
+        requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
+        if _has_approval_plan_tool(requests):
+            return []
+        if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
+            return []
+        return _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
     requests = planner_direct_tool_requests(
         prompt,
         allowed_tools,
@@ -992,7 +1050,8 @@ def _safe_runtime_planner_tool_requests(
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
-    return _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
+    requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
+    return requests
 
 
 def _apply_legacy_file_transfer_app_alias(
@@ -1027,6 +1086,8 @@ def _apply_legacy_plain_search_open_mode(
     if not requests or "app.open" not in set(allowed_tools):
         return requests
     value = str(prompt or "")
+    if _has_app_scoped_find_shortcut(requests):
+        return requests
     if _search_field_prompt(value) or re.search(
         r"(?:切到|聚焦|focus|switch\s+to)",
         value,
@@ -1048,6 +1109,19 @@ def _apply_legacy_plain_search_open_mode(
     return updated
 
 
+def _has_app_scoped_find_shortcut(requests: list[dict[str, Any]]) -> bool:
+    for index, request in enumerate(requests[:-1]):
+        if str(request.get("tool") or "").strip() not in {"app.focus", "app.open"}:
+            continue
+        next_request = requests[index + 1]
+        if str(next_request.get("tool") or "").strip() != "desktop.safe_shortcut":
+            continue
+        payload = next_request.get("input") if isinstance(next_request.get("input"), dict) else {}
+        if str(payload.get("action") or "").strip() == "find":
+            return True
+    return False
+
+
 def _apply_legacy_search_field_target_label(
     prompt: str,
     requests: list[dict[str, Any]],
@@ -1066,6 +1140,69 @@ def _apply_legacy_search_field_target_label(
             copied["input"] = {**payload, "target": "搜索"}
         updated.append(copied)
     return updated
+
+
+def _apply_legacy_hotkey_safe_shortcut_request(
+    prompt: str,
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    if "desktop.safe_shortcut" not in allowed:
+        return requests
+    hotkey = hotkey_hint(prompt)
+    if not hotkey:
+        return requests
+    key = str(hotkey.get("key") or "").strip().lower()
+    modifiers = {str(item or "").strip().lower() for item in hotkey.get("modifiers") or []}
+    if key != "l" or modifiers != {"command"}:
+        return requests
+    for request in requests:
+        if str(request.get("tool") or "").strip() == "desktop.hotkey":
+            return [
+                {
+                    "protocol": request.get("protocol") or "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "focus_address_bar"},
+                    "source": request.get("source") or "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                }
+            ]
+    return requests
+
+
+def _selection_payload_with_selected_requests(
+    payload: dict[str, Any],
+    selected_requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_tools = [
+        str(request.get("tool") or "").strip()
+        for request in selected_requests
+        if str(request.get("tool") or "").strip()
+    ]
+    if not selected_tools:
+        return payload
+    return {
+        **payload,
+        "selected_tools": selected_tools,
+        "selected_request_count": len(selected_tools),
+    }
+
+
+def _approval_first_selection_payload(
+    payload: dict[str, Any],
+    selected_requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not selected_requests:
+        return payload
+    first_tool = str(selected_requests[0].get("tool") or "").strip()
+    if first_tool not in _APPROVAL_PLAN_TOOLS:
+        return payload
+    return {
+        **payload,
+        "selected_tools": [first_tool],
+        "selected_request_count": 1,
+    }
 
 
 def _prepend_legacy_focus_app_search_discovery_request(

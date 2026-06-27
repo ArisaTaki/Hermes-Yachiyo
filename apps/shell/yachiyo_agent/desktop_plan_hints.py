@@ -180,6 +180,8 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
         )
         target = clean_type_target(raw_target, app_name=app_name)
         typed_text = clean_followup_text(raw_text)
+        if _looks_like_current_input_target(raw_target, target):
+            continue
         if target and typed_text:
             return {"target": target, "text": typed_text, "role_filter": "text"}
     return None
@@ -200,6 +202,21 @@ def safe_type_text_hint(text: str) -> str:
         if typed_text:
             return typed_text
     return ""
+
+
+def _looks_like_current_input_target(raw_target: str, clean_target_value: str) -> bool:
+    raw = clean(raw_target)
+    target = clean(clean_target_value)
+    if target in {"当前", "现在", "前台", "这个", "该"}:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:在|到|往|向)?\s*(?:当前|现在|前台|这个|该)\s*"
+            r"(?:输入框|输入栏|文本框|消息框|聊天框|input|field|text\s*box)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def submit_action_hint(text: str) -> str:
@@ -348,6 +365,11 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         return None
     patterns: tuple[tuple[str, str], ...] = (
         (
+            "hide_other_apps",
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:隐藏|hide)\s*(?:其他|其它|其余|别的|other)\s*(?:应用|app|apps|applications)$",
+        ),
+        (
             "status",
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:检查一下|检查|看看|看一下|查看|确认)?\s*"
@@ -421,6 +443,8 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
+        if action == "hide_other_apps":
+            return None
         if action == "quit" and re.search(r"(?:窗口|window)", value, flags=re.IGNORECASE):
             continue
         if action == "show" and re.search(
@@ -465,6 +489,9 @@ def foreground_management_hint(text: str) -> dict[str, str] | None:
 
 def hotkey_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
+    normalized = re.sub(r"\s+", "", value).lower()
+    if normalized in {"退出当前应用", "退出当前app", "关闭当前应用", "关闭当前app"}:
+        return {"key": "q", "modifiers": ["command"]}
     if not contains_any(
         value.lower(),
         ["按", "敲", "快捷键", "press", "hit", "tap", "hotkey", "shortcut"],
@@ -478,7 +505,14 @@ def hotkey_hint(text: str) -> dict[str, Any] | None:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        parsed = _parse_hotkey_combo(match.group("combo"))
+        combo = re.sub(
+            r"\s+(?:in|on)\s+(?:the\s+)?(?:current|foreground|active)\s+"
+            r"(?:window|app|application)\s*$",
+            "",
+            match.group("combo"),
+            flags=re.IGNORECASE,
+        )
+        parsed = _parse_hotkey_combo(combo)
         if parsed:
             return parsed
     return None
@@ -545,7 +579,7 @@ def safe_key_hint(text: str) -> dict[str, Any] | None:
     )
     patterns = (
         (
-            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"^(?:你能帮我|你可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:按一下|按下|按|发送|触发)\s*"
             rf"(?:{count.format(name='count_before')}\s*(?:次|下)\s*)?"
             rf"{key.format(name='key')}"
@@ -553,9 +587,10 @@ def safe_key_hint(text: str) -> dict[str, Any] | None:
             r"\s*(?:键)?(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
         ),
         (
-            r"^(?:please\s+)?(?:press|send|hit)\s+(?:the\s+)?"
+            r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:press|send|hit)\s+(?:the\s+)?"
             rf"{key.format(name='key_en')}"
-            rf"(?:\s+{count.format(name='count_en')}\s*(?:times?)?)?\s*$"
+            rf"(?:\s+{count.format(name='count_en')}\s*(?:times?)?)?"
+            r"(?:\s+please)?[.!?]?\s*$"
         ),
     )
     for pattern in patterns:
@@ -645,6 +680,12 @@ def safe_scroll_hint(text: str) -> dict[str, Any] | None:
         flags=re.IGNORECASE,
     ) or re.search(r"^(?:please\s+)?(?:scroll|page)(?:\s+(?:a\s+)?(?:little|bit))?\s*$", value, flags=re.IGNORECASE):
         return {"direction": "down", "pages": 1}
+    if re.search(
+        zh_prefix + r"(?:翻到|翻至|跳到|跳至)\s*(?P<page>下一页|上一页)(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {"direction": "up" if "上一页" in value else "down", "pages": 1}
     return None
 
 
@@ -1011,6 +1052,7 @@ def clean_followup_text(value: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
+    text = re.sub(r"\s*(?:到|至)?(?:当前|前台)(?:输入框|窗口|应用)?$", "", text, flags=re.IGNORECASE)
     return text.strip(" .，,。")
 
 
@@ -1626,7 +1668,7 @@ def _safe_shortcut_action_from_hotkey_hint(value: str) -> str:
 
 def _safe_shortcut_action_from_phrase(value: str) -> str:
     phrase = re.sub(
-        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接)\s*",
+        r"^(?:你能帮我|你可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以|直接)\s*",
         "",
         clean(value),
         flags=re.IGNORECASE,
@@ -1684,6 +1726,39 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "把剪贴板内容粘贴到当前输入框": "paste",
         "pasteintocurrentinput": "paste",
         "pasteintocurrentfield": "paste",
+        "隐藏其他应用": "hide_other_apps",
+        "隐藏其它应用": "hide_other_apps",
+        "隐藏其余应用": "hide_other_apps",
+        "隐藏别的应用": "hide_other_apps",
+        "hideotherapps": "hide_other_apps",
+        "hideotherapplications": "hide_other_apps",
+        "任务控制中心": "mission_control",
+        "打开任务控制中心": "mission_control",
+        "显示任务控制中心": "mission_control",
+        "调出任务控制中心": "mission_control",
+        "missioncontrol": "mission_control",
+        "openmissioncontrol": "mission_control",
+        "showmissioncontrol": "mission_control",
+        "打开聚焦搜索": "spotlight_search",
+        "显示聚焦搜索": "spotlight_search",
+        "聚焦搜索": "spotlight_search",
+        "spotlight": "spotlight_search",
+        "spotlightsearch": "spotlight_search",
+        "openspotlight": "spotlight_search",
+        "showspotlight": "spotlight_search",
+        "打开emoji面板": "emoji_picker",
+        "显示emoji面板": "emoji_picker",
+        "emoji面板": "emoji_picker",
+        "emojipicker": "emoji_picker",
+        "showemojipicker": "emoji_picker",
+        "打开强制退出窗口": "force_quit_dialog",
+        "显示强制退出窗口": "force_quit_dialog",
+        "强制退出窗口": "force_quit_dialog",
+        "forcequitapplications": "force_quit_dialog",
+        "showforcequitapplications": "force_quit_dialog",
+        "锁屏": "lock_screen",
+        "锁定屏幕": "lock_screen",
+        "lockscreen": "lock_screen",
         "全选": "select_all",
         "selectall": "select_all",
         "撤销": "undo",
@@ -2216,7 +2291,7 @@ def _looks_like_next_focus_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到)?\s*"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|聚焦|焦点到)?\s*"
             r"(?:下一个|下一项|下个|next)\s*"
             r"(?:输入框|文本框|输入栏|字段|控件|元素|项目)?"
             r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
@@ -2231,7 +2306,7 @@ def _looks_like_previous_focus_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|焦点到)?\s*"
+            r"(?:切到|切换到|跳到|跳转到|移到|移动到|聚焦到|聚焦|焦点到)?\s*"
             r"(?:上一个|上一项|上个|previous|prev)\s*"
             r"(?:输入框|文本框|输入栏|字段|控件|元素|项目)?"
             r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",

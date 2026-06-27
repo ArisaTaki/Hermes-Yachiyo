@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Mapping
 from typing import Any
 
@@ -108,9 +109,9 @@ def tool_status_from_payload(
 def tool_result_status(value: Mapping[str, Any]) -> str:
     if _foreground_lock_is_busy(value):
         return "blocked"
-    if value.get("approval_required") is True:
+    if _value_is_true(value.get("approval_required")):
         return "waiting_approval"
-    if value.get("ok") is False:
+    if _value_is_false(value.get("ok")):
         return "failed"
     return ""
 
@@ -218,11 +219,46 @@ def _restore_stable_scalar_types(source: Any, target: Any) -> dict[str, Any]:
 
 def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value)
-    for key in ("limit", "click_count", "repeat_count", "level"):
+    for key in ("limit", "click_count", "repeat_count", "level", "pages"):
         item = result.get(key)
         if isinstance(item, str) and item.isdigit():
             result[key] = int(item)
+    for key in ("ok", "approval_required", "permission_error", "fallback_used"):
+        item = result.get(key)
+        if _value_is_true(item):
+            result[key] = True
+        elif _value_is_false(item):
+            result[key] = False
+    for key in (
+        "permission_targets",
+        "missing_permissions",
+        "recovery_actions",
+        "recovery_hints",
+    ):
+        item = result.get(key)
+        if isinstance(item, str):
+            parsed = _literal_preview_value(item)
+            if isinstance(parsed, list):
+                result[key] = parsed
     return result
+
+
+def _literal_preview_value(value: str) -> Any:
+    text = value.strip()
+    if not (text.startswith("[") and text.endswith("]")):
+        return value
+    try:
+        return ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return value
+
+
+def _value_is_true(value: Any) -> bool:
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
+def _value_is_false(value: Any) -> bool:
+    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
 
 
 def _text(value: Any) -> str:
