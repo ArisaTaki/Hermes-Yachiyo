@@ -108,6 +108,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
     )
 
     assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.preferred_capabilities == ["data.analysis"]
     assert decision.plan.tool_plan.required_capabilities == ["data.analysis"]
     assert decision.plan.tool_plan.missing_capabilities == []
     assert decision.plan.tool_plan.approvals_required == []
@@ -152,6 +153,7 @@ def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> 
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["data_source_kind"] == "xlsx"
+    assert "desktop.app_control" not in decision.selected_intent.preferred_capabilities
     assert decision.plan.tool_plan.approvals_required == []
     assert decision.plan.tool_plan.artifacts_expected == [
         "analysis-report.md",
@@ -390,15 +392,34 @@ def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> 
     }
 
 
-def test_runtime_planner_treats_app_names_as_data_analysis_tool_hints() -> None:
+def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested() -> None:
+    default = RuntimePlanner().decision(
+        "分析 sales.xlsx 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write", "app.open"],
+    )
     decision = RuntimePlanner().decision(
         "打开 Excel 分析 sales.csv 并输出报告",
         allowed_tools=["workspace.read", "terminal.run", "artifact.write", "app.open"],
     )
+    numbers = RuntimePlanner().decision(
+        "在 Numbers 里分析 sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write", "app.open"],
+    )
 
+    assert default.selected_intent.kind == "data_analysis"
+    assert default.selected_intent.inputs["data_source_hint"] == "sales.xlsx"
+    assert default.selected_intent.preferred_capabilities == ["data.analysis"]
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["data_source_hint"] == "sales.csv"
+    assert decision.selected_intent.inputs["spreadsheet_app_hint"] == "Excel"
+    assert decision.selected_intent.preferred_capabilities == [
+        "data.analysis",
+        "desktop.app_control",
+    ]
     assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
+    assert numbers.selected_intent.kind == "data_analysis"
+    assert numbers.selected_intent.inputs["spreadsheet_app_hint"] == "Numbers"
+    assert "desktop.app_control" in numbers.selected_intent.preferred_capabilities
 
 
 def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> None:

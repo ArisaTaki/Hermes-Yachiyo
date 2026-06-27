@@ -164,10 +164,13 @@ class TaskIntentRouter:
             score = 0.22
         if score <= 0:
             return _empty_intent("data_analysis", text)
+        spreadsheet_app_hint = _spreadsheet_ui_app_hint(text)
         inputs = {
             "data_source_hint": source_hint,
             "data_source_kind": data_source_kind_hint(source_hint, text),
         }
+        if spreadsheet_app_hint:
+            inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
         if context_source:
             inputs["context_source"] = context_source
         if source_scope and not source_hint:
@@ -182,7 +185,10 @@ class TaskIntentRouter:
             inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
             required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
-            preferred_capabilities=["data.analysis", "desktop.app_control"],
+            preferred_capabilities=[
+                "data.analysis",
+                *(["desktop.app_control"] if spreadsheet_app_hint else []),
+            ],
             missing_inputs=[] if has_source else ["data_source"],
             risk_level="medium",
         )
@@ -3970,6 +3976,28 @@ def _score_terms(text: str, terms: Iterable[str]) -> float:
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = text.lower()
     return any(str(term).lower() in lowered for term in terms)
+
+
+def _spreadsheet_ui_app_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    app_pattern = r"(?P<app>Microsoft\s+Excel|Apple\s+Numbers|Excel|Numbers)"
+    patterns = (
+        rf"(?:用|通过|在)\s*{app_pattern}\s*(?:里|中|上|来|去)?\s*(?:分析|统计|汇总|打开|查看|编辑)",
+        rf"(?:打开|启动|开启)\s*{app_pattern}\s*(?:来|去)?\s*(?:分析|统计|汇总|打开|查看|编辑)?",
+        rf"\b(?:use|using|with|in|open|launch|start)\s+(?:the\s+)?{app_pattern}\b"
+        r".{0,40}\b(?:analy[sz]e|summari[sz]e|open|view|edit)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app = re.sub(r"\s+", " ", str(match.group("app") or "").strip())
+        if app.lower() == "microsoft excel":
+            return "Excel"
+        if app.lower() == "apple numbers":
+            return "Numbers"
+        return "Numbers" if app.lower() == "numbers" else "Excel"
+    return ""
 
 
 def _file_location_hint(text: str) -> str:
