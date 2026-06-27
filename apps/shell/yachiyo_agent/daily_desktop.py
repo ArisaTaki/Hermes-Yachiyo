@@ -92,6 +92,30 @@ def daily_desktop_user_metadata(
     }
 
 
+def entrypoint_plan_user_metadata(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    """Project planner-first entrypoint metadata while preserving legacy keys."""
+
+    metadata = daily_desktop_user_metadata(requests)
+    if not metadata:
+        return {}
+    source = str(metadata.get("daily_desktop_source") or "").strip()
+    reason = str(metadata.get("daily_desktop_planning_reason") or "").strip()
+    tool = str(metadata.get("daily_desktop_tool") or "").strip()
+    tools = metadata.get("daily_desktop_tools")
+    tool_list = [str(item or "").strip() for item in tools or [] if str(item or "").strip()]
+    return {
+        **metadata,
+        "entrypoint_plan": True,
+        "entrypoint_plan_source": source,
+        "entrypoint_plan_reason": reason,
+        "entrypoint_plan_tool": tool,
+        "entrypoint_plan_tools": tool_list,
+        "entrypoint_plan_legacy_fallback": source != "runtime_planner",
+    }
+
+
 def daily_desktop_planned_timeline(
     prompt: str = "",
     *,

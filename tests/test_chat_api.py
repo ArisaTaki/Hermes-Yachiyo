@@ -214,6 +214,12 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert user.metadata["daily_desktop_planning_reason"] == "planner_fallback_media_playback"
         assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert user.metadata["daily_desktop_tools"] == ["media.apple_music_open_and_play"]
+        assert user.metadata["entrypoint_plan"] is True
+        assert user.metadata["entrypoint_plan_source"] == "runtime_planner"
+        assert user.metadata["entrypoint_plan_reason"] == "planner_fallback_media_playback"
+        assert user.metadata["entrypoint_plan_tool"] == "media.apple_music_open_and_play"
+        assert user.metadata["entrypoint_plan_tools"] == ["media.apple_music_open_and_play"]
+        assert user.metadata["entrypoint_plan_legacy_fallback"] is False
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
         assert "agent.intent.selected" in event_types

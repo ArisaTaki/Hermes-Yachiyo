@@ -17,7 +17,7 @@ from .daily_desktop import (
     daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
-    daily_desktop_user_metadata,
+    entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
 )
 from .desktop_permissions import desktop_permission_missing_by_capability
@@ -374,7 +374,7 @@ class LegacyChatTaskStarter:
             return
         metadata = {
             **runtime_planner_metadata(planner_decision),
-            **daily_desktop_user_metadata(desktop_requests),
+            **entrypoint_plan_user_metadata(desktop_requests),
         }
         if not metadata:
             return

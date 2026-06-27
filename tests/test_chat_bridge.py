@@ -158,11 +158,17 @@ def _run_launcher_daily_desktop_quick_message(
             "runtime_planner",
             "daily_desktop_intent",
         }
+        assert user_metadata["entrypoint_plan"] is True
+        assert user_metadata["entrypoint_plan_source"] == user_metadata["daily_desktop_source"]
+        assert user_metadata["entrypoint_plan_reason"] == user_metadata["daily_desktop_planning_reason"]
+        assert user_metadata["entrypoint_plan_tools"] == user_metadata["daily_desktop_tools"]
         if user_metadata.get("yachiyo_runtime_planner"):
             assert user_metadata["daily_desktop_source"] == "runtime_planner"
             assert user_metadata["yachiyo_plan_source"] == "runtime_planner"
+            assert user_metadata["entrypoint_plan_legacy_fallback"] is False
         else:
             assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+            assert user_metadata["entrypoint_plan_legacy_fallback"] is True
         assert user_metadata["daily_desktop_tool"]
         assert user_metadata["daily_desktop_tools"]
         assert policy_decision_events

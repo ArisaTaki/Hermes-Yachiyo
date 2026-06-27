@@ -75,6 +75,7 @@ from .daily_desktop import (
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
     daily_desktop_user_metadata,
+    entrypoint_plan_user_metadata,
 )
 from .links import studio_run_url
 from .capability_registry import (
@@ -137,6 +138,7 @@ __all__ = [
     "daily_desktop_planned_timeline",
     "daily_desktop_recovery_execution_prompt",
     "daily_desktop_user_metadata",
+    "entrypoint_plan_user_metadata",
     "DESKTOP_ACTION_RISK_LEVELS",
     "desktop_action_risk_level",
     "desktop_action_risk_snapshots",

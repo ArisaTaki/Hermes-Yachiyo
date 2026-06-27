@@ -739,6 +739,11 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert metadata["daily_desktop_tools"] == ["app.open"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == "planner_fallback_desktop_operation"
+    assert metadata["entrypoint_plan"] is True
+    assert metadata["entrypoint_plan_source"] == "runtime_planner"
+    assert metadata["entrypoint_plan_reason"] == "planner_fallback_desktop_operation"
+    assert metadata["entrypoint_plan_tools"] == ["app.open"]
+    assert metadata["entrypoint_plan_legacy_fallback"] is False
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in planner_events[:2]] == [
         "agent.intent.selected",
@@ -777,6 +782,8 @@ def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planne
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_tool"] == "browser.open_url"
     assert metadata["daily_desktop_planning_reason"] == "planner_fallback_web_research"
+    assert metadata["entrypoint_plan_source"] == "runtime_planner"
+    assert metadata["entrypoint_plan_tool"] == "browser.open_url"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in run_events[:2]] == [
         "agent.intent.selected",

@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
     daily_desktop_user_metadata,
+    entrypoint_plan_user_metadata,
 )
 
 
@@ -41,6 +42,32 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
             "input_preview": {"app_name": "Microsoft Word"},
         }
     ]
+
+
+def test_entrypoint_plan_user_metadata_preserves_legacy_keys_with_plan_aliases() -> None:
+    requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+    assert entrypoint_plan_user_metadata(requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "runtime_planner",
+        "daily_desktop_planning_reason": "planner_fallback_desktop_operation",
+        "daily_desktop_tool": "screen.capture",
+        "daily_desktop_tools": ["screen.capture"],
+        "entrypoint_plan": True,
+        "entrypoint_plan_source": "runtime_planner",
+        "entrypoint_plan_reason": "planner_fallback_desktop_operation",
+        "entrypoint_plan_tool": "screen.capture",
+        "entrypoint_plan_tools": ["screen.capture"],
+        "entrypoint_plan_legacy_fallback": False,
+    }
 
 
 def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> None:

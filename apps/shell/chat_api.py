@@ -48,7 +48,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_direct_metadata_request,
     daily_desktop_entrypoint_requests,
-    daily_desktop_user_metadata,
+    entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
 )
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
@@ -597,7 +597,7 @@ class ChatAPI:
     def _daily_desktop_user_metadata(
         requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return daily_desktop_user_metadata(requests)
+        return entrypoint_plan_user_metadata(requests)
 
     @staticmethod
     def _planner_first_daily_desktop_requests(
@@ -1598,7 +1598,7 @@ class ChatAPI:
             if direct_daily_desktop_intent:
                 user_metadata = self._merge_user_metadata(
                     user_metadata,
-                    daily_desktop_user_metadata(daily_desktop_requests),
+                    entrypoint_plan_user_metadata(daily_desktop_requests),
                 )
             if direct_planner_orchestration_intent:
                 user_metadata = self._merge_user_metadata(
@@ -1997,7 +1997,7 @@ class ChatAPI:
                 self._warm_daily_desktop_permission_cache(runnable_daily_desktop_requests)
                 user_metadata = self._merge_user_metadata(
                     user_metadata,
-                    daily_desktop_user_metadata(runnable_daily_desktop_requests),
+                    entrypoint_plan_user_metadata(runnable_daily_desktop_requests),
                 ) or {}
         user_metadata = self._with_client_message_id(user_metadata, client_message_id) or {}
         message_content = text or user_goal
