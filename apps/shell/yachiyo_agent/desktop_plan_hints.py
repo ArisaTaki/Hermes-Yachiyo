@@ -146,14 +146,27 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
 def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None:
     patterns = (
         r"(?P<target>[^。！？!?，,]{1,40}?(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*(?:输入|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:type|enter|fill)\s+(?P<text_en2>[^.!?,]+?)\s+"
+        r"(?:into|in|inside)\s+(?:the\s+)?"
+        r"(?P<target_en2>[^.!?,]{1,40}?(?:search box|search field|message field|address bar|input|field|text box))",
         r"(?P<target_en>[^.!?,]{1,40}?(?:search box|search field|message field|address bar|input|field|text box))\s*(?:type|enter|fill)\s*(?P<text_en>[^.!?,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        raw_target = match.groupdict().get("target") or match.groupdict().get("target_en") or ""
-        raw_text = match.groupdict().get("text") or match.groupdict().get("text_en") or ""
+        raw_target = (
+            match.groupdict().get("target")
+            or match.groupdict().get("target_en")
+            or match.groupdict().get("target_en2")
+            or ""
+        )
+        raw_text = (
+            match.groupdict().get("text")
+            or match.groupdict().get("text_en")
+            or match.groupdict().get("text_en2")
+            or ""
+        )
         target = clean_type_target(raw_target, app_name=app_name)
         typed_text = clean_followup_text(raw_text)
         if target and typed_text:
@@ -351,28 +364,30 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         ),
         (
             "show",
-            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-            r"(?P<app_front>[^。！？!?，,]+?)\s*(?:打开|启动|开启|拉起)?\s*"
-            r"(?:到前台|切到前台|置前|前台|叫出来)$",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启|拉起)\s*(?P<app_front_open>[^。！？!?，,]+?)\s*"
+            r"(?:并|然后|再)?\s*(?:切到|到)?前台$",
         ),
         (
             "show",
-            r"(?P<app2>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏|叫出来|show|restore|unhide)$",
+            r"(?P<app2>[^。！？!?，,]+?)\s*"
+            r"(?:显示出来|调出来|还原|恢复|取消隐藏|叫出来|show|restore|unhide)$",
         ),
         (
             "hide",
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:隐藏|隐藏一下|藏起来|收起|收起来|hide)\s*"
+            r"(?:隐藏一下|隐藏|藏起来|收起来|收起|hide)\s*"
             r"(?P<app3>[^。！？!?，,]+)",
         ),
         (
             "hide",
-            r"(?P<app4>[^。！？!?，,]+?)\s*(?:隐藏|藏起来|收起|收起来|hide)$",
+            r"(?P<app4>[^。！？!?，,]+?)\s*"
+            r"(?:隐藏|藏起来|收起来|收起|hide)(?:一下|下)?$",
         ),
         (
             "minimize",
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
-            r"(?P<app5>[^。！？!?，,]+?)\s*(?:最小化|minimi[sz]e)$",
+            r"(?P<app5>[^。！？!?，,]+?)\s*(?:最小化|minimi[sz]e)(?:一下|下)?$",
         ),
         (
             "minimize",
@@ -399,6 +414,10 @@ def app_management_hint(text: str) -> dict[str, str] | None:
             continue
         if action == "show" and re.search(
             r"(?:切到|聚焦|focus|switch\s+to|activate)",
+            value,
+            flags=re.IGNORECASE,
+        ) and not re.search(
+            r"(?:前台|置前|叫出来|显示|还原|恢复|调出来|show|restore|unhide)",
             value,
             flags=re.IGNORECASE,
         ):
@@ -884,7 +903,8 @@ def clean_target(value: str) -> str:
         flags=re.IGNORECASE,
     )[0]
     target = re.sub(
-        r"\s*(?:按钮|控件|元素|菜单项|菜单|复选框|button|control|element|menu item|menu|checkbox)$",
+        r"\s*(?:按钮|控件|元素|菜单项|菜单|复选框|输入框|文本框|输入栏|"
+        r"button|control|element|menu item|menu|checkbox|field|input|text field|text box|textbox)$",
         "",
         target,
         flags=re.IGNORECASE,
@@ -902,6 +922,7 @@ def clean_target(value: str) -> str:
         flags=re.IGNORECASE,
     )
     target = re.sub(r"^(?:的|里|中|上|内)\s*", "", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:可见的?|visible|shown)\s*", "", target, flags=re.IGNORECASE)
     return target.strip(" .，,。")
 
 
@@ -974,6 +995,10 @@ def role_filter(value: str) -> str:
     if contains_any(lowered, ["输入框", "文本框", "输入栏", "field", "input", "text"]):
         return "text"
     if cleaned in {"搜索", "登录", "创建", "确认", "发送", "提交"}:
+        return "button"
+    if re.search(r"\b(?:click|press|tap)\b", lowered):
+        if re.search(r"\b(?:in|inside|within)\s+[A-Z][A-Za-z0-9 ._-]*$", value):
+            return ""
         return "button"
     return ""
 
@@ -1093,6 +1118,11 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
         or re.search(r"\b(?:what|which)\b.{0,24}\b(?:buttons|controls|ui elements)\b", lowered)
         or re.search(
             r"\b(?:visible|shown|available)\s+(?:buttons|controls|ui elements|text fields)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bwhere\s+(?:is|are)\s+(?:the\s+)?[^.!?]{0,40}?"
+            r"(?:button|control|ui element|text field)\b",
             lowered,
         )
         or re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered)
@@ -1341,7 +1371,7 @@ def _clean_management_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     )
-    app = re.sub(r"\s*(?:然后|再|接着|之后|后|then)\s*$", "", app, flags=re.IGNORECASE)
+    app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|then)\s*$", "", app, flags=re.IGNORECASE)
     app = re.sub(r"^(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*", "", app)
     app = re.sub(
         r"^(?:open|launch|start|focus|activate|bring)\s+|^switch\s+to\s+",
@@ -1351,7 +1381,7 @@ def _clean_management_app_name_hint(value: str) -> str:
     )
     app = re.sub(
         r"\s*(?:一下|下|起来|掉|显示出来|还原|恢复|取消隐藏|隐藏|藏起来|收起|收起来|"
-        r"打开|启动|开启|运行|拉起|切到|聚焦|到前台|切到前台|置前|前台|叫出来|"
+        r"调出来|打开|启动|开启|运行|拉起|切到|聚焦|到前台|切到前台|置前|前台|叫出来|"
         r"open|launch|start|focus|activate|bring|"
         r"最小化|退出|关闭|关掉|结束|终止|show|restore|unhide|hide|minimi[sz]e|"
         r"quit|close|exit|terminate|please|pls|吗|嘛|呢|吧|么|\?|？)$",
@@ -1372,6 +1402,7 @@ def _clean_management_app_name_hint(value: str) -> str:
         "窗口",
         "当前",
         "前台",
+        "来",
     }
     return "" if app.lower() in generic else app
 
@@ -1452,12 +1483,14 @@ def _is_foreground_window_minimize_request(value: str, lowered: str) -> bool:
 def _is_foreground_app_hide_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(
-            r"(?:隐藏|收起|藏起|藏起来)\s*(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
+            r"(?:隐藏|收起|藏起|藏起来)(?:一下|下)?\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*(?:隐藏|收起|藏起|藏起来)",
+            r"(?:当前|现在|前台|这个|该)?\s*(?:应用|app|软件|程序)\s*"
+            r"(?:隐藏|收起|藏起|藏起来)(?:一下|下)?",
             value,
             flags=re.IGNORECASE,
         )

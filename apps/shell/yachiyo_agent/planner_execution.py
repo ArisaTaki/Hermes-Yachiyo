@@ -281,6 +281,10 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        expanded = _expanded_desktop_step_requests(step, tool_name, payload, allowed)
+        if expanded:
+            requests.extend(expanded)
+            continue
         requests.append(
             _request(
                 tool_name,
@@ -291,6 +295,43 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _expanded_desktop_step_requests(
+    step: Any,
+    tool_name: str,
+    payload: dict[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    split_tool = ""
+    if tool_name == "app.open_and_click_ui_element":
+        split_tool = "app.open"
+    elif tool_name == "app.focus_and_click_ui_element":
+        split_tool = "app.focus"
+    if not split_tool or split_tool not in allowed or "desktop.click_ui_element" not in allowed:
+        return []
+    app_name = str(payload.get("app_name") or "").strip()
+    target = str(payload.get("target") or "").strip()
+    if not app_name or not target:
+        return []
+    reason = _desktop_step_planning_reason(step, tool_name)
+    click_payload = {
+        key: payload[key]
+        for key in ("target", "role_filter", "click_count", "limit")
+        if key in payload and payload[key] is not None
+    }
+    return [
+        _request(
+            split_tool,
+            _desktop_request_payload(split_tool, {"app_name": app_name}),
+            planning_reason=reason,
+        ),
+        _request(
+            "desktop.click_ui_element",
+            _desktop_request_payload("desktop.click_ui_element", click_payload),
+            planning_reason=reason,
+        ),
+    ]
 
 
 def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

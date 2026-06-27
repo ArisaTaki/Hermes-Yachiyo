@@ -192,27 +192,36 @@ def _mapping(value: Any) -> dict[str, Any]:
         return {}
     redacted = redact_run_event_payload(dict(value))
     result = dict(redacted) if isinstance(redacted, Mapping) else {}
-    return _restore_configured_flags(value, result)
+    return _restore_known_preview_types(_restore_stable_scalar_types(value, result))
 
 
-def _restore_configured_flags(source: Any, target: Any) -> dict[str, Any]:
+def _restore_stable_scalar_types(source: Any, target: Any) -> dict[str, Any]:
     if not isinstance(source, Mapping) or not isinstance(target, Mapping):
         return dict(target) if isinstance(target, Mapping) else {}
     result = dict(target)
     for key, item in source.items():
         key_text = _text(key)
         target_item = result.get(key_text)
-        if key_text.endswith("_configured") and isinstance(item, bool):
+        if isinstance(item, (bool, int, float)):
             result[key_text] = item
         elif isinstance(item, Mapping) and isinstance(target_item, Mapping):
-            result[key_text] = _restore_configured_flags(item, target_item)
+            result[key_text] = _restore_stable_scalar_types(item, target_item)
         elif isinstance(item, list) and isinstance(target_item, list):
             result[key_text] = [
-                _restore_configured_flags(source_item, redacted_item)
+                _restore_stable_scalar_types(source_item, redacted_item)
                 if isinstance(source_item, Mapping) and isinstance(redacted_item, Mapping)
                 else redacted_item
                 for source_item, redacted_item in zip(item, target_item, strict=False)
             ]
+    return result
+
+
+def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value)
+    for key in ("limit", "click_count", "repeat_count", "level"):
+        item = result.get(key)
+        if isinstance(item, str) and item.isdigit():
+            result[key] = int(item)
     return result
 
 

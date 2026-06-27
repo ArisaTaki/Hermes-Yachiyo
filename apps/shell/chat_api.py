@@ -50,6 +50,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
+from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
 from apps.shell.yachiyo_agent.planner_execution import planner_orchestration_requests
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
@@ -1203,6 +1204,8 @@ class ChatAPI:
         return False
 
     def _daily_desktop_app_followup_goal_text(self, text: str) -> str:
+        if self._daily_desktop_explicit_modifier_hotkey(text):
+            return ""
         clause = self._daily_desktop_app_followup_clause(text)
         if not clause:
             return ""
@@ -1216,6 +1219,14 @@ class ChatAPI:
         if not self._daily_desktop_requests_target_app_context(requests, app_name):
             return ""
         return candidate
+
+    @staticmethod
+    def _daily_desktop_explicit_modifier_hotkey(text: str) -> bool:
+        hotkey = hotkey_hint(text)
+        if not hotkey:
+            return False
+        modifiers = hotkey.get("modifiers") if isinstance(hotkey, dict) else []
+        return bool(modifiers)
 
     @staticmethod
     def _daily_desktop_app_followup_clause(text: str) -> str:

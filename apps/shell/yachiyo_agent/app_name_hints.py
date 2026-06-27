@@ -7,6 +7,8 @@ can be replaced by discovered app metadata.
 
 from __future__ import annotations
 
+import re
+
 from apps.shell.agent.runtime.app_aliases import (
     APP_ALIASES,
     COMMUNICATION_APP_NAMES,
@@ -20,7 +22,25 @@ def legacy_app_name_hint(value: str) -> str:
     app_name = str(value or "").strip()
     if not app_name:
         return ""
-    return APP_ALIASES.get(compact_app_alias(app_name), app_name)
+    app_name = re.sub(r"\s*(?:for\s+me)$", "", app_name, flags=re.IGNORECASE).strip()
+    app_name = re.sub(
+        r"\s*(?:客户端|桌面客户端|桌面版|desktop\s+client|client)$",
+        "",
+        app_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    compact = compact_app_alias(app_name)
+    if compact not in APP_ALIASES:
+        without_article = re.sub(
+            r"^(?:a|an|the)\s+",
+            "",
+            app_name,
+            flags=re.IGNORECASE,
+        ).strip()
+        compact = compact_app_alias(without_article)
+    if compact in {"webbrowser", "webpage", "webpages", "web"}:
+        compact = "browser"
+    return APP_ALIASES.get(compact, app_name)
 
 
 def compact_app_name_hint(value: str) -> str:

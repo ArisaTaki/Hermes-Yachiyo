@@ -320,6 +320,10 @@ _RUNTIME_PLANNER_DESKTOP_HOTKEY_REASON_SETS = (
 _RUNTIME_PLANNER_DESKTOP_DIRECT_REASON_SETS = (
     *_RUNTIME_PLANNER_DESKTOP_OPERATION_REASON_SETS,
     *_RUNTIME_PLANNER_DESKTOP_HOTKEY_REASON_SETS,
+    {"planner_desktop_hotkey", "planner_desktop_operation"},
+    {"planner_fallback_desktop_hotkey", "planner_desktop_operation"},
+    {"planner_desktop_hotkey", "planner_fallback_desktop_operation"},
+    {"planner_fallback_desktop_hotkey", "planner_fallback_desktop_operation"},
 )
 
 

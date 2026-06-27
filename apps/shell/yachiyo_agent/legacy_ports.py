@@ -49,7 +49,7 @@ from .planner_projection import (
     runtime_planner_decision,
     runtime_planner_metadata,
 )
-from .planner_execution import planner_tool_requests
+from .planner_execution import planner_direct_tool_requests
 from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
@@ -965,7 +965,7 @@ def _safe_runtime_planner_tool_requests(
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
-    requests = planner_tool_requests(
+    requests = planner_direct_tool_requests(
         prompt,
         allowed_tools,
         metadata=metadata,

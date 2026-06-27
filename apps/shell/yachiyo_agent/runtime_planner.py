@@ -218,6 +218,10 @@ class TaskIntentRouter:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
+        hotkey = hotkey_hint(text)
+        if _explicit_hotkey_should_override_safe_shortcut(text, hotkey, safe_shortcut):
+            safe_shortcut = None
+            safe_shortcut_sequence = []
         if str((safe_shortcut or {}).get("action") or "").strip() in {
             "screenshot_selection",
             "screenshot_toolbar",
@@ -1528,6 +1532,13 @@ class RuntimePlanner:
         if app_search and click_target and not str(app_search.get("query") or "").strip():
             app_search = {}
         hotkey = hotkey_hint(intent.user_goal)
+        if _explicit_hotkey_should_override_safe_shortcut(
+            intent.user_goal,
+            hotkey,
+            safe_shortcut,
+        ):
+            safe_shortcut = None
+            safe_shortcut_sequence = []
         if app_name and hotkey and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         if app_name and click_target and not _explicit_app_open_request(intent.user_goal):
@@ -5371,6 +5382,8 @@ def _app_name_hint(text: str) -> str:
     patterns = [
         r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
         r"(?:go\s+back\s+to|switch\s+back\s+to|back\s+to)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
+        r"(?:can|could|would)\s+you\s+(?:please\s+)?"
+        r"(?:open|launch|focus|start)\s+(?P<polite_app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?:the\s+)?(?:app|application)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:bring|switch)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:to\s+(?:the\s+)?(?:front|foreground)|forward)",
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
@@ -5392,7 +5405,15 @@ def _app_name_hint(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        app = _clean_app_name_hint(match.group("app"))
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app = _clean_app_name_hint(raw_app)
         if app:
             return app
     return ""
@@ -5439,6 +5460,13 @@ def _clean_app_name_hint(value: str) -> str:
     ).strip(" .，,。")
     app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:please|pls)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(r"\s*(?:for\s+me)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(
+        r"\s*(?:客户端|桌面客户端|桌面版|desktop\s+client|client)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
@@ -5471,6 +5499,10 @@ def _clean_app_name_hint(value: str) -> str:
         "当前app",
         "当前应用",
         "前台应用",
+        "前台",
+        "现在",
+        "这个",
+        "该",
         "current",
         "current app",
         "foreground app",
@@ -5481,6 +5513,27 @@ def _clean_app_name_hint(value: str) -> str:
         "current interface",
         "active interface",
         "foreground interface",
+        "button",
+        "buttons",
+        "control",
+        "controls",
+        "element",
+        "elements",
+        "field",
+        "fields",
+        "click",
+        "click the",
+        "type",
+        "type the",
+        "press",
+        "press the",
+        "can you",
+        "could you",
+        "would you",
+        "你",
+        "我",
+        "帮我",
+        "请",
     }
     if context_source_hint(app):
         return ""
@@ -8947,6 +9000,18 @@ def _generic_app_foreground_operation_tool(
     return _first_allowed(operation_tools, allowed)
 
 
+def _explicit_hotkey_should_override_safe_shortcut(
+    text: str,
+    hotkey: Mapping[str, Any] | None,
+    safe_shortcut: Mapping[str, Any] | None,
+) -> bool:
+    if not hotkey or not safe_shortcut:
+        return False
+    if str((safe_shortcut or {}).get("action") or "").strip() != "focus_address_bar":
+        return False
+    return not _contains_any(text, ["地址栏", "address bar", "omnibox"])
+
+
 def _desktop_operation_tool_preview(
     *,
     app_name: str,
@@ -8979,6 +9044,10 @@ def _desktop_operation_tool_preview(
         if shortcut_tool:
             return shortcut_tool, dict(safe_shortcut)
     if safe_key:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_key"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_key}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -8987,14 +9056,14 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, dict(safe_key)
-        if app_name and allow_app_tools:
-            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_key"), allowed)
-            if app_tool:
-                return app_tool, {"app_name": app_name, **safe_key}
         key_tool = _first_allowed(("desktop.safe_key",), allowed)
         if key_tool:
             return key_tool, dict(safe_key)
     if safe_scroll:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_scroll"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_scroll}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9003,14 +9072,14 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, dict(safe_scroll)
-        if app_name and allow_app_tools:
-            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_scroll"), allowed)
-            if app_tool:
-                return app_tool, {"app_name": app_name, **safe_scroll}
         scroll_tool = _first_allowed(("desktop.safe_scroll",), allowed)
         if scroll_tool:
             return scroll_tool, dict(safe_scroll)
     if safe_click:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_click"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_click}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9019,10 +9088,6 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, dict(safe_click)
-        if app_name and allow_app_tools:
-            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_click"), allowed)
-            if app_tool:
-                return app_tool, {"app_name": app_name, **safe_click}
         click_tool = _first_allowed(("desktop.safe_click",), allowed)
         if click_tool:
             return click_tool, dict(safe_click)
@@ -9030,6 +9095,10 @@ def _desktop_operation_tool_preview(
         if raw_click_tool:
             return raw_click_tool, dict(safe_click)
     if hotkey:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **hotkey}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9038,12 +9107,15 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, dict(hotkey)
-        if app_name and allow_app_tools:
-            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
-            if app_tool:
-                return app_tool, {"app_name": app_name, **hotkey}
         return _first_allowed(("desktop.hotkey",), allowed), dict(hotkey)
     if app_name and type_target:
+        if allow_app_tools:
+            app_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "type_into_ui_element"),
+                allowed,
+            )
+            if app_tool:
+                return app_tool, {"app_name": app_name, **type_target, "limit": 80}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9052,15 +9124,15 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, {**type_target, "limit": 80}
+        return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
+    if app_name and safe_type_text:
         if allow_app_tools:
             app_tool = _first_allowed(
-                app_foreground_tool_candidates(mode, "type_into_ui_element"),
+                app_foreground_tool_candidates(mode, "safe_type_text"),
                 allowed,
             )
             if app_tool:
-                return app_tool, {"app_name": app_name, **type_target, "limit": 80}
-        return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
-    if app_name and safe_type_text:
+                return app_tool, {"app_name": app_name, "text": safe_type_text}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9069,16 +9141,16 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, {"text": safe_type_text}
-        if allow_app_tools:
-            app_tool = _first_allowed(
-                app_foreground_tool_candidates(mode, "safe_type_text"),
-                allowed,
-            )
-            if app_tool:
-                return app_tool, {"app_name": app_name, "text": safe_type_text}
         type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
         return type_tool, {"text": safe_type_text}
     if app_name and click_target:
+        if allow_app_tools:
+            app_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "click_ui_element"),
+                allowed,
+            )
+            if app_tool:
+                return app_tool, {"app_name": app_name, **click_target, "limit": 80}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -9087,13 +9159,6 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, {**click_target, "limit": 80}
-        if allow_app_tools:
-            app_tool = _first_allowed(
-                app_foreground_tool_candidates(mode, "click_ui_element"),
-                allowed,
-            )
-            if app_tool:
-                return app_tool, {"app_name": app_name, **click_target, "limit": 80}
         return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
     if type_target:
         return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
