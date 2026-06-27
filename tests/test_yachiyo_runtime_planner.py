@@ -1070,6 +1070,14 @@ def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
         "search selected text",
         allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     )
+    safari = RuntimePlanner().decision(
+        "用 Safari 搜索选中的内容",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "desktop.search_submit",
+            "app.open_and_safe_shortcut",
+        ],
+    )
 
     assert decision.selected_intent.kind == "web_research"
     assert decision.selected_intent.required_capabilities == ["desktop.ui_operation"]
@@ -1095,6 +1103,21 @@ def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
     }
     assert _step_by_id(decision, "submit-browser-context").tool_name == "desktop.search_submit"
 
+    assert safari.selected_intent.kind == "web_research"
+    assert safari.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "selection",
+        "browser_action": "open_search",
+        "app_name": "Safari",
+    }
+    assert _step_by_id(safari, "focus-browser-address-bar").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(safari, "focus-browser-address-bar").input_preview == {
+        "app_name": "Safari",
+        "action": "focus_address_bar",
+    }
+
 
 def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
     selected = RuntimePlanner().decision(
@@ -1119,6 +1142,14 @@ def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
         "open clipboard link",
         allowed_tools=["desktop.safe_shortcut", "desktop.search_submit"],
     )
+    safari = RuntimePlanner().decision(
+        "open selected link in Safari",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "desktop.search_submit",
+            "app.open_and_safe_shortcut",
+        ],
+    )
 
     assert clipboard.selected_intent.kind == "web_research"
     assert clipboard.selected_intent.inputs == {
@@ -1131,6 +1162,17 @@ def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
         "paste-browser-context",
         "submit-browser-context",
     ]
+
+    assert safari.selected_intent.kind == "web_research"
+    assert safari.selected_intent.inputs == {
+        "url_hint": "",
+        "context_source": "selection",
+        "browser_action": "open_url",
+        "app_name": "Safari",
+    }
+    assert _step_by_id(safari, "focus-browser-address-bar").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
 
 
 def test_runtime_planner_report_generation_prefers_workspace_list_for_context() -> None:
@@ -7620,6 +7662,43 @@ def test_planner_tool_requests_maps_dynamic_web_context_actions() -> None:
         },
     ]
     assert planner_tool_requests(
+        "用 Safari 搜索选中的内容",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "desktop.search_submit",
+            "app.open_and_safe_shortcut",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+    ]
+    assert planner_tool_requests(
         "open clipboard link",
         allowed_tools=["desktop.safe_shortcut", "desktop.search_submit", "browser.open_url"],
     ) == [
@@ -7644,6 +7723,43 @@ def test_planner_tool_requests_maps_dynamic_web_context_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_dynamic_browser_context",
         }
+    ]
+    assert planner_tool_requests(
+        "open selected link in Safari",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "desktop.search_submit",
+            "app.open_and_safe_shortcut",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Safari", "action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_dynamic_browser_context",
+        },
     ]
 
 

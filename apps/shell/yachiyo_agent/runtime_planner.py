@@ -3738,6 +3738,7 @@ def _dynamic_context_browser_steps(
     allowed: set[str] | None,
 ) -> list[ToolPlanStepSnapshot]:
     source = str(intent.inputs.get("context_source") or "").strip()
+    app_name = str(intent.inputs.get("app_name") or "").strip()
     shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
     submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     steps: list[ToolPlanStepSnapshot] = []
@@ -3757,17 +3758,26 @@ def _dynamic_context_browser_steps(
         )
 
     focus_depends_on = ["copy-selected-browser-context"] if source == "selection" else []
+    focus_tool = shortcut_tool
+    focus_payload = {"action": "focus_address_bar"}
+    focus_capability = "desktop.ui_operation"
+    if app_name:
+        app_focus_tool = _first_allowed(app_foreground_tool_candidates("open", "safe_shortcut"), allowed)
+        if app_focus_tool:
+            focus_tool = app_focus_tool
+            focus_payload = {"app_name": app_name, "action": "focus_address_bar"}
+            focus_capability = "desktop.app_control"
     steps.append(
         _step(
             intent,
             "focus-browser-address-bar",
             "Focus browser address bar",
-            "desktop.ui_operation",
-            shortcut_tool,
-            input_preview={"action": "focus_address_bar"},
+            focus_capability,
+            focus_tool,
+            input_preview=focus_payload,
             depends_on=focus_depends_on,
             action="shortcut",
-            reason="Use the foreground browser address bar so selected or clipboard text can be opened or searched.",
+            reason="Use the requested browser address bar so selected or clipboard text can be opened or searched.",
         )
     )
     steps.append(
@@ -7022,11 +7032,24 @@ def _dynamic_context_browser_action_hint(text: str, context_source: str) -> dict
     lowered = value.lower()
     if _looks_like_browser_current_page_find(value, lowered):
         return {}
+    app_name = _dynamic_context_browser_app_name_hint(value)
+    app_payload = {"app_name": app_name} if app_name else {}
     if _looks_like_dynamic_context_url_open(value, lowered):
-        return {"browser_action": "open_url"}
+        return {"browser_action": "open_url", **app_payload}
     if _looks_like_dynamic_context_web_search(value, lowered):
-        return {"browser_action": "open_search"}
+        return {"browser_action": "open_search", **app_payload}
     return {}
+
+
+def _dynamic_context_browser_app_name_hint(text: str) -> str:
+    app_name = _app_name_hint(text)
+    if (
+        app_name
+        and _is_browser_or_search_app_name(app_name)
+        and not _is_generic_browser_app_label(app_name)
+    ):
+        return app_name
+    return ""
 
 
 def _looks_like_dynamic_context_url_open(value: str, lowered: str) -> bool:

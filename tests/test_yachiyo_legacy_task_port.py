@@ -325,6 +325,46 @@ def test_planner_first_direct_selection_owns_current_page_web_actions_without_le
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_scoped_dynamic_browser_context_without_legacy() -> None:
+    allowed = [
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
+        "app.open_and_safe_shortcut",
+    ]
+    cases = (
+        (
+            "用 Safari 搜索选中的内容",
+            [
+                "desktop.safe_shortcut",
+                "app.open_and_safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+            ],
+        ),
+        (
+            "open selected link in Safari",
+            [
+                "desktop.safe_shortcut",
+                "app.open_and_safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+            ],
+        ),
+    )
+    for prompt, expected_tools in cases:
+        legacy_calls: list[dict[str, Any]] = []
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.event_payload["selected_tools"] == expected_tools
+        assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_current_page_link_copy_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
