@@ -1861,6 +1861,7 @@ class RuntimePlanner:
             or safe_key
             or safe_scroll
             or safe_click
+            or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
@@ -3767,15 +3768,22 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
+        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(
+        r"^(?:在|用|通过|in|inside|within|using|with)\s+",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:please|pls)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"(?:应用(?:程序)?|软件)$", "", app).strip(" .，,。")
     app = re.sub(r"^(?:一下|下|这个|那个)\s*", "", app).strip()

@@ -1692,6 +1692,22 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
             "desktop.ui_elements",
         ],
     )
+    focus_type_decision = RuntimePlanner().decision(
+        "切到 Slack 在搜索框输入 Alice",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    in_type_decision = RuntimePlanner().decision(
+        "在 Slack 搜索框输入 Alice",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
     foreground_click = RuntimePlanner().decision(
         "点击发送按钮",
         allowed_tools=["desktop.click_ui_element"],
@@ -1709,6 +1725,18 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
         "limit": 80,
     }
     assert _step_by_id(type_decision, "submit-foreground-ui").approval_required is True
+
+    for app_type_decision in (focus_type_decision, in_type_decision):
+        assert app_type_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+        app_type_step = _step_by_id(app_type_decision, "operate-foreground-ui")
+        assert app_type_step.tool_name == "app.focus_and_type_into_ui_element"
+        assert app_type_step.input_preview == {
+            "app_name": "Slack",
+            "target": "搜索框",
+            "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+        }
 
     assert click_decision.selected_intent.inputs["app_name_hint"] == "微信"
     assert click_decision.selected_intent.inputs["operation_hint"] == "click"
@@ -2507,6 +2535,15 @@ def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
             "desktop.active_window",
         ],
     )
+    generic_app_decision = RuntimePlanner().decision(
+        "Slack 回车发送",
+        allowed_tools=[
+            "desktop.running_apps",
+            "app.focus",
+            "desktop.submit_foreground",
+            "desktop.active_window",
+        ],
+    )
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.inputs["app_name_hint"] == "WeChat"
@@ -2517,6 +2554,13 @@ def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
     assert submit.tool_name == "desktop.submit_foreground"
     assert submit.input_preview == {"action": "send"}
     assert submit.depends_on == ["open-or-focus-app"]
+    assert generic_app_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    generic_focus = _step_by_id(generic_app_decision, "open-or-focus-app")
+    assert generic_focus.tool_name == "app.focus"
+    assert generic_focus.input_preview == {"app_name": "Slack"}
+    assert _step_by_id(generic_app_decision, "submit-foreground-ui").input_preview == {
+        "action": "send"
+    }
 
 
 def test_runtime_planner_keeps_plain_current_window_enter_as_hotkey() -> None:
@@ -2553,6 +2597,25 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "desktop.submit_foreground",
         ],
     )
+    generic_open_app = planner_direct_tool_requests(
+        "打开 Obsidian 写 hello",
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    generic_focus_app = planner_direct_tool_requests(
+        "在 Notes 输入 hello",
+        [
+            "desktop.list_apps",
+            "app.focus_and_safe_type_text",
+            "app.open_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
 
     assert focus == [
         {
@@ -2585,6 +2648,24 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
+    ]
+    assert generic_open_app == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Obsidian", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert generic_focus_app == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
     ]
 
 
