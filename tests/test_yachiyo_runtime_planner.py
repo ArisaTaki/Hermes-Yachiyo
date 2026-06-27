@@ -2443,6 +2443,21 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     assert copy_operation.tool_name == "desktop.safe_shortcut"
     assert copy_operation.input_preview == {"action": "copy"}
     assert copy_operation.approval_required is False
+    copy_selection_to_clipboard = RuntimePlanner().decision(
+        "把当前选中文本复制到剪贴板",
+        allowed_tools=["desktop.active_window", "desktop.safe_shortcut", "desktop.ui_elements"],
+    )
+    assert copy_selection_to_clipboard.selected_intent.kind == "desktop_operation"
+    assert copy_selection_to_clipboard.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "copy"
+    }
+    copy_to_clipboard_operation = _step_by_id(
+        copy_selection_to_clipboard,
+        "operate-foreground-ui",
+    )
+    assert copy_to_clipboard_operation.tool_name == "desktop.safe_shortcut"
+    assert copy_to_clipboard_operation.input_preview == {"action": "copy"}
+    assert copy_to_clipboard_operation.approval_required is False
 
 
 def test_runtime_planner_routes_screenshot_shortcuts_without_opening_fake_apps() -> None:

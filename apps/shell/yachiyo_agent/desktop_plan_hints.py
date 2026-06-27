@@ -1533,6 +1533,16 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         normalized,
     ):
         return "copy_current_page_link"
+    if re.fullmatch(
+        r"(?:把|将)?(?:当前|这个|该)?(?:选中|选中的)?(?:文本|文字|内容)"
+        r"(?:复制|拷贝)(?:到|至|进|放到|放进)?(?:系统)?(?:剪贴板|粘贴板)",
+        normalized,
+    ) or re.fullmatch(
+        r"(?:copy|put)(?:the)?(?:current|selected)?(?:text|selection|content)"
+        r"(?:to(?:the)?(?:system)?clipboard)?",
+        normalized,
+    ):
+        return "copy"
     screenshot_action = _screenshot_safe_shortcut_action(normalized)
     if screenshot_action:
         return screenshot_action
