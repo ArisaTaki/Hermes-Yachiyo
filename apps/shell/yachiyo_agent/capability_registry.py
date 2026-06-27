@@ -76,6 +76,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         tools=(
             "app.open",
             "app.focus",
+            "app.focus_window",
             "app.status",
             "app.show",
             "app.hide",
@@ -142,6 +143,18 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         tools=("workspace.list", "workspace.read"),
         discovery_actions=("list_files", "read_file"),
         output_kinds=("text", "table", "source_file"),
+    ),
+    CapabilityDefinition(
+        capability_id="file.workspace_write",
+        title="Write Workspace Files",
+        category="file",
+        description="Apply approved single-file patches inside configured writable workspace scopes.",
+        tools=("workspace.write_patch",),
+        risk_level="high",
+        approval_required=True,
+        discovery_actions=("inspect_paths", "read_file"),
+        execution_actions=("apply_patch",),
+        output_kinds=("patch", "source_file"),
     ),
     CapabilityDefinition(
         capability_id="file.desktop_access",
@@ -219,13 +232,28 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
     ),
     CapabilityDefinition(
         capability_id="schedule.reminder",
-        title="Create Reminders And Calendar Events",
+        title="Manage Reminders And Calendar Events",
         category="schedule",
-        description="Create reminders, calendar events, or scheduled future tasks.",
-        tools=("reminders.create", "calendar.create_event", "future_task.schedule"),
+        description=(
+            "Create reminders, calendar events, or scheduled FutureTasks, "
+            "and inspect or cancel scheduled tasks."
+        ),
+        tools=(
+            "reminders.create",
+            "calendar.create_event",
+            "future_task.schedule",
+            "future_task.list",
+            "future_task.cancel",
+        ),
         risk_level="medium",
         approval_required=True,
-        execution_actions=("create_reminder", "create_event", "schedule_task"),
+        discovery_actions=("list_scheduled_tasks",),
+        execution_actions=(
+            "create_reminder",
+            "create_event",
+            "schedule_task",
+            "cancel_scheduled_task",
+        ),
         output_kinds=("schedule_item",),
     ),
     CapabilityDefinition(
@@ -352,6 +380,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "communication.compose": ("communication.", "mail.", "messages.", "email."),
     "clipboard.read_write": ("clipboard.",),
     "terminal.execution": ("terminal.",),
+    "file.workspace_write": ("workspace.write_",),
     "file.desktop_access": ("file.",),
     "file.organization": ("file.",),
     "workflow.orchestration": ("workflow.",),
@@ -361,9 +390,16 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "data.analysis": ("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
+    "file.workspace_write": ("workspace.write_patch",),
     "file.desktop_access": ("desktop.open_path", "desktop.reveal_path"),
     "file.organization": ("workspace.list", "desktop.reveal_path", "desktop.open_path", "terminal.run", "artifact.write"),
-    "schedule.reminder": ("reminders.create", "calendar.create_event", "future_task.schedule"),
+    "schedule.reminder": (
+        "reminders.create",
+        "calendar.create_event",
+        "future_task.schedule",
+        "future_task.list",
+        "future_task.cancel",
+    ),
     "information.capture": (
         "notes.create",
         "clipboard.read",

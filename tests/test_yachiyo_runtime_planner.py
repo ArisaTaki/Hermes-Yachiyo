@@ -12,6 +12,8 @@ from apps.shell.yachiyo_agent import (
     YachiyoAgentService,
     capability_snapshots,
 )
+from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
+from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_orchestration_requests,
     planner_direct_tool_requests,
@@ -5439,6 +5441,7 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
     by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
     expected_tools_by_capability = {
         "file.workspace_read": ["workspace.list", "workspace.read"],
+        "file.workspace_write": ["workspace.write_patch"],
         "terminal.execution": ["terminal.run"],
         "data.analysis": ["data.analyze", "workspace.read", "artifact.write"],
         "artifact.write": ["artifact.write"],
@@ -5448,7 +5451,7 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "desktop.windows",
             "desktop.ui_elements",
         ],
-        "desktop.app_control": ["app.open", "app.focus", "app.quit"],
+        "desktop.app_control": ["app.open", "app.focus", "app.focus_window", "app.quit"],
         "desktop.ui_operation": [
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
@@ -5457,7 +5460,13 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "desktop.click",
         ],
         "clipboard.read_write": ["clipboard.read", "clipboard.write"],
-        "schedule.reminder": ["reminders.create", "calendar.create_event", "future_task.schedule"],
+        "schedule.reminder": [
+            "reminders.create",
+            "calendar.create_event",
+            "future_task.schedule",
+            "future_task.list",
+            "future_task.cancel",
+        ],
         "workflow.orchestration": ["workflow.run"],
         "group.multi_agent": ["group.run"],
     }
@@ -5486,6 +5495,61 @@ def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
     assert len(snapshots) == 1
     assert "workspace.write_patch" not in snapshots[0].tools
     assert snapshots[0].available_tools == []
+
+
+def test_capability_registry_exposes_workspace_patch_as_approval_gated_write() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["workspace.write_patch"],
+        capability_ids=["file.workspace_write"],
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tools == ["workspace.write_patch"]
+    assert snapshots[0].available_tools == ["workspace.write_patch"]
+    assert snapshots[0].risk_level == "high"
+    assert snapshots[0].approval_required is True
+
+
+def test_capability_registry_covers_runtime_catalog_desktop_and_workspace_tools() -> None:
+    registry_tools = {
+        tool
+        for snapshot in capability_snapshots()
+        for tool in snapshot.tools
+    }
+    catalog_tools = {
+        item.tool_name
+        for item in runtime_tool_catalog_snapshot().tools
+    }
+    policy_tools = {
+        tool
+        for tools in DESKTOP_CAPABILITY_TOOLS.values()
+        for tool in tools
+    }
+    required_tools = {
+        tool
+        for tool in catalog_tools | policy_tools
+        if tool.startswith(
+            (
+                "app.",
+                "artifact.",
+                "browser.",
+                "calendar.",
+                "clipboard.",
+                "data.",
+                "desktop.",
+                "future_task.",
+                "media.",
+                "notes.",
+                "reminders.",
+                "screen.",
+                "system.",
+                "terminal.",
+                "workspace.",
+            )
+        )
+    }
+
+    assert required_tools - registry_tools == set()
 
 
 def test_capability_registry_exposes_foreground_management_tools() -> None:
