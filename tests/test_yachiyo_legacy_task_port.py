@@ -328,6 +328,39 @@ def test_planner_first_direct_selection_owns_current_page_link_copy_without_lega
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    cases = (
+        ("打开备忘录新建备忘录", "app.open_and_safe_shortcut", "Notes", "new_note"),
+        ("备忘录新建", "app.focus_and_safe_shortcut", "Notes", "new_note"),
+        ("打开提醒事项新建提醒", "app.open_and_safe_shortcut", "Reminders", "new_reminder"),
+        ("提醒事项新建", "app.focus_and_safe_shortcut", "Reminders", "new_reminder"),
+        ("打开日历新建日程", "app.open_and_safe_shortcut", "Calendar", "new_event"),
+        ("Calendar new meeting", "app.focus_and_safe_shortcut", "Calendar", "new_event"),
+    )
+
+    for prompt, tool_name, app_name, action in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            ["app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"],
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": app_name, "action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     data_selection = planner_first_direct_tool_selection(

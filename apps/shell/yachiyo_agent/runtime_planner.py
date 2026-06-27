@@ -934,6 +934,12 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        scoped_new_item = _app_scoped_safe_operation_hint(text)
+        scoped_action = str(
+            (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
+        ).strip()
+        if scoped_action == "new_note":
+            return _empty_intent("information_capture", text)
         hint = capture_note_hint(text)
         if not hint:
             return _empty_intent("information_capture", text)
@@ -959,6 +965,12 @@ class TaskIntentRouter:
         )
 
     def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        scoped_new_item = _app_scoped_safe_operation_hint(text)
+        scoped_action = str(
+            (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
+        ).strip()
+        if scoped_action in {"new_reminder", "new_event"}:
+            return _empty_intent("schedule", text)
         score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
         if score <= 0:
             return _empty_intent("schedule", text)
@@ -5507,9 +5519,21 @@ def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
     safe_key = safe_key_hint(followup)
     safe_scroll = safe_scroll_hint(followup)
     safe_shortcut = safe_shortcut_hint(followup)
+    app_name = str(parsed.get("app_name") or "").strip()
+    canonical_app_name = _canonical_app_name_hint(app_name)
+    if safe_shortcut is None:
+        default_new_action = _app_default_new_item_shortcut_action(canonical_app_name, followup)
+        if default_new_action:
+            safe_shortcut = {"action": default_new_action}
+    if safe_shortcut:
+        new_item_app_name = _app_new_item_shortcut_target_name(
+            canonical_app_name,
+            safe_shortcut,
+        )
+        if new_item_app_name:
+            app_name = new_item_app_name
     if not safe_key and not safe_scroll and not safe_shortcut:
         return {}
-    app_name = str(parsed.get("app_name") or "").strip()
     if (
         safe_shortcut
         and _safe_shortcut_requires_finder_scope(safe_shortcut)
@@ -5534,6 +5558,33 @@ def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
     return result
 
 
+def _app_default_new_item_shortcut_action(app_name: str, followup: str) -> str:
+    normalized = re.sub(r"[\s._·-]+", "", _clean_prompt(followup).lower())
+    if normalized not in {"新建", "创建", "new", "compose"}:
+        return ""
+    return {
+        "Notes": "new_note",
+        "Reminders": "new_reminder",
+        "Calendar": "new_event",
+    }.get(app_name, "")
+
+
+def _app_new_item_shortcut_target_name(
+    canonical_app_name: str,
+    safe_shortcut: Mapping[str, Any],
+) -> str:
+    action = str(safe_shortcut.get("action") or "").strip()
+    app_by_action = {
+        "new_note": "Notes",
+        "new_reminder": "Reminders",
+        "new_event": "Calendar",
+    }
+    expected_app_name = app_by_action.get(action, "")
+    if canonical_app_name == expected_app_name:
+        return expected_app_name
+    return ""
+
+
 def _app_scoped_followup_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     safe_followup = (
@@ -5541,12 +5592,17 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"向下|往下|朝下|向上|往上|朝上|下滑|上滑|下滚|上滚|"
         r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉|"
         r"复制|粘贴|全选|撤销|重做|查找|刷新|后退|前进|最大化|全屏|"
+        r"新建|创建|"
         r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
+        r"新建提醒事项|新建提醒|新提醒|创建提醒事项|创建提醒|"
+        r"新建日程|新建日历事件|新建事件|新建会议|新日程|新事件|新会议|创建日程|创建事件|"
+        r"新建备忘录|新建笔记|新笔记|新备忘录|创建备忘录|创建笔记|"
         r"显示简介|查看简介|快速查看|快速预览|预览|重命名|上一级目录|上一级|"
         r"打开开发者工具|显示开发者工具|开发者工具|"
         r"打开当前网页开发者工具|打开当前网页的开发者工具|"
-        r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|"
+        r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|new|compose|"
         r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e|"
+        r"new\s+note|new\s+reminder|new\s+event|new\s+meeting|compose(?:\s+(?:note|reminder|event|meeting))?|"
         r"open\s+dev\s*tools|show\s+dev\s*tools|dev\s*tools|developer\s+tools).*)"
     )
     patterns: tuple[tuple[str, str], ...] = (

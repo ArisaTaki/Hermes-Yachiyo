@@ -2990,10 +2990,16 @@ def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
 
 def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
     cases = (
-        ("在 Keynote 新建一个演示文稿", "Keynote", "app.focus_and_safe_shortcut"),
-        ("用 Pages 新建一份文档", "Pages", "app.focus_and_safe_shortcut"),
-        ("在 Numbers 新建一个表格", "Numbers", "app.focus_and_safe_shortcut"),
-        ("打开 Keynote 新建演示", "Keynote", "app.open_and_safe_shortcut"),
+        ("在 Keynote 新建一个演示文稿", "Keynote", "new_document", "app.focus_and_safe_shortcut"),
+        ("用 Pages 新建一份文档", "Pages", "new_document", "app.focus_and_safe_shortcut"),
+        ("在 Numbers 新建一个表格", "Numbers", "new_document", "app.focus_and_safe_shortcut"),
+        ("打开 Keynote 新建演示", "Keynote", "new_document", "app.open_and_safe_shortcut"),
+        ("打开备忘录新建备忘录", "Notes", "new_note", "app.open_and_safe_shortcut"),
+        ("备忘录新建", "Notes", "new_note", "app.focus_and_safe_shortcut"),
+        ("打开提醒事项新建提醒", "Reminders", "new_reminder", "app.open_and_safe_shortcut"),
+        ("提醒事项新建", "Reminders", "new_reminder", "app.focus_and_safe_shortcut"),
+        ("打开日历新建日程", "Calendar", "new_event", "app.open_and_safe_shortcut"),
+        ("Calendar new meeting", "Calendar", "new_event", "app.focus_and_safe_shortcut"),
     )
     allowed_tools = [
         "desktop.list_apps",
@@ -3005,21 +3011,21 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         "artifact.write",
     ]
 
-    for prompt, app_name, expected_tool in cases:
+    for prompt, app_name, action, expected_tool in cases:
         decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
         assert decision.selected_intent.kind == "desktop_operation"
         assert decision.selected_intent.inputs == {
             "app_name_hint": app_name,
             "operation_hint": "safe_shortcut",
-            "safe_shortcut_hint": {"action": "new_document"},
+            "safe_shortcut_hint": {"action": action},
         }
         discover = _step_by_id(decision, "discover-desktop-state")
         assert discover.tool_name == "desktop.list_apps"
         assert discover.input_preview == {"query": app_name, "limit": 20}
         operate = _step_by_id(decision, "operate-foreground-ui")
         assert operate.tool_name == expected_tool
-        assert operate.input_preview == {"app_name": app_name, "action": "new_document"}
+        assert operate.input_preview == {"app_name": app_name, "action": action}
         assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
 
     foreground = RuntimePlanner().decision(
