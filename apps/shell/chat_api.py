@@ -52,7 +52,10 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     main_chat_entrypoint_allowed_tools,
 )
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
-from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+from apps.shell.yachiyo_agent.planner_execution import (
+    planner_orchestration_requests,
+    planner_tool_requests,
+)
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
 
@@ -709,6 +712,126 @@ class ChatAPI:
             logger.debug("主聊天日常桌面任务直接执行失败: %s", task_id, exc_info=True)
             return None
 
+    @staticmethod
+    def _planner_orchestration_entrypoint_requests(
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            return planner_orchestration_requests(text, metadata=metadata)
+        except Exception:
+            logger.debug("Chat runtime planner orchestration candidates unavailable", exc_info=True)
+            return []
+
+    def _execute_planner_orchestration_runnable(
+        self,
+        text: str,
+        requests: list[dict[str, Any]],
+        *,
+        client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Dict[str, Any] | None:
+        request = requests[0] if requests else {}
+        if str(request.get("orchestration_kind") or "") != "workflow":
+            return None
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        target_name = str(payload.get("target_name") or "").strip()
+        if not target_name:
+            return None
+        try:
+            service = self._agent_runtime_service()
+            runnable = service.resolve_runnable(name=target_name)
+        except Exception:
+            logger.debug("Planner workflow target could not be resolved: %s", target_name, exc_info=True)
+            return None
+        if not isinstance(runnable, dict) or runnable.get("kind") != "workflow":
+            return None
+        runnable_id = str(runnable.get("id") or runnable.get("workflow_id") or "").strip()
+        if not runnable_id:
+            return None
+        orchestration_metadata = self._merge_user_metadata(
+            metadata,
+            self._planner_orchestration_user_metadata(requests),
+        ) or {}
+        return self._handle_runnable_command(
+            text,
+            [],
+            runnable_id=runnable_id,
+            client_message_id=client_message_id,
+            metadata=orchestration_metadata,
+        )
+
+    @staticmethod
+    def _planner_orchestration_user_metadata(
+        requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        request = requests[0] if requests else {}
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        return {
+            "yachiyo_runtime_planner": True,
+            "yachiyo_intent_kind": str(request.get("intent_kind") or ""),
+            "yachiyo_route_to_studio": bool(request.get("route_to_studio")),
+            "yachiyo_decision_id": str(request.get("decision_id") or ""),
+            "yachiyo_plan_id": str(request.get("plan_id") or ""),
+            "yachiyo_orchestration_kind": str(request.get("orchestration_kind") or ""),
+            "yachiyo_orchestration_target": str(payload.get("target_name") or "").strip(),
+            "yachiyo_orchestration_planning_reason": str(request.get("planning_reason") or ""),
+        }
+
+    def _record_planner_orchestration_handoff(
+        self,
+        *,
+        task_id: str,
+        requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        request = requests[0] if requests else {}
+        content = self._format_planner_orchestration_handoff(request)
+        self._state.update_task_status(
+            task_id,
+            TaskStatus.COMPLETED,
+            result=content,
+            progress_label="Agent Studio",
+        )
+        assistant_id = self._session.upsert_assistant_message(
+            task_id=task_id,
+            content=content,
+            status=MessageStatus.COMPLETED,
+            metadata={
+                "sender": self._main_model_sender_from_runtime(),
+                "planner_orchestration": True,
+                "planner_orchestration_kind": str(request.get("orchestration_kind") or ""),
+                "planner_orchestration_target": str(
+                    (request.get("input") if isinstance(request.get("input"), dict) else {}).get("target_name")
+                    or ""
+                ),
+                "route_to_studio": bool(request.get("route_to_studio")),
+                "intent_kind": str(request.get("intent_kind") or ""),
+                "decision_id": str(request.get("decision_id") or ""),
+                "plan_id": str(request.get("plan_id") or ""),
+            },
+        )
+        return {"assistant_message_id": assistant_id}
+
+    @staticmethod
+    def _format_planner_orchestration_handoff(request: dict[str, Any]) -> str:
+        kind = str(request.get("orchestration_kind") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        target = str(payload.get("target_name") or "").strip()
+        if kind == "workflow":
+            if target:
+                return (
+                    f"已识别为 Workflow 编排请求，但当前没有找到名为「{target}」的 Workflow。"
+                    "请在 Agent Studio 的 Workflow 面板选择或创建后运行。"
+                )
+            return "已识别为 Workflow 编排请求。请在 Agent Studio 的 Workflow 面板选择具体 Workflow 后运行。"
+        if target:
+            return (
+                f"已识别为 GroupRun / 多 Agent 编排请求，但当前没有找到名为「{target}」的 Agent Group。"
+                "请在 Agent Studio 的 Groups 面板选择群组后运行。"
+            )
+        return "已识别为 GroupRun / 多 Agent 编排请求。请在 Agent Studio 的 Groups 面板选择群组后运行。"
+
     def _warm_daily_desktop_permission_cache(
         self,
         requests: list[dict[str, Any]],
@@ -1144,6 +1267,24 @@ class ChatAPI:
                 current_context = self._session_context()
                 group_presynced = True
 
+            planner_orchestration_requests = []
+            if (
+                not raw_attachments
+                and current_context.get("conversation_kind") in {"", "main", None}
+            ):
+                planner_orchestration_requests = self._planner_orchestration_entrypoint_requests(
+                    text,
+                    metadata=metadata,
+                )
+                runnable_orchestration = self._execute_planner_orchestration_runnable(
+                    text,
+                    planner_orchestration_requests,
+                    client_message_id=idempotency_key,
+                    metadata=metadata,
+                )
+                if runnable_orchestration is not None:
+                    return runnable_orchestration
+
             runnable_command = self._handle_runnable_command(
                 text,
                 raw_attachments,
@@ -1169,10 +1310,15 @@ class ChatAPI:
                 and current_context.get("conversation_kind") != "group"
                 and bool(daily_desktop_requests)
             )
+            direct_planner_orchestration_intent = (
+                not raw_attachments
+                and current_context.get("conversation_kind") != "group"
+                and bool(planner_orchestration_requests)
+            )
             if direct_daily_desktop_intent:
                 self._warm_daily_desktop_permission_cache(daily_desktop_requests)
             unavailable_reason = user_task_unavailable_reason(self._runtime)
-            if unavailable_reason and not direct_daily_desktop_intent:
+            if unavailable_reason and not direct_daily_desktop_intent and not direct_planner_orchestration_intent:
                 return self._unavailable_response(unavailable_reason)
 
             if raw_attachments and self._should_enforce_image_capability():
@@ -1207,6 +1353,11 @@ class ChatAPI:
                 user_metadata = self._merge_user_metadata(
                     user_metadata,
                     daily_desktop_user_metadata(daily_desktop_requests),
+                )
+            if direct_planner_orchestration_intent:
+                user_metadata = self._merge_user_metadata(
+                    user_metadata,
+                    self._planner_orchestration_user_metadata(planner_orchestration_requests),
                 )
             task_description = self._with_group_context_for_main_model(task_description, current_context)
             task_description = self._with_group_followup_context(task_description, user_metadata)
@@ -1259,6 +1410,12 @@ class ChatAPI:
                     prompt=task_text,
                     metadata=user_metadata,
                 )
+            direct_planner_orchestration_task: dict[str, Any] | None = None
+            if direct_planner_orchestration_intent and direct_daily_desktop_task is None:
+                direct_planner_orchestration_task = self._record_planner_orchestration_handoff(
+                    task_id=task_id,
+                    requests=planner_orchestration_requests,
+                )
             if direct_group_dispatch_directives:
                 source_text = self._format_group_dispatch_direct_source()
                 self._state.update_task_status(
@@ -1297,6 +1454,17 @@ class ChatAPI:
                     "task_id": task_id,
                     "assistant_message_id": assistant_id,
                     "status": "completed",
+                    "attachments": self._serialize_attachments(saved_attachments),
+                    **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
+                }
+            if direct_planner_orchestration_task is not None:
+                return {
+                    "ok": True,
+                    "message_id": message_id,
+                    "task_id": task_id,
+                    "assistant_message_id": direct_planner_orchestration_task["assistant_message_id"],
+                    "status": "completed",
+                    "planner_orchestration": True,
                     "attachments": self._serialize_attachments(saved_attachments),
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
                 }

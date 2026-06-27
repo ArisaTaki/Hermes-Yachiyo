@@ -848,6 +848,7 @@ class TaskIntentRouter:
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         if score <= 0 and metadata.get("runnable_kind") != "workflow":
             return _empty_intent("workflow_orchestration", text)
+        target_hint = _workflow_target_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "workflow_orchestration", text),
             kind="workflow_orchestration",
@@ -855,6 +856,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.92, 0.5 + score),
             description="Run or debug an Agent Studio workflow.",
+            inputs={"target_name_hint": target_hint} if target_hint else {},
             required_capabilities=["workflow.orchestration"],
             preferred_capabilities=["artifact.write"],
             risk_level="medium",
@@ -866,6 +868,7 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and metadata.get("runnable_kind") != "group":
             return _empty_intent("multi_agent", text)
+        target_hint = _group_target_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "multi_agent", text),
             kind="multi_agent",
@@ -873,6 +876,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.9, 0.48 + score),
             description="Coordinate multiple agents or group runs.",
+            inputs={"target_name_hint": target_hint} if target_hint else {},
             required_capabilities=["group.multi_agent"],
             preferred_capabilities=["artifact.write"],
             risk_level="medium",
@@ -4003,6 +4007,107 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         re.search(r"(?:agent|Agent|智能体|代理)", value, flags=re.IGNORECASE)
         and _contains_any(value, ("分别", "各自", "并行", "协作", "汇总", "对比", "分工"))
     )
+
+
+def _workflow_target_hint(text: str) -> str:
+    return _orchestration_target_hint(
+        text,
+        nouns=("workflow", "Workflow", "工作流", "流程"),
+        reject_prefixes=(
+            "分析",
+            "调研",
+            "研究",
+            "生成",
+            "输出",
+            "整理",
+            "创建",
+            "新建",
+            "发",
+            "发送",
+            "做",
+            "执行",
+            "处理",
+            "analyze",
+            "research",
+            "generate",
+            "create",
+            "send",
+            "run ",
+        ),
+    )
+
+
+def _group_target_hint(text: str) -> str:
+    return _orchestration_target_hint(
+        text,
+        nouns=("group", "Group", "群组", "小组"),
+        reject_prefixes=(
+            "两个",
+            "多个",
+            "多位",
+            "一组",
+            "agent",
+            "Agent",
+            "AI",
+            "智能体",
+            "代理",
+        ),
+    )
+
+
+def _orchestration_target_hint(
+    text: str,
+    *,
+    nouns: tuple[str, ...],
+    reject_prefixes: tuple[str, ...],
+) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    noun_pattern = "|".join(re.escape(noun) for noun in nouns)
+    patterns = (
+        rf"(?:名为|叫做|叫|named)\s*[\"'“”‘’「」『』]?(?P<target>[^\"'“”‘’「」『』,，。；;]+?)[\"'“”‘’「」『』]?\s*(?:的)?\s*(?:{noun_pattern})",
+        rf"(?:{noun_pattern})\s*[\"'“”‘’「」『』](?P<target>[^\"'“”‘’「」『』,，。；;]+)[\"'“”‘’「」『』]",
+        rf"(?:运行|启动|执行|打开|run|start)\s*(?P<target>[\w\u4e00-\u9fff ._-]{{2,48}}?)\s*(?:{noun_pattern})",
+        rf"(?:运行|启动|执行|打开|run|start)\s*(?:{noun_pattern})\s*(?P<target>[\w\u4e00-\u9fff ._-]{{2,48}})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _clean_orchestration_target_hint(
+            match.group("target"),
+            reject_prefixes=reject_prefixes,
+        )
+        if target:
+            return target
+    return ""
+
+
+def _clean_orchestration_target_hint(
+    value: str,
+    *,
+    reject_prefixes: tuple[str, ...],
+) -> str:
+    target = " ".join(str(value or "").strip().split())
+    target = target.strip(" \t\r\n:：,，.。;；\"'“”‘’「」『』")
+    if not target:
+        return ""
+    lowered = target.lower()
+    generic = {
+        "workflow",
+        "flow",
+        "工作流",
+        "流程",
+        "group",
+        "群组",
+        "小组",
+    }
+    if lowered in generic or target in generic:
+        return ""
+    if any(lowered.startswith(prefix.lower()) for prefix in reject_prefixes):
+        return ""
+    return target[:80]
 
 
 def _file_operation_hint(text: str) -> str:

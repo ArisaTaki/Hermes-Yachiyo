@@ -13,6 +13,7 @@ from apps.shell.yachiyo_agent import (
     capability_snapshots,
 )
 from apps.shell.yachiyo_agent.planner_execution import (
+    planner_orchestration_requests,
     planner_direct_tool_requests,
     planner_desktop_tool_requests,
     planner_tool_requests,
@@ -481,11 +482,20 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert workflow_step.action == "start_workflow"
     assert workflow_step.status == "planned"
 
+    named_workflow = RuntimePlanner().decision(
+        "运行 Daily Summary workflow",
+        allowed_tools=["workflow.run", "artifact.write"],
+    )
+    assert named_workflow.selected_intent.inputs == {
+        "target_name_hint": "Daily Summary"
+    }
+
     workflow_with_data_words = RuntimePlanner().decision(
         "启动工作流分析 sales.csv",
         allowed_tools=["workflow.run", "data.analyze", "workspace.read"],
     )
     assert workflow_with_data_words.selected_intent.kind == "workflow_orchestration"
+    assert workflow_with_data_words.selected_intent.inputs == {}
 
     group = RuntimePlanner().decision(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
@@ -499,11 +509,56 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert group_step.action == "start_group_run"
     assert group_step.status == "planned"
 
+    named_group = RuntimePlanner().decision(
+        "运行 Research Team group",
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert named_group.selected_intent.inputs == {
+        "target_name_hint": "Research Team"
+    }
+
     single_agent_research = RuntimePlanner().decision(
         "研究 agent runtime 并总结",
         allowed_tools=["browser.open_url", "artifact.write"],
     )
     assert single_agent_research.selected_intent.kind == "web_research"
+
+
+def test_planner_orchestration_requests_project_workflow_and_group_handoffs() -> None:
+    assert planner_orchestration_requests("运行 Daily Summary workflow") == [
+        {
+            "kind": "orchestration",
+            "orchestration_kind": "workflow",
+            "source": "runtime_planner",
+            "planning_reason": "planner_orchestration_workflow",
+            "route_to_studio": True,
+            "decision_id": RuntimePlanner().decision(
+                "运行 Daily Summary workflow",
+                allowed_tools=["workflow.run", "group.run"],
+            ).decision_id,
+            "plan_id": RuntimePlanner().decision(
+                "运行 Daily Summary workflow",
+                allowed_tools=["workflow.run", "group.run"],
+            ).plan.plan_id,
+            "intent_kind": "workflow_orchestration",
+            "input": {
+                "objective": "运行 Daily Summary workflow",
+                "title": "Workflow Orchestration",
+                "target_name": "Daily Summary",
+            },
+        }
+    ]
+
+    group_request = planner_orchestration_requests(
+        "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总"
+    )
+    assert len(group_request) == 1
+    assert group_request[0]["orchestration_kind"] == "group_run"
+    assert group_request[0]["intent_kind"] == "multi_agent"
+    assert group_request[0]["route_to_studio"] is True
+    assert group_request[0]["input"]["target_name"] == ""
+    assert planner_orchestration_requests("什么是 Workflow？") == []
+    assert planner_orchestration_requests("介绍一下 multi-agent 架构") == []
 
 
 def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:

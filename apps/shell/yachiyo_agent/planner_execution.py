@@ -46,6 +46,28 @@ def planner_direct_tool_requests(
     return requests
 
 
+def planner_orchestration_requests(
+    prompt: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["workflow.run", "group.run"],
+        metadata=metadata,
+    )
+    intent_kind = str(decision.selected_intent.kind or "").strip()
+    if intent_kind == "workflow_orchestration":
+        if not _looks_like_orchestration_action(prompt, "workflow"):
+            return []
+        return [_orchestration_request(decision, "workflow")]
+    if intent_kind == "multi_agent":
+        if not _looks_like_orchestration_action(prompt, "group_run"):
+            return []
+        return [_orchestration_request(decision, "group_run")]
+    return []
+
+
 def planner_decision_and_tool_requests(
     prompt: str,
     allowed_tools: Iterable[str],
@@ -181,6 +203,62 @@ def _request(
         "source": "runtime_planner",
         "planning_reason": planning_reason,
     }
+
+
+def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, Any]:
+    intent = decision.selected_intent
+    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
+    target_name = str(inputs.get("target_name_hint") or "").strip()
+    return {
+        "kind": "orchestration",
+        "orchestration_kind": orchestration_kind,
+        "source": "runtime_planner",
+        "planning_reason": f"planner_orchestration_{orchestration_kind}",
+        "route_to_studio": bool(decision.plan.route_to_studio),
+        "decision_id": str(decision.decision_id or ""),
+        "plan_id": str(decision.plan.plan_id or ""),
+        "intent_kind": str(intent.kind or ""),
+        "input": {
+            "objective": str(intent.user_goal or "").strip(),
+            "title": str(intent.title or "").strip(),
+            "target_name": target_name,
+        },
+    }
+
+
+def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    if re.search(
+        r"(?:什么是|是什么|介绍|解释|说明|为什么|怎么设计|如何设计|不要|不用|无需|不需要|不使用|"
+        r"what is|explain|describe|why|how should|do not|don't)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if orchestration_kind == "workflow":
+        return bool(
+            re.search(r"(?:workflow|flow|工作流|流程)", text, flags=re.IGNORECASE)
+            and re.search(
+                r"(?:运行|启动|执行|创建|新建|调试|跑|打开|run|start|execute|create|debug)",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+    return bool(
+        re.search(
+            r"(?:multi-agent|group|agents?|群组|多\s*agent|多Agent|协作|智能体|代理)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        and re.search(
+            r"(?:让|安排|派发|派活|委派|分配|指派|分别|各自|并行|协作|汇总|运行|启动|执行|"
+            r"assign|dispatch|delegate|parallel|coordinate|run|start|execute)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:

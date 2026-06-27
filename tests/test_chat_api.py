@@ -403,6 +403,89 @@ def test_send_message_executes_direct_data_analysis_task_and_records_artifact(
         store.close()
 
 
+def test_send_message_routes_named_workflow_planner_request_without_at_mention(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeWorkflowService:
+        def __init__(self) -> None:
+            self.resolve_calls: list[dict[str, str]] = []
+            self.run_calls: list[dict[str, str]] = []
+
+        def _workflow(self) -> dict[str, str | bool]:
+            return {
+                "id": "workflow_daily",
+                "workflow_id": "workflow_daily",
+                "name": "Daily Summary",
+                "nickname": "Daily Summary",
+                "kind": "workflow",
+                "enabled": True,
+            }
+
+        def resolve_runnable(self, *, runnable_id: str = "", name: str = ""):
+            self.resolve_calls.append({"runnable_id": runnable_id, "name": name})
+            if runnable_id == "workflow_daily" or name == "Daily Summary":
+                return self._workflow()
+            return None
+
+        def create_run_for_runnable_async(self, **kwargs):
+            self.run_calls.append(dict(kwargs))
+            return {
+                "run_id": "workflow-run-1",
+                "run_group_id": "run-group-1",
+                "runnable": self._workflow(),
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": "Daily Summary"},
+                ],
+            }
+
+    service = FakeWorkflowService()
+    runtime.agent_runtime_service = service
+    try:
+        result = api.send_message("运行 Daily Summary workflow")
+        user = runtime.chat_session.get_messages()[0]
+        assistant = runtime.chat_session.get_messages()[1]
+
+        assert result["ok"] is True
+        assert result["runnable_command"] is True
+        assert result["workflow_run_id"] == "workflow-run-1"
+        assert service.run_calls[0]["runnable_id"] == "workflow_daily"
+        assert user.metadata["yachiyo_runtime_planner"] is True
+        assert user.metadata["yachiyo_intent_kind"] == "workflow_orchestration"
+        assert user.metadata["yachiyo_orchestration_kind"] == "workflow"
+        assert user.metadata["yachiyo_orchestration_target"] == "Daily Summary"
+        assert assistant.metadata["runnable_kind"] == "workflow"
+        assert assistant.metadata["workflow_run_id"] == "workflow-run-1"
+    finally:
+        store.close()
+
+
+def test_send_message_handoffs_ambiguous_multi_agent_planner_request_to_studio(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.agent_runtime_service = SimpleNamespace(
+        _main_chat_tool_policy=lambda: {"allowed_tools": []},
+    )
+    try:
+        result = api.send_message("让两个 agent 分别调研 Hanako 和 Hermes 然后汇总")
+        task = runtime.state.get_task(result["task_id"])
+        messages = runtime.chat_session.get_messages()
+        assistant = messages[1]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["planner_orchestration"] is True
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert "Agent Studio" in assistant.content
+        assert "Groups" in assistant.content
+        assert messages[0].metadata["yachiyo_runtime_planner"] is True
+        assert messages[0].metadata["yachiyo_intent_kind"] == "multi_agent"
+        assert messages[0].metadata["yachiyo_orchestration_kind"] == "group_run"
+        assert assistant.metadata["planner_orchestration"] is True
+        assert assistant.metadata["planner_orchestration_kind"] == "group_run"
+    finally:
+        store.close()
+
+
 def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_model(
     tmp_path,
     monkeypatch,
