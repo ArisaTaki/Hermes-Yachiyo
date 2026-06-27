@@ -6585,7 +6585,11 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
     value = _clean_prompt(text)
     source_pattern = {
         "clipboard": r"(?:剪贴板内容|粘贴板内容|clipboard\s+contents?|the\s+clipboard)",
-        "selection": r"(?:选中的内容|选中内容|选中文字|选中文本|selected\s+text|selected\s+content|selection)",
+        "selection": (
+            r"(?:当前选中的内容|当前选中内容|当前选中的文字|当前选中文字|当前选中文本|"
+            r"选中的内容|选中内容|选中的文字|选中文字|选中文本|"
+            r"selected\s+text|selected\s+content|selection)"
+        ),
         "current_page_link": r"(?:当前网页链接|当前页面链接|当前链接|current\s+page\s+link|current\s+url)",
     }[source]
     patterns = (
@@ -6595,6 +6599,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         rf"(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
+        rf"^(?:给|发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:send|message)\s+{source_pattern}\s+(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
         rf"^(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:send|message)\s+{source_pattern}\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
         rf"^(?:send|message)\s+{source_pattern}\s+(?:to|for)\s+(?P<target>[^.!?,]+)$",
@@ -6610,6 +6615,8 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
             app_name, recipient = _split_communication_surface_and_recipient(
                 str(groups.get("target") or "")
             )
+        if not app_name and recipient:
+            app_name = _communication_surface_for_recipient_hint(recipient)
         if not app_name or not recipient:
             continue
         return {
@@ -6646,13 +6653,47 @@ def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
         if lowered == surface.lower():
             return "", ""
         if lowered.startswith(surface.lower() + " "):
-            return _canonical_app_name_hint(surface), value[len(surface) :].strip()
+            recipient = _strip_communication_surface_connector(value[len(surface) :])
+            return (
+                _canonical_app_name_hint(surface),
+                _clean_communication_recipient_text(recipient),
+            )
         if value.startswith(surface) and len(value) > len(surface):
-            return _canonical_app_name_hint(surface), value[len(surface) :].strip()
+            recipient = _strip_communication_surface_connector(value[len(surface) :])
+            return (
+                _canonical_app_name_hint(surface),
+                _clean_communication_recipient_text(recipient),
+            )
     parts = value.split(None, 1)
     if len(parts) == 2:
         return _canonical_app_name_hint(parts[0]), _clean_communication_hint_text(parts[1])
-    return "", ""
+    app_name = _communication_surface_for_recipient_hint(value)
+    return (app_name, value) if app_name else ("", "")
+
+
+def _strip_communication_surface_connector(value: str) -> str:
+    return re.sub(
+        r"^(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?|里面(?:的)?|中的)?\s*",
+        "",
+        _clean_communication_hint_text(value),
+    )
+
+
+def _communication_surface_for_recipient_hint(recipient: str) -> str:
+    normalized = re.sub(
+        r"[\s._·《》<>「」『』“”\"'`-]+",
+        "",
+        _clean_communication_recipient_text(recipient).lower(),
+    )
+    if normalized in {
+        "文件传输助手",
+        "微信文件传输助手",
+        "filetransferassistant",
+        "filehelper",
+        "wechatfiletransfer",
+    }:
+        return "WeChat"
+    return ""
 
 
 def _split_communication_implicit_recipient_message(value: str) -> tuple[str, str] | None:
