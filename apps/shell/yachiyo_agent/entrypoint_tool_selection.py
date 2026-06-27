@@ -439,6 +439,11 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.type_text",
         "desktop.search_submit",
         "desktop.submit_foreground",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "screen.capture",
         "desktop.hide_app",
         "desktop.show_all_apps",
         "desktop.minimize_window",
@@ -484,6 +489,14 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
     }:
         return True
     if tool_name in {"desktop.search_submit"}:
+        return True
+    if tool_name in {
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "screen.capture",
+    }:
         return True
     if tool_name == "desktop.submit_foreground":
         return _has_text_input(request_input, "action")

@@ -2465,7 +2465,14 @@ def test_runtime_planner_routes_show_all_hidden_apps_to_foreground_tool() -> Non
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -2726,7 +2733,14 @@ def test_runtime_planner_routes_screenshot_shortcuts_without_opening_fake_apps()
             "input": {"action": "screenshot_toolbar"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -3158,6 +3172,13 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     finder_file_search = RuntimePlanner().decision(
@@ -3391,14 +3412,21 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-    ]
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
     assert planner_direct_tool_requests(
         "open Chrome downloads",
         allowed_tools=[
@@ -3467,6 +3495,13 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
     assert planner_direct_tool_requests(
         "打开 Chrome 设置",
@@ -3484,6 +3519,13 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert planner_direct_tool_requests(
         "Chrome 打开历史记录",
@@ -3497,6 +3539,13 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Google Chrome", "action": "show_history"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3591,6 +3640,13 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert planner_direct_tool_requests(
         "Slack preferences",
@@ -3605,6 +3661,13 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Slack", "action": "preferences"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3783,6 +3846,13 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests("在 VS Code 里执行命令 Format Document", allowed) == [
@@ -3804,6 +3874,13 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.submit_foreground",
             "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3837,6 +3914,13 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert planner_direct_tool_requests("微信打开搜索", allowed) == [
         {
@@ -3845,7 +3929,14 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
             "input": {"app_name": "WeChat", "action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert planner_direct_tool_requests("Chrome 点登录", allowed) == [
         {
@@ -3860,7 +3951,14 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
             },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -4173,7 +4271,14 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "input": {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests(
@@ -4190,7 +4295,14 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "input": {"app_name": "Slack", "direction": "down", "pages": 2},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests(
@@ -4207,7 +4319,14 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     for prompt, tool_name, payload in (
@@ -4247,7 +4366,14 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
                 "input": payload,
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
 
@@ -4534,7 +4660,14 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "input": {"app_name": "Obsidian", "text": "hello"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert generic_focus_app == [
         {
@@ -4543,7 +4676,14 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "input": {"app_name": "Notes", "text": "hello"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -6310,6 +6450,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests(
@@ -6348,6 +6495,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -6402,6 +6556,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests(
@@ -6450,6 +6611,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.click_ui_element",
             "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6529,6 +6697,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_direct_tool_requests(
@@ -6543,6 +6718,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
             "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6585,6 +6767,13 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.submit_foreground",
             "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6804,7 +6993,7 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
     assert planner_tool_requests("我现在是不是在家", allowed_tools) == []
 
 
-def test_planner_direct_tool_requests_omits_discover_and_verify_steps() -> None:
+def test_planner_direct_tool_requests_omits_discover_but_preserves_verify_steps() -> None:
     requests = planner_direct_tool_requests(
         "打开 PixelForge 并点击导出按钮",
         allowed_tools=[
@@ -6832,6 +7021,13 @@ def test_planner_direct_tool_requests_omits_discover_and_verify_steps() -> None:
                 "click_count": 1,
                 "limit": 80,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6863,7 +7059,14 @@ def test_planner_direct_tool_requests_maps_foreground_browser_safe_shortcuts() -
                 "input": {"action": action},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
 
@@ -6913,6 +7116,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
     assert [request["tool"] for request in requests] == [
         "app.open",
         "desktop.click_ui_element",
+        "desktop.ui_elements",
     ]
     assert legacy_calls == []
 
@@ -7005,7 +7209,14 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_safe_shortcuts(
                 "input": {"action": action},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
 
@@ -7622,6 +7833,13 @@ def test_planner_direct_tool_requests_maps_app_management_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "app.hide",
             "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -9612,6 +9830,13 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
     }
+    verify_ui = {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
 
     cases = (
         ("复制当前网页内容", [*current_content_copy]),
@@ -9625,6 +9850,7 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            verify_ui,
         ]),
         ("在 Slack 粘贴当前页面内容", [
             *current_content_copy,
@@ -9635,6 +9861,7 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            verify_ui,
         ]),
         ("打开 Slack 粘贴当前页面内容", [
             *current_content_copy,
@@ -9645,6 +9872,7 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            verify_ui,
         ]),
         ("把剪贴板内容粘贴到 Slack", [
             {
@@ -9654,29 +9882,34 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            verify_ui,
         ]),
-        ("把选中的内容填到当前输入框", [selected_copy, paste]),
-        ("把剪贴板内容填到当前输入框", [paste]),
-        ("把剪贴板内容输入到搜索框", [foreground_search_click, paste]),
+        ("把选中的内容填到当前输入框", [selected_copy, paste, verify_ui]),
+        ("把剪贴板内容填到当前输入框", [paste, verify_ui]),
+        ("把剪贴板内容输入到搜索框", [foreground_search_click, paste, verify_ui]),
         ("把当前网页链接输入到地址栏", [
             current_page_link_copy,
             foreground_address_click,
             paste,
+            verify_ui,
         ]),
         ("把当前页面内容输入到搜索框", [
             *current_content_copy,
             foreground_search_click,
             paste,
+            verify_ui,
         ]),
         ("把当前网页链接输入到 Slack 搜索框", [
             current_page_link_copy,
             slack_search_click,
             paste,
+            verify_ui,
         ]),
         ("把当前页面内容输入到 Slack 搜索框", [
             *current_content_copy,
             slack_search_click,
             paste,
+            verify_ui,
         ]),
         ("打开 Slack 搜索框输入选中的内容", [
             selected_copy,
@@ -9694,6 +9927,7 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "planning_reason": "planner_desktop_operation",
             },
             paste,
+            verify_ui,
         ]),
     )
     for prompt, expected_requests in cases:
@@ -9861,7 +10095,7 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "desktop.click_ui_element",
                 "desktop.ui_elements",
             ],
-            ["app.focus_and_click_ui_element"],
+            ["app.focus_and_click_ui_element", "desktop.ui_elements"],
         ),
         (
             "打开 Slack 点击坐标 120, 240",
@@ -9876,7 +10110,7 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "desktop.safe_type_text",
                 "desktop.ui_elements",
             ],
-            ["app.open_and_safe_type_text"],
+            ["app.open_and_safe_type_text", "desktop.ui_elements"],
         ),
         (
             "在 Notes 输入 hello",
@@ -9939,22 +10173,22 @@ def test_planner_first_owns_app_window_and_management_over_legacy() -> None:
         (
             "切到 Slack 的主窗口",
             ["desktop.list_apps", "desktop.windows", "app.focus_window", "app.focus"],
-            ["app.focus_window"],
+            ["app.focus_window", "desktop.windows"],
         ),
         (
             "最小化 Safari",
             ["desktop.list_apps", "app.minimize", "desktop.running_apps"],
-            ["app.minimize"],
+            ["app.minimize", "desktop.running_apps"],
         ),
         (
             "隐藏 Slack",
             ["desktop.list_apps", "app.hide", "desktop.running_apps"],
-            ["app.hide"],
+            ["app.hide", "desktop.running_apps"],
         ),
         (
             "退出 Slack",
             ["desktop.list_apps", "app.quit", "desktop.running_apps"],
-            ["app.quit"],
+            ["app.quit", "desktop.running_apps"],
         ),
     )
 

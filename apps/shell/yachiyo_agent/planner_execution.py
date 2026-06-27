@@ -302,7 +302,7 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     }
     for step in decision.plan.tool_plan.steps:
         step_id = str(getattr(step, "step_id", "") or "").strip()
-        if step_id in {"discover-desktop-state", "verify-desktop-result"}:
+        if step_id == "discover-desktop-state":
             continue
         if step_id == "list-app-windows" and "focus-app-window" in step_ids:
             continue

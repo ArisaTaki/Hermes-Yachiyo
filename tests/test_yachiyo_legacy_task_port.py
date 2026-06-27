@@ -448,7 +448,14 @@ def test_planner_first_direct_selection_owns_screenshot_shortcuts_without_legacy
                 "input": {"action": action},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
     assert legacy_calls == []
@@ -529,23 +536,25 @@ def test_planner_first_direct_selection_owns_app_search_dynamic_context_without_
     cases = (
         (
             "在微信里查找选中的内容",
-            [
-                "desktop.safe_shortcut",
-                "app.focus",
-                "desktop.safe_shortcut",
-                "desktop.safe_shortcut",
-                "desktop.search_submit",
-            ],
-        ),
-        (
-            "在 Slack 里查找剪贴板内容",
-            [
-                "app.focus",
-                "desktop.safe_shortcut",
-                "desktop.safe_shortcut",
-                "desktop.search_submit",
-            ],
-        ),
+                [
+                    "desktop.safe_shortcut",
+                    "app.focus",
+                    "desktop.safe_shortcut",
+                    "desktop.safe_shortcut",
+                    "desktop.search_submit",
+                    "desktop.ui_elements",
+                ],
+            ),
+            (
+                "在 Slack 里查找剪贴板内容",
+                [
+                    "app.focus",
+                    "desktop.safe_shortcut",
+                    "desktop.safe_shortcut",
+                    "desktop.search_submit",
+                    "desktop.ui_elements",
+                ],
+            ),
     )
 
     for prompt, expected_tools in cases:
@@ -614,17 +623,28 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         "desktop.submit_foreground",
     ]
     cases = (
-        ("微信关闭窗口", ["app.focus", "desktop.close_window"]),
+        ("微信关闭窗口", ["app.focus", "desktop.close_window", "desktop.active_window"]),
         (
             "在 VS Code 里执行命令 Format Document",
-            ["app.focus_and_safe_shortcut", "desktop.safe_type_text", "desktop.submit_foreground"],
+            [
+                "app.focus_and_safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.submit_foreground",
+                "desktop.ui_elements",
+            ],
         ),
         (
             "Finder look for Downloads",
-            ["app.focus", "desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+            [
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "desktop.ui_elements",
+            ],
         ),
-        ("微信打开搜索", ["app.open_and_safe_shortcut"]),
-        ("Chrome 点登录", ["app.focus_and_click_ui_element"]),
+        ("微信打开搜索", ["app.open_and_safe_shortcut", "desktop.ui_elements"]),
+        ("Chrome 点登录", ["app.focus_and_click_ui_element", "desktop.ui_elements"]),
     )
 
     for prompt, expected_tools in cases:
@@ -1073,7 +1093,14 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
                 "input": tool_input,
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.running_apps",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
     assert legacy_calls == []
 
@@ -1096,7 +1123,14 @@ def test_planner_first_direct_selection_owns_show_all_hidden_apps_without_legacy
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert legacy_calls == []
 
@@ -1124,7 +1158,14 @@ def test_planner_first_direct_selection_owns_approved_low_level_foreground_click
             "input": {"x": 120, "y": 240},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert type_selection.selected_source == "runtime_planner"
     assert type_selection.event_payload["legacy_request_count"] == 0
@@ -1135,7 +1176,14 @@ def test_planner_first_direct_selection_owns_approved_low_level_foreground_click
             "input": {"text": "hello"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert legacy_calls == []
 
@@ -1540,13 +1588,13 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     )
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_tool"] == "app.open"
-    assert metadata["daily_desktop_tools"] == ["app.open"]
+    assert metadata["daily_desktop_tools"] == ["app.open", "desktop.active_window"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == "planner_desktop_operation"
     assert metadata["entrypoint_plan"] is True
     assert metadata["entrypoint_plan_source"] == "runtime_planner"
     assert metadata["entrypoint_plan_reason"] == "planner_desktop_operation"
-    assert metadata["entrypoint_plan_tools"] == ["app.open"]
+    assert metadata["entrypoint_plan_tools"] == ["app.open", "desktop.active_window"]
     assert metadata["entrypoint_plan_legacy_fallback"] is False
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in planner_events[:2]] == [
@@ -1558,7 +1606,10 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
         event for event in planner_events if event[1]["event_type"] == "agent.plan.selection"
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
-    assert selection_events[0][1]["payload"]["selected_tools"] == ["app.open"]
+    assert selection_events[0][1]["payload"]["selected_tools"] == [
+        "app.open",
+        "desktop.active_window",
+    ]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
