@@ -2038,6 +2038,34 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "desktop.submit_foreground"
     )
 
+    open_command_palette = RuntimePlanner().decision(
+        "打开 Obsidian 命令面板",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert open_command_palette.selected_intent.kind == "desktop_operation"
+    assert open_command_palette.selected_intent.inputs["app_name_hint"] == "Obsidian"
+    assert open_command_palette.selected_intent.inputs["command_palette_hint"] == {
+        "app_name": "Obsidian",
+        "mode": "open",
+        "action": "obsidian_command_palette",
+    }
+    assert [step.step_id for step in open_command_palette.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-app-command-palette",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(open_command_palette, "open-app-command-palette").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(open_command_palette, "open-app-command-palette").input_preview == {
+        "app_name": "Obsidian",
+        "action": "obsidian_command_palette",
+    }
+
     finder_file_search = RuntimePlanner().decision(
         "在 Finder 搜索 budget.xlsx",
         allowed_tools=[
@@ -2476,6 +2504,11 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "打开 Slack 并复制",
             "app.open_and_safe_shortcut",
             {"app_name": "Slack", "action": "copy"},
+        ),
+        (
+            "打开 Chrome 开发者工具",
+            "app.open_and_safe_shortcut",
+            {"app_name": "Google Chrome", "action": "open_devtools"},
         ),
         (
             "Chrome 新建标签页",
@@ -4082,6 +4115,23 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.submit_foreground",
             "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_direct_tool_requests(
+        "打开 Obsidian 命令面板",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

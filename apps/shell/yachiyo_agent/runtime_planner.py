@@ -1669,22 +1669,24 @@ class RuntimePlanner:
                     reason="Open the requested app command palette with a safe app-scoped shortcut.",
                 )
             )
-            steps.append(
-                _step(
-                    intent,
-                    "type-command-palette-query",
-                    "Type command palette query",
-                    "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text",), allowed),
-                    input_preview={"text": command_text},
-                    depends_on=["open-app-command-palette"],
-                    action="type",
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Type only the explicit command text from the user prompt.",
+            previous_step_id = "open-app-command-palette"
+            if command_text:
+                steps.append(
+                    _step(
+                        intent,
+                        "type-command-palette-query",
+                        "Type command palette query",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_type_text",), allowed),
+                        input_preview={"text": command_text},
+                        depends_on=["open-app-command-palette"],
+                        action="type",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Type only the explicit command text from the user prompt.",
+                    )
                 )
-            )
-            previous_step_id = "type-command-palette-query"
+                previous_step_id = "type-command-palette-query"
             safe_key = command_palette.get("safe_key")
             if isinstance(safe_key, Mapping) and safe_key:
                 steps.append(
@@ -4013,7 +4015,7 @@ def _foreground_compose_text_hint(text: str) -> str:
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写)\s*(?P<text>[^。！？!?，,]+?)"
         r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)?$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
-        r"(?P<app>[\w .·-]{1,40}?)\s*(?:发送|发出|发)\s*(?P<text>[^。！？!?，,]+)$",
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:发送|发出|(?<!开)发)\s*(?P<text>[^。！？!?，,]+)$",
         r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:type|enter|write|send)\s+(?P<text>[^.!?]+?)(?:\s+(?:and|then)\s+send)?$",
     )
@@ -4057,7 +4059,7 @@ def _foreground_compose_app_name_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
-        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写|发送|发出|发|粘贴|paste)",
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写|发送|发出|(?<!开)发|粘贴|paste)",
         r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:type|enter|write|send|paste)\b",
     )
@@ -4822,8 +4824,11 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"复制|粘贴|全选|撤销|重做|查找|刷新|后退|前进|最大化|全屏|"
         r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
         r"显示简介|查看简介|快速查看|快速预览|预览|重命名|上一级目录|上一级|"
+        r"打开开发者工具|显示开发者工具|开发者工具|"
+        r"打开当前网页开发者工具|打开当前网页的开发者工具|"
         r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|"
-        r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e).*)"
+        r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e|"
+        r"open\s+dev\s*tools|show\s+dev\s*tools|dev\s*tools|developer\s+tools).*)"
     )
     patterns: tuple[tuple[str, str], ...] = (
         (
@@ -4923,6 +4928,45 @@ def _app_command_palette_hint(text: str) -> dict[str, Any]:
         r"(?P<verb>输入|打字|键入|敲入|打入|打上|搜索|查找|找|执行|运行|打开|启动|"
         r"type|enter|search|find|run|execute|open|launch)"
     )
+    open_patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|里面)?\s*"
+            rf"(?:打开|调出|唤起|显示|open|show)\s*{palette}"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "focus",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            rf"(?:的)?(?:打开|调出|唤起|显示)?\s*{palette}"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "",
+        ),
+        (
+            rf"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+{palette}$",
+            "focus",
+        ),
+        (
+            r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            rf"(?:(?:and|then)\s+)?(?:open|show)?\s*{palette}$",
+            "",
+        ),
+    )
+    for pattern, default_mode in open_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        if not app_name:
+            continue
+        return {
+            "app_name": app_name,
+            "mode": _command_palette_mode(groups.get("mode") or default_mode),
+            "action": _command_palette_action_for_app(app_name),
+        }
     patterns: tuple[tuple[str, str], ...] = (
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
