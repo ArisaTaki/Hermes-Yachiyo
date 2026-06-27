@@ -193,7 +193,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         title="Analyze Data",
         category="data",
         description="Inspect structured data, compute summaries, and generate charts or tables.",
-        tools=("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+        tools=("data.analyze", "terminal.run"),
         risk_level="medium",
         approval_required=True,
         discovery_actions=("find_dataset", "inspect_schema"),
@@ -388,7 +388,7 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
-    "data.analysis": ("data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"),
+    "data.analysis": ("data.analyze", "terminal.run"),
     "file.workspace_read": ("workspace.list", "workspace.read"),
     "file.workspace_write": ("workspace.write_patch",),
     "file.desktop_access": ("desktop.open_path", "desktop.reveal_path"),

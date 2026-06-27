@@ -156,7 +156,7 @@ class TaskIntentRouter:
             text,
             ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
         )
-        has_source = bool(source_hint or source_scope or context_source or can_discover_source)
+        has_source = bool(source_hint or source_scope or context_source)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
         if (
@@ -705,7 +705,7 @@ class TaskIntentRouter:
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
-        if _app_scoped_desktop_operation_hint(text):
+        if _app_scoped_desktop_operation_hint(text) and not web_search:
             return _empty_intent("web_research", text)
         browser_action = (
             web_search
@@ -4226,7 +4226,7 @@ def _required_capabilities_for_plan(
         required = (
             ["data.analysis"]
             if any(step.tool_name == "data.analyze" for step in steps)
-            else list(intent.required_capabilities)
+            else (_step_required_capabilities(steps) or list(intent.required_capabilities))
         )
         if any(step.step_id == "open-spreadsheet-app" for step in steps) and (
             "desktop.app_control" not in required
@@ -4487,6 +4487,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and not _looks_like_media_search_play_request(text)
     ):
         score += 0.26
+    if (
+        intent.kind == "desktop_operation"
+        and intent.inputs.get("app_search_hint")
+        and _web_search_query(text)
+    ):
+        score -= 0.36
     if intent.kind == "desktop_operation" and "window_list_hint" in intent.inputs:
         score += 0.2
     if intent.kind == "media_playback" and _contains_any(
@@ -7564,7 +7570,7 @@ def _web_search_query(text: str) -> str:
     chinese_patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:研究|调研|了解|查)(?:一下|下|查)?\s*(.+)$",
-        r"(?:用\s*)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
+        r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
         r"(?:搜索|查找|检索)\s*(.+)$",
     )
     for pattern in chinese_patterns:
@@ -7654,6 +7660,8 @@ def _is_browser_or_search_app_name(app_name: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
     return normalized in {
         "browser",
+        "any browser",
+        "default browser",
         "chrome",
         "google chrome",
         "safari",
@@ -7664,6 +7672,9 @@ def _is_browser_or_search_app_name(app_name: str) -> bool:
         "google",
         "谷歌",
         "浏览器",
+        "任意浏览器",
+        "任何浏览器",
+        "默认浏览器",
         "网页",
         "页面",
         "当前网页",

@@ -286,6 +286,11 @@ def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["context_source"] == "selection"
     assert decision.selected_intent.missing_inputs == []
+    assert decision.plan.tool_plan.required_capabilities == [
+        "clipboard.read_write",
+        "data.analysis",
+        "artifact.write",
+    ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "copy-selected-data-context",
         "read-data-context",
@@ -485,7 +490,7 @@ def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> 
     assert _step_by_id(decision, "write-analysis-artifact").status == "unavailable"
     assert set(decision.plan.tool_plan.missing_capabilities) == {
         "artifact.write",
-        "terminal.execution",
+        "data.analysis",
     }
 
 
@@ -542,9 +547,9 @@ def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested
         "desktop.app_control",
     ]
     assert decision.plan.tool_plan.required_capabilities == [
-        "desktop.app_control",
         "file.workspace_read",
-        "terminal.execution",
+        "desktop.app_control",
+        "data.analysis",
         "artifact.write",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
@@ -593,6 +598,10 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    broad_decision = RuntimePlanner().decision(
+        "输出一份数据分析",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert scoped_decision.selected_intent.kind == "data_analysis"
     assert scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
@@ -602,9 +611,14 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "path": "Downloads"
     }
     assert generic_decision.selected_intent.kind == "data_analysis"
-    assert generic_decision.selected_intent.missing_inputs == []
+    assert generic_decision.selected_intent.missing_inputs == ["data_source"]
     assert _step_by_id(generic_decision, "inspect-data-source").tool_name == "workspace.list"
     assert _step_by_id(generic_decision, "inspect-data-source").input_preview == {}
+    assert generic_decision.plan.tool_plan.open_questions == ["data_source"]
+    assert broad_decision.selected_intent.kind == "data_analysis"
+    assert broad_decision.selected_intent.missing_inputs == ["data_source"]
+    assert _step_by_id(broad_decision, "inspect-data-source").tool_name == "workspace.list"
+    assert broad_decision.plan.tool_plan.open_questions == ["data_source"]
 
 
 def test_runtime_planner_predicts_data_analysis_artifacts_by_requested_outputs() -> None:
@@ -906,6 +920,17 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(search_decision, "open-web-search").input_preview == {
         "url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%96%B0%E9%97%BB"
     }
+
+    browser_surface_decision = RuntimePlanner().decision(
+        "帮我在任意浏览器搜索 OpenAI 最新新闻并总结",
+        allowed_tools=["browser.open_url", "artifact.write", "app.open"],
+    )
+    assert browser_surface_decision.selected_intent.kind == "web_research"
+    assert browser_surface_decision.selected_intent.inputs["browser_action"] == "open_search"
+    assert browser_surface_decision.selected_intent.inputs["query"] == "OpenAI 最新新闻"
+    assert _step_by_id(browser_surface_decision, "open-web-search").tool_name == (
+        "browser.open_url"
+    )
 
     english_decision = RuntimePlanner().decision(
         "research OpenAI latest news and write a report",
@@ -5636,7 +5661,7 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
         "file.workspace_read": ["workspace.list", "workspace.read"],
         "file.workspace_write": ["workspace.write_patch"],
         "terminal.execution": ["terminal.run"],
-        "data.analysis": ["data.analyze", "workspace.read", "artifact.write"],
+        "data.analysis": ["data.analyze", "terminal.run"],
         "artifact.write": ["artifact.write"],
         "browser.research": ["browser.open_url", "browser.current_page", "browser.click"],
         "desktop.app_discovery": [
