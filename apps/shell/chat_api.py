@@ -594,12 +594,6 @@ class ChatAPI:
         return merged
 
     @staticmethod
-    def _daily_desktop_user_metadata(
-        requests: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return entrypoint_plan_user_metadata(requests)
-
-    @staticmethod
     def _planner_first_daily_desktop_requests(
         text: str,
         *,
