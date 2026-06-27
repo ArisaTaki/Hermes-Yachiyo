@@ -2095,7 +2095,7 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
     assert click_step.input_preview == {
         "app_name": "微信",
         "target": "搜索",
-        "role_filter": "",
+        "role_filter": "button",
         "click_count": 1,
         "limit": 80,
     }
@@ -6018,6 +6018,45 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
                 "app_name": "PixelForge",
                 "target": "Export",
                 "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    bare_point_requests = planner_desktop_tool_requests(
+        "Slack 点搜索",
+        allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
+    )
+    postposed_click_requests = planner_desktop_tool_requests(
+        "在 Linear 上的创建按钮点击",
+        allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
+    )
+    assert bare_point_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Slack",
+                "target": "搜索",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert postposed_click_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Linear",
+                "target": "创建",
+                "role_filter": "button",
                 "limit": 80,
                 "click_count": 1,
             },

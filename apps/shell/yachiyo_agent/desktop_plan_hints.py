@@ -110,20 +110,26 @@ def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
 
 def click_target_hint(text: str) -> dict[str, Any] | None:
     patterns = (
-        r"(?:双击|点击|点一下|点按|单击|按一下|按)\s*(?P<target>[^。！？!?，,]+)",
+        r"(?P<target_post>[^。！？!?，,]{1,60}?)(?:按钮|控件|元素|菜单项|菜单|复选框)?\s*(?:双击|点击|点一下|点按|单击)$",
+        r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*(?P<target>[^。！？!?，,]+)",
         r"(?:double\s+click|click|press|tap)\s+(?:the\s+)?(?P<target_en>[^.!?,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
-        raw_target = match.groupdict().get("target") or match.groupdict().get("target_en") or ""
+        raw_target = (
+            match.groupdict().get("target")
+            or match.groupdict().get("target_post")
+            or match.groupdict().get("target_en")
+            or ""
+        )
         target = clean_target(raw_target)
         if not target:
             continue
         return {
             "target": target,
-            "role_filter": role_filter(raw_target),
+            "role_filter": role_filter(match.group(0)),
             "click_count": 2 if contains_any(match.group(0), ["双击", "double click"]) else 1,
         }
     return None
@@ -817,6 +823,13 @@ def clean_target(value: str) -> str:
         target,
         flags=re.IGNORECASE,
     )
+    target = re.sub(
+        r"^(?:在|用|通过)\s*[\w .·-]{1,40}?(?:里|中|上|内|的)\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
+    target = re.sub(r"^(?:的|里|中|上|内)\s*", "", target, flags=re.IGNORECASE)
     return target.strip(" .，,。")
 
 
@@ -860,6 +873,12 @@ def clean_followup_text(value: str) -> str:
 
 def role_filter(value: str) -> str:
     lowered = value.lower()
+    cleaned = re.sub(
+        r"^(?:双击|点击|点一下|点按|单击|按一下|按|点)\s*",
+        "",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
     if contains_any(lowered, ["按钮", "button"]):
         return "button"
     if contains_any(lowered, ["菜单", "menu"]):
@@ -868,6 +887,8 @@ def role_filter(value: str) -> str:
         return "checkbox"
     if contains_any(lowered, ["输入框", "文本框", "输入栏", "field", "input", "text"]):
         return "text"
+    if cleaned in {"搜索", "登录", "创建", "确认", "发送", "提交"}:
+        return "button"
     return ""
 
 

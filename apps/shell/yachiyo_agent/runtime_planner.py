@@ -1393,8 +1393,12 @@ class RuntimePlanner:
         if operation_mode_hint in {"open", "focus"}:
             mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
+        if app_search and click_target and not str(app_search.get("query") or "").strip():
+            app_search = {}
         hotkey = hotkey_hint(intent.user_goal)
         if app_name and hotkey and not _explicit_app_open_request(intent.user_goal):
+            mode = "focus"
+        if app_name and click_target and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         foreground_compose_text = str(
@@ -2215,6 +2219,7 @@ class RuntimePlanner:
             return steps
         if (
             _looks_like_ui_operation(intent.user_goal)
+            or click_target
             or primary_safe_shortcut
             or safe_key
             or safe_scroll
@@ -4312,6 +4317,7 @@ def _app_name_hint(text: str) -> str:
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
+        r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点\s*[^。！？!?，,]+",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)"
         r"(?:按|敲|tap|press|hit).{0,8}(?:回车|return|enter)",
         r"^(?!(?:can|could|would|please|pls|search|find|open|launch|focus|start)\b)"
@@ -5036,6 +5042,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "safe_scroll"
     if safe_click_hint(text):
         return "safe_click"
+    if click_target_hint(text):
+        return "click"
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"

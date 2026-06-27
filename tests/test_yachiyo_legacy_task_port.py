@@ -873,6 +873,46 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_clicks_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = [
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+        "desktop.click_ui_element",
+    ]
+    cases = [
+        ("Slack 点搜索", "Slack", "搜索"),
+        ("微信点搜索", "WeChat", "搜索"),
+        ("在 Linear 上的创建按钮点击", "Linear", "创建"),
+    ]
+
+    for prompt, app_name, target in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_click_ui_element",
+                "input": {
+                    "app_name": app_name,
+                    "target": target,
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
