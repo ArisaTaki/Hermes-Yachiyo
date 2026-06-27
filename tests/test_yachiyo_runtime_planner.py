@@ -3045,6 +3045,9 @@ def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
 def test_runtime_planner_extracts_common_note_body_forms() -> None:
     examples = (
         ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
+        ("把这段文字记到备忘录：今天买牛奶", "今天买牛奶"),
+        ("将这个想法记录到笔记：做一个桌面 agent", "做一个桌面 agent"),
+        ("把今天买牛奶记到备忘录", "今天买牛奶"),
         ("在 Notes 新建笔记 hello", "hello"),
         ("用备忘录记录一下 hello", "hello"),
         ("create a note in Notes: hello", "hello"),

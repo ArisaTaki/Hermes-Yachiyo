@@ -37,6 +37,11 @@ def capture_tool_preview(
 def note_body(text: str) -> str:
     value = _clean(text)
     patterns = (
+        r"^(?:帮我|请|麻烦)?(?:把|将)\s*(?:这段文字|这段文本|这段内容|这个想法|这个内容|以下内容|这句话)?\s*"
+        r"(?:记到|记录到|保存到|写到|添加到)\s*(?:Apple\s*Notes|Notes|备忘录|笔记)"
+        r"\s*[:：]\s*(?P<body_to_app>.+)$",
+        r"^(?:帮我|请|麻烦)?(?:把|将)\s*(?P<body_before_app>.+?)\s*"
+        r"(?:记到|记录到|保存到|写到|添加到)\s*(?:Apple\s*Notes|Notes|备忘录|笔记)$",
         r"^(?:在|用|通过)\s*(?:Apple\s*Notes|Notes|备忘录|笔记)\s*(?:里|中|上|内)?\s*"
         r"(?:记录一下|记一下|新建|创建|添加|新增|写|记录|保存|记下)\s*(?:一条|一个)?\s*"
         r"(?:备忘录|笔记)?\s*[:：]?\s*(?P<body_app>.+)$",
@@ -61,13 +66,15 @@ def note_body(text: str) -> str:
         groups = match.groupdict()
         body = _normalize_body(
             groups.get("body_app")
+            or groups.get("body_to_app")
+            or groups.get("body_before_app")
             or groups.get("body_app_en")
             or groups.get("body_in_app_en")
             or groups.get("body")
             or groups.get("body_en")
             or ""
         )
-        if body and not context_source_hint(body):
+        if body and not context_source_hint(body) and not _looks_like_placeholder_note_body(body):
             return body
     return ""
 
@@ -148,6 +155,24 @@ def _normalize_body(value: str) -> str:
     body = _clean(value).strip("「」\"'“”‘’ .，,。:：")
     body = re.sub(r"^(?:to|for|about|that)\s+", "", body, flags=re.IGNORECASE)
     return body.strip()
+
+
+def _looks_like_placeholder_note_body(value: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(value or "").strip().lower())
+    return normalized in {
+        "这段文字",
+        "这段文本",
+        "这段内容",
+        "这个内容",
+        "这个想法",
+        "以下内容",
+        "这句话",
+        "thetext",
+        "thistext",
+        "thiscontent",
+        "selectedtext",
+        "selection",
+    }
 
 
 def _clean(value: str) -> str:
