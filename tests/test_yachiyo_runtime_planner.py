@@ -35,6 +35,10 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_timeline_event,
     planner_timeline_events,
 )
+from apps.shell.yachiyo_agent.web_destination_hints import (
+    legacy_known_web_destination_search_url,
+    legacy_known_web_destination_url_hint,
+)
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
@@ -86,6 +90,14 @@ def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() ->
     assert supports_new_message_app_hint("一个我没提过的新应用") is False
     assert legacy_music_app_name_hint("网易云音乐") == "网易云音乐"
     assert legacy_music_app_name_hint("Apple Music") == "Music"
+
+
+def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() -> None:
+    assert legacy_known_web_destination_url_hint("打开 GitHub") == "https://github.com"
+    assert (
+        legacy_known_web_destination_search_url("GitHub", "oha-yachiyo")
+        == "https://github.com/search?q=oha-yachiyo"
+    )
 
 
 def _recording_legacy_requests(

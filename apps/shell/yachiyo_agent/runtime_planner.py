@@ -14,11 +14,6 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus
 
-from apps.shell.agent.runtime.web_destinations import (
-    known_web_destination_search_url,
-    known_web_destination_url_hint,
-)
-
 from .app_name_hints import (
     compact_app_name_hint,
     legacy_app_name_hint,
@@ -69,6 +64,10 @@ from .file_access_plan_hints import file_access_hint
 from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
 from .terminal_plan_hints import terminal_command_hint
+from .web_destination_hints import (
+    legacy_known_web_destination_search_url,
+    legacy_known_web_destination_url_hint,
+)
 
 
 class TaskIntentRouter:
@@ -7884,7 +7883,7 @@ def _explicit_browser_url_hint(text: str) -> str:
         flags=re.IGNORECASE,
     )
     if not domain_match:
-        return known_web_destination_url_hint(value)
+        return legacy_known_web_destination_url_hint(value)
     candidate = _clean_browser_url(domain_match.group(0))
     if not _browser_url_context_allows_domain(value, candidate):
         return ""
@@ -8210,7 +8209,7 @@ def _known_web_destination_search_hint(text: str) -> dict[str, str]:
             continue
         destination = _clean_web_destination_site_hint(match.group("site"))
         query = _clean_web_search_query(match.group("query"))
-        url = known_web_destination_search_url(destination, query)
+        url = legacy_known_web_destination_search_url(destination, query)
         if url:
             return {
                 "destination": destination,

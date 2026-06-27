@@ -386,6 +386,23 @@ def test_runtime_planner_app_aliases_are_behind_discovery_compatibility_boundary
     assert "apps.shell.agent.runtime.media_apps" not in desktop_hints
 
 
+def test_runtime_planner_web_destinations_are_behind_discovery_compatibility_boundary() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/web_destination_hints.py",
+        [
+            "def legacy_known_web_destination_url_hint(value: str) -> str:",
+            "def legacy_known_web_destination_search_url(site_name: str, query: str) -> str:",
+            "The planner should prefer browser discovery and direct URL handling when",
+            "known_web_destination_url_hint(value)",
+            "known_web_destination_search_url(site_name, query)",
+        ],
+    )
+    planner = _read("apps/shell/yachiyo_agent/runtime_planner.py")
+    assert "legacy_known_web_destination_url_hint" in planner
+    assert "legacy_known_web_destination_search_url" in planner
+    assert "apps.shell.agent.runtime.web_destinations" not in planner
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
