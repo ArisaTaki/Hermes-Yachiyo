@@ -391,7 +391,33 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
         "desktop.app_control",
         "desktop.ui_operation",
     ]
+    assert metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]
+    assert metadata["yachiyo_plan_artifacts_expected"] == []
+    assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_required_capabilities"] == ["desktop.app_discovery"]
+    assert metadata["yachiyo_missing_capabilities"] == []
+
+
+def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+            title="Data analysis",
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+    assert metadata["yachiyo_plan_capabilities"] == ["data.analysis"]
+    assert metadata["yachiyo_plan_approvals_required"] == []
+    assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
+    assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
 
 

@@ -30,9 +30,10 @@ def runtime_planner_metadata(
 ) -> dict[str, Any]:
     if decision is None:
         return {}
+    tool_plan = decision.plan.tool_plan
     tool_names = [
         str(step.tool_name or "").strip()
-        for step in decision.plan.tool_plan.steps
+        for step in tool_plan.steps
         if str(step.tool_name or "").strip()
     ]
     return {
@@ -45,8 +46,11 @@ def runtime_planner_metadata(
         "yachiyo_route_to_studio": decision.plan.route_to_studio,
         "yachiyo_plan_tools": tool_names,
         "yachiyo_plan_capabilities": _plan_capability_ids(decision),
+        "yachiyo_plan_approvals_required": list(tool_plan.approvals_required),
+        "yachiyo_plan_artifacts_expected": list(tool_plan.artifacts_expected),
+        "yachiyo_plan_open_questions": list(tool_plan.open_questions),
         "yachiyo_required_capabilities": _required_capability_ids(decision),
-        "yachiyo_missing_capabilities": list(decision.plan.tool_plan.missing_capabilities),
+        "yachiyo_missing_capabilities": list(tool_plan.missing_capabilities),
     }
 
 
