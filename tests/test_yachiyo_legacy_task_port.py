@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -1848,6 +1849,44 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
     ]
 
 
+def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
+    tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatFutureTaskRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-future-reminder",
+        conversation_id="chat-1",
+        prompt="提醒我明天买牛奶",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "schedule"
+    assert metadata["daily_desktop_tool"] == "future_task.schedule"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_schedule"
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "future_task.schedule",
+            "input": {
+                "title": "买牛奶",
+                "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
+                "scheduled_at_epoch": datetime.fromisoformat(tomorrow_0900).timestamp(),
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+
+
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
     runtime = _FakeRuntime()
     monkeypatch.setattr(
@@ -2392,4 +2431,12 @@ class _MainChatDataAnalysisRuntime(_MainChatPlannerEventRuntime):
                 "artifact.write",
             ],
             "approval_required": {},
+        }
+
+
+class _MainChatFutureTaskRuntime(_MainChatPlannerEventRuntime):
+    def _main_chat_tool_policy(self) -> dict[str, Any]:
+        return {
+            "allowed_tools": ["future_task.schedule"],
+            "approval_required": {"future_task.schedule": True},
         }

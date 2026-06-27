@@ -3030,8 +3030,7 @@ class RuntimePlanner:
                 "create-schedule-item",
                 "Create schedule item",
                 "schedule.reminder",
-                tool_name
-                or _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                tool_name,
                 input_preview=input_preview,
                 risk_level="medium",
                 approval_required=True,

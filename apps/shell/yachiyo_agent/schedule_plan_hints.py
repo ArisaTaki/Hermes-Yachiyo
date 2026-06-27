@@ -21,10 +21,16 @@ def schedule_tool_preview(
     if _looks_like_calendar_event(text):
         payload = calendar_event_payload(text)
         if payload:
-            return _first_allowed(("calendar.create_event",), allowed), payload
+            tool_name = _first_allowed(("calendar.create_event",), allowed)
+            if tool_name:
+                return tool_name, payload
+            return _future_task_schedule_preview(text, payload, allowed)
     payload = reminder_payload(text)
     if payload:
-        return _first_allowed(("reminders.create",), allowed), payload
+        tool_name = _first_allowed(("reminders.create",), allowed)
+        if tool_name:
+            return tool_name, payload
+        return _future_task_schedule_preview(text, payload, allowed)
     return None, {}
 
 
@@ -78,6 +84,30 @@ def calendar_event_payload(text: str) -> dict[str, Any]:
         "title": title,
         "start_at": _local_datetime_text(start),
         "end_at": _local_datetime_text(end),
+    }
+
+
+def _future_task_schedule_preview(
+    text: str,
+    schedule_payload: dict[str, Any],
+    allowed: set[str] | None,
+) -> tuple[str | None, dict[str, Any]]:
+    tool_name = _first_allowed(("future_task.schedule",), allowed)
+    if not tool_name:
+        return None, schedule_payload
+    title = str(schedule_payload.get("title") or "").strip()
+    scheduled_at = str(
+        schedule_payload.get("due_at") or schedule_payload.get("start_at") or ""
+    ).strip()
+    if not title or not scheduled_at:
+        return None, {}
+    scheduled_epoch = _local_iso_to_epoch(scheduled_at)
+    if scheduled_epoch is None:
+        return None, {}
+    return tool_name, {
+        "title": title,
+        "prompt": _future_task_prompt(title, text),
+        "scheduled_at_epoch": scheduled_epoch,
     }
 
 
@@ -398,6 +428,21 @@ def _parse_schedule_number(value: str | None) -> int | None:
 
 def _local_datetime_text(value: datetime) -> str:
     return value.isoformat(timespec="minutes")
+
+
+def _local_iso_to_epoch(value: str) -> float | None:
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return None
+
+
+def _future_task_prompt(title: str, text: str) -> str:
+    clean_title = _clean(title)
+    clean_text = _clean(text)
+    if clean_text:
+        return f"提醒用户：{clean_title}。原始请求：{clean_text}"
+    return f"提醒用户：{clean_title}"
 
 
 def _clean(value: str) -> str:

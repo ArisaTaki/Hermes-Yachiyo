@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from apps.shell.yachiyo_agent import (
@@ -5412,6 +5412,32 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     }
 
 
+def test_runtime_planner_falls_back_to_future_task_for_timed_reminders() -> None:
+    tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    scheduled_epoch = datetime.fromisoformat(tomorrow_0900).timestamp()
+    decision = RuntimePlanner().decision(
+        "提醒我明天买牛奶",
+        allowed_tools=["future_task.schedule"],
+    )
+    untimed = RuntimePlanner().decision(
+        "创建提醒事项：买牛奶",
+        allowed_tools=["future_task.schedule"],
+    )
+
+    assert decision.selected_intent.kind == "schedule"
+    step = _step_by_id(decision, "create-schedule-item")
+    assert step.tool_name == "future_task.schedule"
+    assert step.input_preview == {
+        "title": "买牛奶",
+        "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
+        "scheduled_at_epoch": scheduled_epoch,
+    }
+    assert step.approval_required is True
+    untimed_step = _step_by_id(untimed, "create-schedule-item")
+    assert untimed_step.tool_name is None
+    assert untimed_step.status == "unavailable"
+
+
 def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability() -> None:
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
@@ -8145,6 +8171,7 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
+    tomorrow_0900_epoch = datetime.fromisoformat(tomorrow_0900).timestamp()
 
     assert planner_tool_requests(
         "提醒我明天买牛奶",
@@ -8158,6 +8185,29 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
             "planning_reason": "planner_fallback_schedule",
         }
     ]
+    assert planner_tool_requests(
+        "提醒我明天买牛奶",
+        allowed_tools=["future_task.schedule"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "future_task.schedule",
+            "input": {
+                "title": "买牛奶",
+                "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
+                "scheduled_at_epoch": tomorrow_0900_epoch,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert (
+        planner_tool_requests(
+            "创建提醒事项：买牛奶",
+            allowed_tools=["future_task.schedule"],
+        )
+        == []
+    )
     assert planner_tool_requests(
         "创建明天上午10点开会的提醒",
         allowed_tools=["reminders.create"],
