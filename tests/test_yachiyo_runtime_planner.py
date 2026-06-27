@@ -1852,6 +1852,47 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert _step_by_id(scoped_search, "open-or-focus-app").tool_name == "app.focus"
 
+    finder_file_search = RuntimePlanner().decision(
+        "在 Finder 搜索 budget.xlsx",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "data.analyze",
+        ],
+    )
+    assert finder_file_search.selected_intent.kind == "desktop_operation"
+    assert finder_file_search.selected_intent.inputs["app_name_hint"] == "Finder"
+    assert finder_file_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "budget.xlsx",
+        "target": "搜索",
+    }
+    assert _step_by_id(finder_file_search, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(finder_file_search, "type-app-search-query").input_preview == {
+        "text": "budget.xlsx"
+    }
+
+    finder_find_file = RuntimePlanner().decision(
+        "在 Finder 查找 sales.csv",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "data.analyze",
+        ],
+    )
+    assert finder_find_file.selected_intent.kind == "desktop_operation"
+    assert finder_find_file.selected_intent.inputs["app_search_hint"] == {
+        "query": "sales.csv",
+        "target": "搜索",
+    }
+
     first_result = RuntimePlanner().decision(
         "在 Slack 搜索 Alice 并选择第一个结果",
         allowed_tools=[

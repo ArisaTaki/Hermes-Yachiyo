@@ -3386,6 +3386,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         intent.kind == "desktop_operation"
         and _contains_any(text, _TASK_DELIVERABLE_TERMS)
         and not _looks_like_ui_operation(text)
+        and not intent.inputs.get("app_search_hint")
     ):
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
@@ -3395,6 +3396,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
     ):
         score += 0.24
+    if (
+        intent.kind == "desktop_operation"
+        and intent.inputs.get("app_search_hint")
+        and not _looks_like_media_search_play_request(text)
+    ):
+        score += 0.26
     if intent.kind == "media_playback" and _contains_any(
         text,
         ["music", "song", "songs", "音乐", "歌曲", "歌"],
@@ -3598,7 +3605,7 @@ def _app_name_hint(text: str) -> str:
         r"(?:点击|点按|按|输入|搜索|查找|click|press|tap|type|enter|search)\b",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)(?:点击|点按)",
         r"(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
-        r"(?:^|[\s，,。])(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
+        r"(?:^|[\s，,。])(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|查找|检索|找|播放|创建|新建|写|发送|分析|操作|帮|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -5103,8 +5110,27 @@ def _is_browser_or_search_app_name(app_name: str) -> bool:
         "google",
         "谷歌",
         "浏览器",
+        "网页",
+        "页面",
+        "当前网页",
+        "当前页面",
+        "current page",
+        "current webpage",
+        "web page",
         "spotlight",
     }
+
+
+def _looks_like_media_search_play_request(text: str) -> bool:
+    hint = media_playback_hint(text)
+    return bool(
+        str(hint.get("action") or "").strip() == "play"
+        and str(hint.get("query") or "").strip()
+        and (
+            str(hint.get("app_name") or "").strip()
+            or _contains_any(text, ("apple music", "spotify", "网易云", "qq music", "QQ 音乐"))
+        )
+    )
 
 
 def _clean_web_search_query(query: str) -> str:
