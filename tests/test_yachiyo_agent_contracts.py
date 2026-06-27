@@ -29,6 +29,7 @@ from apps.shell.yachiyo_agent import (
     ArtifactContentSnapshot,
     ArtifactSnapshot,
     CapabilityCategory,
+    CapabilitySnapshot,
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
@@ -41,10 +42,12 @@ from apps.shell.yachiyo_agent import (
     InstallRestrictedToolPluginRequest,
     MemorySnapshot,
     MemoryTraceSnapshot,
+    PlannerDecisionSnapshot,
     PublicRunEvent,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    RuntimePlanSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
     SaveAgentDeskFileRequest,
@@ -58,10 +61,12 @@ from apps.shell.yachiyo_agent import (
     SkillSourceRootSnapshot,
     SkillTraceSnapshot,
     StartChatTaskRequest,
+    TaskIntentSnapshot,
     TaskIntentKind,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
+    ToolPlanSnapshot,
     ToolPlanStepSnapshot,
     UpdateRestrictedToolPluginRequest,
     WorkflowRunSnapshot,
@@ -132,6 +137,108 @@ def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
         "status",
     ]
     assert payload["action"] == "list_apps"
+
+
+def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() -> None:
+    intent = TaskIntentSnapshot(
+        intent_id="intent-1",
+        kind="data_analysis",
+        title="Analyze sales CSV",
+        user_goal="分析 sales.csv 并输出报告",
+        confidence=0.92,
+        description="Read a local dataset and write a report artifact.",
+        inputs={"path": "sales.csv"},
+        expected_outputs=["markdown_report", "chart"],
+        required_capabilities=["workspace.file_read", "data.analysis", "artifact.output"],
+        preferred_capabilities=["desktop.app_discovery"],
+        risk_level="medium",
+    )
+    capability = CapabilitySnapshot(
+        capability_id="data.analysis",
+        title="Data analysis",
+        category="data_analysis",
+        description="Analyze structured data with Python.",
+        tools=["data.analyze", "terminal.run"],
+        available_tools=["data.analyze"],
+        missing_tools=["terminal.run"],
+        risk_level="medium",
+        approval_required=True,
+        discovery_actions=["inspect_file"],
+        execution_actions=["run_analysis"],
+        output_kinds=["markdown", "chart"],
+    )
+    tool_plan = ToolPlanSnapshot(
+        plan_id="tool-plan-1",
+        title="Analyze and write report",
+        steps=[
+            ToolPlanStepSnapshot(
+                step_id="inspect-data-source",
+                title="Inspect data source",
+                capability_id="workspace.file_read",
+                action="read_file",
+                tool_name="workspace.read",
+                input_preview={"path": "sales.csv"},
+                reason="Confirm the dataset shape before analysis.",
+            ),
+            ToolPlanStepSnapshot(
+                step_id="run-analysis",
+                title="Run analysis",
+                capability_id="data.analysis",
+                action="analyze",
+                tool_name="data.analyze",
+                input_preview={"path": "sales.csv"},
+                risk_level="medium",
+                approval_required=True,
+                depends_on=["inspect-data-source"],
+                reason="Compute summary statistics and charts.",
+                fallback_tools=["terminal.run"],
+            ),
+        ],
+        required_capabilities=["workspace.file_read", "data.analysis", "artifact.output"],
+        approvals_required=["run-analysis"],
+        artifacts_expected=["markdown_report", "chart"],
+    )
+    runtime_plan = RuntimePlanSnapshot(
+        plan_id="runtime-plan-1",
+        intent=intent,
+        capabilities=[capability],
+        tool_plan=tool_plan,
+        timeline_preview=[{"event_type": "agent.plan.created"}],
+    )
+    decision = PlannerDecisionSnapshot(
+        decision_id="decision-1",
+        prompt="分析 sales.csv 并输出报告",
+        selected_intent=intent,
+        candidate_intents=[intent],
+        plan=runtime_plan,
+        created_at="2026-06-27T00:00:00Z",
+    )
+
+    payload = _json(decision)
+
+    assert list(payload) == [
+        "decision_id",
+        "prompt",
+        "selected_intent",
+        "candidate_intents",
+        "plan",
+        "created_at",
+        "source",
+    ]
+    assert payload["selected_intent"]["required_capabilities"] == [
+        "workspace.file_read",
+        "data.analysis",
+        "artifact.output",
+    ]
+    assert payload["plan"]["capabilities"][0]["available_tools"] == ["data.analyze"]
+    assert payload["plan"]["capabilities"][0]["missing_tools"] == ["terminal.run"]
+    assert payload["plan"]["tool_plan"]["approvals_required"] == ["run-analysis"]
+    assert payload["plan"]["tool_plan"]["artifacts_expected"] == ["markdown_report", "chart"]
+    assert payload["plan"]["tool_plan"]["steps"][1]["reason"] == (
+        "Compute summary statistics and charts."
+    )
+    assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
+    assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
 
 
 def test_agent_task_snapshot_json_shape_is_stable() -> None:
