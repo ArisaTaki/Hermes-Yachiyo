@@ -772,6 +772,8 @@ class TaskIntentRouter:
 
     def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
+        if score <= 0 and _looks_like_multi_agent_request(text):
+            score = 0.24
         if score <= 0 and metadata.get("runnable_kind") != "group":
             return _empty_intent("multi_agent", text)
         return TaskIntentSnapshot(
@@ -3377,6 +3379,16 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.16
     if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
         score += 0.18
+    if intent.kind == "workflow_orchestration" and _contains_any(
+        text,
+        ["workflow", "flow", "工作流", "流程"],
+    ):
+        score += 0.26
+    if intent.kind == "multi_agent" and (
+        _contains_any(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
+        or _looks_like_multi_agent_request(text)
+    ):
+        score += 0.28
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
     if (
@@ -3497,6 +3509,27 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "桌面",
             "文档",
         ],
+    )
+
+
+def _looks_like_multi_agent_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if re.search(
+        r"(?:two|three|multiple|several)\s+(?:agents?|ai\s+agents?)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"(?:两个|两个以上|多个|多位|几位|一组)\s*(?:agent|Agent|AI|智能体|代理)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(r"(?:agent|Agent|智能体|代理)", value, flags=re.IGNORECASE)
+        and _contains_any(value, ("分别", "各自", "并行", "协作", "汇总", "对比", "分工"))
     )
 
 

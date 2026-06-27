@@ -403,6 +403,44 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert _step_by_id(organize_decision, "apply-file-organization").approval_required is True
 
 
+def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes() -> None:
+    workflow = RuntimePlanner().decision(
+        "创建一个 workflow 分析数据然后发微信给我",
+        allowed_tools=["workflow.run", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert workflow.selected_intent.kind == "workflow_orchestration"
+    assert workflow.plan.route_to_studio is True
+    workflow_step = _step_by_id(workflow, "workflow-orchestration")
+    assert workflow_step.capability_id == "workflow.orchestration"
+    assert workflow_step.action == "start_workflow"
+    assert workflow_step.status == "planned"
+
+    workflow_with_data_words = RuntimePlanner().decision(
+        "启动工作流分析 sales.csv",
+        allowed_tools=["workflow.run", "data.analyze", "workspace.read"],
+    )
+    assert workflow_with_data_words.selected_intent.kind == "workflow_orchestration"
+
+    group = RuntimePlanner().decision(
+        "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
+        allowed_tools=["group.run", "browser.open_url_and_extract_text", "artifact.write"],
+    )
+
+    assert group.selected_intent.kind == "multi_agent"
+    assert group.plan.route_to_studio is True
+    group_step = _step_by_id(group, "group-multi_agent")
+    assert group_step.capability_id == "group.multi_agent"
+    assert group_step.action == "start_group_run"
+    assert group_step.status == "planned"
+
+    single_agent_research = RuntimePlanner().decision(
+        "研究 agent runtime 并总结",
+        allowed_tools=["browser.open_url", "artifact.write"],
+    )
+    assert single_agent_research.selected_intent.kind == "web_research"
+
+
 def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:
     decision = RuntimePlanner().decision(
         "打开终端运行 ls",
