@@ -1900,6 +1900,11 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
             "input": {
                 "path": "data/sales.csv",
                 "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                ],
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",

@@ -422,6 +422,23 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 "path": str(payload.get("path") or ""),
                 "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
             }
+            source_kind = str(payload.get("source_kind") or "").strip()
+            if source_kind:
+                request_input["source_kind"] = source_kind
+            requested_outputs = payload.get("requested_outputs")
+            if isinstance(requested_outputs, list):
+                request_input["requested_outputs"] = [
+                    str(item or "").strip()
+                    for item in requested_outputs
+                    if str(item or "").strip()
+                ]
+            artifact_manifest = payload.get("artifact_manifest")
+            if isinstance(artifact_manifest, list):
+                request_input["artifact_manifest"] = [
+                    dict(item)
+                    for item in artifact_manifest
+                    if isinstance(item, Mapping)
+                ]
             artifact_paths = payload.get("artifact_paths")
             if isinstance(artifact_paths, list):
                 request_input["artifact_paths"] = [

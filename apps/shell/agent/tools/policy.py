@@ -1051,6 +1051,20 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                     "and .png chart outputs. The first path remains the primary artifact."
                 ),
             },
+            "source_kind": {
+                "type": "string",
+                "description": "Planner-observed source kind such as csv, jsonl, xlsx, or text_table.",
+            },
+            "requested_outputs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Planner-requested output intents, for replay and debugging.",
+            },
+            "artifact_manifest": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Expected artifact paths and kinds, for Studio replay and debugging.",
+            },
             "max_rows": {
                 "type": "integer",
                 "minimum": 1,

@@ -591,6 +591,11 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         assert event["payload"]["input_preview"] == {
             "path": "data/sales.csv",
             "artifact_path": "analysis-report.md",
+            "source_kind": "csv",
+            "requested_outputs": ["report"],
+            "artifact_manifest": [
+                {"path": "analysis-report.md", "kind": "markdown"},
+            ],
         }
     finally:
         store.close()

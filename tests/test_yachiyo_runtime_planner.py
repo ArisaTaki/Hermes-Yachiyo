@@ -37,6 +37,39 @@ def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
     return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
 
 
+def _data_analysis_preview(
+    path: str,
+    source_kind: str,
+    *,
+    requested_outputs: list[str] | None = None,
+    artifact_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    paths = artifact_paths or ["analysis-report.md"]
+    payload: dict[str, Any] = {
+        "path": path,
+        "artifact_path": paths[0],
+        "source_kind": source_kind,
+        "requested_outputs": requested_outputs or ["report"],
+        "artifact_manifest": [
+            {"path": item, "kind": _data_analysis_artifact_kind(item)}
+            for item in paths
+        ],
+    }
+    if len(paths) > 1:
+        payload["artifact_paths"] = paths
+    return payload
+
+
+def _data_analysis_artifact_kind(path: str) -> str:
+    if path.endswith(".csv"):
+        return "csv"
+    if path.endswith(".html"):
+        return "html"
+    if path.endswith(".png"):
+        return "chart"
+    return "markdown"
+
+
 def _recording_legacy_requests(
     calls: list[dict[str, Any]],
 ) -> Callable[[str, list[str]], list[dict[str, Any]]]:
@@ -119,10 +152,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
     step = _step_by_id(decision, "analyze-data-file")
     assert step.action == "analyze_data_file"
     assert step.tool_name == "data.analyze"
-    assert step.input_preview == {
-        "path": "sales.csv",
-        "artifact_path": "analysis-report.md",
-    }
+    assert step.input_preview == _data_analysis_preview("sales.csv", "csv")
 
 
 def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths() -> None:
@@ -139,10 +169,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths(
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
-    assert step.input_preview == {
-        "path": "~/Downloads/sales.csv",
-        "artifact_path": "analysis-report.md",
-    }
+    assert step.input_preview == _data_analysis_preview("~/Downloads/sales.csv", "csv")
 
 
 def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis() -> None:
@@ -197,16 +224,17 @@ def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> 
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
-    assert step.input_preview == {
-        "path": "metrics.xlsx",
-        "artifact_path": "analysis-report.md",
-        "artifact_paths": [
+    assert step.input_preview == _data_analysis_preview(
+        "metrics.xlsx",
+        "xlsx",
+        requested_outputs=["chart", "report", "table"],
+        artifact_paths=[
             "analysis-report.md",
             "analysis-chart.png",
             "analysis-summary.csv",
             "analysis-report.html",
         ],
-    }
+    )
 
 
 def test_runtime_planner_prefers_builtin_data_analysis_for_markdown_tables() -> None:
@@ -224,10 +252,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_markdown_tables() -> 
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
-    assert step.input_preview == {
-        "path": "data/sales.md",
-        "artifact_path": "analysis-report.md",
-    }
+    assert step.input_preview == _data_analysis_preview("data/sales.md", "text_table")
 
 
 def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
@@ -245,10 +270,7 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
-    assert step.input_preview == {
-        "path": "logs/events.jsonl",
-        "artifact_path": "analysis-report.md",
-    }
+    assert step.input_preview == _data_analysis_preview("logs/events.jsonl", "jsonl")
 
 
 def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
@@ -7178,10 +7200,7 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
-            "input": {
-                "path": "data/sales.csv",
-                "artifact_path": "analysis-report.md",
-            },
+            "input": _data_analysis_preview("data/sales.csv", "csv"),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         }
@@ -7190,10 +7209,7 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
-            "input": {
-                "path": "~/Downloads/sales.csv",
-                "artifact_path": "analysis-report.md",
-            },
+            "input": _data_analysis_preview("~/Downloads/sales.csv", "csv"),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         }
@@ -7227,10 +7243,7 @@ def test_planner_tool_requests_opens_requested_spreadsheet_app_for_analysis() ->
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
-            "input": {
-                "path": "data/sales.csv",
-                "artifact_path": "analysis-report.md",
-            },
+            "input": _data_analysis_preview("data/sales.csv", "csv"),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         },
@@ -7257,16 +7270,17 @@ def test_planner_tool_requests_passes_builtin_data_analysis_artifact_paths() -> 
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
-            "input": {
-                "path": "data/metrics.xlsx",
-                "artifact_path": "analysis-report.md",
-                "artifact_paths": [
+            "input": _data_analysis_preview(
+                "data/metrics.xlsx",
+                "xlsx",
+                requested_outputs=["chart", "report", "table"],
+                artifact_paths=[
                     "analysis-report.md",
                     "analysis-chart.png",
                     "analysis-summary.csv",
                     "analysis-report.html",
                 ],
-            },
+            ),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         }

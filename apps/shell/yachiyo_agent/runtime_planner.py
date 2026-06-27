@@ -31,6 +31,7 @@ from .contracts import (
     ToolPlanStepSnapshot,
 )
 from .data_analysis_plan_hints import (
+    data_analysis_artifact_manifest,
     data_analysis_artifacts_expected,
     data_source_hint,
     data_source_kind_hint,
@@ -1263,9 +1264,17 @@ class RuntimePlanner:
                 intent.user_goal,
             )
             artifact_path = artifact_paths[0] if artifact_paths else "analysis-report.md"
+            source_kind = str(
+                intent.inputs.get("data_source_kind")
+                or data_source_kind_hint(source_hint, intent.user_goal)
+                or "unknown"
+            ).strip()
             input_preview = {
                 "path": source_hint,
                 "artifact_path": artifact_path,
+                "source_kind": source_kind,
+                "requested_outputs": list(intent.expected_outputs),
+                "artifact_manifest": data_analysis_artifact_manifest(artifact_paths),
             }
             if len(artifact_paths) > 1:
                 input_preview["artifact_paths"] = artifact_paths

@@ -83,3 +83,26 @@ def data_analysis_artifacts_expected(
     if any(marker in lowered for marker in ("html", "网页报告", "web report")):
         artifacts.append("analysis-report.html")
     return list(dict.fromkeys(artifacts))
+
+
+def data_analysis_artifact_manifest(artifact_paths: Iterable[str]) -> list[dict[str, str]]:
+    manifest: list[dict[str, str]] = []
+    for path in artifact_paths:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            continue
+        manifest.append({"path": clean_path, "kind": data_analysis_artifact_kind(clean_path)})
+    return manifest
+
+
+def data_analysis_artifact_kind(path: str) -> str:
+    lowered = str(path or "").lower()
+    if lowered.endswith(".csv"):
+        return "csv"
+    if lowered.endswith(".html"):
+        return "html"
+    if lowered.endswith(".png"):
+        return "chart"
+    if lowered.endswith(".json"):
+        return "json"
+    return "markdown"
