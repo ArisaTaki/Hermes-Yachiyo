@@ -3659,7 +3659,9 @@ def _can_use_builtin_data_analysis(
         return False
     source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
     source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
-    if not source_hint or source_hint.startswith(("/", "~")):
+    if not source_hint:
+        return False
+    if re.search(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", source_hint):
         return False
     if any(part == ".." for part in source_hint.replace("\\", "/").split("/")):
         return False

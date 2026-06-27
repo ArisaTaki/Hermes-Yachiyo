@@ -96,6 +96,26 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
     }
 
 
+def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths() -> None:
+    decision = RuntimePlanner().decision(
+        "分析 ~/Downloads/sales.csv 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_hint"] == "~/Downloads/sales.csv"
+    assert decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file"
+    ]
+    step = _step_by_id(decision, "analyze-data-file")
+    assert step.tool_name == "data.analyze"
+    assert step.input_preview == {
+        "path": "~/Downloads/sales.csv",
+        "artifact_path": "analysis-report.md",
+    }
+
+
 def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> None:
     decision = RuntimePlanner().decision(
         "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",
@@ -5948,6 +5968,10 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
         "请分析 data/sales.csv 并输出报告",
         allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
     )
+    local_path_requests = planner_tool_requests(
+        "分析 ~/Downloads/sales.csv 并输出报告",
+        allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert requests == [
         {
@@ -5955,6 +5979,18 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
             "tool": "data.analyze",
             "input": {
                 "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+    assert local_path_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "~/Downloads/sales.csv",
                 "artifact_path": "analysis-report.md",
             },
             "source": "runtime_planner",
