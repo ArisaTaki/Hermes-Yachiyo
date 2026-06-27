@@ -76,6 +76,9 @@ export function PlannerTraceInspector({
     ...(toolPlan?.missing_capabilities || []),
     ...(trace.selection?.missingCapabilities || []),
   ]);
+  const intentInputEntries = plannerIntentInputEntries(intent?.inputs);
+  const expectedOutputs = uniqueStrings(intent?.expected_outputs || []);
+  const missingInputs = uniqueStrings(intent?.missing_inputs || []);
   const approvalsRequired = uniqueStrings(toolPlan?.approvals_required || []);
   const artifactsExpected = uniqueStrings(toolPlan?.artifacts_expected || []);
   const openQuestions = uniqueStrings(toolPlan?.open_questions || []);
@@ -133,6 +136,38 @@ export function PlannerTraceInspector({
             </div>
             <small>{intent.risk_level || 'risk unknown'}</small>
           </div>
+        ) : null}
+
+        {intentInputEntries.length || expectedOutputs.length || missingInputs.length ? (
+          <section data-testid="agent-run-detail-planner-inputs">
+            <div className="studio-tool-inspector-heading">
+              <h3>Intent Inputs</h3>
+              <span>{intentInputEntries.length ? `${intentInputEntries.length} recorded` : 'none recorded'}</span>
+            </div>
+            <div className="studio-tool-pill-row">
+              {intentInputEntries.map((entry) => (
+                <span
+                  className="studio-tool-permission"
+                  data-intent-input-key={entry.key}
+                  data-intent-input-value={entry.value}
+                  key={`input:${entry.key}`}
+                  title={entry.value}
+                >
+                  input · {entry.key}: {entry.value}
+                </span>
+              ))}
+              {expectedOutputs.map((output) => (
+                <span className="studio-tool-permission" data-intent-output={output} key={`output:${output}`}>
+                  output · {output}
+                </span>
+              ))}
+              {missingInputs.map((input) => (
+                <span className="studio-tool-permission missing" data-missing-intent-input={input} key={`missing-input:${input}`}>
+                  missing input · {input}
+                </span>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         {trace.selection ? (
@@ -369,6 +404,37 @@ function plannerStepInputPreview(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function plannerIntentInputEntries(value: unknown): Array<{ key: string; value: string }> {
+  const record = objectRecord(value);
+  return Object.entries(record)
+    .map(([key, entryValue]) => ({
+      key,
+      value: plannerValuePreview(entryValue),
+    }))
+    .filter((entry) => entry.key && entry.value);
+}
+
+function plannerValuePreview(value: unknown): string {
+  let preview = '';
+  if (typeof value === 'string') {
+    preview = value.trim();
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    preview = String(value);
+  } else if (value !== null && value !== undefined) {
+    try {
+      preview = JSON.stringify(value);
+    } catch {
+      preview = '';
+    }
+  }
+  return truncatePlannerPreview(preview);
+}
+
+function truncatePlannerPreview(value: string): string {
+  const clean = value.replace(/\s+/g, ' ').trim();
+  return clean.length > 160 ? `${clean.slice(0, 157)}...` : clean;
 }
 
 function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
