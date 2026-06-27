@@ -3076,7 +3076,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "切到 Obsidian 打开命令面板输入 Toggle reading view 并回车",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.submit_foreground",
             "desktop.ui_elements",
@@ -3093,16 +3095,20 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert [step.step_id for step in command_palette.plan.tool_plan.steps] == [
         "discover-desktop-state",
+        "open-or-focus-app",
         "open-app-command-palette",
         "type-command-palette-query",
         "submit-command-palette",
         "verify-desktop-result",
     ]
+    assert _step_by_id(command_palette, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(command_palette, "open-or-focus-app").input_preview == {
+        "app_name": "Obsidian"
+    }
     assert _step_by_id(command_palette, "open-app-command-palette").tool_name == (
-        "app.focus_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
     assert _step_by_id(command_palette, "open-app-command-palette").input_preview == {
-        "app_name": "Obsidian",
         "action": "obsidian_command_palette",
     }
     assert _step_by_id(command_palette, "type-command-palette-query").input_preview == {
@@ -3116,7 +3122,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "打开 Obsidian 命令面板",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     )
@@ -3129,14 +3137,17 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert [step.step_id for step in open_command_palette.plan.tool_plan.steps] == [
         "discover-desktop-state",
+        "open-or-focus-app",
         "open-app-command-palette",
         "verify-desktop-result",
     ]
+    assert _step_by_id(open_command_palette, "open-or-focus-app").tool_name == (
+        "app.open"
+    )
     assert _step_by_id(open_command_palette, "open-app-command-palette").tool_name == (
-        "app.open_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
     assert _step_by_id(open_command_palette, "open-app-command-palette").input_preview == {
-        "app_name": "Obsidian",
         "action": "obsidian_command_palette",
     }
 
@@ -3144,7 +3155,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "打开 VS Code 命令面板",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     )
@@ -3161,14 +3174,23 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "打开 VS Code 命令面板",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "tool": "app.open",
+            "input": {"app_name": "Visual Studio Code"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3310,7 +3332,9 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "打开 Chrome 下载内容",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
             "desktop.ui_elements",
@@ -3329,16 +3353,20 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
     }
     assert [step.step_id for step in browser_internal.plan.tool_plan.steps] == [
         "discover-desktop-state",
+        "open-or-focus-app",
         "focus-browser-address-bar",
         "type-browser-internal-url",
         "submit-browser-internal-url",
         "verify-desktop-result",
     ]
+    assert _step_by_id(browser_internal, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(browser_internal, "open-or-focus-app").input_preview == {
+        "app_name": "Chrome"
+    }
     assert _step_by_id(browser_internal, "focus-browser-address-bar").tool_name == (
-        "app.open_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
     assert _step_by_id(browser_internal, "focus-browser-address-bar").input_preview == {
-        "app_name": "Chrome",
         "action": "focus_address_bar",
     }
     assert _step_by_id(browser_internal, "type-browser-internal-url").input_preview == {
@@ -3349,7 +3377,9 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "打开 Chrome 设置",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
@@ -3361,8 +3391,8 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "mode": "open",
         "action": "preferences",
     }
+    assert _step_by_id(browser_settings, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(browser_settings, "open-browser-internal-page").input_preview == {
-        "app_name": "Chrome",
         "action": "preferences",
     }
 
@@ -3370,7 +3400,9 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "Chrome 打开历史记录",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     )
@@ -3382,15 +3414,18 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "mode": "focus",
         "action": "show_history",
     }
+    assert _step_by_id(browser_history, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(browser_history, "open-browser-internal-page").tool_name == (
-        "app.focus_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
 
     assert planner_direct_tool_requests(
         "打开 Chrome 下载内容",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
             "desktop.ui_elements",
@@ -3400,8 +3435,15 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3431,7 +3473,9 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "open Chrome downloads",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
             "desktop.open_path",
@@ -3439,8 +3483,15 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "focus_address_bar"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3459,16 +3510,19 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "planning_reason": "planner_desktop_operation",
         },
     ]
-    for prompt, shortcut_tool, url in (
-        ("Chrome 打开书签", "app.focus_and_safe_shortcut", "chrome://bookmarks/"),
-        ("open Chrome extensions", "app.open_and_safe_shortcut", "chrome://extensions/"),
+    for prompt, app_tool, url in (
+        ("Chrome 打开书签", "app.focus", "chrome://bookmarks/"),
+        ("open Chrome extensions", "app.open", "chrome://extensions/"),
     ):
         assert planner_direct_tool_requests(
             prompt,
             allowed_tools=[
                 "desktop.list_apps",
+                "app.open",
+                "app.focus",
                 "app.open_and_safe_shortcut",
                 "app.focus_and_safe_shortcut",
+                "desktop.safe_shortcut",
                 "desktop.safe_type_text",
                 "desktop.search_submit",
                 "desktop.ui_elements",
@@ -3476,8 +3530,15 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         ) == [
             {
                 "protocol": "json_fallback",
-                "tool": shortcut_tool,
-                "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+                "tool": app_tool,
+                "input": {"app_name": "Google Chrome"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "focus_address_bar"},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -3507,15 +3568,24 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "打开 Chrome 设置",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "preferences"},
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "preferences"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3531,14 +3601,23 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         "Chrome 打开历史记录",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "show_history"},
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "show_history"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3557,8 +3636,10 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "打开 Slack 偏好设置",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
@@ -3570,8 +3651,8 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "mode": "open",
         "action": "preferences",
     }
+    assert _step_by_id(slack_preferences, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(slack_preferences, "open-app-preferences").input_preview == {
-        "app_name": "Slack",
         "action": "preferences",
     }
 
@@ -3579,8 +3660,10 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "在 Slack 里打开偏好设置",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
@@ -3591,12 +3674,15 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "mode": "focus",
         "action": "preferences",
     }
+    assert _step_by_id(scoped_preferences, "open-or-focus-app").tool_name == "app.focus"
 
     english_preferences = RuntimePlanner().decision(
         "Slack preferences",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
@@ -3607,12 +3693,17 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "mode": "focus",
         "action": "preferences",
     }
+    assert _step_by_id(english_preferences, "open-app-preferences").tool_name == (
+        "desktop.safe_shortcut"
+    )
 
     open_english_preferences = RuntimePlanner().decision(
         "open Slack preferences",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
@@ -3628,15 +3719,24 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "打开 Slack 偏好设置",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Slack", "action": "preferences"},
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "preferences"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3652,15 +3752,24 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "Slack preferences",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
             "system.settings_open",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Slack", "action": "preferences"},
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "preferences"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3858,8 +3967,15 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     assert planner_direct_tool_requests("在 VS Code 里执行命令 Format Document", allowed) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "tool": "app.focus",
+            "input": {"app_name": "Visual Studio Code"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6676,7 +6792,9 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         "切到 Obsidian 打开命令面板输入 Toggle reading view 并回车",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.submit_foreground",
             "desktop.ui_elements",
@@ -6685,8 +6803,15 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
     assert command_palette_requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+            "tool": "app.focus",
+            "input": {"app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "obsidian_command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6717,14 +6842,23 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         "打开 Obsidian 命令面板",
         allowed_tools=[
             "desktop.list_apps",
+            "app.open",
             "app.open_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+            "tool": "app.open",
+            "input": {"app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "obsidian_command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -6741,7 +6875,9 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         "在 VS Code 里打开命令面板输入 Format Document 后按下箭头再确认",
         allowed_tools=[
             "desktop.list_apps",
+            "app.focus",
             "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.safe_key",
             "desktop.submit_foreground",
@@ -6751,8 +6887,15 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
     assert command_palette_key_requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "tool": "app.focus",
+            "input": {"app_name": "Visual Studio Code"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "command_palette"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

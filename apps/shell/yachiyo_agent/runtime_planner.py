@@ -1956,23 +1956,19 @@ class RuntimePlanner:
         if app_preferences:
             preferences_app = str(app_preferences.get("app_name") or app_name or "").strip()
             preferences_mode = str(app_preferences.get("mode") or mode or "focus").strip()
-            steps.append(
-                _step(
-                    intent,
-                    "open-app-preferences",
-                    "Open app preferences",
-                    "desktop.app_control",
-                    _first_allowed(
-                        app_foreground_tool_candidates(preferences_mode, "safe_shortcut"),
-                        allowed,
-                    ),
-                    input_preview={"app_name": preferences_app, "action": "preferences"},
-                    depends_on=["discover-desktop-state"],
-                    action="shortcut",
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Open the requested app preferences through an app-scoped safe shortcut.",
-                )
+            _append_app_scoped_safe_shortcut_steps(
+                steps,
+                intent,
+                step_id="open-app-preferences",
+                title="Open app preferences",
+                app_name=preferences_app,
+                mode=preferences_mode,
+                shortcut_action="preferences",
+                allowed=allowed,
+                depends_on=["discover-desktop-state"],
+                prepare_reason="Prepare the requested app before opening its preferences.",
+                shortcut_reason="Open the requested app preferences with a generic foreground safe shortcut.",
+                fallback_reason="Open the requested app preferences through an app-scoped safe shortcut.",
             )
             verify_tool = _first_allowed(
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
@@ -2002,43 +1998,37 @@ class RuntimePlanner:
             page_url = str(browser_internal_page.get("url") or "").strip()
             previous_step_id = "discover-desktop-state"
             if page_action:
-                steps.append(
-                    _step(
-                        intent,
-                        "open-browser-internal-page",
-                        "Open browser internal page",
-                        "desktop.app_control",
-                        _first_allowed(
-                            app_foreground_tool_candidates(page_mode, "safe_shortcut"),
-                            allowed,
-                        ),
-                        input_preview={"app_name": browser_app, "action": page_action},
-                        depends_on=[previous_step_id],
-                        action="shortcut",
-                        risk_level="low",
-                        approval_required=False,
-                        reason="Open the requested browser surface through an app-scoped safe shortcut.",
-                    )
+                _append_app_scoped_safe_shortcut_steps(
+                    steps,
+                    intent,
+                    step_id="open-browser-internal-page",
+                    title="Open browser internal page",
+                    app_name=browser_app,
+                    mode=page_mode,
+                    shortcut_action=page_action,
+                    allowed=allowed,
+                    depends_on=[previous_step_id],
+                    prepare_reason="Prepare the requested browser before opening its internal surface.",
+                    shortcut_reason="Open the requested browser surface with a generic foreground safe shortcut.",
+                    fallback_reason="Open the requested browser surface through an app-scoped safe shortcut.",
                 )
                 previous_step_id = "open-browser-internal-page"
             elif page_url:
-                steps.append(
-                    _step(
-                        intent,
-                        "focus-browser-address-bar",
-                        "Focus browser address bar",
-                        "desktop.app_control",
-                        _first_allowed(
-                            app_foreground_tool_candidates(page_mode, "safe_shortcut"),
-                            allowed,
-                        ),
-                        input_preview={"app_name": browser_app, "action": "focus_address_bar"},
-                        depends_on=[previous_step_id],
-                        action="shortcut",
-                        risk_level="low",
-                        approval_required=False,
-                        reason="Focus the browser address bar before opening the requested internal surface.",
-                    )
+                _append_app_scoped_safe_shortcut_steps(
+                    steps,
+                    intent,
+                    step_id="focus-browser-address-bar",
+                    title="Focus browser address bar",
+                    app_name=browser_app,
+                    mode=page_mode,
+                    shortcut_action="focus_address_bar",
+                    allowed=allowed,
+                    depends_on=[previous_step_id],
+                    prepare_reason="Prepare the requested browser before focusing its address bar.",
+                    shortcut_reason="Focus the browser address bar with a generic foreground safe shortcut.",
+                    fallback_reason=(
+                        "Focus the browser address bar before opening the requested internal surface."
+                    ),
                 )
                 steps.append(
                     _step(
@@ -2101,24 +2091,19 @@ class RuntimePlanner:
                 or _command_palette_action_for_app(palette_app)
                 or "command_palette"
             ).strip()
-            shortcut_tool = _first_allowed(
-                (f"app.{palette_mode}_and_safe_shortcut", "app.focus_and_safe_shortcut"),
-                allowed,
-            )
-            steps.append(
-                _step(
-                    intent,
-                    "open-app-command-palette",
-                    "Open app command palette",
-                    "desktop.app_control",
-                    shortcut_tool,
-                    input_preview={"app_name": palette_app, "action": shortcut_action},
-                    depends_on=["discover-desktop-state"],
-                    action="shortcut",
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Open the requested app command palette with a safe app-scoped shortcut.",
-                )
+            _append_app_scoped_safe_shortcut_steps(
+                steps,
+                intent,
+                step_id="open-app-command-palette",
+                title="Open app command palette",
+                app_name=palette_app,
+                mode=palette_mode,
+                shortcut_action=shortcut_action,
+                allowed=allowed,
+                depends_on=["discover-desktop-state"],
+                prepare_reason="Prepare the requested app before opening its command palette.",
+                shortcut_reason="Open the requested command palette with a generic foreground safe shortcut.",
+                fallback_reason="Open the requested app command palette with a safe app-scoped shortcut.",
             )
             previous_step_id = "open-app-command-palette"
             if command_text:
@@ -3463,6 +3448,75 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
         if allowed is None or tool in allowed:
             return tool
     return None
+
+
+def _append_app_scoped_safe_shortcut_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    *,
+    step_id: str,
+    title: str,
+    app_name: str,
+    mode: str,
+    shortcut_action: str,
+    allowed: set[str] | None,
+    depends_on: list[str],
+    prepare_reason: str,
+    shortcut_reason: str,
+    fallback_reason: str,
+) -> str:
+    clean_mode = mode or "focus"
+    app_tool = _first_allowed(app_control_tool_candidates(clean_mode), allowed)
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    if app_name and app_tool and shortcut_tool:
+        steps.append(
+            _step(
+                intent,
+                "open-or-focus-app",
+                "Open or focus app",
+                "desktop.app_control",
+                app_tool,
+                input_preview={"app_name": app_name},
+                depends_on=depends_on,
+                reason=prepare_reason,
+            )
+        )
+        steps.append(
+            _step(
+                intent,
+                step_id,
+                title,
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": shortcut_action},
+                depends_on=["open-or-focus-app"],
+                action="shortcut",
+                risk_level="low",
+                approval_required=False,
+                reason=shortcut_reason,
+            )
+        )
+        return step_id
+
+    steps.append(
+        _step(
+            intent,
+            step_id,
+            title,
+            "desktop.app_control",
+            _first_allowed(
+                app_foreground_tool_candidates(clean_mode, "safe_shortcut"),
+                allowed,
+            ),
+            input_preview={"app_name": app_name, "action": shortcut_action},
+            depends_on=depends_on,
+            action="shortcut",
+            risk_level="low",
+            approval_required=False,
+            reason=fallback_reason,
+        )
+    )
+    return step_id
 
 
 def _context_source_steps(

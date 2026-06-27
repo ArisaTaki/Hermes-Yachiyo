@@ -627,7 +627,8 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         (
             "在 VS Code 里执行命令 Format Document",
             [
-                "app.focus_and_safe_shortcut",
+                "app.focus",
+                "desktop.safe_shortcut",
                 "desktop.safe_type_text",
                 "desktop.submit_foreground",
                 "desktop.ui_elements",
