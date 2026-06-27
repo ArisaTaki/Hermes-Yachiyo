@@ -43,6 +43,7 @@ def runtime_planner_metadata(
         "yachiyo_plan_id": decision.plan.plan_id,
         "yachiyo_intent_kind": decision.selected_intent.kind,
         "yachiyo_intent_confidence": round(float(decision.selected_intent.confidence or 0), 3),
+        "yachiyo_candidate_intents": _candidate_intent_summaries(decision),
         "yachiyo_route_to_studio": decision.plan.route_to_studio,
         "yachiyo_plan_tools": tool_names,
         "yachiyo_plan_capabilities": _plan_capability_ids(decision),
@@ -73,6 +74,22 @@ def planner_enriched_chat_request(
         **runtime_planner_metadata(decision),
     }
     return payload
+
+
+def _candidate_intent_summaries(decision: PlannerDecisionSnapshot) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for intent in decision.candidate_intents:
+        kind = str(intent.kind or "").strip()
+        if not kind:
+            continue
+        summaries.append(
+            {
+                "kind": kind,
+                "title": str(intent.title or "").strip(),
+                "confidence": round(float(intent.confidence or 0), 3),
+            }
+        )
+    return summaries
 
 
 def planner_timeline_events(
@@ -276,10 +293,10 @@ def _required_capability_ids(decision: Any | None) -> list[str]:
     intent = getattr(decision, "selected_intent", None)
     plan = getattr(decision, "plan", None)
     tool_plan = getattr(plan, "tool_plan", None)
-    values: list[str] = []
-    values.extend(getattr(intent, "required_capabilities", None) or [])
-    values.extend(getattr(tool_plan, "required_capabilities", None) or [])
-    return _unique_strings(values)
+    tool_plan_required = _unique_strings(getattr(tool_plan, "required_capabilities", None) or [])
+    if tool_plan_required:
+        return tool_plan_required
+    return _unique_strings(getattr(intent, "required_capabilities", None) or [])
 
 
 def _missing_capability_ids(decision: Any | None) -> list[str]:

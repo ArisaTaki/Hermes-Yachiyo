@@ -380,6 +380,9 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     metadata = port.calls[0][1]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "desktop_operation"
+    assert metadata["yachiyo_candidate_intents"] == [
+        {"kind": "desktop_operation", "title": "Desktop Operation", "confidence": 0.58}
+    ]
     assert metadata["yachiyo_route_to_studio"] is True
     assert metadata["yachiyo_plan_tools"] == [
         "desktop.list_apps",
@@ -439,12 +442,53 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     metadata = port.calls[0][1]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["yachiyo_candidate_intents"] == [
+        {"kind": "data_analysis", "title": "Data Analysis", "confidence": 0.56},
+        {"kind": "report_generation", "title": "Report Generation", "confidence": 0.42},
+    ]
     assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
     assert metadata["yachiyo_plan_capabilities"] == ["data.analysis"]
     assert metadata["yachiyo_plan_approvals_required"] == []
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
+
+
+def test_yachiyo_agent_service_surfaces_data_analysis_open_questions_to_chat_task() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="输出一份数据分析",
+            conversation_id="chat-1",
+            title="Data analysis",
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["yachiyo_candidate_intents"] == [
+        {"kind": "data_analysis", "title": "Data Analysis", "confidence": 0.56}
+    ]
+    assert metadata["yachiyo_plan_tools"] == [
+        "workspace.list",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert metadata["yachiyo_required_capabilities"] == [
+        "file.workspace_read",
+        "data.analysis",
+        "artifact.write",
+    ]
+    assert metadata["yachiyo_plan_open_questions"] == ["data_source"]
+    assert task.metadata["yachiyo_plan_open_questions"] == ["data_source"]
+    assert task.metadata["yachiyo_required_capabilities"] == [
+        "file.workspace_read",
+        "data.analysis",
+        "artifact.write",
+    ]
 
 
 def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
