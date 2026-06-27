@@ -602,6 +602,33 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 planning_reason="planner_fallback_web_research",
             )
         ]
+    if (
+        browser_action == "open_search"
+        and str(decision.selected_intent.inputs.get("followup_action") or "").strip()
+        == "click_search_result"
+    ):
+        if "browser.open_url" not in allowed or "browser.click" not in allowed:
+            return []
+        url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
+        selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
+        if not url or not selector:
+            return []
+        click_payload: dict[str, Any] = {"selector": selector}
+        click_count = decision.selected_intent.inputs.get("click_count")
+        if click_count not in (None, ""):
+            click_payload["click_count"] = click_count
+        return [
+            _request(
+                "browser.open_url",
+                {"url": url},
+                planning_reason="planner_fallback_web_research",
+            ),
+            _request(
+                "browser.click",
+                click_payload,
+                planning_reason="planner_fallback_web_research",
+            ),
+        ]
     if _dynamic_context_browser_action(decision):
         return _dynamic_context_browser_tool_requests(decision, allowed)
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(

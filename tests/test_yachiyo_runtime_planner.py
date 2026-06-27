@@ -791,6 +791,41 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     }
     assert _step_by_id(chinese, "open-web-search").tool_name == "browser.open_url"
 
+    first_result = RuntimePlanner().decision(
+        "Chrome 搜索 OpenAI 并打开第一个结果",
+        allowed_tools=["browser.open_url", "browser.click"],
+    )
+    assert first_result.selected_intent.kind == "web_research"
+    assert first_result.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI",
+        "browser_action": "open_search",
+        "query": "OpenAI",
+        "followup_action": "click_search_result",
+        "selector": "search-result=1",
+        "click_count": 1,
+    }
+    assert [step.step_id for step in first_result.plan.tool_plan.steps] == [
+        "open-web-search",
+        "click-web-search-result",
+    ]
+    assert _step_by_id(first_result, "open-web-search").input_preview == {
+        "url": "https://www.google.com/search?q=OpenAI"
+    }
+    click_step = _step_by_id(first_result, "click-web-search-result")
+    assert click_step.tool_name == "browser.click"
+    assert click_step.input_preview == {"selector": "search-result=1", "click_count": 1}
+    assert click_step.approval_required is True
+    assert click_step.depends_on == ["open-web-search"]
+
+    english_first_result = RuntimePlanner().decision(
+        "search Chrome for OpenAI and open first result",
+        allowed_tools=["browser.open_url", "browser.click"],
+    )
+    assert english_first_result.selected_intent.inputs["query"] == "OpenAI"
+    assert english_first_result.selected_intent.inputs["followup_action"] == (
+        "click_search_result"
+    )
+
     app_search = RuntimePlanner().decision(
         "search WeChat for file transfer",
         allowed_tools=["browser.open_url", "app.focus_and_safe_shortcut"],
@@ -5341,6 +5376,61 @@ def test_entrypoint_selection_routes_browser_click_to_planner() -> None:
     assert _step_by_id(desktop, "operate-foreground-ui").tool_name == "desktop.click_ui_element"
 
 
+def test_entrypoint_selection_routes_web_search_first_result_sequence_to_planner() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus",
+                "input": {"app_name": "Google Chrome"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {"url": "https://www.google.com/search?q=OpenAI"},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.click",
+                "input": {"selector": "search-result=1", "click_count": 1},
+            },
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "Chrome 搜索 OpenAI 并打开第一个结果",
+        ["browser.open_url", "browser.click", "app.focus"],
+        metadata={"daily_desktop_intent": True},
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.decision is not None
+    assert selection.decision.selected_intent.kind == "web_research"
+    assert selection.decision.selected_intent.inputs["followup_action"] == (
+        "click_search_result"
+    )
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert legacy_calls == []
+
+
 def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -> None:
     decision = RuntimePlanner().decision(
         "在 PixelForge 里点击导出按钮",
@@ -6192,7 +6282,7 @@ def test_planner_tool_requests_maps_current_page_find_actions() -> None:
 
 
 def test_planner_tool_requests_maps_static_web_search() -> None:
-    allowed = ["browser.open_url", "browser.open_url_and_extract_text"]
+    allowed = ["browser.open_url", "browser.open_url_and_extract_text", "browser.click"]
 
     assert planner_tool_requests("Can you search Chrome for weather?", allowed_tools=allowed) == [
         {
@@ -6202,6 +6292,25 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }
+    ]
+    assert planner_tool_requests(
+        "Chrome 搜索 OpenAI 并打开第一个结果",
+        allowed_tools=allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
     ]
     assert planner_tool_requests("百度 open hanako", allowed_tools=allowed) == [
         {

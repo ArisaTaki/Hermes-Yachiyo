@@ -624,17 +624,20 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _direct_communication_hint(text):
             return _empty_intent("web_research", text)
+        dynamic_source = source if source in {"clipboard", "selection"} else ""
+        web_search = _web_search_hint(text, dynamic_source)
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
         if _app_scoped_desktop_operation_hint(text) and not browser_interaction:
             return _empty_intent("web_research", text)
-        dynamic_source = source if source in {"clipboard", "selection"} else ""
         browser_action = (
-            browser_interaction
+            web_search
+            if str(web_search.get("followup_action") or "").strip()
+            else browser_interaction
             or _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
             or _dynamic_context_browser_action_hint(text, dynamic_source)
             or _browser_url_action_hint(text, dynamic_source)
-            or _web_search_hint(text, dynamic_source)
+            or web_search
         )
         score = _score_terms(
             text,
@@ -2384,42 +2387,67 @@ class RuntimePlanner:
             }:
                 if url:
                     input_preview["url"] = url
-            return [
-                _step(
-                    intent,
-                    {
-                        "current_page": "read-current-page",
-                        "extract_text": "extract-current-page-text",
-                        "screenshot": "capture-current-page",
-                        "click": "click-current-page-element",
-                        "type_text": "type-current-page-input",
-                        "open_search": "open-web-search",
-                        "open_url": "open-web-url",
-                        "open_url_extract": "extract-web-url-text",
-                        "open_url_screenshot": "capture-web-url",
-                    }.get(browser_action, "read-current-page"),
-                    {
-                        "current_page": "Read current page",
-                        "extract_text": "Extract current page text",
-                        "screenshot": "Capture current page",
-                        "click": "Click current page element",
-                        "type_text": "Type into current page input",
-                        "open_search": "Open web search",
-                        "open_url": "Open web URL",
-                        "open_url_extract": "Open and extract web URL",
-                        "open_url_screenshot": "Open and capture web URL",
-                    }.get(browser_action, "Read current page"),
-                    "browser.research",
-                    _first_allowed((tool_name,), allowed) if tool_name else None,
-                    input_preview=input_preview,
-                    risk_level="medium" if browser_action in {"click", "type_text"} else "low",
-                    approval_required=browser_action in {"click", "type_text"},
-                    reason=(
-                        "Use the browser interaction tool so the runtime can enforce browser approval."
-                        if browser_action in {"click", "type_text"}
-                        else "Use the explicit current-page browser tool instead of desktop screen automation."
+            main_step = _step(
+                intent,
+                {
+                    "current_page": "read-current-page",
+                    "extract_text": "extract-current-page-text",
+                    "screenshot": "capture-current-page",
+                    "click": "click-current-page-element",
+                    "type_text": "type-current-page-input",
+                    "open_search": "open-web-search",
+                    "open_url": "open-web-url",
+                    "open_url_extract": "extract-web-url-text",
+                    "open_url_screenshot": "capture-web-url",
+                }.get(browser_action, "read-current-page"),
+                {
+                    "current_page": "Read current page",
+                    "extract_text": "Extract current page text",
+                    "screenshot": "Capture current page",
+                    "click": "Click current page element",
+                    "type_text": "Type into current page input",
+                    "open_search": "Open web search",
+                    "open_url": "Open web URL",
+                    "open_url_extract": "Open and extract web URL",
+                    "open_url_screenshot": "Open and capture web URL",
+                }.get(browser_action, "Read current page"),
+                "browser.research",
+                _first_allowed((tool_name,), allowed) if tool_name else None,
+                input_preview=input_preview,
+                risk_level="medium" if browser_action in {"click", "type_text"} else "low",
+                approval_required=browser_action in {"click", "type_text"},
+                reason=(
+                    "Use the browser interaction tool so the runtime can enforce browser approval."
+                    if browser_action in {"click", "type_text"}
+                    else "Use the explicit current-page browser tool instead of desktop screen automation."
+                ),
+            )
+            if (
+                browser_action == "open_search"
+                and str(intent.inputs.get("followup_action") or "").strip()
+                == "click_search_result"
+            ):
+                click_preview = {
+                    "selector": str(intent.inputs.get("selector") or "search-result=1"),
+                    "click_count": int(intent.inputs.get("click_count") or 1),
+                }
+                return [
+                    main_step,
+                    _step(
+                        intent,
+                        "click-web-search-result",
+                        "Click web search result",
+                        "browser.research",
+                        _first_allowed(("browser.click",), allowed),
+                        input_preview=click_preview,
+                        risk_level="medium",
+                        approval_required=True,
+                        depends_on=["open-web-search"],
+                        reason="Click the requested search result only after opening the planned search URL.",
                     ),
-                )
+                ]
+            return [
+                main_step
             ]
         if context_source and not url:
             context_steps = _context_source_steps(
@@ -6026,11 +6054,15 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
     if not query:
         return {}
     engine = _web_search_engine_hint(value)
-    return {
+    hint: dict[str, Any] = {
         "browser_action": "open_search",
         "query": query,
         "url_hint": _web_search_url(engine, query),
     }
+    followup = _web_search_followup_hint(value)
+    if followup:
+        hint.update(followup)
+    return hint
 
 
 def _web_search_query(text: str) -> str:
@@ -6043,7 +6075,7 @@ def _web_search_query(text: str) -> str:
     if search_surface and not _is_browser_or_search_app_name(search_surface):
         return ""
     app_name = _app_name_hint(text)
-    if app_name and not _is_browser_or_search_app_name(app_name):
+    if app_name and not search_surface and not _is_browser_or_search_app_name(app_name):
         return ""
     lowered = text.lower()
     patterns = (
@@ -6100,6 +6132,33 @@ def _web_search_engine_hint(text: str) -> str:
     return "baidu" if re.search(r"(?:百度|baidu)", text, flags=re.IGNORECASE) else "google"
 
 
+def _web_search_followup_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    match = re.search(
+        r"(?:并|然后|再|接着|之后|后)?\s*"
+        r"(?:打开|点击|点一下|点按|进入|访问|选择|选中)\s*"
+        r"(?P<rank>第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:and|then)\s+(?:open|click|visit|select|choose)\s+(?:the\s+)?"
+        r"(?P<rank_en>first|1st)\s+(?:search\s+)?(?:result|link|item)\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return {}
+    rank = match.groupdict().get("rank") or match.groupdict().get("rank_en") or ""
+    index = _browser_search_result_rank_index(rank)
+    if not index:
+        return {}
+    return {
+        "followup_action": "click_search_result",
+        "selector": f"search-result={index}",
+        "click_count": 1,
+    }
+
+
 def _web_search_url(engine: str, query: str) -> str:
     if str(engine or "").strip().lower() == "baidu":
         return f"https://www.baidu.com/s?wd={quote_plus(query)}"
@@ -6107,14 +6166,18 @@ def _web_search_url(engine: str, query: str) -> str:
 
 
 def _web_search_surface_hint(text: str) -> str:
-    match = re.search(
+    patterns = (
         r"\b(?:can\s+you\s+)?search\s+(?P<surface>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+for\s+.+$",
-        text,
-        flags=re.IGNORECASE,
+        r"^(?P<surface>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s*(?:搜索|查找|检索)\s*.+$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:在|用|通过)\s*"
+        r"(?P<surface>[\w .·-]{1,40}?)\s*(?:里|中|上|内)?\s*"
+        r"(?:搜索|查找|检索)\s*.+$",
     )
-    if not match:
-        return ""
-    return str(match.group("surface") or "").strip()
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return str(match.group("surface") or "").strip()
+    return ""
 
 
 def _is_browser_or_search_app_name(app_name: str) -> bool:
@@ -6158,6 +6221,21 @@ def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(
         r"\s+(?:and|then)\s+(?:write|create|generate|produce|summari[sz]e).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"\s+(?:and|then)\s+(?:open|click|visit|select|choose)\s+(?:the\s+)?"
+        r"(?:first|1st)\s+(?:search\s+)?(?:result|link|item).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"\s*(?:并|然后|并且|再|接着|之后|后)?\s*"
+        r"(?:打开|点击|点一下|点按|进入|访问|选择|选中)\s*"
+        r"(?:第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目).*$",
         "",
         value,
         flags=re.IGNORECASE,
