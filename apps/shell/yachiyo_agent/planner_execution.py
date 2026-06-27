@@ -172,6 +172,11 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
 
 
 def _direct_tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if decision.selected_intent.kind == "schedule":
+        direct_requests = _direct_schedule_context_app_item_tool_requests(decision, allowed)
+        if direct_requests:
+            return direct_requests
+        return _tool_requests_for_decision(decision, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return _tool_requests_for_decision(decision, allowed)
     return _direct_desktop_tool_requests(decision, allowed)
@@ -969,6 +974,95 @@ def _schedule_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, 
             planning_reason="planner_fallback_schedule",
         )
     ]
+
+
+def _direct_schedule_context_app_item_tool_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    source = str(decision.selected_intent.inputs.get("context_source") or "").strip()
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return []
+    app_name, shortcut_action = _schedule_context_app_item_target(
+        str(decision.selected_intent.user_goal or "")
+    )
+    if not app_name or not shortcut_action:
+        return []
+    app_tool = _first_allowed(("app.open_and_safe_shortcut",), allowed)
+    if not app_tool or "desktop.safe_shortcut" not in allowed:
+        return []
+    planning_reason = "planner_fallback_schedule_context_app_item"
+    source_requests = _direct_context_clipboard_copy_requests(
+        source,
+        allowed,
+        planning_reason=planning_reason,
+    )
+    if source_requests is None:
+        return []
+    return [
+        *source_requests,
+        _request(
+            app_tool,
+            {"app_name": app_name, "action": shortcut_action},
+            planning_reason=planning_reason,
+        ),
+        _request(
+            "desktop.safe_shortcut",
+            {"action": "paste"},
+            planning_reason=planning_reason,
+        ),
+    ]
+
+
+def _schedule_context_app_item_target(text: str) -> tuple[str, str]:
+    lowered = str(text or "").lower()
+    if any(term in lowered for term in ("calendar", "日历", "日程", "事件", "event")):
+        return "Calendar", "new_event"
+    if any(term in lowered for term in ("reminder", "reminders", "提醒", "提醒事项")):
+        return "Reminders", "new_reminder"
+    return "", ""
+
+
+def _direct_context_clipboard_copy_requests(
+    source: str,
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]] | None:
+    if source == "clipboard":
+        return []
+    if "desktop.safe_shortcut" not in allowed:
+        return None
+    if source == "selection":
+        return [
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "copy"},
+                planning_reason=planning_reason,
+            )
+        ]
+    if source == "current_page_link":
+        return [
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "copy_current_page_link"},
+                planning_reason=planning_reason,
+            )
+        ]
+    if source == "current_page_content":
+        return [
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "select_all"},
+                planning_reason=planning_reason,
+            ),
+            _request(
+                "desktop.safe_shortcut",
+                {"action": "copy"},
+                planning_reason=planning_reason,
+            ),
+        ]
+    return None
 
 
 def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

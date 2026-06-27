@@ -4568,6 +4568,29 @@ def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
     assert "notes.create" in capability.available_tools
 
 
+def test_runtime_planner_routes_empty_note_request_to_desktop_shortcut() -> None:
+    decision = RuntimePlanner().decision(
+        "创建备忘录",
+        allowed_tools=["desktop.safe_shortcut"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+    }
+    assert planner_direct_tool_requests("创建备忘录", ["desktop.safe_shortcut"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+
 def test_runtime_planner_extracts_common_note_body_forms() -> None:
     examples = (
         ("备忘录记一下今天要买牛奶", "今天要买牛奶"),
@@ -7555,6 +7578,66 @@ def test_planner_tool_requests_prefetches_dynamic_schedule_sources_for_model_loo
             "planning_reason": "planner_prefetch_schedule_context",
             "continue_to_model": True,
         }
+    ]
+    assert planner_tool_requests(
+        "把当前页面内容创建成日历事件",
+        allowed_tools=["calendar.create_event", "browser.extract_text"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_schedule_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
+def test_planner_direct_tool_requests_routes_schedule_context_to_app_item() -> None:
+    allowed = [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "browser.current_page",
+        "reminders.create",
+        "calendar.create_event",
+    ]
+    current_page_link_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy_current_page_link"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule_context_app_item",
+    }
+    paste = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule_context_app_item",
+    }
+
+    assert planner_direct_tool_requests("把当前网页链接加入提醒事项", allowed) == [
+        current_page_link_copy,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule_context_app_item",
+        },
+        paste,
+    ]
+    assert planner_direct_tool_requests("把当前网页链接加入日历", allowed) == [
+        current_page_link_copy,
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Calendar", "action": "new_event"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule_context_app_item",
+        },
+        paste,
     ]
     assert planner_tool_requests(
         "把当前页面内容创建成日历事件",

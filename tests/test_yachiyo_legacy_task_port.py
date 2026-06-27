@@ -374,6 +374,41 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed = [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "browser.current_page",
+        "reminders.create",
+        "calendar.create_event",
+    ]
+    cases = (
+        (
+            "把当前网页链接加入提醒事项",
+            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        ),
+        (
+            "把当前网页链接加入日历",
+            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+        ),
+        ("创建备忘录", ["desktop.safe_shortcut"]),
+    )
+
+    for prompt, expected_tools in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.event_payload["selected_tools"] == expected_tools
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     cases = (

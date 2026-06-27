@@ -995,6 +995,12 @@ class TaskIntentRouter:
             return _empty_intent("information_capture", text)
         has_body = bool(str(hint.get("body") or "").strip())
         source = str(hint.get("source") or "").strip()
+        if (
+            not has_body
+            and not source
+            and str((safe_shortcut_hint(text) or {}).get("action") or "").strip() == "new_note"
+        ):
+            return _empty_intent("information_capture", text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "information_capture", text),
             kind="information_capture",
@@ -4269,6 +4275,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索", "网页", "网站"],
     ):
         score += 0.14
+    if intent.kind == "web_research" and _looks_like_schedule_request(text):
+        score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score -= 0.18
     if intent.kind == "report_generation":
