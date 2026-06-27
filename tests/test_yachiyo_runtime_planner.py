@@ -2954,6 +2954,19 @@ def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> 
         "text": "yachiyo"
     }
 
+    open_only = RuntimePlanner().decision(
+        "打开聚焦搜索",
+        allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text", "browser.open_url"],
+    )
+    assert open_only.selected_intent.kind == "desktop_operation"
+    assert open_only.selected_intent.inputs["spotlight_search_hint"] == {"query": ""}
+    assert [step.step_id for step in open_only.plan.tool_plan.steps] == [
+        "open-spotlight-search",
+    ]
+    assert _step_by_id(open_only, "open-spotlight-search").input_preview == {
+        "action": "spotlight_search"
+    }
+
 
 def test_runtime_planner_keeps_current_app_input_foreground_scoped() -> None:
     decision = RuntimePlanner().decision(
@@ -3418,6 +3431,32 @@ def test_runtime_planner_routes_pure_foreground_submit_to_approval_gate() -> Non
         assert submit.risk_level == "high"
         assert submit.approval_required is True
         assert submit.depends_on == ["discover-desktop-state"]
+
+
+def test_runtime_planner_routes_foreground_search_submit_to_safe_submit() -> None:
+    for prompt in ("提交当前搜索", "press enter to search"):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.search_submit",
+                "desktop.submit_foreground",
+                "browser.open_url",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["operation_hint"] == "submit_search"
+        assert decision.selected_intent.inputs["foreground_search_submit_hint"] == {
+            "action": "search"
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "submit-foreground-search"
+        ]
+        submit = _step_by_id(decision, "submit-foreground-search")
+        assert submit.tool_name == "desktop.search_submit"
+        assert submit.input_preview == {}
+        assert submit.risk_level == "low"
+        assert submit.approval_required is False
 
 
 def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
@@ -5378,6 +5417,15 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
         }
     ]
     assert planner_tool_requests("当前窗口是什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("现在前台是什么", allowed_tools) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.active_window",

@@ -237,11 +237,13 @@ class TaskIntentRouter:
         ) and not app_scoped_desktop_operation:
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
+        foreground_search_submit = _foreground_search_submit_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
         app_preferences = _app_preferences_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
+        spotlight_open = _spotlight_open_hint(text)
         score = _score_terms(
             text,
             [
@@ -309,7 +311,12 @@ class TaskIntentRouter:
                 "回车发送",
             ],
         )
-        if score <= 0 and (foreground_submit_action or foreground_compose_text or foreground_paste):
+        if score <= 0 and (
+            foreground_search_submit
+            or foreground_submit_action
+            or foreground_compose_text
+            or foreground_paste
+        ):
             score = 0.18
         if score <= 0 and (app_scoped_desktop_operation or command_palette):
             score = 0.18
@@ -317,7 +324,7 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and app_preferences:
             score = 0.2
-        if score <= 0 and spotlight_search_query:
+        if score <= 0 and (spotlight_search_query or spotlight_open):
             score = 0.18
         if (
             score <= 0
@@ -334,10 +341,13 @@ class TaskIntentRouter:
             and not foreground_compose_text
             and not foreground_paste
             and desktop_discovery is None
+            and not foreground_search_submit
             and not foreground_submit_action
             and not command_palette
             and not browser_internal_page
             and not app_preferences
+            and not spotlight_search_query
+            and not spotlight_open
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -415,6 +425,7 @@ class TaskIntentRouter:
             app_name_hint = app_search_app_name
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
+            or ("submit_search" if foreground_search_submit else "")
             or ("submit_foreground" if foreground_submit_action else "")
             or ("browser_internal_page" if browser_internal_page else "")
             or ("app_preferences" if app_preferences else "")
@@ -443,6 +454,8 @@ class TaskIntentRouter:
             and not foreground_paste
             and not app_search
             and not spotlight_search_query
+            and not spotlight_open
+            and not foreground_search_submit
             and not foreground_submit_action
             and not command_palette
         ):
@@ -504,8 +517,10 @@ class TaskIntentRouter:
             inputs["browser_internal_page_hint"] = browser_internal_page
         if app_preferences:
             inputs["app_preferences_hint"] = app_preferences
-        if spotlight_search_query:
+        if spotlight_search_query or spotlight_open:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
+        if foreground_search_submit:
+            inputs["foreground_search_submit_hint"] = {"action": "search"}
         if foreground_management is not None:
             inputs["foreground_management_hint"] = foreground_management
         if safe_shortcut_sequence:
@@ -541,6 +556,7 @@ class TaskIntentRouter:
                 "minimize_app",
                 "status_app",
                 "minimize_window",
+                "submit_search",
                 "safe_shortcut",
                 "safe_key",
                 "safe_scroll",
@@ -647,6 +663,8 @@ class TaskIntentRouter:
         if source and safe_shortcut_hint(text):
             return _empty_intent("web_research", text)
         if _spotlight_search_query_hint(text):
+            return _empty_intent("web_research", text)
+        if _spotlight_open_hint(text) or _foreground_search_submit_hint(text):
             return _empty_intent("web_research", text)
         if _direct_communication_hint(text):
             return _empty_intent("web_research", text)
@@ -1317,7 +1335,11 @@ class RuntimePlanner:
         spotlight_search = intent.inputs.get("spotlight_search_hint")
         if not isinstance(spotlight_search, Mapping):
             spotlight_query = _spotlight_search_query_hint(intent.user_goal)
-            spotlight_search = {"query": spotlight_query} if spotlight_query else {}
+            spotlight_search = (
+                {"query": spotlight_query}
+                if spotlight_query
+                else ({"query": ""} if _spotlight_open_hint(intent.user_goal) else {})
+            )
         app_name = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -1390,6 +1412,9 @@ class RuntimePlanner:
             or _foreground_submit_action_hint(intent.user_goal)
             or ""
         ).strip()
+        foreground_search_submit = bool(
+            intent.inputs.get("foreground_search_submit_hint")
+        ) or _foreground_search_submit_hint(intent.user_goal)
         if (
             app_name
             and (foreground_submit_action or foreground_compose_text or foreground_paste)
@@ -1421,9 +1446,24 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        if foreground_search_submit:
+            return [
+                _step(
+                    intent,
+                    "submit-foreground-search",
+                    "Submit current search",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.search_submit",), allowed),
+                    input_preview={},
+                    action="submit",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Submit the current search field with the dedicated safe search submit tool.",
+                )
+            ]
         if spotlight_search:
             query = str(spotlight_search.get("query") or "").strip()
-            return [
+            steps = [
                 _step(
                     intent,
                     "open-spotlight-search",
@@ -1436,20 +1476,24 @@ class RuntimePlanner:
                     approval_required=False,
                     reason="Open Spotlight with the dedicated safe shortcut.",
                 ),
-                _step(
-                    intent,
-                    "type-spotlight-search-query",
-                    "Type Spotlight search query",
-                    "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text",), allowed),
-                    input_preview={"text": query},
-                    depends_on=["open-spotlight-search"],
-                    action="type",
-                    risk_level="low",
-                    approval_required=False,
-                    reason="Type only the explicit Spotlight query from the user prompt.",
-                ),
             ]
+            if query:
+                steps.append(
+                    _step(
+                        intent,
+                        "type-spotlight-search-query",
+                        "Type Spotlight search query",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_type_text",), allowed),
+                        input_preview={"text": query},
+                        depends_on=["open-spotlight-search"],
+                        action="type",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Type only the explicit Spotlight query from the user prompt.",
+                    )
+                )
+            return steps
         if (
             desktop_discovery
             and not app_name
@@ -3446,6 +3490,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
         return "submit"
+    if step_key == "submit-foreground-search":
+        return "submit"
     if step_key == "focus-app-search-field":
         return _desktop_operation_action(tool_name)
     if step_key == "type-app-search-query":
@@ -4460,6 +4506,16 @@ def _foreground_submit_action_hint(text: str) -> str:
     if re.search(r"(?:提交|submit).{0,8}(?:回车|return|enter)", value, flags=re.IGNORECASE):
         return "submit"
     return ""
+
+
+def _foreground_search_submit_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    return bool(
+        re.fullmatch(r"(?:提交|确认|执行)?\s*(?:当前|这个|前台)?\s*(?:搜索|查询|查找)", value)
+        or re.fullmatch(r"(?:按|敲|点)?\s*(?:回车|enter|return)\s*(?:搜索|查询|查找)", value, flags=re.IGNORECASE)
+        or re.fullmatch(r"(?:press|hit|tap)\s+(?:enter|return)\s+to\s+(?:search|find)", lowered)
+    )
 
 
 def _foreground_compose_text_hint(text: str) -> str:
@@ -6212,6 +6268,16 @@ def _spotlight_search_query_hint(text: str) -> str:
     return ""
 
 
+def _spotlight_open_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    if _spotlight_search_query_hint(value):
+        return False
+    return bool(
+        re.fullmatch(r"(?:打开|启动|显示|呼出|唤起)\s*(?:Spotlight|spotlight|聚焦搜索|系统搜索)", value)
+        or re.fullmatch(r"(?:open|launch|start|show)\s+(?:spotlight|system\s+search)", value, flags=re.IGNORECASE)
+    )
+
+
 def _dynamic_context_browser_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if context_source not in {"selection", "clipboard"}:
         return {}
@@ -7181,6 +7247,7 @@ def _looks_like_active_window_request(value: str, lowered: str) -> bool:
         return False
     return bool(
         re.search(r"(?:当前|现在|前台).{0,8}(?:窗口|应用|app).{0,8}(?:是什么|是哪个|是不是)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:(?:当前|现在)\s*)?前台\s*(?:窗口|应用|app)?\s*(?:是什么|是啥|哪个|什么)", value, flags=re.IGNORECASE)
         or re.search(r"(?:当前|现在)?前台是不是\s*.+", value, flags=re.IGNORECASE)
         or re.search(r"现在是不是在\s*.+", value, flags=re.IGNORECASE)
         or re.search(r"我正在用什么(?:应用|app|软件)?", value, flags=re.IGNORECASE)

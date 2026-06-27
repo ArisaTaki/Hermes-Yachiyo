@@ -523,6 +523,11 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
         allowed,
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    frontmost_selection = planner_first_direct_tool_selection(
+        "现在前台是什么",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
     running_apps_selection = planner_first_direct_tool_selection(
         "当前有哪些 App 在运行",
         allowed,
@@ -566,6 +571,9 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
+    assert frontmost_selection.selected_source == "runtime_planner"
+    assert frontmost_selection.event_payload["legacy_request_count"] == 0
+    assert frontmost_selection.requests == active_window_selection.requests
     assert running_apps_selection.selected_source == "runtime_planner"
     assert running_apps_selection.event_payload["legacy_request_count"] == 0
     assert running_apps_selection.requests == [
@@ -710,6 +718,86 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
                 "planning_reason": "planner_fallback_desktop_operation",
             }
         ]
+    assert legacy_calls == []
+
+
+def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "browser.open_url",
+    ]
+    cases = [
+        (
+            "提交当前搜索",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.search_submit",
+                    "input": {},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                }
+            ],
+        ),
+        (
+            "press enter to search",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.search_submit",
+                    "input": {},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                }
+            ],
+        ),
+        (
+            "打开聚焦搜索",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "spotlight_search"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                }
+            ],
+        ),
+        (
+            "Spotlight 搜索 yachiyo",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "spotlight_search"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": "yachiyo"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                },
+            ],
+        ),
+    ]
+
+    for prompt, expected_requests in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == expected_requests
     assert legacy_calls == []
 
 
