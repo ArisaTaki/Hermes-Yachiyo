@@ -2580,6 +2580,54 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
     assert _step_by_id(decision, "submit-app-search").approval_required is False
 
+    called_app_search = RuntimePlanner().decision(
+        "帮我打开一个叫 AtlasLab 的应用并搜索 revenue",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.research",
+            "artifact.write",
+        ],
+    )
+
+    assert called_app_search.selected_intent.kind == "desktop_operation"
+    assert called_app_search.selected_intent.inputs["app_name_hint"] == "AtlasLab"
+    assert called_app_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "revenue",
+        "target": "搜索",
+    }
+    assert _step_by_id(called_app_search, "open-or-focus-app").input_preview == {
+        "app_name": "AtlasLab"
+    }
+    assert _step_by_id(called_app_search, "type-app-search-query").input_preview == {
+        "text": "revenue"
+    }
+
+    english_called_app_search = RuntimePlanner().decision(
+        "open the app called AtlasLab and search revenue",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.research",
+            "artifact.write",
+        ],
+    )
+
+    assert english_called_app_search.selected_intent.kind == "desktop_operation"
+    assert english_called_app_search.selected_intent.inputs["app_name_hint"] == "AtlasLab"
+    assert english_called_app_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "revenue",
+        "target": "Search",
+    }
+
     leading = RuntimePlanner().decision(
         "Finder 找下载文件",
         allowed_tools=[

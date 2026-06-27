@@ -4855,11 +4855,13 @@ def _clean_app_name_hint(value: str) -> str:
     )[0].strip(" .，,。")
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?(?:我(?:没|没有)提过的|新的|未知的)?"
-        r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)(?:叫|名叫|名称是|名字是|called|named)?\s*",
+        r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)"
+        r"(?:\s*(?:叫|名叫|名称是|名字是|called|named))?\s*",
         "",
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
+    app = re.sub(r"^(?:called|named)\s+", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"^(?:在|用|通过)\s*", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(
         r"^(?:in|inside|within|using|with)\s+",
@@ -7037,10 +7039,13 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
         if app
         else r"(?:当前\s*(?:app|应用|软件)|current\s+app|foreground\s+app)"
     )
+    chinese_search_verb = r"(?:搜索|查找|检索|找)(?!框|栏|输入|结果)"
     chinese_patterns = (
-        rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
         rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:[，,]\s*)?"
-        rf"(?:并|然后|再|接着|之后)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:并|然后|再|接着|之后)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:打开|启动|切到|聚焦).{{0,30}}{app_pattern}.{{0,20}}"
+        rf"{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
     )
     for pattern in chinese_patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -7050,10 +7055,12 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
                 return query
 
     lowered = value.lower()
+    english_search_verb = r"(?:search|find|look\s+up)(?!\s+(?:box|field|bar|input|result|results)\b)"
     english_patterns = (
-        rf"\b(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\s+(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
-        rf"\b(?:open|launch|focus|start)\s+(?:the\s+)?{app_pattern}\s+(?:and|then)?\s*(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
-        rf"\b(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+?)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\b",
+        rf"\b(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\s+{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        rf"\b(?:open|launch|focus|start)\s+(?:the\s+)?{app_pattern}\s+(?:and|then)?\s*{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        rf"\b(?:open|launch|focus|start)\b.{{0,60}}\b{app_pattern}\b.{{0,40}}\b{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        rf"\b{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+?)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\b",
     )
     for pattern in english_patterns:
         match = re.search(pattern, lowered, flags=re.IGNORECASE)
