@@ -145,6 +145,37 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths(
     }
 
 
+def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "用 Excel 分析 data/sales.csv 并输出报告",
+        allowed_tools=[
+            "app.open",
+            "data.analyze",
+            "workspace.read",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["spreadsheet_app_hint"] == "Excel"
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.app_control",
+        "data.analysis",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-spreadsheet-app",
+        "analyze-data-file",
+    ]
+    assert _step_by_id(decision, "open-spreadsheet-app").tool_name == "app.open"
+    assert _step_by_id(decision, "open-spreadsheet-app").input_preview == {
+        "app_name": "Excel",
+    }
+    assert _step_by_id(decision, "analyze-data-file").depends_on == [
+        "open-spreadsheet-app"
+    ]
+
+
 def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> None:
     decision = RuntimePlanner().decision(
         "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",
@@ -409,6 +440,9 @@ def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested
     assert default.selected_intent.kind == "data_analysis"
     assert default.selected_intent.inputs["data_source_hint"] == "sales.xlsx"
     assert default.selected_intent.preferred_capabilities == ["data.analysis"]
+    assert "open-spreadsheet-app" not in [
+        step.step_id for step in default.plan.tool_plan.steps
+    ]
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["data_source_hint"] == "sales.csv"
     assert decision.selected_intent.inputs["spreadsheet_app_hint"] == "Excel"
@@ -416,10 +450,33 @@ def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested
         "data.analysis",
         "desktop.app_control",
     ]
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.app_control",
+        "file.workspace_read",
+        "terminal.execution",
+        "artifact.write",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "open-spreadsheet-app",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "open-spreadsheet-app").tool_name == "app.open"
+    assert _step_by_id(decision, "open-spreadsheet-app").input_preview == {
+        "app_name": "Excel",
+    }
     assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
+    assert _step_by_id(decision, "run-analysis").depends_on == [
+        "inspect-data-source",
+        "open-spreadsheet-app",
+    ]
     assert numbers.selected_intent.kind == "data_analysis"
     assert numbers.selected_intent.inputs["spreadsheet_app_hint"] == "Numbers"
     assert "desktop.app_control" in numbers.selected_intent.preferred_capabilities
+    assert _step_by_id(numbers, "open-spreadsheet-app").input_preview == {
+        "app_name": "Numbers",
+    }
 
 
 def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> None:
@@ -7023,6 +7080,53 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+
+
+def test_planner_tool_requests_opens_requested_spreadsheet_app_for_analysis() -> None:
+    requests = planner_tool_requests(
+        "用 Excel 分析 data/sales.csv 并输出报告",
+        allowed_tools=[
+            "app.open",
+            "data.analyze",
+            "workspace.read",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    fallback_requests = planner_tool_requests(
+        "在 Numbers 里分析 report.xlsx 并输出报告",
+        allowed_tools=["app.open", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Excel"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+    ]
+    assert fallback_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Numbers"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+            "continue_to_model": True,
         }
     ]
 

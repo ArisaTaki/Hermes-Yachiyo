@@ -1198,6 +1198,7 @@ class RuntimePlanner:
         source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
         context_source = str(intent.inputs.get("context_source") or "").strip()
         source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
+        spreadsheet_app_step = _spreadsheet_app_open_step(intent, allowed)
         if context_source and not source_hint:
             context_steps = _context_source_steps(
                 intent,
@@ -1206,9 +1207,16 @@ class RuntimePlanner:
                 step_prefix="data",
                 capability_id="data.analysis",
             )
-            depends_on = [step.step_id for step in context_steps]
+            context_depends_on = [step.step_id for step in context_steps]
+            spreadsheet_steps = (
+                [_with_step_dependencies(spreadsheet_app_step, context_depends_on)]
+                if spreadsheet_app_step is not None
+                else []
+            )
+            depends_on = context_depends_on + [step.step_id for step in spreadsheet_steps]
             return [
                 *context_steps,
+                *spreadsheet_steps,
                 _step(
                     intent,
                     "run-analysis",
@@ -1250,7 +1258,9 @@ class RuntimePlanner:
             }
             if len(artifact_paths) > 1:
                 input_preview["artifact_paths"] = artifact_paths
+            depends_on = [spreadsheet_app_step.step_id] if spreadsheet_app_step is not None else []
             return [
+                *([spreadsheet_app_step] if spreadsheet_app_step is not None else []),
                 _step(
                     intent,
                     "analyze-data-file",
@@ -1258,6 +1268,7 @@ class RuntimePlanner:
                     "data.analysis",
                     _first_allowed(("data.analyze",), allowed),
                     input_preview=input_preview,
+                    depends_on=depends_on,
                     reason=(
                         "Use the built-in local parser for straightforward CSV, TSV, JSON, JSONL, XLSX, "
                         "text-table, and standard report artifacts before escalating to terminal.run."
@@ -1268,6 +1279,11 @@ class RuntimePlanner:
             ("workspace.read", "workspace.list")
             if source_hint
             else ("workspace.list", "workspace.read")
+        )
+        spreadsheet_steps = (
+            [_with_step_dependencies(spreadsheet_app_step, ["inspect-data-source"])]
+            if spreadsheet_app_step is not None
+            else []
         )
         return [
             _step(
@@ -1280,6 +1296,7 @@ class RuntimePlanner:
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),
+            *spreadsheet_steps,
             _step(
                 intent,
                 "run-analysis",
@@ -1289,7 +1306,10 @@ class RuntimePlanner:
                 input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
                 risk_level="high",
                 approval_required=True,
-                depends_on=["inspect-data-source"],
+                depends_on=[
+                    "inspect-data-source",
+                    *[step.step_id for step in spreadsheet_steps],
+                ],
                 reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
             ),
             _step(
@@ -3198,6 +3218,40 @@ def _step(
     )
 
 
+def _spreadsheet_app_open_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> ToolPlanStepSnapshot | None:
+    app_name = str(intent.inputs.get("spreadsheet_app_hint") or "").strip()
+    if not app_name:
+        return None
+    return _step(
+        intent,
+        "open-spreadsheet-app",
+        "Open requested spreadsheet app",
+        "desktop.app_control",
+        _first_allowed(("app.open",), allowed),
+        input_preview={"app_name": app_name},
+        action="open_app",
+        reason=(
+            "The user explicitly requested a spreadsheet app; open it while keeping "
+            "analysis on reproducible local data tools."
+        ),
+    )
+
+
+def _with_step_dependencies(
+    step: ToolPlanStepSnapshot,
+    depends_on: Iterable[str],
+) -> ToolPlanStepSnapshot:
+    clean_depends_on = [
+        str(item or "").strip()
+        for item in depends_on
+        if str(item or "").strip()
+    ]
+    return step.model_copy(update={"depends_on": clean_depends_on})
+
+
 def _service_step(
     intent: TaskIntentSnapshot,
     capability_id: str,
@@ -4093,8 +4147,17 @@ def _required_capabilities_for_plan(
     intent: TaskIntentSnapshot,
     steps: list[ToolPlanStepSnapshot],
 ) -> list[str]:
-    if intent.kind == "data_analysis" and any(step.tool_name == "data.analyze" for step in steps):
-        return ["data.analysis"]
+    if intent.kind == "data_analysis":
+        required = (
+            ["data.analysis"]
+            if any(step.tool_name == "data.analyze" for step in steps)
+            else list(intent.required_capabilities)
+        )
+        if any(step.step_id == "open-spreadsheet-app" for step in steps) and (
+            "desktop.app_control" not in required
+        ):
+            required.insert(0, "desktop.app_control")
+        return required
     return list(intent.required_capabilities)
 
 

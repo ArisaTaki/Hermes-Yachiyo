@@ -1774,6 +1774,56 @@ def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> 
     ]
 
 
+def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatDataAnalysisRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-spreadsheet-data",
+        conversation_id="chat-1",
+        prompt="用 Excel 分析 data/sales.csv 并输出报告",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["daily_desktop_tool"] == "app.open"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == (
+        "planner_fallback_data_analysis_spreadsheet_app"
+    )
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    assert [
+        step["tool_name"]
+        for step in planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"]
+    ] == ["app.open", "data.analyze"]
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Excel"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+    ]
+
+
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
     runtime = _FakeRuntime()
     monkeypatch.setattr(
@@ -2310,6 +2360,12 @@ class _MainChatPlannerEventRuntime:
 class _MainChatDataAnalysisRuntime(_MainChatPlannerEventRuntime):
     def _main_chat_tool_policy(self) -> dict[str, Any]:
         return {
-            "allowed_tools": ["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+            "allowed_tools": [
+                "app.open",
+                "data.analyze",
+                "workspace.read",
+                "terminal.run",
+                "artifact.write",
+            ],
             "approval_required": {},
         }

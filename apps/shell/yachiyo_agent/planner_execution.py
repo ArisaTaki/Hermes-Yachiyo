@@ -405,6 +405,7 @@ def _canonical_app_name(app_name: str) -> str:
 
 
 def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    app_requests = _data_analysis_spreadsheet_app_requests(decision, allowed)
     data_analyze_step = next(
         (
             item
@@ -431,6 +432,7 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             if payload.get("max_rows"):
                 request_input["max_rows"] = int(payload.get("max_rows") or 1000)
             return [
+                *app_requests,
                 _request(
                     "data.analyze",
                     request_input,
@@ -441,12 +443,13 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
     inputs = decision.selected_intent.inputs
     context_source = str(inputs.get("context_source") or "").strip()
     if context_source in {"selection", "clipboard"}:
-        return _context_source_tool_requests(
+        context_requests = _context_source_tool_requests(
             decision,
             allowed,
             step_ids=("copy-selected-data-context", "read-data-context"),
             planning_reason="planner_prefetch_data_source",
         )
+        return _append_model_followup_requests(context_requests, app_requests)
     source_hint = str(inputs.get("data_source_hint") or "").strip()
     if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
         request = _request(
@@ -455,18 +458,68 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             planning_reason="planner_prefetch_data_source",
         )
         request["continue_to_model"] = True
-        return [request]
+        return _append_model_followup_requests([request], app_requests)
     if source_hint:
-        return []
+        return _mark_last_request_for_model_followup(app_requests)
     source_scope = str(inputs.get("data_source_scope_hint") or "").strip()
     if source_scope and not _workspace_listable_data_scope(source_scope):
-        return []
-    return _context_prefetch_tool_requests(
+        return _mark_last_request_for_model_followup(app_requests)
+    context_requests = _context_prefetch_tool_requests(
         decision,
         allowed,
         step_ids=("inspect-data-source",),
         planning_reason="planner_prefetch_data_source",
     )
+    return _append_model_followup_requests(context_requests, app_requests)
+
+
+def _data_analysis_spreadsheet_app_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "step_id", "") == "open-spreadsheet-app"
+        ),
+        None,
+    )
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not tool_name or tool_name not in allowed:
+        return []
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    return [
+        _request(
+            tool_name,
+            _desktop_request_payload(tool_name, payload),
+            planning_reason="planner_fallback_data_analysis_spreadsheet_app",
+        )
+    ]
+
+
+def _append_model_followup_requests(
+    base_requests: list[dict[str, Any]],
+    extra_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not extra_requests:
+        return base_requests
+    if not base_requests:
+        return _mark_last_request_for_model_followup(extra_requests)
+    continue_to_model = bool(base_requests[-1].pop("continue_to_model", False))
+    requests = [*base_requests, *extra_requests]
+    if continue_to_model:
+        requests[-1]["continue_to_model"] = True
+    return requests
+
+
+def _mark_last_request_for_model_followup(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if requests:
+        requests[-1]["continue_to_model"] = True
+    return requests
 
 
 def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
