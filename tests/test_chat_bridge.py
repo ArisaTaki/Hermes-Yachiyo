@@ -584,6 +584,63 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         store.close()
 
 
+def test_chat_bridge_quick_message_discovers_data_source_with_main_chat_tools(
+    tmp_path,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = SimpleNamespace(
+        _main_chat_tool_policy=lambda: {
+            "allowed_tools": ["workspace.list", "workspace.read", "terminal.run", "artifact.write"]
+        }
+    )
+    bridge = ChatBridge(runtime)
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-data-discovery",
+            "task_id": "task-data-discovery",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+    try:
+        result = bridge.send_quick_message(
+            "分析 Downloads 里的销售数据并输出报告",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["agent_task"]["task_id"] == "task-data-discovery"
+        _assert_planner_trace_prefix(
+            result["agent_task"],
+            intent_kind="data_analysis",
+        )
+        selection_event = _agent_task_event(
+            result["agent_task"],
+            "agent.plan.selection",
+        )
+        assert selection_event["payload"]["selection_source"] == "runtime_planner"
+        assert selection_event["payload"]["selected_tools"] == ["workspace.list"]
+        assert selection_event["payload"]["planner_request_count"] == 1
+        event = _agent_task_event(
+            result["agent_task"],
+            "agent.desktop.intent_planned",
+            detail="workspace.list",
+        )
+        assert event["payload"]["tool"] == "workspace.list"
+        assert event["payload"]["source"] == "runtime_planner"
+        assert event["payload"]["planning_reason"] == "planner_prefetch_data_source"
+        assert event["payload"]["input_preview"] == {"path": "Downloads"}
+        assert event["payload"]["continue_to_model"] is True
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_keeps_legacy_fallback_inside_main_chat_policy(
     tmp_path,
 ):
