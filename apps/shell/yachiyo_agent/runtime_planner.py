@@ -648,6 +648,7 @@ class TaskIntentRouter:
         score = _score_terms(text, ["report", "write up", "summary", "deck", "报告", "总结", "汇报", "文档"])
         if score <= 0:
             return _empty_intent("report_generation", text)
+        context_source = context_source_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "report_generation", text),
             kind="report_generation",
@@ -655,9 +656,17 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.85, 0.34 + score),
             description="Produce a written artifact from available context or gathered inputs.",
+            inputs={"context_source": context_source} if context_source else {},
             expected_outputs=_expected_outputs(text, default=["report"]),
             required_capabilities=["artifact.write"],
-            preferred_capabilities=["file.workspace_read", "browser.research", "data.analysis"],
+            preferred_capabilities=[
+                *(
+                    ["clipboard.read_write", "desktop.ui_operation"]
+                    if context_source
+                    else ["file.workspace_read", "browser.research", "data.analysis"]
+                ),
+                "artifact.write",
+            ],
             risk_level="low",
         )
 
@@ -2104,6 +2113,29 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        context_source = str(intent.inputs.get("context_source") or "").strip()
+        if context_source:
+            context_steps = _context_source_steps(
+                intent,
+                allowed,
+                context_source,
+                step_prefix="report",
+                capability_id="artifact.write",
+            )
+            depends_on = [step.step_id for step in context_steps]
+            return [
+                *context_steps,
+                _step(
+                    intent,
+                    "write-report-artifact",
+                    "Write report artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={"path": "report.md", "body_source": context_source},
+                    depends_on=depends_on,
+                    reason="Produce the requested durable output from the inspected source.",
+                ),
+            ]
         return [
             _step(
                 intent,
@@ -3430,6 +3462,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if str(intent.inputs.get("context_source") or "").strip():
+            score += 0.34
         if _contains_any(text, ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索"]):
             score -= 0.04
     if intent.kind == "data_analysis" and (

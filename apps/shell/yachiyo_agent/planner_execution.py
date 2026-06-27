@@ -88,6 +88,13 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
     if decision.selected_intent.kind == "web_research":
         return _web_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "report_generation":
+        if str(decision.selected_intent.inputs.get("context_source") or "").strip():
+            return _context_source_tool_requests(
+                decision,
+                allowed,
+                step_ids=("copy-selected-report-context", "read-report-context"),
+                planning_reason="planner_prefetch_report_context",
+            )
         return _context_prefetch_tool_requests(
             decision,
             allowed,

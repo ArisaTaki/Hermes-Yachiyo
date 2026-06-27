@@ -911,6 +911,28 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert decision.selected_intent.kind == "report_generation"
     assert _step_by_id(decision, "gather-context").tool_name == "workspace.list"
 
+    clipboard = RuntimePlanner().decision(
+        "把剪贴板内容做成报告",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
+    assert clipboard.selected_intent.kind == "report_generation"
+    assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(clipboard, "read-report-context").tool_name == "clipboard.read"
+    assert _step_by_id(clipboard, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "clipboard",
+    }
+
+    read_only = RuntimePlanner().decision(
+        "读取剪贴板",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
+    assert read_only.selected_intent.kind == "clipboard_operation"
+
 
 def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> None:
     decision = RuntimePlanner().decision(
@@ -5151,6 +5173,45 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "planning_reason": "planner_prefetch_report_context",
             "continue_to_model": True,
         }
+    ]
+
+    clipboard_requests = planner_tool_requests(
+        "把剪贴板内容做成报告",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
+
+    assert clipboard_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    selection_requests = planner_tool_requests(
+        "把选中的内容做成报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
+    )
+
+    assert selection_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        },
     ]
 
 
