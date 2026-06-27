@@ -76,7 +76,10 @@ from apps.shell.yachiyo_agent import (
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
-from apps.shell.yachiyo_agent.task_cards import agent_task_light_snapshot_from_task
+from apps.shell.yachiyo_agent.task_cards import (
+    agent_task_light_snapshot_from_task,
+    agent_task_snapshot_from_payload,
+)
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 
 
@@ -205,6 +208,73 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.write_patch"
     assert "event" not in payload["recent_events"][0]
+
+
+def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "completed",
+            "summary": "已打开 Microsoft Word。",
+            "events": [
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "input_preview": {"limit": 20, "query": "Word"},
+                        "result": {"ok": True},
+                    },
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "tool": "app.open",
+                        "input_preview": {"app_name": "Microsoft Word"},
+                        "result": {"ok": True},
+                    },
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "tool": "desktop.active_window",
+                        "input_preview": {},
+                        "result": {"ok": True},
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "payload": {
+                        "tool": "app.open",
+                        "tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+                        "input_preview": {"app_name": "Microsoft Word"},
+                        "result": {"ok": True},
+                        "steps": [
+                            {
+                                "tool": "desktop.list_apps",
+                                "input_preview": {"limit": 20, "query": "Word"},
+                                "result": {"ok": True},
+                            },
+                            {
+                                "tool": "app.open",
+                                "input_preview": {"app_name": "Microsoft Word"},
+                                "result": {"ok": True},
+                            },
+                            {
+                                "tool": "desktop.active_window",
+                                "input_preview": {},
+                                "result": {"ok": True},
+                            },
+                        ],
+                        "summary": "已打开 Microsoft Word。",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in snapshot.recent_events].count("agent.tool.call") == 3
+    assert [tool_call.tool_name for tool_call in snapshot.tool_calls] == ["app.open"]
+    assert snapshot.tool_calls[0].input_preview == {"app_name": "Microsoft Word"}
 
 
 def test_agent_task_light_snapshot_json_shape_is_stable() -> None:

@@ -20,7 +20,7 @@ from .artifact_event_snapshots import (
     merge_artifact_snapshot_lists,
 )
 from .artifacts import artifact_snapshots_from_payloads
-from .contracts import AgentTaskSnapshot, PublicRunEvent
+from .contracts import AgentTaskSnapshot, PublicRunEvent, ToolCallSnapshot
 from .events import public_run_event_from_payload
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
@@ -33,6 +33,23 @@ _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_re
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
+_DAILY_DESKTOP_DISCOVERY_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+    "desktop.windows",
+    "desktop.permissions",
+}
+_DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+    "desktop.permissions",
+}
+_DAILY_DESKTOP_VERIFY_TOOLS = {
+    "desktop.active_window",
+    "desktop.windows",
+    "desktop.ui_elements",
+    "screen.capture",
+}
 
 
 def agent_task_snapshot_from_payload(
@@ -74,6 +91,7 @@ def agent_task_snapshot_from_payload(
         run_id=run_id,
         events=recent_events,
     )
+    tool_calls = _chat_task_tool_calls(tool_calls, recent_events)
     active_task = status in _ACTIVE_TASK_STATUSES
     recovery_needs_user_action = (
         _has_desktop_recovery_user_action(
@@ -121,6 +139,90 @@ def agent_task_snapshots_from_payloads(payloads: Any) -> list[AgentTaskSnapshot]
     if not isinstance(payloads, list):
         return []
     return [agent_task_snapshot_from_payload(item) for item in payloads]
+
+
+def _chat_task_tool_calls(
+    tool_calls: list[ToolCallSnapshot],
+    events: list[PublicRunEvent],
+) -> list[ToolCallSnapshot]:
+    completed_events = [
+        event
+        for event in events
+        if event.event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE
+    ]
+    if not completed_events:
+        return tool_calls
+
+    visible_events: list[PublicRunEvent] = []
+    for event in completed_events:
+        payload = dict(event.payload) if isinstance(event.payload, Mapping) else {}
+        steps = _visible_daily_desktop_completed_steps(payload.get("steps"))
+        if steps:
+            payload["steps"] = steps
+        visible_events.append(event.model_copy(update={"payload": payload}))
+    visible_tool_calls = tool_call_snapshots_from_payloads(None, events=visible_events)
+    return visible_tool_calls or tool_calls
+
+
+def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_steps, list):
+        return []
+    steps = [dict(step) for step in raw_steps if isinstance(step, Mapping)]
+    primary_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if _text(step.get("tool") or step.get("tool_name")) not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        and _text(step.get("tool") or step.get("tool_name")) not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if not primary_indexes:
+        visible_steps = list(steps)
+        while (
+            len(visible_steps) > 1
+            and _text(visible_steps[0].get("tool") or visible_steps[0].get("tool_name"))
+            in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS
+        ):
+            visible_steps = visible_steps[1:]
+        return visible_steps
+
+    first_primary = primary_indexes[0]
+    last_primary = primary_indexes[-1]
+    visible_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(steps):
+        tool_name = _text(step.get("tool") or step.get("tool_name"))
+        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS and (
+            index < first_primary or index > last_primary
+        ):
+            continue
+        if (
+            tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
+            and index > last_primary
+            and not _is_requested_ui_readback(steps, index, first_primary, last_primary)
+        ):
+            continue
+        visible_steps.append(step)
+    return visible_steps or steps
+
+
+def _is_requested_ui_readback(
+    steps: list[dict[str, Any]],
+    index: int,
+    first_primary: int,
+    last_primary: int,
+) -> bool:
+    if _text(steps[index].get("tool") or steps[index].get("tool_name")) != "desktop.ui_elements":
+        return False
+    primary_tools = {
+        _text(step.get("tool") or step.get("tool_name"))
+        for step in steps[first_primary : last_primary + 1]
+        if isinstance(step, Mapping)
+    }
+    return bool(primary_tools) and primary_tools.issubset(
+        {
+            "app.open",
+            "app.focus",
+            "system.settings_open",
+        }
+    )
 
 
 def run_events_from_payload(
