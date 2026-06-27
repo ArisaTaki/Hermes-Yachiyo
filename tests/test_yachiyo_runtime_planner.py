@@ -1213,6 +1213,36 @@ def test_runtime_planner_keeps_postposed_app_name_for_app_scoped_shortcut() -> N
     }
 
 
+def test_runtime_planner_strips_chinese_mode_suffix_for_app_scoped_shortcut() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.active_window",
+    ]
+    decision = RuntimePlanner().decision("把Chrome启动起来刷新一下", allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Chrome",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {
+        "app_name": "Chrome",
+        "action": "refresh",
+    }
+
+    requests = planner_tool_requests("把Chrome启动起来刷新一下", allowed_tools)
+    assert requests[1]["tool"] == "app.open_and_safe_shortcut"
+    assert requests[1]["input"] == {
+        "app_name": "Google Chrome",
+        "action": "refresh",
+    }
+
+
 def test_runtime_planner_extracts_english_focus_and_app_prefixes() -> None:
     cases = (
         ("bring Slack to front", "Slack", "app.focus"),
