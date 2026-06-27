@@ -3016,6 +3016,14 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
         "把音量调到最大",
         allowed_tools=["system.volume"],
     )
+    louder = RuntimePlanner().decision(
+        "大点声",
+        allowed_tools=["system.volume"],
+    )
+    quieter = RuntimePlanner().decision(
+        "声音小一点",
+        allowed_tools=["system.volume"],
+    )
 
     assert decision.selected_intent.kind == "system_control"
     assert decision.selected_intent.inputs == {
@@ -3030,6 +3038,17 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
     assert max_volume.selected_intent.inputs == {
         "kind": "volume",
         "payload": {"action": "set", "level": 100},
+    }
+    assert louder.selected_intent.kind == "system_control"
+    assert louder.selected_intent.inputs == {
+        "kind": "volume",
+        "payload": {"action": "up"},
+    }
+    assert _step_by_id(louder, "control-system-state").tool_name == "system.volume"
+    assert quieter.selected_intent.kind == "system_control"
+    assert quieter.selected_intent.inputs == {
+        "kind": "volume",
+        "payload": {"action": "down"},
     }
 
 

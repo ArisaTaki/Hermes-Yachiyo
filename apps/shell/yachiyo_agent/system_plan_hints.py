@@ -169,9 +169,43 @@ def _volume_payload(text: str) -> dict[str, Any]:
         level = int(level_match.group("level"))
         if 0 <= level <= 100:
             return {"action": "set", "level": level}
-    if _contains_any(text, ["调大", "调高", "提高", "大声", "volume up", "louder"]):
+    if _contains_any(
+        text,
+        [
+            "调大",
+            "调高",
+            "提高",
+            "大声",
+            "大点声",
+            "大一点声",
+            "声音大点",
+            "声音大一点",
+            "volume up",
+            "louder",
+        ],
+    ) or (
+        has_volume_context
+        and _contains_any(text, ["大一点", "大点", "高一点", "高点"])
+    ):
         return {"action": "up"}
-    if _contains_any(text, ["调小", "调低", "降低", "小声", "volume down", "quieter"]):
+    if _contains_any(
+        text,
+        [
+            "调小",
+            "调低",
+            "降低",
+            "小声",
+            "小点声",
+            "小一点声",
+            "声音小点",
+            "声音小一点",
+            "volume down",
+            "quieter",
+        ],
+    ) or (
+        has_volume_context
+        and _contains_any(text, ["小一点", "小点", "低一点", "低点"])
+    ):
         return {"action": "down"}
     if _contains_any(text, ["查看音量", "读取音量", "当前音量", "音量多少", "volume status"]):
         return {"action": "status"}

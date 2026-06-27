@@ -167,7 +167,7 @@ def test_planner_first_direct_selection_owns_system_control_without_legacy() -> 
     legacy_calls: list[dict[str, Any]] = []
 
     volume_selection = planner_first_direct_tool_selection(
-        "音量调大",
+        "大点声",
         ["system.volume"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
