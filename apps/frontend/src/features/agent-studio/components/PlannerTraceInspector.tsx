@@ -38,6 +38,8 @@ type PlannerSelection = {
   plannerRequestCount: number;
   reason: string;
   requiredCapabilities: string[];
+  legacyFallback: boolean;
+  selectedRole: string;
   selectedSource: string;
   selectedTools: string[];
   selectedRequestCount: number;
@@ -186,18 +188,23 @@ export function PlannerTraceInspector({
         {trace.selection ? (
           <section
             data-legacy-request-count={trace.selection.legacyRequestCount}
+            data-legacy-fallback={String(trace.selection.legacyFallback)}
             data-missing-capability-count={trace.selection.missingCapabilityCount}
             data-plan-capability-count={trace.selection.planCapabilityCount}
             data-plan-step-count={trace.selection.planStepCount}
             data-planner-request-count={trace.selection.plannerRequestCount}
+            data-selection-role={trace.selection.selectedRole}
             data-selected-request-count={trace.selection.selectedRequestCount}
             data-testid="agent-run-detail-planner-selection"
           >
             <div className="studio-tool-inspector-heading">
               <h3>Direct Selection</h3>
-              <span>{trace.selection.selectedSource || 'unknown'}</span>
+              <span>{trace.selection.selectedRole || trace.selection.selectedSource || 'unknown'}</span>
             </div>
             <div className="studio-tool-pill-row">
+              <span className="studio-tool-permission" data-selection-role={trace.selection.selectedRole}>
+                role · {trace.selection.selectedRole || 'not recorded'}
+              </span>
               <span className="studio-tool-permission" data-selection-reason={trace.selection.reason}>
                 reason · {trace.selection.reason || 'not recorded'}
               </span>
@@ -670,6 +677,7 @@ function toolPlanStepSnapshot(value: unknown): ToolPlanStepSnapshot | null {
 
 function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerSelection | null {
   const selectedSource = stringValue(payload.selection_source);
+  const selectedRole = stringValue(payload.selection_role);
   const reason = stringValue(payload.selection_reason);
   const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
   const planTools = uniqueStrings(Array.isArray(payload.plan_tools) ? payload.plan_tools : []);
@@ -701,6 +709,7 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
   if (
     !selectedSource
+    && !selectedRole
     && !reason
     && !selectedTools.length
     && !planTools.length
@@ -728,6 +737,11 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     plannerRequestCount,
     reason,
     requiredCapabilities,
+    legacyFallback: booleanValue(
+      payload.legacy_fallback,
+      selectedRole === 'legacy_desktop_intent_fallback',
+    ) || false,
+    selectedRole,
     selectedSource,
     selectedTools,
     selectedRequestCount,

@@ -1200,6 +1200,8 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "runtimePlannerEventType",
             "plan_tools",
             "plan_capabilities",
+            "selection_role",
+            "legacy_fallback",
             "plan_step_count",
             'data-testid="agent-run-detail-planner-intent"',
             'data-testid="agent-run-detail-planner-selection"',

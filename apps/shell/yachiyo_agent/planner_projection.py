@@ -125,6 +125,9 @@ def planner_selection_payload(
     planner_request_list = _request_list(planner_requests)
     legacy_request_list = _request_list(legacy_requests)
     selected_request_list = _request_list(selected_requests)
+    selected_source_value = str(selected_source or "").strip()
+    selected_reason_value = str(selected_reason or "").strip()
+    selection_role = _selection_role(selected_source_value)
     plan_tools = _plan_tool_names(decision)
     plan_steps = _plan_steps(decision)
     plan_capabilities = _plan_capability_ids(decision)
@@ -134,8 +137,10 @@ def planner_selection_payload(
     open_questions = _tool_plan_values(decision, "open_questions")
     payload: dict[str, Any] = {
         "source": "runtime_planner",
-        "selection_source": str(selected_source or "").strip(),
-        "selection_reason": str(selected_reason or "").strip(),
+        "selection_source": selected_source_value,
+        "selection_role": selection_role,
+        "selection_reason": selected_reason_value,
+        "legacy_fallback": selection_role == "legacy_desktop_intent_fallback",
         "plan_tools": plan_tools,
         "plan_capabilities": plan_capabilities,
         "required_capabilities": _required_capability_ids(decision),
@@ -171,6 +176,14 @@ def planner_selection_payload(
     if isinstance(route_to_studio, bool):
         payload["route_to_studio"] = route_to_studio
     return payload
+
+
+def _selection_role(selected_source: str) -> str:
+    if selected_source == "daily_desktop_intent":
+        return "legacy_desktop_intent_fallback"
+    if selected_source == "runtime_planner":
+        return "runtime_planner_primary"
+    return selected_source or "none"
 
 
 def planner_selection_timeline_event(

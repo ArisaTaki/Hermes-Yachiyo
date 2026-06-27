@@ -465,6 +465,8 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
 
     assert payload["source"] == "runtime_planner"
     assert payload["selection_source"] == "runtime_planner"
+    assert payload["selection_role"] == "runtime_planner_primary"
+    assert payload["legacy_fallback"] is False
     assert payload["selection_reason"] == "runtime_planner_direct"
     assert payload["plan_tools"] == ["desktop.list_apps", "app.open", "desktop.active_window"]
     assert payload["plan_capabilities"] == [
@@ -498,6 +500,44 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert event["event"] == "agent.plan.selection"
     assert event["detail"] == "runtime_planner"
     assert event["payload"] == payload
+
+
+def test_runtime_planner_selection_projection_marks_legacy_desktop_intent_as_fallback() -> None:
+    decision = RuntimePlanner().decision(
+        "Finder 新建文件夹",
+        allowed_tools=["desktop.safe_shortcut", "app.open_and_safe_shortcut"],
+    )
+    planner_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_folder"},
+        }
+    ]
+    legacy_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "new_folder"},
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=legacy_requests,
+        selected_requests=legacy_requests,
+        selected_source="daily_desktop_intent",
+        selected_reason="legacy_selected_after_planner_gap",
+    )
+
+    assert payload["source"] == "runtime_planner"
+    assert payload["selection_source"] == "daily_desktop_intent"
+    assert payload["selection_role"] == "legacy_desktop_intent_fallback"
+    assert payload["legacy_fallback"] is True
+    assert payload["planner_tools"] == ["desktop.safe_shortcut"]
+    assert payload["legacy_tools"] == ["app.open_and_safe_shortcut"]
+    assert payload["selected_tools"] == ["app.open_and_safe_shortcut"]
 
 
 def test_planner_selection_payload_surfaces_outputs_for_studio_replay() -> None:
