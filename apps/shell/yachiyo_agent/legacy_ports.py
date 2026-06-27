@@ -1098,7 +1098,11 @@ def _coalesce_legacy_direct_app_shortcut_requests(
         {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"} & allowed
     ):
         return requests
-    if not (_explicit_open_prompt(prompt) or _search_field_prompt(prompt)):
+    if not (
+        _explicit_open_prompt(prompt)
+        or _search_field_prompt(prompt)
+        or _has_non_search_app_shortcut_pair(requests)
+    ):
         return requests
     coalesced: list[dict[str, Any]] = []
     index = 0
@@ -1169,6 +1173,20 @@ def _coalesce_legacy_direct_app_shortcut_requests(
         if index < len(requests) and _legacy_direct_verify_request(requests[index]):
             index += 1
     return coalesced
+
+
+def _has_non_search_app_shortcut_pair(requests: list[dict[str, Any]]) -> bool:
+    for index, request in enumerate(requests[:-1]):
+        if str(request.get("tool") or "").strip() not in {"app.open", "app.focus"}:
+            continue
+        shortcut = requests[index + 1]
+        if str(shortcut.get("tool") or "").strip() != "desktop.safe_shortcut":
+            continue
+        payload = shortcut.get("input") if isinstance(shortcut.get("input"), dict) else {}
+        action = str(payload.get("action") or "").strip()
+        if action and action != "find":
+            return True
+    return False
 
 
 def _explicit_open_prompt(prompt: str) -> bool:

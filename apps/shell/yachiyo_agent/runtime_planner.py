@@ -4896,6 +4896,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += -0.18 if _looks_like_generic_media_control_request(text) else 0.24
     if (
         intent.kind == "desktop_operation"
+        and str(intent.inputs.get("operation_hint") or "").strip() == "play"
+        and str(media_playback_hint(text).get("action") or "").strip() == "play"
+    ):
+        score -= 0.2
+    if (
+        intent.kind == "desktop_operation"
         and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
     ):
         score += 0.24
@@ -4935,6 +4941,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.08
     if intent.kind == "media_playback" and str(intent.inputs.get("query") or "").strip():
         score += 0.08
+    if (
+        intent.kind == "media_playback"
+        and str(intent.inputs.get("action") or "").strip() == "play"
+        and not str(intent.inputs.get("query") or "").strip()
+    ):
+        score += 0.12
     if intent.kind == "information_capture" and _contains_any(
         text,
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
@@ -8527,10 +8539,10 @@ def _looks_like_media_search_play_request(text: str) -> bool:
 def _looks_like_generic_media_control_request(text: str) -> bool:
     hint = media_playback_hint(text)
     action = str(hint.get("action") or "").strip()
-    if action not in {"pause", "next", "previous", "status"}:
-        return False
     if str(hint.get("control_only") or "").strip().lower() == "true":
         return True
+    if action not in {"pause", "next", "previous", "status"}:
+        return False
     return bool(
         not str(hint.get("app_name") or "").strip()
         and _contains_any(text, ("music", "song", "songs", "音乐", "歌曲"))

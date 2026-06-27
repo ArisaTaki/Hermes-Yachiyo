@@ -25,10 +25,21 @@ _GENERIC_MUSIC_QUERIES = {
     "进度",
     "apple",
     "个",
+    "点",
+    "东西",
+    "听听",
+    "音乐听听",
     "一下",
     "一首",
     "首",
+    "吗",
+    "嘛",
+    "吧",
+    "呢",
+    "么",
     "some music",
+    "something",
+    "anything",
     "a song",
     "song",
     "songs",
@@ -804,11 +815,14 @@ def media_action_hint(text: str) -> str:
         ["暂停", "停一下", "停止", "停止播放", "别放了", "关掉", "pause", "stop playing"],
     ):
         return "pause"
-    if contains_any(lowered, ["继续", "恢复播放", "resume", "continue"]):
+    if contains_any(lowered, ["继续", "恢复播放", "恢复音乐", "恢复歌", "resume", "continue"]):
         return "play"
     if re.search(r"\bput\s+.+\s+on\s+(?:apple\s*music|music)\b", lowered):
         return "play"
-    if contains_any(lowered, ["来点", "听点", "听一首", "听首"]):
+    if contains_any(
+        lowered,
+        ["来点", "听点", "听一首", "听首", "想听", "听音乐", "听歌", "listen to music", "put on some music"],
+    ):
         return "play"
     if contains_any(lowered, ["播放", "播", "放", "play"]):
         return "play"
@@ -820,7 +834,7 @@ def media_control_only_hint(text: str, *, action: str = "") -> bool:
     if action in {"next", "previous", "pause"}:
         return not re.search(r"apple\s*music|苹果音乐|spotify|网易云|qq\s*音乐|qq music", lowered)
     if action == "play":
-        return contains_any(lowered, ["继续", "恢复播放", "resume", "continue"])
+        return contains_any(lowered, ["继续", "恢复播放", "恢复音乐", "恢复歌", "resume", "continue"])
     return False
 
 
@@ -877,6 +891,7 @@ def media_query_hint(text: str) -> str:
 def _clean_media_query(value: str) -> str:
     query = clean(value)
     query = re.sub(r"^some\s+(?=[a-z])", "", query)
+    query = re.sub(r"^(?:in|on|with|using)\s+", "", query, flags=re.IGNORECASE)
     query = re.sub(
         r"(?:用|在|打开|启动|通过)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)|spotify|网易云音乐?|qq\s*音乐|qq music)",
         "",
