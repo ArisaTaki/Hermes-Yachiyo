@@ -1237,6 +1237,48 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "click_search_result"
     )
 
+    github_search = RuntimePlanner().decision(
+        "在任意浏览器打开 GitHub 搜索 oha-yachiyo",
+        allowed_tools=["browser.open_url", "app.open", "desktop.list_apps"],
+    )
+    assert github_search.selected_intent.kind == "web_research"
+    assert github_search.selected_intent.inputs == {
+        "url_hint": "https://github.com/search?q=oha-yachiyo",
+        "browser_action": "open_search",
+        "query": "oha-yachiyo",
+        "destination": "GitHub",
+    }
+    assert _step_by_id(github_search, "open-web-search").input_preview == {
+        "url": "https://github.com/search?q=oha-yachiyo"
+    }
+
+    github_direct_search = RuntimePlanner().decision(
+        "打开 GitHub 搜索 oha-yachiyo",
+        allowed_tools=["browser.open_url", "app.open", "desktop.list_apps"],
+    )
+    assert github_direct_search.selected_intent.kind == "web_research"
+    assert github_direct_search.selected_intent.inputs["url_hint"] == (
+        "https://github.com/search?q=oha-yachiyo"
+    )
+
+    bilibili_search = RuntimePlanner().decision(
+        "在浏览器打开 Bilibili 搜索八千代",
+        allowed_tools=["browser.open_url", "app.open", "desktop.list_apps"],
+    )
+    assert bilibili_search.selected_intent.kind == "web_research"
+    assert bilibili_search.selected_intent.inputs["url_hint"] == (
+        "https://search.bilibili.com/all?keyword=%E5%85%AB%E5%8D%83%E4%BB%A3"
+    )
+
+    reddit_search = RuntimePlanner().decision(
+        "用 Chrome 打开 Reddit 搜索 yachiyo",
+        allowed_tools=["browser.open_url", "app.open", "desktop.list_apps"],
+    )
+    assert reddit_search.selected_intent.kind == "web_research"
+    assert reddit_search.selected_intent.inputs["url_hint"] == (
+        "https://www.reddit.com/search/?q=yachiyo"
+    )
+
     app_search = RuntimePlanner().decision(
         "search WeChat for file transfer",
         allowed_tools=["browser.open_url", "app.focus_and_safe_shortcut"],
@@ -1247,6 +1289,23 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "search WeChat for file transfer",
         allowed_tools=["browser.open_url", "app.focus_and_safe_shortcut"],
     ) == []
+
+    slack_search = RuntimePlanner().decision(
+        "打开 Slack 搜索 yachiyo 并打开第一个结果",
+        allowed_tools=[
+            "browser.open_url",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+        ],
+    )
+    assert slack_search.selected_intent.kind == "desktop_operation"
+    assert slack_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "yachiyo",
+        "target": "搜索",
+    }
 
 
 def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
@@ -7072,6 +7131,11 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
         ["browser.open_url", "app.open", "desktop.list_apps"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    github_search_selection = planner_first_direct_tool_selection(
+        "在任意浏览器打开 GitHub 搜索 oha-yachiyo",
+        ["browser.open_url", "app.open", "desktop.list_apps"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
     app_selection = planner_first_direct_tool_selection(
         "打开 Notion",
         ["browser.open_url", "app.open", "desktop.list_apps"],
@@ -7129,6 +7193,17 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
             "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://music.youtube.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert github_search_selection.selected_source == "runtime_planner"
+    assert github_search_selection.event_payload["intent_kind"] == "web_research"
+    assert github_search_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com/search?q=oha-yachiyo"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }
@@ -8431,6 +8506,18 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.baidu.com/s?wd=open+hanako"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests(
+        "在任意浏览器打开 GitHub 搜索 oha-yachiyo",
+        allowed_tools=[*allowed, "app.open", "desktop.list_apps"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com/search?q=oha-yachiyo"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }

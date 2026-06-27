@@ -18,7 +18,10 @@ from apps.shell.agent.runtime.app_aliases import APP_ALIASES as _APP_ALIASES
 from apps.shell.agent.runtime.app_aliases import COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES
 from apps.shell.agent.runtime.app_aliases import EMAIL_APP_NAMES as _EMAIL_APP_NAMES
 from apps.shell.agent.runtime.app_aliases import compact_app_alias as _compact_app_alias
-from apps.shell.agent.runtime.web_destinations import known_web_destination_url_hint
+from apps.shell.agent.runtime.web_destinations import (
+    known_web_destination_search_url,
+    known_web_destination_url_hint,
+)
 
 from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
 from .capability_registry import capability_snapshots
@@ -202,6 +205,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if _direct_communication_candidate_hint(text):
+            return _empty_intent("desktop_operation", text)
+        if _known_web_destination_search_hint(text):
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
@@ -7860,6 +7865,18 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
     if context_source in {"selection", "clipboard"}:
         return {}
     value = _clean_prompt(text)
+    destination_search = _known_web_destination_search_hint(value)
+    if destination_search:
+        hint: dict[str, Any] = {
+            "browser_action": "open_search",
+            "query": destination_search["query"],
+            "url_hint": destination_search["url_hint"],
+            "destination": destination_search["destination"],
+        }
+        followup = _web_search_followup_hint(value)
+        if followup:
+            hint.update(followup)
+        return hint
     query = _web_search_query(value)
     if not query:
         return {}
@@ -7973,6 +7990,59 @@ def _web_search_url(engine: str, query: str) -> str:
     if str(engine or "").strip().lower() == "baidu":
         return f"https://www.baidu.com/s?wd={quote_plus(query)}"
     return f"https://www.google.com/search?q={quote_plus(query)}"
+
+
+def _known_web_destination_search_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?"
+        r"(?:浏览器|chrome|google\s*chrome|google|谷歌|safari)?"
+        r"(?:里|中|上|内)?\s*(?:打开|访问|浏览|前往|去|上)?\s*"
+        r"(?P<site>[\w .·-]{1,60}?)(?:里|中|上|内)?\s*"
+        r"(?:搜索|搜一下|搜|查找|检索|找)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?P<site>[\w .·-]{1,60}?)(?:里|中|上|内)?\s*"
+        r"(?:搜索|搜一下|搜|查找|检索|找)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:(?:use|using|in|on|with)\s+(?:the\s+)?"
+        r"(?:browser|chrome|google\s+chrome|google|safari)\s+(?:to\s+)?)?"
+        r"(?:open|visit|browse|go\s+to)\s+(?:the\s+)?"
+        r"(?P<site>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:and\s+|then\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?"
+        r"(?P<query>[^.!?,]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:search|find|look\s+up)\s+(?:the\s+)?"
+        r"(?P<site>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+for\s+"
+        r"(?P<query>[^.!?,]+)$",
+        r"^(?P<site>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        destination = _clean_web_destination_site_hint(match.group("site"))
+        query = _clean_web_search_query(match.group("query"))
+        url = known_web_destination_search_url(destination, query)
+        if url:
+            return {
+                "destination": destination,
+                "query": query,
+                "url_hint": url,
+            }
+    return {}
+
+
+def _clean_web_destination_site_hint(site_name: str) -> str:
+    value = str(site_name or "").strip(" .，,。")
+    value = re.sub(
+        r"^(?:打开|访问|浏览|前往|去|上|open|visit|browse|go\s+to)\s+",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    value = re.sub(r"^(?:the\s+)?", "", value, flags=re.IGNORECASE).strip(" .，,。")
+    return value
 
 
 def _web_search_surface_hint(text: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote_plus
 
 
 KNOWN_WEB_DESTINATION_URLS: dict[str, str] = {
@@ -55,6 +56,37 @@ BROWSER_ONLY_WEB_DESTINATION_URLS: dict[str, str] = {
     "音乐": "https://music.apple.com",
 }
 
+KNOWN_WEB_DESTINATION_SEARCH_URLS: dict[str, str] = {
+    "baidu": "https://www.baidu.com/s?wd={query}",
+    "bilibili": "https://search.bilibili.com/all?keyword={query}",
+    "b站": "https://search.bilibili.com/all?keyword={query}",
+    "douban": "https://www.douban.com/search?q={query}",
+    "github": "https://github.com/search?q={query}",
+    "google": "https://www.google.com/search?q={query}",
+    "jd": "https://search.jd.com/Search?keyword={query}",
+    "jingdong": "https://search.jd.com/Search?keyword={query}",
+    "reddit": "https://www.reddit.com/search/?q={query}",
+    "rednote": "https://www.xiaohongshu.com/search_result?keyword={query}",
+    "taobao": "https://s.taobao.com/search?q={query}",
+    "twitter": "https://x.com/search?q={query}",
+    "weibo": "https://s.weibo.com/weibo?q={query}",
+    "x": "https://x.com/search?q={query}",
+    "xiaohongshu": "https://www.xiaohongshu.com/search_result?keyword={query}",
+    "yt": "https://www.youtube.com/results?search_query={query}",
+    "youtube": "https://www.youtube.com/results?search_query={query}",
+    "zhihu": "https://www.zhihu.com/search?type=content&q={query}",
+    "知乎": "https://www.zhihu.com/search?type=content&q={query}",
+    "百度": "https://www.baidu.com/s?wd={query}",
+    "豆瓣": "https://www.douban.com/search?q={query}",
+    "哔哩哔哩": "https://search.bilibili.com/all?keyword={query}",
+    "京东": "https://search.jd.com/Search?keyword={query}",
+    "淘宝": "https://s.taobao.com/search?q={query}",
+    "推特": "https://x.com/search?q={query}",
+    "微博": "https://s.weibo.com/weibo?q={query}",
+    "小红书": "https://www.xiaohongshu.com/search_result?keyword={query}",
+    "谷歌": "https://www.google.com/search?q={query}",
+}
+
 
 def known_web_destination_url_hint(text: str) -> str:
     value = str(text or "").strip()
@@ -90,6 +122,22 @@ def known_web_destination_url(site_name: str) -> str:
     site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site).strip()
     compact = re.sub(r"[\s._·-]+", "", site.lower())
     return KNOWN_WEB_DESTINATION_URLS.get(compact, "")
+
+
+def known_web_destination_search_url(site_name: str, query: str) -> str:
+    site = re.sub(
+        r"\s*(?:官网|官方网站|官方站|网页|网站|站点|首页|主页|首页面|site|website|homepage|home\s+page)$",
+        "",
+        str(site_name or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site).strip()
+    compact = re.sub(r"[\s._·-]+", "", site.lower())
+    template = KNOWN_WEB_DESTINATION_SEARCH_URLS.get(compact, "")
+    clean_query = str(query or "").strip()
+    if not template or not clean_query:
+        return ""
+    return template.format(query=quote_plus(clean_query))
 
 
 def browser_only_web_destination_url(site_name: str) -> str:
