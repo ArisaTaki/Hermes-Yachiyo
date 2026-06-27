@@ -9,7 +9,7 @@ from typing import Any
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
-from .desktop_plan_hints import media_tool_preview
+from .desktop_plan_hints import media_app_query_search_plan, media_tool_preview
 from .file_access_plan_hints import file_access_tool_preview
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
@@ -364,6 +364,16 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
 
 
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
+    app_query_plan = media_app_query_search_plan(inputs, allowed)
+    if app_query_plan:
+        return [
+            _request(
+                tool_name,
+                payload,
+                planning_reason="planner_fallback_media_playback",
+            )
+            for tool_name, payload in app_query_plan
+        ]
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
         return []

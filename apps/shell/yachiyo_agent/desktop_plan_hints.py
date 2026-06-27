@@ -603,6 +603,45 @@ def media_tool_preview(
     return tool_name, {"action": action} if tool_name else {}
 
 
+def media_app_query_search_plan(
+    inputs: Mapping[str, Any],
+    allowed_tools: Iterable[str] | None,
+) -> list[tuple[str, dict[str, Any]]]:
+    allowed = _allowed_tool_set(allowed_tools)
+    action = str(inputs.get("action") or "").strip() or "play"
+    app_name = str(inputs.get("app_name") or "").strip()
+    query = str(inputs.get("query") or "").strip()
+    if action != "play" or not app_name or app_name == "Music" or not query:
+        return []
+
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    if not type_tool or not submit_tool:
+        return []
+
+    app_search_tool = _first_allowed(
+        ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"),
+        allowed,
+    )
+    if app_search_tool:
+        return [
+            (app_search_tool, {"app_name": app_name, "action": "find"}),
+            (type_tool, {"text": query}),
+            (submit_tool, {}),
+        ]
+
+    app_tool = _first_allowed(("app.open", "app.focus"), allowed)
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    if not app_tool or not shortcut_tool:
+        return []
+    return [
+        (app_tool, {"app_name": app_name}),
+        (shortcut_tool, {"action": "find"}),
+        (type_tool, {"text": query}),
+        (submit_tool, {}),
+    ]
+
+
 def media_action_hint(text: str) -> str:
     lowered = str(text or "").lower()
     if contains_any(lowered, ["当前播放", "现在播放", "正在播放", "播放什么", "status", "currently playing"]):

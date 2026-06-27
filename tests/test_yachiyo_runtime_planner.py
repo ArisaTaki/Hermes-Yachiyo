@@ -2329,6 +2329,42 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
+def test_runtime_planner_routes_named_music_app_query_through_app_search() -> None:
+    decision = RuntimePlanner().decision(
+        "在 Spotify 播放 lo-fi",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Spotify",
+        "query": "lo-fi",
+        "control_only": "",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+    ]
+    assert _step_by_id(decision, "focus-media-app-search").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+        "app_name": "Spotify",
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-media-search-query").input_preview == {
+        "text": "lo-fi"
+    }
+    assert _step_by_id(decision, "submit-media-search").tool_name == "desktop.search_submit"
+
+
 def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
     cases = (
         ("切歌", "next"),
@@ -4267,6 +4303,42 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
             "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan() -> None:
+    requests = planner_desktop_tool_requests(
+        "在 Spotify 播放 lo-fi",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "lo-fi"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

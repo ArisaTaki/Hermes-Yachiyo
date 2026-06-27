@@ -42,6 +42,7 @@ from .desktop_plan_hints import (
     focus_window_hint,
     foreground_management_hint,
     hotkey_hint,
+    media_app_query_search_plan,
     media_playback_hint,
     media_tool_preview,
     safe_click_hint,
@@ -1818,6 +1819,63 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        app_query_plan = media_app_query_search_plan(intent.inputs, allowed)
+        if app_query_plan:
+            steps: list[ToolPlanStepSnapshot] = []
+            previous_step_id = ""
+            for tool_name, input_preview in app_query_plan:
+                if tool_name in {"app.open", "app.focus"}:
+                    step_id = "open-media-app" if tool_name == "app.open" else "focus-media-app"
+                    title = "Open media app" if tool_name == "app.open" else "Focus media app"
+                    capability_id = "desktop.app_control"
+                    action = "open" if tool_name == "app.open" else "focus"
+                    reason = (
+                        "Open or focus the requested media app before searching because "
+                        "the generic media playback tool cannot search for a specific query."
+                    )
+                elif tool_name.startswith("app."):
+                    step_id = "focus-media-app-search"
+                    title = "Focus media app search"
+                    capability_id = "desktop.app_control"
+                    action = "shortcut" if tool_name.endswith("_safe_shortcut") else "open"
+                    reason = (
+                        "Open the requested media app and focus its search affordance because "
+                        "the generic media playback tool cannot search for a specific query."
+                    )
+                elif tool_name == "desktop.safe_shortcut":
+                    step_id = "focus-media-app-search"
+                    title = "Focus media app search"
+                    capability_id = "desktop.ui_operation"
+                    action = "shortcut"
+                    reason = "Focus the media app search affordance with a safe shortcut."
+                elif tool_name == "desktop.safe_type_text":
+                    step_id = "type-media-search-query"
+                    title = "Type media search query"
+                    capability_id = "desktop.ui_operation"
+                    action = "type"
+                    reason = "Type only the explicit media query from the user prompt."
+                else:
+                    step_id = "submit-media-search"
+                    title = "Submit media search"
+                    capability_id = "desktop.ui_operation"
+                    action = "submit"
+                    reason = "Submit the media app search with the dedicated safe submit tool."
+                steps.append(
+                    _step(
+                        intent,
+                        step_id,
+                        title,
+                        capability_id,
+                        tool_name,
+                        input_preview=input_preview,
+                        depends_on=[previous_step_id] if previous_step_id else [],
+                        action=action,
+                        reason=reason,
+                    )
+                )
+                previous_step_id = step_id
+            return steps
+
         tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
         return [
             _step(
