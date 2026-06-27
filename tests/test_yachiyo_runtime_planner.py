@@ -7767,6 +7767,148 @@ def test_planner_first_routes_terminal_command_on_planner_approval_path() -> Non
     assert legacy_calls == []
 
 
+def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
+    allowed = [
+        "desktop.safe_shortcut",
+        "desktop.click_ui_element",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "screen.capture",
+    ]
+    selected_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+    current_page_link_copy = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy_current_page_link"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+    current_content_copy = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        selected_copy,
+    ]
+    paste = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "paste"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+    foreground_search_click = {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "搜索", "role_filter": "text", "limit": 80, "click_count": 1},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+    foreground_address_click = {
+        "protocol": "json_fallback",
+        "tool": "desktop.click_ui_element",
+        "input": {"target": "地址", "role_filter": "text", "limit": 80, "click_count": 1},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+    slack_search_click = {
+        "protocol": "json_fallback",
+        "tool": "app.focus_and_click_ui_element",
+        "input": {
+            "app_name": "Slack",
+            "target": "搜索",
+            "role_filter": "text",
+            "limit": 80,
+            "click_count": 1,
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_desktop_operation",
+    }
+
+    cases = (
+        ("复制当前网页内容", [*current_content_copy]),
+        ("把当前页面内容复制到剪贴板", [*current_content_copy]),
+        ("把当前网页链接粘贴到 Slack", [
+            current_page_link_copy,
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+        ]),
+        ("把选中的内容填到当前输入框", [selected_copy, paste]),
+        ("把剪贴板内容输入到搜索框", [foreground_search_click, paste]),
+        ("把当前网页链接输入到地址栏", [
+            current_page_link_copy,
+            foreground_address_click,
+            paste,
+        ]),
+        ("把当前页面内容输入到搜索框", [
+            *current_content_copy,
+            foreground_search_click,
+            paste,
+        ]),
+        ("把当前网页链接输入到 Slack 搜索框", [
+            current_page_link_copy,
+            slack_search_click,
+            paste,
+        ]),
+        ("把当前页面内容输入到 Slack 搜索框", [
+            *current_content_copy,
+            slack_search_click,
+            paste,
+        ]),
+        ("打开 Slack 搜索框输入选中的内容", [
+            selected_copy,
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_click_ui_element",
+                "input": {
+                    "app_name": "Slack",
+                    "target": "搜索",
+                    "role_filter": "text",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+            paste,
+        ]),
+    )
+    for prompt, expected_requests in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["operation_hint"] == "dynamic_context_ui_transfer"
+        assert planner_direct_tool_requests(prompt, allowed) == expected_requests
+
+    blocked = RuntimePlanner().decision(
+        "把当前页面内容输入到当前输入框",
+        allowed_tools=[*allowed, "browser.type_text"],
+    )
+    assert blocked.selected_intent.kind == "general"
+    assert planner_direct_tool_requests(
+        "把当前页面内容输入到当前输入框",
+        [*allowed, "browser.type_text"],
+    ) == []
+
+
 def test_planner_first_owns_direct_context_communication_send_sequence() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [

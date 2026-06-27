@@ -231,10 +231,13 @@ class TaskIntentRouter:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
+        dynamic_context_transfer = _dynamic_context_ui_transfer_hint(text)
+        if dynamic_context_transfer:
+            foreground_compose_text = ""
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         if (
             _browser_type_text_hint(text) or _browser_click_hint(text)
-        ) and not app_scoped_desktop_operation:
+        ) and not app_scoped_desktop_operation and not dynamic_context_transfer:
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
         foreground_search_submit = _foreground_search_submit_hint(text)
@@ -326,6 +329,8 @@ class TaskIntentRouter:
             score = 0.2
         if score <= 0 and (spotlight_search_query or spotlight_open):
             score = 0.18
+        if score <= 0 and dynamic_context_transfer:
+            score = 0.24
         if (
             score <= 0
             and not metadata.get("daily_desktop_intent")
@@ -348,6 +353,7 @@ class TaskIntentRouter:
             and not app_preferences
             and not spotlight_search_query
             and not spotlight_open
+            and not dynamic_context_transfer
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -374,7 +380,8 @@ class TaskIntentRouter:
             or app_scoped_safe_operation.get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
-            or _foreground_compose_app_name_hint(text)
+            or dynamic_context_transfer.get("app_name")
+            or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
             or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or _app_name_hint(text)
             or ""
@@ -429,6 +436,7 @@ class TaskIntentRouter:
             or ("submit_foreground" if foreground_submit_action else "")
             or ("browser_internal_page" if browser_internal_page else "")
             or ("app_preferences" if app_preferences else "")
+            or ("dynamic_context_ui_transfer" if dynamic_context_transfer else "")
             or ("safe_shortcut_sequence" if safe_shortcut_sequence else "")
             or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
@@ -458,6 +466,7 @@ class TaskIntentRouter:
             and not foreground_search_submit
             and not foreground_submit_action
             and not command_palette
+            and not dynamic_context_transfer
         ):
             return _empty_intent("desktop_operation", text)
         if (
@@ -474,6 +483,7 @@ class TaskIntentRouter:
             and safe_click is None
             and not app_search
             and not command_palette
+            and not dynamic_context_transfer
         ):
             return _empty_intent("desktop_operation", text)
         if (
@@ -491,6 +501,7 @@ class TaskIntentRouter:
             and safe_click is None
             and not app_search
             and not command_palette
+            and not dynamic_context_transfer
         ):
             return _empty_intent("desktop_operation", text)
         inputs: dict[str, Any] = {
@@ -519,6 +530,8 @@ class TaskIntentRouter:
             inputs["app_preferences_hint"] = app_preferences
         if spotlight_search_query or spotlight_open:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
+        if dynamic_context_transfer:
+            inputs["dynamic_context_ui_transfer_hint"] = dynamic_context_transfer
         if foreground_search_submit:
             inputs["foreground_search_submit_hint"] = {"action": "search"}
         if foreground_management is not None:
@@ -561,6 +574,7 @@ class TaskIntentRouter:
                 "safe_key",
                 "safe_scroll",
                 "safe_click",
+                "dynamic_context_ui_transfer",
             }
             and _looks_like_ui_operation(text)
             else "low"
@@ -659,6 +673,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _dynamic_context_ui_transfer_hint(text) or _blocked_dynamic_context_ui_transfer_hint(text):
+            return _empty_intent("web_research", text)
         source = context_source_hint(text)
         if source and safe_shortcut_hint(text):
             return _empty_intent("web_research", text)
@@ -1500,6 +1516,9 @@ class RuntimePlanner:
                     )
                 )
             return steps
+        dynamic_context_transfer = intent.inputs.get("dynamic_context_ui_transfer_hint")
+        if not isinstance(dynamic_context_transfer, Mapping):
+            dynamic_context_transfer = _dynamic_context_ui_transfer_hint(intent.user_goal)
         if (
             desktop_discovery
             and not app_name
@@ -1573,6 +1592,13 @@ class RuntimePlanner:
                 reason=discovery_reason,
             )
         ]
+        if dynamic_context_transfer:
+            return _dynamic_context_ui_transfer_steps(
+                intent,
+                allowed,
+                dict(dynamic_context_transfer),
+                steps,
+            )
         if foreground_management:
             action = str(foreground_management.get("action") or "").strip()
             tool_name = {
@@ -3171,6 +3197,193 @@ def _context_source_steps(
     return []
 
 
+def _dynamic_context_ui_transfer_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    hint: Mapping[str, Any],
+    base_steps: list[ToolPlanStepSnapshot],
+) -> list[ToolPlanStepSnapshot]:
+    source = str(hint.get("source") or "").strip()
+    action = str(hint.get("action") or "").strip()
+    target_kind = str(hint.get("target_kind") or "").strip()
+    target = str(hint.get("target") or "").strip()
+    app_name = str(hint.get("app_name") or "").strip()
+    mode = str(hint.get("mode") or "focus").strip() or "focus"
+    source_requires_shortcut = source in {
+        "selection",
+        "current_page_link",
+        "current_page_content",
+    }
+    target_requires_paste = target_kind in {"app_paste", "current_input", "ui_field"}
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    if (source_requires_shortcut or target_requires_paste) and not shortcut_tool:
+        return list(base_steps)
+
+    app_paste_tool: str | None = None
+    field_click_tool: str | None = None
+    if target_kind == "app_paste":
+        if not app_name:
+            return list(base_steps)
+        app_paste_tool = _first_allowed(
+            app_foreground_tool_candidates(mode, "safe_shortcut"),
+            allowed,
+        )
+        if not app_paste_tool:
+            return list(base_steps)
+    elif target_kind == "ui_field":
+        if not target:
+            return list(base_steps)
+        if app_name:
+            field_click_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "click_ui_element"),
+                allowed,
+            )
+        else:
+            field_click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
+        if not field_click_tool:
+            return list(base_steps)
+    elif action != "copy_context" and target_kind != "current_input":
+        return list(base_steps)
+
+    steps = list(base_steps)
+    previous_step_id = steps[-1].step_id if steps else ""
+
+    def append_step(step: ToolPlanStepSnapshot) -> None:
+        nonlocal previous_step_id
+        steps.append(step)
+        previous_step_id = step.step_id
+
+    if source == "selection":
+        append_step(
+            _step(
+                intent,
+                "copy-selected-dynamic-context",
+                "Copy selected context",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                depends_on=[previous_step_id] if previous_step_id else [],
+                reason="Copy the selected content before transferring it to the requested UI target.",
+            )
+        )
+    elif source == "current_page_link":
+        append_step(
+            _step(
+                intent,
+                "copy-current-page-link-context",
+                "Copy current page link",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy_current_page_link"},
+                depends_on=[previous_step_id] if previous_step_id else [],
+                reason="Copy the current page link before transferring it to the requested UI target.",
+            )
+        )
+    elif source == "current_page_content":
+        append_step(
+            _step(
+                intent,
+                "select-current-page-content",
+                "Select current page content",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "select_all"},
+                depends_on=[previous_step_id] if previous_step_id else [],
+                reason="Select the current page content before copying it for transfer.",
+            )
+        )
+        append_step(
+            _step(
+                intent,
+                "copy-current-page-content",
+                "Copy current page content",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                depends_on=["select-current-page-content"],
+                reason="Copy the selected page content before transferring it to the requested UI target.",
+            )
+        )
+    elif source != "clipboard":
+        return list(base_steps)
+
+    if action == "copy_context":
+        return steps
+
+    if target_kind == "app_paste":
+        append_step(
+            _step(
+                intent,
+                "paste-context-into-app",
+                "Paste context into app",
+                "desktop.app_control",
+                app_paste_tool,
+                input_preview={"app_name": app_name, "action": "paste"},
+                depends_on=[previous_step_id] if previous_step_id else [],
+                action="shortcut",
+                reason="Focus or open the requested app and paste the captured context.",
+            )
+        )
+    else:
+        if target_kind == "ui_field":
+            field_payload = {
+                "target": target,
+                "role_filter": "text",
+                "limit": 80,
+                "click_count": 1,
+            }
+            if field_click_tool and field_click_tool.startswith("app."):
+                field_payload = {"app_name": app_name, **field_payload}
+            append_step(
+                _step(
+                    intent,
+                    "focus-context-transfer-field",
+                    "Focus transfer field",
+                    "desktop.ui_operation",
+                    field_click_tool,
+                    input_preview=field_payload,
+                    depends_on=[previous_step_id] if previous_step_id else [],
+                    action="click",
+                    reason="Focus the requested text field before pasting the captured context.",
+                )
+            )
+        append_step(
+            _step(
+                intent,
+                "paste-context-into-field",
+                "Paste context",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "paste"},
+                depends_on=[previous_step_id] if previous_step_id else [],
+                action="shortcut",
+                reason="Paste the captured context into the focused input.",
+            )
+        )
+
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+        allowed,
+    )
+    steps.append(
+        _step(
+            intent,
+            "verify-desktop-result",
+            "Verify desktop result",
+            "desktop.app_discovery",
+            verify_tool,
+            input_preview=_desktop_verify_input_preview(
+                verify_tool,
+                app_name=app_name,
+                operation_preview={"target": target} if target else {},
+            ),
+            depends_on=[previous_step_id] if previous_step_id else [],
+            reason="Observe the destination UI after transferring context.",
+        )
+    )
+    return steps
+
+
 def _context_source_capability_id(source: str, tool_name: str | None, fallback: str) -> str:
     clean_tool = str(tool_name or "").strip()
     if source in {"selection", "clipboard"}:
@@ -4577,6 +4790,228 @@ def _foreground_paste_hint(text: str) -> bool:
         _contains_any(value, ("发送", "提交", "send", "submit"))
         or _looks_like_foreground_submit_scope(value, value.lower())
     )
+
+
+def _dynamic_context_ui_transfer_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    source = _dynamic_context_source_hint(value)
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return {}
+    target_kind, target = _dynamic_context_ui_target_hint(value)
+    app_name = _dynamic_context_transfer_app_name_hint(value)
+    if app_name and target_kind == "current_input":
+        target_kind = "app_paste"
+        target = ""
+    if app_name and not target_kind and _looks_like_dynamic_context_transfer(value):
+        target_kind = "app_paste"
+    if (
+        target_kind == "current_input"
+        and source == "current_page_content"
+    ):
+        return {}
+    if _looks_like_dynamic_context_copy_only(value):
+        if source != "current_page_content":
+            return {}
+        return {
+            "source": source,
+            "action": "copy_context",
+            "target_kind": "",
+            "target": "",
+            "app_name": "",
+            "mode": "focus",
+        }
+    if not target_kind:
+        return {}
+    if not _looks_like_dynamic_context_transfer(value):
+        return {}
+    return {
+        "source": source,
+        "action": "transfer_context",
+        "target_kind": target_kind,
+        "target": target,
+        "app_name": app_name,
+        "mode": "open" if _explicit_app_open_request(value) else "focus",
+    }
+
+
+def _blocked_dynamic_context_ui_transfer_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    source = _dynamic_context_source_hint(value)
+    target_kind, _target = _dynamic_context_ui_target_hint(value)
+    return source == "current_page_content" and target_kind == "current_input"
+
+
+def _dynamic_context_source_hint(text: str) -> str:
+    lowered = _clean_prompt(text).lower()
+    if _contains_any(
+        lowered,
+        (
+            "current page link",
+            "current url",
+            "当前网页链接",
+            "当前页面链接",
+            "当前链接",
+            "当前页地址",
+        ),
+    ):
+        return "current_page_link"
+    if _contains_any(
+        lowered,
+        (
+            "current page content",
+            "current page text",
+            "current window content",
+            "copy current window content",
+            "当前网页内容",
+            "当前页面内容",
+            "当前网页正文",
+            "当前页面正文",
+            "当前窗口内容",
+            "当前应用内容",
+        ),
+    ):
+        return "current_page_content"
+    if _contains_any(
+        lowered,
+        (
+            "selected text",
+            "highlighted text",
+            "selection",
+            "selected link",
+            "selected url",
+            "选中文字",
+            "选中文本",
+            "选中链接",
+            "选中网址",
+            "选中的文字",
+            "选中的文本",
+            "选中的内容",
+            "选中的数据",
+            "选中内容",
+            "选中数据",
+        ),
+    ):
+        return "selection"
+    return context_source_hint(lowered)
+
+
+def _dynamic_context_ui_target_hint(text: str) -> tuple[str, str]:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if _contains_any(
+        lowered,
+        (
+            "address bar",
+            "url bar",
+            "location bar",
+            "地址栏",
+            "网址栏",
+        ),
+    ):
+        return "ui_field", "地址"
+    if _contains_any(
+        lowered,
+        (
+            "search box",
+            "search field",
+            "search bar",
+            "搜索框",
+            "搜索栏",
+            "查找框",
+            "检索框",
+        ),
+    ):
+        return "ui_field", "搜索"
+    if _contains_any(
+        lowered,
+        (
+            "current input",
+            "current field",
+            "current text box",
+            "foreground input",
+            "当前输入框",
+            "当前文本框",
+            "前台输入框",
+            "前台文本框",
+            "这里",
+            "此处",
+            "here",
+        ),
+    ):
+        return "current_input", ""
+    return "", ""
+
+
+def _looks_like_dynamic_context_copy_only(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not re.search(r"(?:复制|copy)", value, flags=re.IGNORECASE):
+        return False
+    return not re.search(
+        r"(?:粘贴|贴到|输入到|输入进|填到|填入|填写到|paste|type|enter|insert|put)",
+        value,
+        flags=re.IGNORECASE,
+    )
+
+
+def _looks_like_dynamic_context_transfer(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:粘贴|贴到|输入到|输入进|输入|键入|填到|填入|填写到|填写|paste|type|enter|insert|put)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _dynamic_context_transfer_app_name_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:粘贴到|粘贴在|贴到|输入到|输入进|填到|填入|填写到|放到)\s*"
+        r"(?P<app>[\w .·-]{1,40}?)(?:$|[。！？!?，,])",
+        r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+        r"(?:粘贴|贴|输入|填入|填写)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)(?:的)?\s*"
+        r"(?:搜索框|搜索栏|查找框|检索框|地址栏|输入框|文本框)\s*"
+        r"(?:粘贴|贴|输入|填入|填写)",
+        r"(?:paste|type|enter|insert|put)\b.+?\b(?:in|into|to)\s+"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:$|[.!?,])",
+        r"\b(?:in|inside|within|using|with)\s+"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:paste|type|enter|insert|put)\b",
+        r"^(?:open|launch|focus|switch\s+to)?\s*"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:(?:search|input|text)\s+(?:box|field)|address\s+bar)?\s*"
+        r"(?:paste|type|enter|insert|put)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app = _clean_dynamic_context_target_app(match.group("app"))
+        if app:
+            return app
+    return ""
+
+
+def _clean_dynamic_context_target_app(value: str) -> str:
+    app = str(value or "").strip(" .，,。")
+    app = re.sub(
+        r"(?:的)?\s*(?:搜索框|搜索栏|查找框|检索框|地址栏|网址栏|输入框|文本框)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"\s*(?:(?:search|input|text)\s+(?:box|field)|search\s+bar|address\s+bar|url\s+bar|location\s+bar)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    if not app or context_source_hint(app) or _is_generic_foreground_app_label(app):
+        return ""
+    return _canonical_app_name_hint(app)
 
 
 def _foreground_compose_app_name_hint(text: str) -> str:

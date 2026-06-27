@@ -328,6 +328,52 @@ def test_planner_first_direct_selection_owns_current_page_link_copy_without_lega
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed = [
+        "desktop.safe_shortcut",
+        "desktop.click_ui_element",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+    ]
+
+    cases = (
+        (
+            "把当前网页链接粘贴到 Slack",
+            ["desktop.safe_shortcut", "app.focus_and_safe_shortcut"],
+        ),
+        (
+            "把当前网页链接输入到 Slack 搜索框",
+            ["desktop.safe_shortcut", "app.focus_and_click_ui_element", "desktop.safe_shortcut"],
+        ),
+        (
+            "打开 Slack 搜索框输入选中的内容",
+            ["desktop.safe_shortcut", "app.open_and_click_ui_element", "desktop.safe_shortcut"],
+        ),
+        (
+            "复制当前网页内容",
+            ["desktop.safe_shortcut", "desktop.safe_shortcut"],
+        ),
+        (
+            "把选中的内容填到当前输入框",
+            ["desktop.safe_shortcut", "desktop.safe_shortcut"],
+        ),
+    )
+    for prompt, expected_tools in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.event_payload["selected_tools"] == expected_tools
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     cases = (
