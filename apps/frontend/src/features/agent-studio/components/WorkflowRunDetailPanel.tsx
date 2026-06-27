@@ -70,20 +70,33 @@ export function WorkflowRunDetailPanel({
       </div>
       {childSnapshots.length ? (
         <div className="run-group-overview-children run-public-child-list" data-testid="agent-run-detail-public-children">
-          {childSnapshots.map((child) => (
-            <button
-              type="button"
-              data-group-run-id={child.group_run_id || child.run_group_id || ''}
-              data-run-id={child.run_id}
-              data-testid="agent-run-detail-public-child-run"
-              data-workflow-node-id={child.workflow_node_id || ''}
-              key={child.run_id}
-              onClick={() => onOpenRunDetail(child.run_id)}
-            >
-              <span>{publicChildRunTitle(child)}</span>
-              <small>{publicChildRunMeta(child, runStatusLabel(child.status || 'unknown'))}</small>
-            </button>
-          ))}
+          {childSnapshots.map((child) => {
+            const plannerSummary = publicChildPlannerSummary(child);
+            return (
+              <button
+                type="button"
+                data-group-run-id={child.group_run_id || child.run_group_id || ''}
+                data-has-planner-summary={String(Boolean(plannerSummary))}
+                data-planner-summary={plannerSummary}
+                data-run-id={child.run_id}
+                data-testid="agent-run-detail-public-child-run"
+                data-workflow-node-id={child.workflow_node_id || ''}
+                key={child.run_id}
+                onClick={() => onOpenRunDetail(child.run_id)}
+              >
+                <span>{publicChildRunTitle(child)}</span>
+                <small>{publicChildRunMeta(child, runStatusLabel(child.status || 'unknown'))}</small>
+                {plannerSummary ? (
+                  <small
+                    className="group-run-child-planner-trace"
+                    data-testid="agent-run-detail-public-child-planner-summary"
+                  >
+                    Planner trace · {plannerSummary}
+                  </small>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </section>
@@ -106,4 +119,17 @@ function publicChildRunMeta(child: RunTimelineChildSnapshot, statusLabel: string
     groupRunId ? `group run ${groupRunId}` : '',
     child.parent_run_id ? `parent ${child.parent_run_id}` : '',
   ].filter(Boolean).join(' · ');
+}
+
+function publicChildPlannerSummary(child: RunTimelineChildSnapshot): string {
+  const summary = child.planner_summary;
+  if (!summary) return '';
+  const parts = [
+    summary.intent_kind,
+    summary.step_count ? `${summary.step_count} steps` : '',
+    summary.approvals_required?.length ? `${summary.approvals_required.length} approvals` : '',
+    summary.artifacts_expected?.length ? `${summary.artifacts_expected.length} artifacts` : '',
+    summary.open_questions?.length ? `${summary.open_questions.length} questions` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
 }

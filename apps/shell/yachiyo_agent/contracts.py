@@ -240,6 +240,27 @@ class PlannerDecisionSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class PlannerTraceSummarySnapshot(_PublicSnapshot):
+    source: str = ""
+    decision_id: str | None = None
+    plan_id: str | None = None
+    intent_kind: str | None = None
+    intent_title: str | None = None
+    route_to_studio: bool | None = None
+    selection_source: str | None = None
+    selection_reason: str | None = None
+    plan_tools: list[str] = Field(default_factory=list)
+    selected_tools: list[str] = Field(default_factory=list)
+    plan_capabilities: list[str] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
+    missing_capabilities: list[str] = Field(default_factory=list)
+    approvals_required: list[str] = Field(default_factory=list)
+    artifacts_expected: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    step_count: int = 0
+    event_count: int = 0
+
+
 class PublicRunEvent(_PublicSnapshot):
     event_id: str | None = None
     run_id: str
@@ -444,6 +465,7 @@ class RunTimelineChildSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     agent_id: str | None = None
     workflow_id: str | None = None
+    planner_summary: PlannerTraceSummarySnapshot | None = None
 
 
 class RunTimelineSnapshot(_PublicSnapshot):

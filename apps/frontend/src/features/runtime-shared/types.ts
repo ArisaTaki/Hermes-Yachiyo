@@ -182,6 +182,27 @@ export type PlannerDecisionSnapshot = {
   source?: string;
 };
 
+export type PlannerTraceSummarySnapshot = {
+  source?: string;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  intent_kind?: string | null;
+  intent_title?: string | null;
+  route_to_studio?: boolean | null;
+  selection_source?: string | null;
+  selection_reason?: string | null;
+  plan_tools?: string[];
+  selected_tools?: string[];
+  plan_capabilities?: string[];
+  required_capabilities?: string[];
+  missing_capabilities?: string[];
+  approvals_required?: string[];
+  artifacts_expected?: string[];
+  open_questions?: string[];
+  step_count?: number;
+  event_count?: number;
+};
+
 export type PublicRunEvent = {
   event_id?: string | null;
   run_id: string;
@@ -394,6 +415,7 @@ export type RunTimelineChildSnapshot = {
   workflow_node_label?: string | null;
   agent_id?: string | null;
   workflow_id?: string | null;
+  planner_summary?: PlannerTraceSummarySnapshot | null;
 };
 
 export type RunTimelineSnapshot = {

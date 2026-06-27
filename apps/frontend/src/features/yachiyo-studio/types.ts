@@ -26,6 +26,7 @@ export type {
   MemorySnapshot,
   MemoryTraceSnapshot,
   PlannerDecisionSnapshot,
+  PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RerunRunRequest,
   RunEventPageSnapshot,

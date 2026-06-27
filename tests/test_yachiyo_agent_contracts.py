@@ -43,6 +43,7 @@ from apps.shell.yachiyo_agent import (
     MemorySnapshot,
     MemoryTraceSnapshot,
     PlannerDecisionSnapshot,
+    PlannerTraceSummarySnapshot,
     PublicRunEvent,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
@@ -81,6 +82,7 @@ from apps.shell.yachiyo_agent import (
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
+from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
 from apps.shell.yachiyo_agent.task_cards import (
     agent_task_light_snapshot_from_task,
     agent_task_snapshot_from_payload,
@@ -239,6 +241,126 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
     )
     assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
     assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
+
+
+def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-1",
+            "kind": "workflow_run",
+            "status": "running",
+            "children": [
+                {
+                    "run_id": "child-run-1",
+                    "status": "completed",
+                    "kind": "agent_run",
+                    "workflow_node_id": "analyze",
+                    "events": [
+                        {
+                            "event_type": "agent.intent.selected",
+                            "payload": {
+                                "source": "runtime_planner",
+                                "decision_id": "decision-1",
+                                "plan_id": "plan-1",
+                                "route_to_studio": True,
+                                "intent": {
+                                    "intent_id": "intent-1",
+                                    "kind": "data_analysis",
+                                    "title": "Analyze CSV",
+                                    "required_capabilities": [
+                                        "workspace.file_read",
+                                        "data.analysis",
+                                    ],
+                                },
+                            },
+                        },
+                        {
+                            "event_type": "agent.plan.created",
+                            "payload": {
+                                "source": "runtime_planner",
+                                "decision_id": "decision-1",
+                                "plan": {
+                                    "plan_id": "plan-1",
+                                    "route_to_studio": True,
+                                    "intent": {
+                                        "intent_id": "intent-1",
+                                        "kind": "data_analysis",
+                                        "title": "Analyze CSV",
+                                        "required_capabilities": ["data.analysis"],
+                                    },
+                                    "capabilities": [
+                                        {"capability_id": "workspace.file_read"},
+                                        {"capability_id": "data.analysis"},
+                                    ],
+                                    "tool_plan": {
+                                        "steps": [
+                                            {
+                                                "step_id": "inspect-data",
+                                                "capability_id": "workspace.file_read",
+                                                "tool_name": "workspace.read",
+                                            },
+                                            {
+                                                "step_id": "run-analysis",
+                                                "capability_id": "data.analysis",
+                                                "tool_name": "data.analyze",
+                                                "approval_required": True,
+                                            },
+                                        ],
+                                        "required_capabilities": [
+                                            "workspace.file_read",
+                                            "data.analysis",
+                                        ],
+                                        "approvals_required": ["run-analysis"],
+                                        "artifacts_expected": ["markdown_report"],
+                                        "open_questions": ["confirm date range"],
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "event_type": "agent.plan.selection",
+                            "payload": {
+                                "source": "runtime_planner",
+                                "decision_id": "decision-1",
+                                "plan_id": "plan-1",
+                                "selection_source": "runtime_planner",
+                                "selection_reason": "runtime_planner_direct",
+                                "selected_tools": ["data.analyze"],
+                                "plan_step_count": 2,
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    child = snapshot.children[0]
+    assert child.planner_summary == PlannerTraceSummarySnapshot(
+        source="runtime_planner",
+        decision_id="decision-1",
+        plan_id="plan-1",
+        intent_kind="data_analysis",
+        intent_title="Analyze CSV",
+        route_to_studio=True,
+        selection_source="runtime_planner",
+        selection_reason="runtime_planner_direct",
+        plan_tools=["workspace.read", "data.analyze"],
+        selected_tools=["data.analyze"],
+        plan_capabilities=["workspace.file_read", "data.analysis"],
+        required_capabilities=["workspace.file_read", "data.analysis"],
+        approvals_required=["run-analysis"],
+        artifacts_expected=["markdown_report"],
+        open_questions=["confirm date range"],
+        step_count=2,
+        event_count=3,
+    )
+    payload = _json(snapshot)
+    assert payload["children"][0]["planner_summary"]["intent_kind"] == "data_analysis"
+    assert payload["children"][0]["planner_summary"]["plan_tools"] == [
+        "workspace.read",
+        "data.analyze",
+    ]
 
 
 def test_agent_task_snapshot_json_shape_is_stable() -> None:
@@ -1832,6 +1954,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["children"][0]["parent_run_id"] == "run-1"
     assert payload["children"][0]["group_run_id"] == "group-run-1"
     assert payload["children"][0]["workflow_node_id"] == "review"
+    assert payload["children"][0]["planner_summary"] is None
 
 
 def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
