@@ -14,16 +14,17 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus
 
-from apps.shell.agent.runtime.app_aliases import COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES
-from apps.shell.agent.runtime.app_aliases import EMAIL_APP_NAMES as _EMAIL_APP_NAMES
-from apps.shell.agent.runtime.app_aliases import compact_app_alias as _compact_app_alias
 from apps.shell.agent.runtime.web_destinations import (
     known_web_destination_search_url,
     known_web_destination_url_hint,
 )
 
+from .app_name_hints import (
+    compact_app_name_hint,
+    legacy_app_name_hint,
+    supports_new_message_app_hint,
+)
 from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
-from .app_name_hints import legacy_app_name_hint
 from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
@@ -448,8 +449,8 @@ class TaskIntentRouter:
         if app_search_app_name and (
             not app_name_hint
             or _looks_like_app_search_followup_app(app_name_hint)
-            or _compact_app_alias(app_name_hint).startswith(
-                _compact_app_alias(app_search_app_name)
+            or compact_app_name_hint(app_name_hint).startswith(
+                compact_app_name_hint(app_search_app_name)
             )
         ):
             app_name_hint = app_search_app_name
@@ -5442,7 +5443,7 @@ def _clean_app_name_hint(value: str) -> str:
     }
     if context_source_hint(app):
         return ""
-    if _compact_app_alias(app) in {
+    if compact_app_name_hint(app) in {
         "folder",
         "folders",
         "afolder",
@@ -6211,7 +6212,7 @@ def _browser_internal_surface_url(app_name: str, surface: str) -> str:
 
 
 def _browser_family(app_name: str) -> str:
-    compact = _compact_app_alias(app_name)
+    compact = compact_app_name_hint(app_name)
     if compact in {"chrome", "googlechrome", "chromium"}:
         return "chrome"
     if compact in {"edge", "microsoftedge"}:
@@ -6274,7 +6275,7 @@ def _app_preferences_hint(text: str) -> dict[str, str]:
 
 
 def _is_system_settings_app_label(app_name: str) -> bool:
-    compact = _compact_app_alias(app_name)
+    compact = compact_app_name_hint(app_name)
     return compact in {
         "system",
         "systemsettings",
@@ -7147,7 +7148,7 @@ def _app_new_item_shortcut_target_name(
 
 
 def _app_supports_new_message_shortcut(app_name: str) -> bool:
-    return app_name in (_COMMUNICATION_APP_NAMES | _EMAIL_APP_NAMES)
+    return supports_new_message_app_hint(app_name)
 
 
 def _app_scoped_followup_hint(text: str) -> dict[str, str]:
@@ -7425,7 +7426,7 @@ def _command_palette_mode(value: str) -> str:
 
 
 def _command_palette_action_for_app(app_name: str) -> str:
-    if _compact_app_alias(app_name) == "obsidian":
+    if compact_app_name_hint(app_name) == "obsidian":
         return "obsidian_command_palette"
     return "command_palette"
 
@@ -7515,7 +7516,7 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
             not app
             or _looks_like_app_search_followup_app(app)
             or parsed_app.lower() == app.lower()
-            or _compact_app_alias(app).startswith(_compact_app_alias(parsed_app))
+            or compact_app_name_hint(app).startswith(compact_app_name_hint(parsed_app))
         ):
             return parsed
     if not query:

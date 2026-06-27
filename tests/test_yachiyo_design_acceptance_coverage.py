@@ -365,6 +365,8 @@ def test_runtime_planner_app_aliases_are_behind_discovery_compatibility_boundary
         "apps/shell/yachiyo_agent/app_name_hints.py",
         [
             "def legacy_app_name_hint(value: str) -> str:",
+            "def compact_app_name_hint(value: str) -> str:",
+            "def supports_new_message_app_hint(value: str) -> bool:",
             "The planner should prefer desktop discovery when available.",
             "APP_ALIASES.get(compact_app_alias(app_name), app_name)",
         ],
@@ -376,6 +378,7 @@ def test_runtime_planner_app_aliases_are_behind_discovery_compatibility_boundary
         text = _read(relative_path)
         assert "legacy_app_name_hint" in text
         assert "APP_ALIASES" not in text
+        assert "apps.shell.agent.runtime.app_aliases" not in text
 
 
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:

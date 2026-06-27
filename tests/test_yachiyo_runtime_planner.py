@@ -12,7 +12,11 @@ from apps.shell.yachiyo_agent import (
     YachiyoAgentService,
     capability_snapshots,
 )
-from apps.shell.yachiyo_agent.app_name_hints import legacy_app_name_hint
+from apps.shell.yachiyo_agent.app_name_hints import (
+    compact_app_name_hint,
+    legacy_app_name_hint,
+    supports_new_message_app_hint,
+)
 from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from apps.shell.yachiyo_agent.planner_execution import (
@@ -76,6 +80,9 @@ def _data_analysis_artifact_kind(path: str) -> str:
 def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() -> None:
     assert legacy_app_name_hint("Chrome") == "Google Chrome"
     assert legacy_app_name_hint("一个我没提过的新应用") == "一个我没提过的新应用"
+    assert compact_app_name_hint("Google Chrome") == "googlechrome"
+    assert supports_new_message_app_hint("Messages") is True
+    assert supports_new_message_app_hint("一个我没提过的新应用") is False
 
 
 def _recording_legacy_requests(
