@@ -6,8 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from apps.shell.agent.runtime.app_aliases import APP_ALIASES
-
+from .app_name_hints import legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
@@ -400,8 +399,7 @@ def _canonicalize_app_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_app_name(app_name: str) -> str:
-    compact = re.sub(r"[\s._-]+", "", str(app_name or "").strip().lower())
-    return APP_ALIASES.get(compact, str(app_name or "").strip())
+    return legacy_app_name_hint(app_name)
 
 
 def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

@@ -360,6 +360,24 @@ def test_hanako_hermes_runtime_roadmap_is_guarded() -> None:
     )
 
 
+def test_runtime_planner_app_aliases_are_behind_discovery_compatibility_boundary() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/app_name_hints.py",
+        [
+            "def legacy_app_name_hint(value: str) -> str:",
+            "The planner should prefer desktop discovery when available.",
+            "APP_ALIASES.get(compact_app_alias(app_name), app_name)",
+        ],
+    )
+    for relative_path in (
+        "apps/shell/yachiyo_agent/planner_execution.py",
+        "apps/shell/yachiyo_agent/runtime_planner.py",
+    ):
+        text = _read(relative_path)
+        assert "legacy_app_name_hint" in text
+        assert "APP_ALIASES" not in text
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]

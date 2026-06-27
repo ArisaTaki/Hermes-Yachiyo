@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus
 
-from apps.shell.agent.runtime.app_aliases import APP_ALIASES as _APP_ALIASES
 from apps.shell.agent.runtime.app_aliases import COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES
 from apps.shell.agent.runtime.app_aliases import EMAIL_APP_NAMES as _EMAIL_APP_NAMES
 from apps.shell.agent.runtime.app_aliases import compact_app_alias as _compact_app_alias
@@ -24,6 +23,7 @@ from apps.shell.agent.runtime.web_destinations import (
 )
 
 from .capture_plan_hints import capture_note_hint, capture_tool_preview, context_source_hint
+from .app_name_hints import legacy_app_name_hint
 from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
@@ -6078,7 +6078,7 @@ def _canonical_app_name_hint(value: str) -> str:
     app = _clean_app_name_hint(value)
     if not app:
         return ""
-    return _APP_ALIASES.get(_compact_app_alias(app), app)
+    return legacy_app_name_hint(app)
 
 
 def _browser_internal_page_hint(text: str) -> dict[str, str]:
