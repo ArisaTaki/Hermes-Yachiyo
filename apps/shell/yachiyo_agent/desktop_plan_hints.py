@@ -709,6 +709,7 @@ def media_app_query_search_plan(
         play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
         if play_tool:
             plan.append((play_tool, {"app_name": app_name}))
+        _append_media_app_verify_step(plan, allowed)
         return plan
 
     app_tool = _first_allowed(("app.open", "app.focus"), allowed)
@@ -724,7 +725,22 @@ def media_app_query_search_plan(
     play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
     if play_tool:
         plan.append((play_tool, {"app_name": app_name}))
+    _append_media_app_verify_step(plan, allowed)
     return plan
+
+
+def _append_media_app_verify_step(
+    plan: list[tuple[str, dict[str, Any]]],
+    allowed: set[str] | None,
+) -> None:
+    tool_name = _first_allowed(
+        ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+        allowed,
+    )
+    if not tool_name:
+        return
+    payload = {"role_filter": "", "limit": 80} if tool_name == "desktop.ui_elements" else {}
+    plan.append((tool_name, payload))
 
 
 def media_action_hint(text: str) -> str:

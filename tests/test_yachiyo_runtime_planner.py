@@ -4553,6 +4553,30 @@ def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> Non
     assert _step_by_id(decision, "submit-media-search").tool_name == "desktop.search_submit"
 
 
+def test_runtime_planner_verifies_media_app_search_when_observation_tool_is_available() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "verify-media-search",
+    ]
+    verify = _step_by_id(decision, "verify-media-search")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.capability_id == "desktop.app_discovery"
+    assert verify.action == "read_ui"
+    assert verify.depends_on == ["submit-media-search"]
+
+
 def test_runtime_planner_routes_media_status_to_readonly_tool() -> None:
     for prompt in (
         "查看当前 Apple Music 播放状态",
@@ -6444,6 +6468,31 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
     assert legacy_calls == []
 
 
+def test_entrypoint_selection_keeps_runtime_planner_for_media_app_search_fallback() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert legacy_calls == []
+
+
 def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
@@ -7268,6 +7317,32 @@ def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_
             "planning_reason": "planner_fallback_media_playback",
         },
     ]
+
+
+def test_planner_desktop_tool_requests_verifies_media_app_search_when_available() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert requests[-1] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "", "limit": 80},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_media_playback",
+    }
 
 
 def test_planner_desktop_tool_requests_normalizes_named_music_app_control() -> None:

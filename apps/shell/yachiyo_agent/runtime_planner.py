@@ -2561,6 +2561,12 @@ class RuntimePlanner:
                     capability_id = "media.playback"
                     action = "play"
                     reason = "Start playback from the media app results after submitting the explicit search."
+                elif tool_name in {"desktop.ui_elements", "desktop.active_window", "screen.capture"}:
+                    step_id = "verify-media-search"
+                    title = "Verify media search"
+                    capability_id = "desktop.app_discovery"
+                    action = _desktop_discovery_action(tool_name)
+                    reason = "Observe the media app after submitting the search/play request."
                 else:
                     step_id = "submit-media-search"
                     title = "Submit media search"

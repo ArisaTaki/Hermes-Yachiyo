@@ -192,7 +192,30 @@ def _runtime_planner_media_playback_owns_selection(requests: list[dict[str, Any]
     if reasons != {"planner_fallback_media_playback"}:
         return False
     tools = _request_tool_set(requests)
-    return bool(tools) and all(tool.startswith("media.") for tool in tools)
+    return bool(tools) and tools <= _RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS
+
+
+_RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS = frozenset(
+    {
+        "media.apple_music_play",
+        "media.apple_music_status",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+        "media.system_control",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "screen.capture",
+    }
+)
 
 
 def _runtime_planner_clipboard_owns_selection(requests: list[dict[str, Any]]) -> bool:
