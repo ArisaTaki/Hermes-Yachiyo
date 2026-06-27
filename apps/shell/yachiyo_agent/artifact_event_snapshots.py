@@ -229,6 +229,14 @@ def merge_artifact_snapshots(
         group_run_id=current.group_run_id or next_artifact.group_run_id,
         title=current.title or next_artifact.title,
         kind=current.kind or next_artifact.kind,
+        planned_kind=current.planned_kind or next_artifact.planned_kind,
+        source_kind=current.source_kind or next_artifact.source_kind,
+        requested_outputs=current.requested_outputs or next_artifact.requested_outputs,
+        manifest_index=(
+            current.manifest_index
+            if current.manifest_index is not None
+            else next_artifact.manifest_index
+        ),
         path=current.path or next_artifact.path,
         mime_type=current.mime_type or next_artifact.mime_type,
         size_bytes=current.size_bytes if current.size_bytes is not None else next_artifact.size_bytes,

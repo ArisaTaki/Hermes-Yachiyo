@@ -52,6 +52,10 @@ def artifact_snapshot_from_payload(
         group_run_id=_optional_text(payload.get("group_run_id") or payload.get("run_group_id")),
         title=title,
         kind=_text(payload.get("kind") or "artifact"),
+        planned_kind=_optional_text(payload.get("planned_kind")),
+        source_kind=_optional_text(payload.get("source_kind")),
+        requested_outputs=_optional_text_list(payload.get("requested_outputs")),
+        manifest_index=_optional_int(payload.get("manifest_index")),
         path=path,
         mime_type=_optional_text(payload.get("mime_type") or payload.get("content_type")),
         size_bytes=_optional_int(payload.get("size_bytes") or payload.get("bytes")),
@@ -111,6 +115,13 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def _optional_text_list(value: Any) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    result = [_text(item) for item in value if _text(item)]
+    return result or None
+
+
 def _redacted_artifact_snapshot(snapshot: ArtifactSnapshot) -> ArtifactSnapshot:
     return snapshot.model_copy(
         update={
@@ -128,6 +139,10 @@ def _redacted_artifact_snapshot(snapshot: ArtifactSnapshot) -> ArtifactSnapshot:
             "group_run_id": _optional_text(snapshot.group_run_id),
             "title": _text(snapshot.title),
             "kind": _text(snapshot.kind),
+            "planned_kind": _optional_text(snapshot.planned_kind),
+            "source_kind": _optional_text(snapshot.source_kind),
+            "requested_outputs": _optional_text_list(snapshot.requested_outputs),
+            "manifest_index": _optional_int(snapshot.manifest_index),
             "path": _optional_text(snapshot.path),
             "mime_type": _optional_text(snapshot.mime_type),
             "preview_text": _optional_text(snapshot.preview_text),

@@ -2281,6 +2281,10 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
         group_run_id="group-run-1",
         title="Report",
         kind="workflow_artifact",
+        planned_kind="markdown",
+        source_kind="csv",
+        requested_outputs=["report"],
+        manifest_index=0,
         path="reports/out.md",
         mime_type="text/markdown",
         size_bytes=42,
@@ -2306,6 +2310,10 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
         "group_run_id",
         "title",
         "kind",
+        "planned_kind",
+        "source_kind",
+        "requested_outputs",
+        "manifest_index",
         "path",
         "mime_type",
         "size_bytes",
@@ -2316,6 +2324,10 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["source_tool"] == "artifact.write"
     assert payload["workflow_node_id"] == "report"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["planned_kind"] == "markdown"
+    assert payload["source_kind"] == "csv"
+    assert payload["requested_outputs"] == ["report"]
+    assert payload["manifest_index"] == 0
 
 
 def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> None:

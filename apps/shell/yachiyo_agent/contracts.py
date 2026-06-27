@@ -324,6 +324,10 @@ class ArtifactSnapshot(_PublicSnapshot):
     group_run_id: str | None = None
     title: str
     kind: str
+    planned_kind: str | None = None
+    source_kind: str | None = None
+    requested_outputs: list[str] | None = None
+    manifest_index: int | None = None
     path: str | None = None
     mime_type: str | None = None
     size_bytes: int | None = None

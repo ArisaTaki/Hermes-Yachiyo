@@ -276,6 +276,10 @@ export type ArtifactSnapshot = {
   group_run_id?: string | null;
   title: string;
   kind: string;
+  planned_kind?: string | null;
+  source_kind?: string | null;
+  requested_outputs?: string[] | null;
+  manifest_index?: number | null;
   path?: string | null;
   mime_type?: string | null;
   size_bytes?: number | null;

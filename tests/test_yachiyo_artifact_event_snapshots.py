@@ -176,6 +176,10 @@ def test_tool_completed_event_artifacts_result_projects_all_public_artifacts() -
                     {
                         "path": "analysis-chart.png",
                         "kind": "image",
+                        "planned_kind": "chart",
+                        "source_kind": "csv",
+                        "requested_outputs": ["report", "chart"],
+                        "manifest_index": 2,
                         "mime_type": "image/png",
                         "size_bytes": 333,
                     },
@@ -202,6 +206,10 @@ def test_tool_completed_event_artifacts_result_projects_all_public_artifacts() -
     assert artifacts[1].kind == "csv"
     assert artifacts[1].mime_type == "text/csv"
     assert artifacts[2].kind == "image"
+    assert artifacts[2].planned_kind == "chart"
+    assert artifacts[2].source_kind == "csv"
+    assert artifacts[2].requested_outputs == ["report", "chart"]
+    assert artifacts[2].manifest_index == 2
     assert artifacts[2].mime_type == "image/png"
 
 
