@@ -3452,6 +3452,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "plan_step_count",
             "planner_request_count",
             "legacy_request_count",
+            "toolPlanRequiredCapabilities.length ? toolPlanRequiredCapabilities : intentRequiredCapabilities",
+            "trace.candidateIntents.length > 1",
             'data-testid="agent-run-detail-planner-intent"',
             'data-testid="agent-run-detail-planner-inputs"',
             'data-testid="agent-run-detail-planner-selection"',
@@ -3482,6 +3484,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             'data-testid="agent-run-detail-planner-capabilities"',
             'data-testid="agent-run-detail-planner-step"',
             'data-testid="agent-run-detail-planner-outputs"',
+            'data-testid="agent-run-detail-planner-candidates"',
         ],
     )
     _assert_contains(

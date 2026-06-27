@@ -63,9 +63,10 @@ export function PlannerTraceInspector({
   const capabilityById = new Map(capabilities.map((capability) => [capability.capability_id, capability]));
   const selectionPlanCapabilities = trace.selection?.planCapabilities || [];
   const selectionRequiredCapabilities = trace.selection?.requiredCapabilities || [];
+  const toolPlanRequiredCapabilities = uniqueStrings(toolPlan?.required_capabilities || []);
+  const intentRequiredCapabilities = uniqueStrings(intent?.required_capabilities || []);
   const requiredCapabilities = uniqueStrings([
-    ...(intent?.required_capabilities || []),
-    ...(toolPlan?.required_capabilities || []),
+    ...(toolPlanRequiredCapabilities.length ? toolPlanRequiredCapabilities : intentRequiredCapabilities),
     ...selectionRequiredCapabilities,
   ]);
   const preferredCapabilities = uniqueStrings(intent?.preferred_capabilities || []);
