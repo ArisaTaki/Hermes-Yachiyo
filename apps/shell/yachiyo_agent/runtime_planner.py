@@ -571,6 +571,8 @@ class TaskIntentRouter:
                 "research",
                 "search web",
                 "search",
+                "latest",
+                "news",
                 "website",
                 "url",
                 "link",
@@ -583,6 +585,8 @@ class TaskIntentRouter:
                 "搜索",
                 "查找",
                 "调研",
+                "研究",
+                "新闻",
             ],
         )
         if (
@@ -3406,7 +3410,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.34
     if intent.kind == "web_research" and _contains_any(
         text,
-        ["http://", "https://", "research", "search", "调研", "搜索", "网页", "网站"],
+        ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索", "网页", "网站"],
     ):
         score += 0.14
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
@@ -3414,7 +3418,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
-        if _contains_any(text, ["http://", "https://", "research", "search", "调研", "搜索"]):
+        if _contains_any(text, ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索"]):
             score -= 0.04
     if intent.kind == "data_analysis" and (
         data_source_hint(text)
@@ -4948,6 +4952,7 @@ def _web_search_query(text: str) -> str:
         return ""
     lowered = text.lower()
     patterns = (
+        r"\b(?:can\s+you\s+)?(?:research|look\s+up|find\s+out\s+about)\s+(.+)$",
         r"\b(?:can\s+you\s+)?search\s+(?:google\s+chrome|chrome|safari|browser|web|google)\s+for\s+(.+)$",
         r"\b(?:can\s+you\s+)?search\s+for\s+(.+)$",
         r"\b(?:google|search)\s+(.+)$",
@@ -4960,6 +4965,8 @@ def _web_search_query(text: str) -> str:
                 return query
 
     chinese_patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:研究|调研|了解|查)(?:一下|下|查)?\s*(.+)$",
         r"(?:用\s*)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
         r"(?:搜索|查找|检索)\s*(.+)$",
     )
@@ -5035,6 +5042,19 @@ def _is_browser_or_search_app_name(app_name: str) -> bool:
 
 def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
+    value = re.sub(
+        r"\s+(?:and|then)\s+(?:write|create|generate|produce|summari[sz]e).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:并|然后|并且|再)?(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
+        r"(?:报告|总结|文档|结果)?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     if not value:

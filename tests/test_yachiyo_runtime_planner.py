@@ -495,6 +495,24 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert decision.selected_intent.kind == "web_research"
     assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
 
+    search_decision = RuntimePlanner().decision(
+        "研究一下 OpenAI 最新新闻并输出报告",
+        allowed_tools=["browser.open_url", "artifact.write"],
+    )
+    assert search_decision.selected_intent.kind == "web_research"
+    assert search_decision.selected_intent.inputs["browser_action"] == "open_search"
+    assert search_decision.selected_intent.inputs["query"] == "OpenAI 最新新闻"
+    assert _step_by_id(search_decision, "open-web-search").input_preview == {
+        "url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E6%96%B0%E9%97%BB"
+    }
+
+    english_decision = RuntimePlanner().decision(
+        "research OpenAI latest news and write a report",
+        allowed_tools=["browser.open_url", "artifact.write"],
+    )
+    assert english_decision.selected_intent.kind == "web_research"
+    assert english_decision.selected_intent.inputs["query"] == "openai latest news"
+
 
 def test_runtime_planner_routes_current_page_browser_actions() -> None:
     screenshot = RuntimePlanner().decision(
