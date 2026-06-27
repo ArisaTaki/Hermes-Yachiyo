@@ -2978,7 +2978,7 @@ def _context_source_steps(
                     intent,
                     f"copy-selected-{step_prefix}-context",
                     "Copy selected context",
-                    capability_id,
+                    _context_source_capability_id(source, copy_tool, capability_id),
                     copy_tool,
                     input_preview={"action": "copy"},
                     reason="Copy the explicit user-selected text before using it as task context.",
@@ -2991,7 +2991,7 @@ def _context_source_steps(
                     intent,
                     f"read-{step_prefix}-context",
                     "Read captured context",
-                    capability_id,
+                    _context_source_capability_id(source, read_tool, capability_id),
                     read_tool,
                     depends_on=[f"copy-selected-{step_prefix}-context"] if copy_tool else [],
                     reason="Read the copied text so the next step uses inspected context.",
@@ -3006,7 +3006,7 @@ def _context_source_steps(
                 intent,
                 f"read-{step_prefix}-context",
                 "Read captured context",
-                capability_id,
+                _context_source_capability_id(source, tool_name, capability_id),
                 tool_name,
                 reason="Read the explicitly requested clipboard contents before using them as task context.",
             )
@@ -3020,7 +3020,7 @@ def _context_source_steps(
                 intent,
                 f"read-{step_prefix}-context",
                 "Read captured context",
-                capability_id,
+                _context_source_capability_id(source, tool_name, capability_id),
                 tool_name,
                 input_preview=payload,
                 reason="Capture the current page reference before using it as task context.",
@@ -3037,7 +3037,7 @@ def _context_source_steps(
                 intent,
                 f"read-{step_prefix}-context",
                 "Read captured context",
-                capability_id,
+                _context_source_capability_id(source, tool_name, capability_id),
                 tool_name,
                 input_preview=_information_capture_context_payload(tool_name),
                 reason="Inspect the current page or window text before using it as task context.",
@@ -3051,7 +3051,7 @@ def _context_source_steps(
                 intent,
                 f"read-{step_prefix}-context",
                 "Read captured context",
-                capability_id,
+                _context_source_capability_id(source, tool_name, capability_id),
                 tool_name,
                 input_preview=_information_capture_context_payload(tool_name),
                 reason="Inspect visible text before using it as task context.",
@@ -3059,6 +3059,22 @@ def _context_source_steps(
         ]
 
     return []
+
+
+def _context_source_capability_id(source: str, tool_name: str | None, fallback: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if source in {"selection", "clipboard"}:
+        return "clipboard.read_write"
+    if source in {"current_page_link", "current_page_content"}:
+        if clean_tool.startswith("browser."):
+            return "browser.research"
+        if clean_tool == "desktop.safe_shortcut":
+            return "desktop.ui_operation"
+        if clean_tool in {"desktop.ui_elements", "screen.capture"}:
+            return "desktop.app_discovery"
+    if source == "visible_text":
+        return "desktop.app_discovery"
+    return fallback
 
 
 def _direct_communication_steps(

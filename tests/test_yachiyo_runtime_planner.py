@@ -233,6 +233,10 @@ def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
         "run-analysis",
         "write-analysis-artifact",
     ]
+    assert _step_by_id(decision, "copy-selected-data-context").capability_id == (
+        "clipboard.read_write"
+    )
+    assert _step_by_id(decision, "read-data-context").capability_id == "clipboard.read_write"
     assert _step_by_id(decision, "run-analysis").approval_required is True
     assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
         "paths": ["analysis-report.md"],
@@ -1127,7 +1131,9 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "read-report-context",
         "write-report-artifact",
     ]
-    assert _step_by_id(clipboard, "read-report-context").tool_name == "clipboard.read"
+    report_context = _step_by_id(clipboard, "read-report-context")
+    assert report_context.capability_id == "clipboard.read_write"
+    assert report_context.tool_name == "clipboard.read"
     assert _step_by_id(clipboard, "write-report-artifact").input_preview == {
         "path": "report.md",
         "body_source": "clipboard",
@@ -4331,7 +4337,7 @@ def test_runtime_planner_tracks_context_communication_source_without_body() -> N
         "draft-communication-from-context",
     ]
     read_step = _step_by_id(decision, "read-communication-context")
-    assert read_step.capability_id == "communication.compose"
+    assert read_step.capability_id == "browser.research"
     assert read_step.tool_name == "browser.extract_text"
     assert read_step.action == "extract_text"
     draft_step = _step_by_id(decision, "draft-communication-from-context")
@@ -4434,6 +4440,7 @@ def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
         "action": "copy"
     }
     read_step = _step_by_id(decision, "read-schedule-context")
+    assert read_step.capability_id == "clipboard.read_write"
     assert read_step.tool_name == "clipboard.read"
     assert read_step.action == "read_clipboard"
     create_step = _step_by_id(decision, "create-schedule-item-from-context")
@@ -4449,6 +4456,7 @@ def test_runtime_planner_tracks_browser_context_sources() -> None:
     )
     assert note_decision.selected_intent.kind == "information_capture"
     note_read_step = _step_by_id(note_decision, "read-note-context")
+    assert note_read_step.capability_id == "browser.research"
     assert note_read_step.tool_name == "browser.current_page"
     assert note_read_step.action == "read_current_page"
 
@@ -4458,6 +4466,7 @@ def test_runtime_planner_tracks_browser_context_sources() -> None:
     )
     assert schedule_decision.selected_intent.kind == "schedule"
     schedule_read_step = _step_by_id(schedule_decision, "read-schedule-context")
+    assert schedule_read_step.capability_id == "browser.research"
     assert schedule_read_step.tool_name == "browser.extract_text"
     assert schedule_read_step.action == "extract_text"
 
