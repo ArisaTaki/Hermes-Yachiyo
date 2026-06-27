@@ -224,6 +224,7 @@ class TaskIntentRouter:
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
+        app_preferences = _app_preferences_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
         score = _score_terms(
@@ -299,6 +300,8 @@ class TaskIntentRouter:
             score = 0.18
         if score <= 0 and browser_internal_page:
             score = 0.24
+        if score <= 0 and app_preferences:
+            score = 0.2
         if score <= 0 and spotlight_search_query:
             score = 0.18
         if (
@@ -319,6 +322,7 @@ class TaskIntentRouter:
             and not foreground_submit_action
             and not command_palette
             and not browser_internal_page
+            and not app_preferences
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -340,6 +344,7 @@ class TaskIntentRouter:
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
             or browser_internal_page.get("app_name")
+            or app_preferences.get("app_name")
             or (command_palette or {}).get("app_name")
             or app_scoped_safe_operation.get("app_name")
             or app_scoped_safe_shortcut_app
@@ -393,6 +398,7 @@ class TaskIntentRouter:
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_foreground" if foreground_submit_action else "")
             or ("browser_internal_page" if browser_internal_page else "")
+            or ("app_preferences" if app_preferences else "")
             or ("safe_shortcut_sequence" if safe_shortcut_sequence else "")
             or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
@@ -475,6 +481,8 @@ class TaskIntentRouter:
             inputs["command_palette_hint"] = command_palette
         if browser_internal_page:
             inputs["browser_internal_page_hint"] = browser_internal_page
+        if app_preferences:
+            inputs["app_preferences_hint"] = app_preferences
         if spotlight_search_query:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
         if foreground_management is not None:
@@ -585,7 +593,7 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         if metadata.get("desktop_permission_recovery") and metadata.get("recovery_tool"):
             return _empty_intent("system_control", text)
-        if _browser_internal_page_hint(text):
+        if _browser_internal_page_hint(text) or _app_preferences_hint(text):
             return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
@@ -1243,6 +1251,9 @@ class RuntimePlanner:
         browser_internal_page = intent.inputs.get("browser_internal_page_hint")
         if not isinstance(browser_internal_page, Mapping):
             browser_internal_page = _browser_internal_page_hint(intent.user_goal)
+        app_preferences = intent.inputs.get("app_preferences_hint")
+        if not isinstance(app_preferences, Mapping):
+            app_preferences = _app_preferences_hint(intent.user_goal)
         spotlight_search = intent.inputs.get("spotlight_search_hint")
         if not isinstance(spotlight_search, Mapping):
             spotlight_query = _spotlight_search_query_hint(intent.user_goal)
@@ -1254,6 +1265,7 @@ class RuntimePlanner:
             or (screen_capture or {}).get("app_name")
             or command_palette.get("app_name")
             or browser_internal_page.get("app_name")
+            or app_preferences.get("app_name")
             or app_scoped_safe_operation.get("app_name")
             or app_search.get("app_name")
             or intent.inputs.get("app_name_hint")
@@ -1658,6 +1670,48 @@ class RuntimePlanner:
                     input_preview={},
                     depends_on=["manage-app"],
                     reason="Observe desktop state after the app management action.",
+                )
+            )
+            return steps
+        if app_preferences:
+            preferences_app = str(app_preferences.get("app_name") or app_name or "").strip()
+            preferences_mode = str(app_preferences.get("mode") or mode or "focus").strip()
+            steps.append(
+                _step(
+                    intent,
+                    "open-app-preferences",
+                    "Open app preferences",
+                    "desktop.app_control",
+                    _first_allowed(
+                        app_foreground_tool_candidates(preferences_mode, "safe_shortcut"),
+                        allowed,
+                    ),
+                    input_preview={"app_name": preferences_app, "action": "preferences"},
+                    depends_on=["discover-desktop-state"],
+                    action="shortcut",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Open the requested app preferences through an app-scoped safe shortcut.",
+                )
+            )
+            verify_tool = _first_allowed(
+                ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+                allowed,
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=preferences_app,
+                        operation_preview={},
+                    ),
+                    depends_on=["open-app-preferences"],
+                    reason="Observe the app after opening its preferences.",
                 )
             )
             return steps
@@ -4461,6 +4515,134 @@ def _browser_family(app_name: str) -> str:
     if compact == "firefox":
         return "firefox"
     return ""
+
+
+def _app_preferences_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    surface = r"(?:偏好设置|设置|preferences|settings)"
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*"
+            rf"(?P<app>[\w .·-]{{1,40}}?)\s*(?:的)?\s*(?P<surface>{surface})"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?:在|用|通过)\s*(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内|里面)?\s*"
+            rf"(?:打开|显示|查看|进入|切到|聚焦)\s*(?P<surface>{surface})"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "focus",
+        ),
+        (
+            r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            rf"(?:the\s+)?(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+"
+            rf"(?P<surface>{surface})$",
+            "",
+        ),
+        (
+            r"^(?!(?:open|launch|start|focus|switch\s+to|activate)\b)"
+            rf"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?P<surface>{surface})$",
+            "focus",
+        ),
+    )
+    for pattern, default_mode in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _clean_app_name_hint(groups.get("app") or "")
+        if (
+            not app_name
+            or _is_browser_or_search_app_name(app_name)
+            or _is_system_settings_app_label(app_name)
+        ):
+            continue
+        return {
+            "app_name": app_name,
+            "mode": _command_palette_mode(groups.get("mode") or default_mode),
+            "action": "preferences",
+        }
+    return {}
+
+
+def _is_system_settings_app_label(app_name: str) -> bool:
+    compact = _compact_app_alias(app_name)
+    return compact in {
+        "system",
+        "systemsettings",
+        "systempreferences",
+        "settings",
+        "preferences",
+        "系统",
+        "系统设置",
+        "系统偏好",
+        "系统偏好设置",
+        "设置",
+        "偏好",
+        "偏好设置",
+        "bluetooth",
+        "蓝牙",
+        "wifi",
+        "wi-fi",
+        "无线网络",
+        "无线局域网",
+        "network",
+        "网络",
+        "display",
+        "displays",
+        "显示器",
+        "sound",
+        "audio",
+        "声音",
+        "音频",
+        "keyboard",
+        "键盘",
+        "notification",
+        "notifications",
+        "通知",
+        "battery",
+        "电池",
+        "mouse",
+        "鼠标",
+        "trackpad",
+        "触控板",
+        "printer",
+        "printers",
+        "打印机",
+        "focus",
+        "专注模式",
+        "wallpaper",
+        "墙纸",
+        "壁纸",
+        "dock",
+        "程序坞",
+        "desktopdock",
+        "桌面与程序坞",
+        "screensaver",
+        "屏幕保护程序",
+        "屏幕保护",
+        "siri",
+        "language",
+        "languageandregion",
+        "语言与地区",
+        "dateandtime",
+        "日期与时间",
+        "softwareupdate",
+        "软件更新",
+        "storage",
+        "储存空间",
+        "存储空间",
+        "loginitems",
+        "登录项",
+        "usersandgroups",
+        "用户与群组",
+        "privacy",
+        "security",
+        "隐私",
+        "隐私与安全性",
+    }
 
 
 def _desktop_operation_hint(text: str) -> str:

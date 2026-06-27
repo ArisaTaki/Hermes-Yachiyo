@@ -2435,6 +2435,147 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
     ]
 
 
+def test_runtime_planner_routes_app_preferences_without_system_settings() -> None:
+    slack_preferences = RuntimePlanner().decision(
+        "打开 Slack 偏好设置",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    )
+    assert slack_preferences.selected_intent.kind == "desktop_operation"
+    assert slack_preferences.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert slack_preferences.selected_intent.inputs["app_preferences_hint"] == {
+        "app_name": "Slack",
+        "mode": "open",
+        "action": "preferences",
+    }
+    assert _step_by_id(slack_preferences, "open-app-preferences").input_preview == {
+        "app_name": "Slack",
+        "action": "preferences",
+    }
+
+    scoped_preferences = RuntimePlanner().decision(
+        "在 Slack 里打开偏好设置",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    )
+    assert scoped_preferences.selected_intent.kind == "desktop_operation"
+    assert scoped_preferences.selected_intent.inputs["app_preferences_hint"] == {
+        "app_name": "Slack",
+        "mode": "focus",
+        "action": "preferences",
+    }
+
+    english_preferences = RuntimePlanner().decision(
+        "Slack preferences",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    )
+    assert english_preferences.selected_intent.kind == "desktop_operation"
+    assert english_preferences.selected_intent.inputs["app_preferences_hint"] == {
+        "app_name": "Slack",
+        "mode": "focus",
+        "action": "preferences",
+    }
+
+    open_english_preferences = RuntimePlanner().decision(
+        "open Slack preferences",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    )
+    assert open_english_preferences.selected_intent.kind == "desktop_operation"
+    assert open_english_preferences.selected_intent.inputs["app_preferences_hint"] == {
+        "app_name": "Slack",
+        "mode": "open",
+        "action": "preferences",
+    }
+
+    assert planner_direct_tool_requests(
+        "打开 Slack 偏好设置",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "preferences"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert planner_direct_tool_requests(
+        "Slack preferences",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "preferences"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    bluetooth_settings = RuntimePlanner().decision(
+        "打开蓝牙设置",
+        allowed_tools=["system.settings_open", "app.open_and_safe_shortcut"],
+    )
+    assert bluetooth_settings.selected_intent.kind == "system_control"
+    assert bluetooth_settings.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "蓝牙"},
+        "inspect_ui": False,
+    }
+
+    sound_settings = RuntimePlanner().decision(
+        "open sound settings",
+        allowed_tools=["system.settings_open", "app.open_and_safe_shortcut"],
+    )
+    assert sound_settings.selected_intent.kind == "system_control"
+    assert sound_settings.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "声音"},
+        "inspect_ui": False,
+    }
+
+    system_settings = RuntimePlanner().decision(
+        "打开系统设置",
+        allowed_tools=["system.settings_open", "app.open_and_safe_shortcut"],
+    )
+    assert system_settings.selected_intent.kind == "system_control"
+    assert system_settings.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "系统设置"},
+        "inspect_ui": False,
+    }
+
+
 def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> None:
     decision = RuntimePlanner().decision(
         "Spotlight 搜索 yachiyo",

@@ -270,6 +270,7 @@ def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) 
         "safe_click_hint",
         "desktop_discovery_hint",
         "browser_internal_page_hint",
+        "app_preferences_hint",
     }
     return not any(inputs.get(key) for key in hint_keys)
 
