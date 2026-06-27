@@ -130,6 +130,18 @@ def start_legacy_group_run(
                 client_run_id=client_run_id,
                 orchestration=group_run_orchestration_context(orchestration_plan),
             )
+            append_group_run_planner_events(
+                runtime,
+                child_run,
+                objective,
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                members=members,
+                child_run_ids=[str(child_run.get("run_id") or "")],
+                client_run_id=client_run_id,
+                orchestration=group_run_orchestration_context(orchestration_plan),
+            )
         append_group_member_event(
             runtime,
             child_run,
@@ -285,6 +297,55 @@ def append_group_member_planner_events(
             append_run_event(run_id, event_type, payload)
         except Exception:
             continue
+
+
+def append_group_run_planner_events(
+    runtime: Any,
+    run: dict[str, Any],
+    objective: str,
+    *,
+    group_id: str,
+    group: dict[str, Any],
+    run_group_id: str,
+    members: list[dict[str, Any]],
+    child_run_ids: list[str],
+    client_run_id: str = "",
+    orchestration: dict[str, Any] | None = None,
+) -> None:
+    decision = runtime_planner_decision(
+        objective,
+        metadata={"runnable_kind": "group_run", "group_id": group_id},
+    )
+    for event_type, payload in planner_run_event_payloads(decision):
+        append_group_run_event(
+            runtime,
+            run,
+            _group_run_planner_event_type(event_type),
+            group_id=group_id,
+            group=group,
+            run_group_id=run_group_id,
+            objective=objective,
+            status="running",
+            members=members,
+            child_run_ids=child_run_ids,
+            client_run_id=client_run_id,
+            orchestration={
+                **dict(orchestration or {}),
+                **dict(payload),
+                "planner_event_type": event_type,
+                "planner_scope": "group_run",
+            },
+        )
+
+
+def _group_run_planner_event_type(event_type: str) -> str:
+    if event_type == "agent.intent.selected":
+        return "group.run.intent.selected"
+    if event_type == "agent.plan.created":
+        return "group.run.plan.created"
+    if event_type == "agent.plan.step":
+        return "group.run.plan.step"
+    return "group.run.planner_event"
 
 
 def _member_allowed_tools(member: dict[str, Any]) -> list[str] | None:

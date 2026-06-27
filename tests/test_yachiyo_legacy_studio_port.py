@@ -85,6 +85,10 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert [event["event_type"] for event in group_run["events"]] == [
         "group.run.started",
         "group.run.plan",
+        "group.run.intent.selected",
+        "group.run.plan.created",
+        "group.run.plan.step",
+        "group.run.plan.step",
         "group.member.started",
         "group.member.started",
     ]
@@ -106,6 +110,21 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert plan["payload"]["group_execution_strategy"] == "fan_out"
     assert plan["payload"]["group_parallel"] is True
     assert plan["payload"]["group_member_order"] == ["agent-1", "agent-2"]
+    group_intent = group_run["events"][2]
+    assert group_intent["payload"]["source"] == "runtime_planner"
+    assert group_intent["payload"]["planner_scope"] == "group_run"
+    assert group_intent["payload"]["planner_event_type"] == "agent.intent.selected"
+    assert group_intent["payload"]["intent"]["kind"] == "general"
+    assert group_intent["payload"]["group_run_id"] == "group-run-1"
+    group_plan = group_run["events"][3]
+    assert group_plan["payload"]["planner_event_type"] == "agent.plan.created"
+    assert group_plan["payload"]["plan"]["tool_plan"]["title"] == "General Task Tool Plan"
+    group_step_tools = [
+        event["payload"]["step"]["tool_name"]
+        for event in group_run["events"]
+        if event["event_type"] == "group.run.plan.step"
+    ]
+    assert group_step_tools == ["workspace.list", "artifact.write"]
 
 
 def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() -> None:
@@ -123,9 +142,16 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
         }
     )
 
-    assert [event["event_type"] for event in group_run["events"]] == [
+    event_types = [event["event_type"] for event in group_run["events"]]
+    assert event_types[:6] == [
         "group.run.started",
         "group.run.plan",
+        "group.run.intent.selected",
+        "group.run.plan.created",
+        "group.run.plan.step",
+        "group.run.plan.step",
+    ]
+    assert event_types[6:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",
