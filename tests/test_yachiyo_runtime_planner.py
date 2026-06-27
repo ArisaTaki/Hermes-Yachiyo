@@ -3436,6 +3436,8 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         ("Apple Music search Space Oddity and play it", "Space Oddity"),
         ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "超时空辉夜姬"),
         ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
+        ("播放 Apple Music 里的 超时空辉夜姬", "超时空辉夜姬"),
+        ("Apple Music 里的超时空辉夜姬播放", "超时空辉夜姬"),
         ("超时空辉夜姬播放", "超时空辉夜姬"),
         ("周杰伦播放一下", "周杰伦"),
     ):

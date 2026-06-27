@@ -752,6 +752,7 @@ def _clean_media_query(value: str) -> str:
         query,
         flags=re.IGNORECASE,
     )
+    query = re.sub(r"^\s*(?:里的|中的|里面|里|中|上|内|的)\s*", "", query)
     query = re.split(
         r"(?:并|然后|再|接着|之后|后|and\s+then|then)",
         query,
