@@ -758,6 +758,10 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "Can you search Chrome for weather?",
         allowed_tools=["browser.open_url", "browser.open_url_and_extract_text"],
     )
+    bare_search = RuntimePlanner().decision(
+        "search Chrome for weather",
+        allowed_tools=["browser.open_url", "browser.open_url_and_extract_text"],
+    )
 
     assert decision.selected_intent.kind == "web_research"
     assert decision.selected_intent.inputs == {
@@ -768,6 +772,12 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     step = _step_by_id(decision, "open-web-search")
     assert step.tool_name == "browser.open_url"
     assert step.input_preview == {"url": "https://www.google.com/search?q=weather"}
+    assert bare_search.selected_intent.kind == "web_research"
+    assert bare_search.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=weather",
+        "browser_action": "open_search",
+        "query": "weather",
+    }
 
     chinese = RuntimePlanner().decision(
         "搜索天气",
@@ -1978,6 +1988,50 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "target": "搜索",
     }
     assert _step_by_id(scoped_search, "open-or-focus-app").tool_name == "app.focus"
+
+    english_scoped_search = RuntimePlanner().decision(
+        "search WeChat for file transfer",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    )
+    assert english_scoped_search.selected_intent.kind == "desktop_operation"
+    assert english_scoped_search.selected_intent.inputs["app_name_hint"] == "WeChat"
+    assert english_scoped_search.selected_intent.inputs["app_search_hint"] == {
+        "app_name": "WeChat",
+        "query": "file transfer",
+        "target": "Search",
+    }
+    assert _step_by_id(english_scoped_search, "open-or-focus-app").tool_name == "app.focus"
+
+    english_scoped_search_with_preposition = RuntimePlanner().decision(
+        "search in WeChat for file transfer",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    )
+    assert english_scoped_search_with_preposition.selected_intent.kind == "desktop_operation"
+    assert (
+        english_scoped_search_with_preposition.selected_intent.inputs["app_name_hint"]
+        == "WeChat"
+    )
+    assert english_scoped_search_with_preposition.selected_intent.inputs["app_search_hint"] == {
+        "app_name": "WeChat",
+        "query": "file transfer",
+        "target": "Search",
+    }
 
     focused_search = RuntimePlanner().decision(
         "切到微信，搜索张三",
@@ -3982,6 +4036,48 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_type_text",
             "input": {"text": "lo-fi"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_direct_tool_requests(
+        "search WeChat for file transfer",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "file transfer"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

@@ -376,8 +376,14 @@ class TaskIntentRouter:
             app_management,
         )
         app_search = _app_search_hint(text, app_name_hint)
-        if not app_name_hint and app_search.get("app_name"):
-            app_name_hint = str(app_search.get("app_name") or "").strip()
+        app_search_app_name = str(app_search.get("app_name") or "").strip()
+        if app_search_app_name and (
+            not app_name_hint
+            or _compact_app_alias(app_name_hint).startswith(
+                _compact_app_alias(app_search_app_name)
+            )
+        ):
+            app_name_hint = app_search_app_name
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_foreground" if foreground_submit_action else "")
@@ -1233,10 +1239,10 @@ class RuntimePlanner:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
-            or intent.inputs.get("app_name_hint")
             or command_palette.get("app_name")
             or app_scoped_safe_operation.get("app_name")
             or app_search.get("app_name")
+            or intent.inputs.get("app_name_hint")
             or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             or (app_management or {}).get("app_name")
             or _foreground_compose_app_name_hint(intent.user_goal)
@@ -5117,7 +5123,11 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
     if not query:
         parsed = _leading_app_search_hint(text)
         parsed_app = str(parsed.get("app_name") or "").strip() if parsed else ""
-        if parsed and (not app or parsed_app.lower() == app.lower()):
+        if parsed and (
+            not app
+            or parsed_app.lower() == app.lower()
+            or _compact_app_alias(app).startswith(_compact_app_alias(parsed_app))
+        ):
             return parsed
     if not query:
         return {}
@@ -5155,15 +5165,22 @@ def _leading_app_search_hint(text: str) -> dict[str, str]:
     patterns = (
         r"^(?P<app>[\w .·-]{1,40}?)\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
         r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        r"^(?:search|find|look\s+up)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?"
+        r"(?P<app_in>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:for\s+)?(?P<query_in>[^.!?,]+)$",
+        r"^(?:search|find|look\s+up)\s+(?:the\s+)?"
+        r"(?P<app_prefix>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+for\s+(?P<query_prefix>[^.!?,]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _clean_app_name_hint(match.group("app"))
+        groups = match.groupdict()
+        raw_app = groups.get("app") or groups.get("app_in") or groups.get("app_prefix") or ""
+        raw_query = groups.get("query") or groups.get("query_in") or groups.get("query_prefix") or ""
+        app_name = _clean_app_name_hint(raw_app)
         if not app_name or _is_browser_or_search_app_name(app_name):
             continue
-        query = _clean_app_search_query(match.group("query"))
+        query = _clean_app_search_query(raw_query)
         if not query or _invalid_leading_app_search_match(value, app_name, query):
             continue
         return {
