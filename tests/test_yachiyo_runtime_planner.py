@@ -4459,6 +4459,19 @@ def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> 
     assert "browser.print_page" in snapshots[0].available_tools
 
 
+def test_capability_registry_exposes_workflow_and_group_run_tools() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["workflow.run", "group.run"],
+        capability_ids=["workflow.orchestration", "group.multi_agent"],
+    )
+    by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
+
+    assert by_id["workflow.orchestration"].tools == ["workflow.run"]
+    assert by_id["workflow.orchestration"].available_tools == ["workflow.run"]
+    assert by_id["group.multi_agent"].tools == ["group.run"]
+    assert by_id["group.multi_agent"].available_tools == ["group.run"]
+
+
 def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
     snapshots = capability_snapshots(
         allowed_tools=["workspace.write_patch"],
