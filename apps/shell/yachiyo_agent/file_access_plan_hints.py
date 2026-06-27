@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from apps.shell.agent.runtime.path_aliases import common_desktop_path_marker
+from .path_alias_hints import legacy_common_desktop_path_hint
 
 
 def file_access_hint(prompt: str) -> dict[str, str]:
@@ -115,7 +115,7 @@ def _explicit_path(text: str) -> str:
 
 
 def _common_path(text: str) -> str:
-    return common_desktop_path_marker(text)
+    return legacy_common_desktop_path_hint(text)
 
 
 def _looks_like_open_request(text: str) -> bool:

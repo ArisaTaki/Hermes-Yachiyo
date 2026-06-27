@@ -403,6 +403,20 @@ def test_runtime_planner_web_destinations_are_behind_discovery_compatibility_bou
     assert "apps.shell.agent.runtime.web_destinations" not in planner
 
 
+def test_runtime_planner_path_aliases_are_behind_discovery_compatibility_boundary() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/path_alias_hints.py",
+        [
+            "def legacy_common_desktop_path_hint(value: str) -> str:",
+            "The planner should prefer discovered file context and explicit paths when",
+            "common_desktop_path_marker(value)",
+        ],
+    )
+    file_hints = _read("apps/shell/yachiyo_agent/file_access_plan_hints.py")
+    assert "legacy_common_desktop_path_hint" in file_hints
+    assert "apps.shell.agent.runtime.path_aliases" not in file_hints
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]

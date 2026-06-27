@@ -35,6 +35,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_timeline_event,
     planner_timeline_events,
 )
+from apps.shell.yachiyo_agent.path_alias_hints import legacy_common_desktop_path_hint
 from apps.shell.yachiyo_agent.web_destination_hints import (
     legacy_known_web_destination_search_url,
     legacy_known_web_destination_url_hint,
@@ -98,6 +99,11 @@ def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() ->
         legacy_known_web_destination_search_url("GitHub", "oha-yachiyo")
         == "https://github.com/search?q=oha-yachiyo"
     )
+
+
+def test_runtime_planner_path_aliases_are_behind_compatibility_boundary() -> None:
+    assert legacy_common_desktop_path_hint("打开下载目录") == "~/Downloads"
+    assert legacy_common_desktop_path_hint("打开桌面文件夹") == "~/Desktop"
 
 
 def _recording_legacy_requests(
