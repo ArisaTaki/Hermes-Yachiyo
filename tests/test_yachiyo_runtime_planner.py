@@ -92,7 +92,9 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
         ("调研 https://example.com 的最新信息", "web_research", ["browser.research"]),
         ("整理 Downloads 里的 PDF 文件", "file_organization", ["file.organization"]),
+        ("整理 Downloads 里的发票文件", "file_organization", ["file.organization"]),
         ("给 Alice 发消息说会议改到三点", "communication", ["communication.compose"]),
+        ("给 Alice 写一封邮件说明会议延期", "communication", ["communication.compose"]),
         ("明天上午九点提醒我提交报告", "schedule", ["schedule.reminder"]),
         ("修复这个仓库里的 failing tests", "code_task", ["file.workspace_read"]),
         ("运行日报 Workflow", "workflow_orchestration", ["workflow.orchestration"]),
@@ -631,12 +633,22 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "整理 Downloads 里的文件",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    invoice_decision = RuntimePlanner().decision(
+        "整理 Downloads 里的发票文件",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
     assert organize_decision.selected_intent.kind == "file_organization"
     assert organize_decision.selected_intent.inputs == {
         "location_hint": "Downloads",
         "operation_hint": "organize",
     }
     assert _step_by_id(organize_decision, "apply-file-organization").approval_required is True
+    assert invoice_decision.selected_intent.kind == "file_organization"
+    assert invoice_decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "organize",
+    }
+    assert _step_by_id(invoice_decision, "apply-file-organization").approval_required is True
 
 
 def test_runtime_planner_routes_file_inventory_without_apply_approval() -> None:
@@ -5277,6 +5289,10 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
         "写一封邮件给 Alice 说明项目进展",
         allowed_tools=["artifact.write"],
     )
+    recipient_first = RuntimePlanner().decision(
+        "给 Alice 写一封邮件说明会议延期",
+        allowed_tools=["artifact.write"],
+    )
 
     assert decision.selected_intent.kind == "communication"
     assert decision.plan.tool_plan.missing_capabilities == []
@@ -5284,6 +5300,11 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     assert draft_step.tool_name == "artifact.write"
     assert draft_step.depends_on == []
     assert draft_step.approval_required is True
+    assert recipient_first.selected_intent.kind == "communication"
+    assert recipient_first.plan.tool_plan.missing_capabilities == []
+    recipient_first_draft = _step_by_id(recipient_first, "draft-communication")
+    assert recipient_first_draft.tool_name == "artifact.write"
+    assert recipient_first_draft.approval_required is True
 
 
 def test_runtime_planner_tracks_context_communication_source_without_body() -> None:

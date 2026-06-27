@@ -4422,7 +4422,11 @@ _BROWSER_TEXT_INPUT_SELECTOR = (
 
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
+    if intent.kind == "desktop_operation" and _looks_like_file_organization_request(text):
+        score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_recipient_message_request(text):
+        score -= 0.3
+    if intent.kind == "desktop_operation" and _looks_like_communication_task_request(text):
         score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_schedule_request(text):
         score -= 0.2
@@ -4483,8 +4487,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.16
     if intent.kind == "communication" and _looks_like_recipient_message_request(text):
         score += 0.28
+    if intent.kind == "communication" and _looks_like_communication_task_request(text):
+        score += 0.26
     if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
         score += 0.18
+    if intent.kind == "schedule" and _looks_like_communication_task_request(text):
+        score -= 0.18
     if intent.kind == "schedule" and _looks_like_schedule_request(text):
         score += 0.22
     if intent.kind == "workflow_orchestration" and _contains_any(
@@ -4499,6 +4507,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.28
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
+    if intent.kind == "file_organization" and _looks_like_file_organization_request(text):
+        score += 0.18
     if (
         intent.kind == "data_analysis"
         and str(intent.inputs.get("context_source") or "").strip()
@@ -5437,6 +5447,33 @@ def _looks_like_recipient_message_request(value: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(r"\b(?:send|message)\s+.+?\s+(?:to|for)\s+", value, flags=re.IGNORECASE)
+    )
+
+
+def _looks_like_communication_task_request(value: str) -> bool:
+    text = _clean_prompt(value)
+    return bool(
+        _looks_like_recipient_message_request(text)
+        or re.search(
+            r"(?:给|向|对)\s*[^：:，,。]+?\s*"
+            r"(?:写|撰写|起草|草拟|发|发送|回复|回)\s*"
+            r"(?:一封|封|条)?\s*(?:邮件|消息|短信|微信|email|mail|message)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:写|撰写|起草|草拟|发|发送|回复|回)\s*"
+            r"(?:一封|封|条)?\s*(?:邮件|消息|短信|微信|email|mail|message)\s*"
+            r"(?:给|发给|发送给|向|对)\s*[^：:，,。]+",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:write|draft|compose|send|reply)\s+(?:an?\s+)?"
+            r"(?:email|e-mail|mail|message)\s+(?:to|for)\s+",
+            text,
+            flags=re.IGNORECASE,
+        )
     )
 
 
