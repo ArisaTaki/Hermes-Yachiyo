@@ -5061,6 +5061,26 @@ def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
     assert "notes.create" in capability.available_tools
 
 
+def test_runtime_planner_writes_explicit_note_body_as_artifact_fallback() -> None:
+    decision = RuntimePlanner().decision(
+        "记一下：今天要买牛奶",
+        allowed_tools=["artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "information_capture"
+    assert decision.plan.tool_plan.artifacts_expected == ["captured-note.md"]
+    step = _step_by_id(decision, "write-note-artifact")
+    assert step.capability_id == "information.capture"
+    assert step.action == "write_artifact"
+    assert step.tool_name == "artifact.write"
+    assert step.input_preview == {
+        "path": "captured-note.md",
+        "content": "今天要买牛奶",
+    }
+    capability = _capability_by_id(decision, "information.capture")
+    assert capability.available_tools == ["artifact.write"]
+
+
 def test_runtime_planner_routes_empty_note_request_to_desktop_shortcut() -> None:
     decision = RuntimePlanner().decision(
         "创建备忘录",
@@ -8359,12 +8379,28 @@ def test_planner_tool_requests_maps_explicit_note_plan() -> None:
         "在 Notes 新建笔记 hello",
         allowed_tools=["notes.create"],
     )
+    artifact_requests = planner_tool_requests(
+        "记一下：今天要买牛奶",
+        allowed_tools=["artifact.write"],
+    )
 
     assert requests == [
         {
             "protocol": "json_fallback",
             "tool": "notes.create",
             "input": {"body": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_information_capture",
+        }
+    ]
+    assert artifact_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "captured-note.md",
+                "content": "今天要买牛奶",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_information_capture",
         }

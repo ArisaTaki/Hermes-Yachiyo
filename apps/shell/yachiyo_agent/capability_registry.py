@@ -233,6 +233,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         description="Capture explicit text or inspected context into a local note.",
         tools=(
             "notes.create",
+            "artifact.write",
             "clipboard.read",
             "desktop.safe_shortcut",
             "browser.current_page",
@@ -241,8 +242,8 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "screen.capture",
         ),
         discovery_actions=("read_clipboard", "copy_selection", "extract_text", "read_ui"),
-        execution_actions=("create_note",),
-        output_kinds=("note", "text"),
+        execution_actions=("create_note", "write_artifact"),
+        output_kinds=("note", "text", "artifact"),
     ),
     CapabilityDefinition(
         capability_id="clipboard.read_write",

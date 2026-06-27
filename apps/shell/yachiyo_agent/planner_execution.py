@@ -1119,6 +1119,9 @@ def _direct_context_clipboard_copy_requests(
 
 
 def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    artifact_request = _information_capture_artifact_request(decision, allowed)
+    if artifact_request:
+        return [artifact_request]
     tool_name, payload = capture_tool_preview(decision.selected_intent.inputs, allowed)
     if tool_name != "notes.create" or not payload.get("body"):
         return _context_source_tool_requests(
@@ -1134,6 +1137,35 @@ def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list
             planning_reason="planner_fallback_information_capture",
         )
     ]
+
+
+def _information_capture_artifact_request(
+    decision: Any,
+    allowed: set[str],
+) -> dict[str, Any] | None:
+    step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "step_id", "") == "write-note-artifact"
+        ),
+        None,
+    )
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name != "artifact.write" or tool_name not in allowed:
+        return None
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    if not str(payload.get("path") or "").strip() or not str(payload.get("content") or "").strip():
+        return None
+    return _request(
+        tool_name,
+        {
+            "path": str(payload.get("path") or ""),
+            "content": str(payload.get("content") or ""),
+        },
+        planning_reason="planner_fallback_information_capture",
+    )
 
 
 def _context_source_tool_requests(

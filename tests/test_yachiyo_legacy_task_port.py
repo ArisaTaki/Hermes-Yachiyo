@@ -1704,6 +1704,44 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     ]
 
 
+def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatArtifactRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-note-artifact",
+        conversation_id="chat-1",
+        prompt="记一下：今天要买牛奶",
+    )
+
+    assert task is not None
+    metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "information_capture"
+    assert metadata["daily_desktop_tool"] == "artifact.write"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == (
+        "planner_fallback_information_capture"
+    )
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "captured-note.md",
+                "content": "今天要买牛奶",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_information_capture",
+        }
+    ]
+
+
 def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
@@ -2439,4 +2477,12 @@ class _MainChatFutureTaskRuntime(_MainChatPlannerEventRuntime):
         return {
             "allowed_tools": ["future_task.schedule"],
             "approval_required": {"future_task.schedule": True},
+        }
+
+
+class _MainChatArtifactRuntime(_MainChatPlannerEventRuntime):
+    def _main_chat_tool_policy(self) -> dict[str, Any]:
+        return {
+            "allowed_tools": ["artifact.write"],
+            "approval_required": {},
         }

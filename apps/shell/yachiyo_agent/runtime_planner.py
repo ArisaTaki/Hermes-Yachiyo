@@ -3056,6 +3056,20 @@ class RuntimePlanner:
                     reason="Use the note creation tool for explicit user-provided content.",
                 )
             ]
+        body = str(intent.inputs.get("body") or "").strip()
+        artifact_tool = _first_allowed(("artifact.write",), allowed)
+        if body and artifact_tool:
+            return [
+                _step(
+                    intent,
+                    "write-note-artifact",
+                    "Write note artifact",
+                    "information.capture",
+                    artifact_tool,
+                    input_preview={"path": "captured-note.md", "content": body},
+                    reason="Capture explicit user-provided note text as a replayable artifact.",
+                )
+            ]
 
         source = str(intent.inputs.get("source") or "").strip()
         context_steps = _context_source_steps(
@@ -3971,6 +3985,8 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
             return _context_source_action(tool_name)
         return "schedule_task"
     if capability_id == "information.capture":
+        if tool_name == "artifact.write":
+            return "write_artifact"
         return _context_source_action(tool_name)
     if capability_id == "communication.compose":
         if _is_context_source_tool(tool_name):
@@ -4219,6 +4235,8 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
         if str(intent.inputs.get("operation_hint") or "").strip() == "inventory":
             return ["file-inventory.md"]
         return ["file-organization-plan.md"]
+    if intent.kind == "information_capture":
+        return ["captured-note.md"]
     return ["report.md"]
 
 
