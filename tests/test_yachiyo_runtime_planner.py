@@ -3041,6 +3041,9 @@ def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
         ("launch SuperData Studio application", "SuperData Studio"),
         ("打开微信应用", "微信"),
         ("启动 Obsidian 软件", "Obsidian"),
+        ("帮我打开 Pixelmator", "Pixelmator"),
+        ("打开一个我没提过的应用叫 Raycast", "Raycast"),
+        ("打开一个叫 Linear 的应用", "Linear"),
     )
 
     for prompt, expected_app_name in cases:

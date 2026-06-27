@@ -4043,12 +4043,26 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|and|then|to|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|paste|thanks)",
+        r"(?:并|然后|再|接着|之后|后|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|\b(?:and|then|to|paste|thanks)\b)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    called_app_match = re.match(
+        r"^(?:一个|一款|这个|那个)?(?:叫|名叫|名称是|名字是)\s*(?P<app>.+?)\s*(?:的)?(?:应用(?:程序)?|软件)$",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if called_app_match:
+        app = called_app_match.group("app")
+    app = re.sub(
+        r"^(?:一个|一款|这个|那个)?(?:我(?:没|没有)提过的|新的|未知的)?"
+        r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)(?:叫|名叫|名称是|名字是|called|named)?\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.sub(
         r"^(?:在|用|通过|in|inside|within|using|with)\s+",
         "",
