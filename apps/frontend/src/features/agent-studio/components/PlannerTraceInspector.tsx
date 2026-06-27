@@ -23,10 +23,13 @@ type PlannerTrace = {
 };
 
 type PlannerSelection = {
+  approvalsRequired: string[];
+  artifactsExpected: string[];
   legacyTools: string[];
   legacyRequestCount: number;
   missingCapabilities: string[];
   missingCapabilityCount: number;
+  openQuestions: string[];
   planCapabilities: string[];
   planCapabilityCount: number;
   planTools: string[];
@@ -79,9 +82,18 @@ export function PlannerTraceInspector({
   const intentInputEntries = plannerIntentInputEntries(intent?.inputs);
   const expectedOutputs = uniqueStrings(intent?.expected_outputs || []);
   const missingInputs = uniqueStrings(intent?.missing_inputs || []);
-  const approvalsRequired = uniqueStrings(toolPlan?.approvals_required || []);
-  const artifactsExpected = uniqueStrings(toolPlan?.artifacts_expected || []);
-  const openQuestions = uniqueStrings(toolPlan?.open_questions || []);
+  const approvalsRequired = uniqueStrings([
+    ...(toolPlan?.approvals_required || []),
+    ...(trace.selection?.approvalsRequired || []),
+  ]);
+  const artifactsExpected = uniqueStrings([
+    ...(toolPlan?.artifacts_expected || []),
+    ...(trace.selection?.artifactsExpected || []),
+  ]);
+  const openQuestions = uniqueStrings([
+    ...(toolPlan?.open_questions || []),
+    ...(trace.selection?.openQuestions || []),
+  ]);
   const confidence = confidenceLabel(intent?.confidence);
 
   return (
@@ -669,6 +681,15 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const missingCapabilities = uniqueStrings(
     Array.isArray(payload.missing_capabilities) ? payload.missing_capabilities : [],
   );
+  const approvalsRequired = uniqueStrings(
+    Array.isArray(payload.approvals_required) ? payload.approvals_required : [],
+  );
+  const artifactsExpected = uniqueStrings(
+    Array.isArray(payload.artifacts_expected) ? payload.artifacts_expected : [],
+  );
+  const openQuestions = uniqueStrings(
+    Array.isArray(payload.open_questions) ? payload.open_questions : [],
+  );
   const plannerTools = uniqueStrings(Array.isArray(payload.planner_tools) ? payload.planner_tools : []);
   const legacyTools = uniqueStrings(Array.isArray(payload.legacy_tools) ? payload.legacy_tools : []);
   const selectedRequestCount = integerValue(payload.selected_request_count, selectedTools.length);
@@ -684,14 +705,20 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     && !planTools.length
     && !planCapabilities.length
     && !missingCapabilities.length
+    && !approvalsRequired.length
+    && !artifactsExpected.length
+    && !openQuestions.length
     && !plannerTools.length
     && !legacyTools.length
   ) return null;
   return {
+    approvalsRequired,
+    artifactsExpected,
     legacyTools,
     legacyRequestCount,
     missingCapabilities,
     missingCapabilityCount,
+    openQuestions,
     planCapabilities,
     planCapabilityCount,
     planTools,

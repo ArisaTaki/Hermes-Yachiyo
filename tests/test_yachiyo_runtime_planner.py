@@ -390,12 +390,18 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     ]
     assert payload["required_capabilities"] == ["desktop.app_discovery"]
     assert payload["missing_capabilities"] == []
+    assert payload["approvals_required"] == []
+    assert payload["artifacts_expected"] == []
+    assert payload["open_questions"] == []
     assert payload["planner_tools"] == ["app.open"]
     assert payload["legacy_tools"] == []
     assert payload["selected_tools"] == ["app.open"]
     assert payload["plan_step_count"] == 3
     assert payload["plan_capability_count"] == 3
     assert payload["missing_capability_count"] == 0
+    assert payload["approval_count"] == 0
+    assert payload["artifact_count"] == 0
+    assert payload["open_question_count"] == 0
     assert payload["planner_request_count"] == 1
     assert payload["legacy_request_count"] == 0
     assert payload["selected_request_count"] == 1
@@ -405,6 +411,37 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert event["event"] == "agent.plan.selection"
     assert event["detail"] == "runtime_planner"
     assert event["payload"] == payload
+
+
+def test_planner_selection_payload_surfaces_outputs_for_studio_replay() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+    planner_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "python analyze_sales.py"},
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=planner_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["intent_kind"] == "data_analysis"
+    assert payload["approvals_required"] == ["run-analysis"]
+    assert payload["artifacts_expected"] == ["analysis-report.md"]
+    assert payload["open_questions"] == []
+    assert payload["approval_count"] == 1
+    assert payload["artifact_count"] == 1
+    assert payload["open_question_count"] == 0
 
 
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:

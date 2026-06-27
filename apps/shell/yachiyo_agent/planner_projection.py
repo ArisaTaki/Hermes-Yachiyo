@@ -112,6 +112,9 @@ def planner_selection_payload(
     plan_steps = _plan_steps(decision)
     plan_capabilities = _plan_capability_ids(decision)
     missing_capabilities = _missing_capability_ids(decision)
+    approvals_required = _tool_plan_values(decision, "approvals_required")
+    artifacts_expected = _tool_plan_values(decision, "artifacts_expected")
+    open_questions = _tool_plan_values(decision, "open_questions")
     payload: dict[str, Any] = {
         "source": "runtime_planner",
         "selection_source": str(selected_source or "").strip(),
@@ -120,12 +123,18 @@ def planner_selection_payload(
         "plan_capabilities": plan_capabilities,
         "required_capabilities": _required_capability_ids(decision),
         "missing_capabilities": missing_capabilities,
+        "approvals_required": approvals_required,
+        "artifacts_expected": artifacts_expected,
+        "open_questions": open_questions,
         "planner_tools": _tool_names(planner_request_list),
         "legacy_tools": _tool_names(legacy_request_list),
         "selected_tools": _tool_names(selected_request_list),
         "plan_step_count": len(plan_steps),
         "plan_capability_count": len(plan_capabilities),
         "missing_capability_count": len(missing_capabilities),
+        "approval_count": len(approvals_required),
+        "artifact_count": len(artifacts_expected),
+        "open_question_count": len(open_questions),
         "planner_request_count": len(planner_request_list),
         "legacy_request_count": len(legacy_request_list),
         "selected_request_count": len(selected_request_list),
@@ -277,6 +286,12 @@ def _missing_capability_ids(decision: Any | None) -> list[str]:
     plan = getattr(decision, "plan", None)
     tool_plan = getattr(plan, "tool_plan", None)
     return _unique_strings(getattr(tool_plan, "missing_capabilities", None) or [])
+
+
+def _tool_plan_values(decision: Any | None, attribute: str) -> list[str]:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    return _unique_strings(getattr(tool_plan, attribute, None) or [])
 
 
 def _unique_strings(values: Iterable[Any]) -> list[str]:
