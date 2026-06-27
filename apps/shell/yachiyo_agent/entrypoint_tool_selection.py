@@ -362,7 +362,7 @@ def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str,
     if reasons != {"planner_fallback_desktop_operation"}:
         return False
     tools = _request_tools(requests)
-    if len(tools) != 2 or tools[1] != "desktop.ui_elements":
+    if len(tools) != 2 or tools[1] not in {"desktop.ui_elements", "screen.capture"}:
         return False
     if tools[0] not in {"app.open", "app.focus", "app.focus_window"}:
         return False

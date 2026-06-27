@@ -1442,6 +1442,18 @@ def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
         "看一下 Slack 界面",
         allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
     )
+    suffix_decision = RuntimePlanner().decision(
+        "Slack 截屏",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+    prefix_decision = RuntimePlanner().decision(
+        "截取 Slack 的界面",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
+    current_window_decision = RuntimePlanner().decision(
+        "当前窗口截图",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    )
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
@@ -1457,6 +1469,19 @@ def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
     ]
     assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(decision, "capture-screen").depends_on == ["open-or-focus-app"]
+    for capture_decision in (suffix_decision, prefix_decision):
+        assert capture_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+        assert capture_decision.selected_intent.inputs["operation_hint"] == "capture_screen"
+        assert _step_by_id(capture_decision, "open-or-focus-app").input_preview == {
+            "app_name": "Slack"
+        }
+        assert _step_by_id(capture_decision, "capture-screen").depends_on == [
+            "open-or-focus-app"
+        ]
+    assert current_window_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert [step.step_id for step in current_window_decision.plan.tool_plan.steps] == [
+        "capture-screen"
+    ]
 
     open_decision = RuntimePlanner().decision(
         "打开 Slack 然后截图",
@@ -6338,6 +6363,11 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
         ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    app_capture = planner_first_direct_tool_selection(
+        "Slack 截屏",
+        ["desktop.list_apps", "app.focus", "screen.capture"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
 
     assert app_ui.selected_source == "runtime_planner"
     assert app_ui.event_payload["legacy_request_count"] == 0
@@ -6353,6 +6383,24 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert app_capture.selected_source == "runtime_planner"
+    assert app_capture.event_payload["legacy_request_count"] == 0
+    assert app_capture.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
