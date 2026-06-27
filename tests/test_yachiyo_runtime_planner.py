@@ -4398,8 +4398,13 @@ def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> N
 
 def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
     decision = RuntimePlanner().decision(
         "提醒我明天买牛奶",
+        allowed_tools=["reminders.create"],
+    )
+    create_first = RuntimePlanner().decision(
+        "创建明天上午10点开会的提醒",
         allowed_tools=["reminders.create"],
     )
 
@@ -4407,6 +4412,13 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     step = _step_by_id(decision, "create-schedule-item")
     assert step.tool_name == "reminders.create"
     assert step.input_preview == {"title": "买牛奶", "due_at": tomorrow_0900}
+    assert create_first.selected_intent.kind == "schedule"
+    create_first_step = _step_by_id(create_first, "create-schedule-item")
+    assert create_first_step.tool_name == "reminders.create"
+    assert create_first_step.input_preview == {
+        "title": "开会",
+        "due_at": tomorrow_1000,
+    }
 
 
 def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability() -> None:
@@ -6863,6 +6875,7 @@ def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
 
 def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
 
@@ -6874,6 +6887,18 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "创建明天上午10点开会的提醒",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "开会", "due_at": tomorrow_1000},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",
         }

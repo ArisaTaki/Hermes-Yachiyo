@@ -123,6 +123,9 @@ def _reminder_body(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:创建|新建|添加|新增)?\s*(?:一个|一条|一项)?\s*(?:提醒事项|提醒)\s*[:：]?\s*(?P<title>.+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:创建|新建|添加|新增)\s*(?:个|一个|一条|一项|新的?)?\s*"
+        r"(?P<body_create>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:设|设置|定|订)\s*(?:个|一个|一条|一项|新的?)?\s*"
         r"(?P<body_set>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
         r"^(?:please\s+)?(?:create|add|make)?\s*(?:a\s+)?(?:new\s+)?reminder\s*(?:called|named|for|to)?\s*(?P<title_en>.+)$",
@@ -138,6 +141,7 @@ def _reminder_body(text: str) -> str:
         body = _strip_schedule_prefix(
             groups.get("body")
             or groups.get("title")
+            or groups.get("body_create")
             or groups.get("body_set")
             or groups.get("title_en")
             or groups.get("body_set_en")
