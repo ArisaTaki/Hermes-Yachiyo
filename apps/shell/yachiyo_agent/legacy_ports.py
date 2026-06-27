@@ -19,6 +19,7 @@ from .daily_desktop import (
     daily_desktop_recovery_execution_prompt,
     entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
+    planner_first_daily_desktop_entrypoint_requests,
 )
 from .desktop_permissions import desktop_permission_missing_by_capability
 from .desktop_plan_hints import hotkey_hint
@@ -188,25 +189,12 @@ class LegacyChatTaskStarter:
             self._runtime,
             fallback=allowed_daily_desktop_tools,
         )
-        direct_tool_request = daily_desktop_direct_metadata_request(
-            metadata,
-            allowed_tools=allowed_daily_desktop_tools,
+        planned_requests = planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            metadata=metadata,
+            allowed_tools=allowed_entrypoint_tools,
+            metadata_allowed_tools=allowed_daily_desktop_tools,
         )
-        planned_requests = (
-            [direct_tool_request]
-            if direct_tool_request
-            else planner_tool_requests(
-                prompt,
-                allowed_entrypoint_tools,
-                metadata=metadata,
-            )
-        )
-        if not planned_requests:
-            planned_requests = daily_desktop_entrypoint_requests(
-                prompt,
-                metadata=metadata,
-                allowed_tools=allowed_entrypoint_tools,
-            )
         return daily_desktop_planned_timeline(
             prompt,
             requests=planned_requests,
