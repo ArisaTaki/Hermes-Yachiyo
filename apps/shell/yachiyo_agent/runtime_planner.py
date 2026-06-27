@@ -3159,7 +3159,23 @@ class RuntimePlanner:
                     ),
                 ),
             ]
-        depends_on = [] if compose_tool == "artifact.write" else ["discover-communication-surface"]
+        if compose_tool == "artifact.write":
+            return [
+                _step(
+                    intent,
+                    "draft-communication",
+                    "Draft communication",
+                    "communication.compose",
+                    compose_tool,
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Prepare the user-requested communication as a draft artifact; "
+                        "final sending remains approval-gated."
+                    ),
+                )
+            ]
+        depends_on = ["discover-communication-surface"]
         return [
             _step(
                 intent,
@@ -4206,8 +4222,6 @@ def _required_capabilities_for_plan(
     intent: TaskIntentSnapshot,
     steps: list[ToolPlanStepSnapshot],
 ) -> list[str]:
-    if intent.kind in {"desktop_operation", "media_playback"}:
-        return _step_required_capabilities(steps) or list(intent.required_capabilities)
     if intent.kind == "data_analysis":
         required = (
             ["data.analysis"]
@@ -4219,7 +4233,7 @@ def _required_capabilities_for_plan(
         ):
             required.insert(0, "desktop.app_control")
         return required
-    return list(intent.required_capabilities)
+    return _step_required_capabilities(steps) or list(intent.required_capabilities)
 
 
 def _step_required_capabilities(steps: Iterable[ToolPlanStepSnapshot]) -> list[str]:
