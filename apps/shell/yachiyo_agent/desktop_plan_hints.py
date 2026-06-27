@@ -688,13 +688,16 @@ def media_app_query_search_plan(
     query = str(inputs.get("query") or "").strip()
     if action != "play" or not app_name or not query:
         return []
-    if app_name == "Music" and _first_allowed(("media.apple_music_play",), allowed):
-        return []
 
     type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
     submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     if not type_tool or not submit_tool:
         return []
+
+    discovery_step = []
+    discover_tool = _first_allowed(("desktop.list_apps",), allowed)
+    if discover_tool:
+        discovery_step = [(discover_tool, {"query": app_name, "limit": 20})]
 
     app_search_tool = _first_allowed(
         ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"),
@@ -702,6 +705,7 @@ def media_app_query_search_plan(
     )
     if app_search_tool:
         plan = [
+            *discovery_step,
             (app_search_tool, {"app_name": app_name, "action": "find"}),
             (type_tool, {"text": query}),
             (submit_tool, {}),
@@ -717,6 +721,7 @@ def media_app_query_search_plan(
     if not app_tool or not shortcut_tool:
         return []
     plan = [
+        *discovery_step,
         (app_tool, {"app_name": app_name}),
         (shortcut_tool, {"action": "find"}),
         (type_tool, {"text": query}),

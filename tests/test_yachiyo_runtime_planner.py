@@ -4598,6 +4598,60 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
+def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_query() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.apple_music_play",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Music",
+        "query": "超时空辉夜姬",
+        "control_only": "",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    assert _step_by_id(decision, "discover-media-app").input_preview == {
+        "query": "Music",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "play-media-search-result").input_preview == {
+        "app_name": "Music"
+    }
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.app_discovery",
+        "desktop.ui_operation",
+        "media.playback",
+    ]
+    assert "media.apple_music_play" not in [
+        step.tool_name for step in decision.plan.tool_plan.steps
+    ]
+
+
 def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music 搜索超时空辉夜姬并播放",
@@ -7428,6 +7482,34 @@ def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_
             "planning_reason": "planner_fallback_media_playback",
         },
     ]
+
+
+def test_planner_desktop_tool_requests_prefers_discovered_media_app_operation_for_apple_music_query() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.apple_music_play",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"query": "Music", "limit": 20}
+    assert requests[1]["input"] == {"app_name": "Music", "action": "find"}
+    assert requests[4]["input"] == {"app_name": "Music"}
+    assert all(request["tool"] != "media.apple_music_play" for request in requests)
 
 
 def test_planner_desktop_tool_requests_verifies_media_app_search_when_available() -> None:

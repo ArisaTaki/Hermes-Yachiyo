@@ -2525,7 +2525,16 @@ class RuntimePlanner:
             steps: list[ToolPlanStepSnapshot] = []
             previous_step_id = ""
             for tool_name, input_preview in app_query_plan:
-                if tool_name in {"app.open", "app.focus"}:
+                if tool_name == "desktop.list_apps":
+                    step_id = "discover-media-app"
+                    title = "Discover media app"
+                    capability_id = "desktop.app_discovery"
+                    action = "discover"
+                    reason = (
+                        "Resolve the requested media app through desktop discovery before opening "
+                        "or operating it."
+                    )
+                elif tool_name in {"app.open", "app.focus"}:
                     step_id = "open-media-app" if tool_name == "app.open" else "focus-media-app"
                     title = "Open media app" if tool_name == "app.open" else "Focus media app"
                     capability_id = "desktop.app_control"
