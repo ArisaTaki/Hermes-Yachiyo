@@ -112,11 +112,24 @@ def _artifact_write(broker: Any, payload: dict[str, Any], _approved: bool) -> di
 
 def _data_analyze(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     raw_artifact_paths = payload.get("artifact_paths")
+    raw_requested_outputs = payload.get("requested_outputs")
+    raw_artifact_manifest = payload.get("artifact_manifest")
     return broker.data_analyze(
         str(payload.get("path") or ""),
         artifact_path=str(payload.get("artifact_path") or "analysis-report.md"),
         artifact_paths=list(raw_artifact_paths) if isinstance(raw_artifact_paths, list) else None,
         max_rows=int(payload.get("max_rows") or 1000),
+        source_kind=str(payload.get("source_kind") or ""),
+        requested_outputs=(
+            list(raw_requested_outputs)
+            if isinstance(raw_requested_outputs, list)
+            else None
+        ),
+        artifact_manifest=(
+            [dict(item) for item in raw_artifact_manifest if isinstance(item, dict)]
+            if isinstance(raw_artifact_manifest, list)
+            else None
+        ),
     )
 
 

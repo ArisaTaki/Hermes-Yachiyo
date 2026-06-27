@@ -90,6 +90,41 @@ def test_artifact_created_payload_projects_structured_tool_artifacts() -> None:
     }
 
 
+def test_artifact_created_payload_preserves_data_analysis_plan_metadata() -> None:
+    payload = artifact_created_payload(
+        {
+            "ok": True,
+            "summary": "Analyzed data",
+            "artifact": {
+                "path": "analysis-chart.png",
+                "kind": "image",
+                "planned_kind": "chart",
+                "source_kind": "csv",
+                "requested_outputs": ["report", "chart"],
+                "manifest_index": 1,
+                "mime_type": "image/png",
+                "size_bytes": 321,
+                "width": 640,
+                "height": 360,
+            },
+        },
+        run_id="run-data",
+        source_tool="data.analyze",
+    )
+
+    assert payload["source_tool"] == "data.analyze"
+    assert payload["kind"] == "image"
+    assert payload["planned_kind"] == "chart"
+    assert payload["source_kind"] == "csv"
+    assert payload["requested_outputs"] == ["report", "chart"]
+    assert payload["manifest_index"] == 1
+    assert payload["artifact"]["kind"] == "image"
+    assert payload["artifact"]["planned_kind"] == "chart"
+    assert payload["artifact"]["source_kind"] == "csv"
+    assert payload["artifact"]["requested_outputs"] == ["report", "chart"]
+    assert payload["artifact"]["manifest_index"] == 1
+
+
 def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
     events: list[tuple[str, str, dict[str, object]]] = []
 

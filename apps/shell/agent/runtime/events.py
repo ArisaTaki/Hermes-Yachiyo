@@ -654,11 +654,22 @@ def artifact_created_payload(
         "size_bytes": size_bytes,
         "source_tool": source,
     }
-    for key in ("title", "mime_type", "content_type", "width", "height"):
+    trace_metadata_keys = (
+        "title",
+        "mime_type",
+        "content_type",
+        "width",
+        "height",
+        "planned_kind",
+        "source_kind",
+        "requested_outputs",
+        "manifest_index",
+    )
+    for key in trace_metadata_keys:
         value = artifact.get(key)
         if value is not None:
             nested_artifact[key] = value
-    return {
+    payload = {
         "artifact_id": artifact_id,
         "run_id": run_id,
         "kind": kind,
@@ -667,6 +678,10 @@ def artifact_created_payload(
         "source_tool": source,
         "artifact": nested_artifact,
     }
+    for key in trace_metadata_keys:
+        if key in nested_artifact:
+            payload[key] = nested_artifact[key]
+    return payload
 
 
 def tool_trace_status(tool_result: dict[str, Any]) -> str:

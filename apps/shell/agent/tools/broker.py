@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,67 @@ def _redact_secrets(value: Any) -> str:
         collapse_whitespace=False,
         trim=False,
     )
+
+
+def _clean_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _artifact_manifest_by_path(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, list):
+        return {}
+    manifest: dict[str, dict[str, str]] = {}
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        entry = {
+            "path": path,
+            "kind": str(item.get("kind") or "").strip(),
+        }
+        manifest.setdefault(path, entry)
+    return manifest
+
+
+def _data_analysis_artifact_metadata(
+    artifact: dict[str, Any],
+    *,
+    source_kind: str,
+    requested_outputs: list[str],
+    manifest_by_path: dict[str, dict[str, str]],
+    index: int,
+) -> dict[str, Any]:
+    path = str(artifact.get("path") or "").strip()
+    manifest = manifest_by_path.get(path) or {}
+    planned_kind = str(manifest.get("kind") or "").strip()
+    metadata = dict(artifact)
+    if source_kind:
+        metadata["source_kind"] = source_kind
+    if requested_outputs:
+        metadata["requested_outputs"] = list(requested_outputs)
+    if planned_kind:
+        metadata["planned_kind"] = planned_kind
+        metadata["manifest_index"] = index
+    return metadata
+
+
+def _data_analysis_artifact_manifest(artifacts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    manifest: list[dict[str, str]] = []
+    for artifact in artifacts:
+        path = str(artifact.get("path") or "").strip()
+        if not path:
+            continue
+        planned_kind = str(artifact.get("planned_kind") or "").strip()
+        actual_kind = str(artifact.get("kind") or "").strip()
+        entry = {"path": path, "kind": planned_kind or actual_kind}
+        if planned_kind and actual_kind and planned_kind != actual_kind:
+            entry["actual_kind"] = actual_kind
+        manifest.append(entry)
+    return manifest
 
 
 @dataclass
@@ -371,6 +433,9 @@ class ToolBroker:
         artifact_path: str = "analysis-report.md",
         artifact_paths: list[str] | None = None,
         max_rows: int = 1000,
+        source_kind: str = "",
+        requested_outputs: list[str] | None = None,
+        artifact_manifest: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
         display_path = path or "."
@@ -398,19 +463,28 @@ class ToolBroker:
         )
         if not result.get("ok"):
             return result
+        analysis_source_kind = str(result.get("source_kind") or source_kind or "").strip()
+        clean_requested_outputs = _clean_string_list(requested_outputs)
+        manifest_by_path = _artifact_manifest_by_path(artifact_manifest)
         artifact = self.artifact_write(
             str(result.get("artifact_path") or "analysis-report.md"),
             str(result.get("artifact_content") or ""),
         )
         artifacts = [
-            {
-                "path": artifact["path"],
-                "kind": "markdown",
-                "mime_type": "text/markdown",
-                "size_bytes": artifact["bytes"],
-            }
+            _data_analysis_artifact_metadata(
+                {
+                    "path": artifact["path"],
+                    "kind": "markdown",
+                    "mime_type": "text/markdown",
+                    "size_bytes": artifact["bytes"],
+                },
+                source_kind=analysis_source_kind,
+                requested_outputs=clean_requested_outputs,
+                manifest_by_path=manifest_by_path,
+                index=0,
+            )
         ]
-        for extra in result.get("extra_artifacts") or []:
+        for extra_index, extra in enumerate(result.get("extra_artifacts") or [], start=1):
             if not isinstance(extra, dict):
                 continue
             extra_path = str(extra.get("path") or "").strip()
@@ -421,22 +495,28 @@ class ToolBroker:
             else:
                 written = self.artifact_write(extra_path, str(extra.get("content") or ""))
             artifacts.append(
-                {
-                    "path": written["path"],
-                    "kind": str(extra.get("kind") or "artifact"),
-                    "mime_type": str(extra.get("mime_type") or ""),
-                    "size_bytes": written["bytes"],
-                    **(
-                        {"width": extra.get("width")}
-                        if extra.get("width") is not None
-                        else {}
-                    ),
-                    **(
-                        {"height": extra.get("height")}
-                        if extra.get("height") is not None
-                        else {}
-                    ),
-                }
+                _data_analysis_artifact_metadata(
+                    {
+                        "path": written["path"],
+                        "kind": str(extra.get("kind") or "artifact"),
+                        "mime_type": str(extra.get("mime_type") or ""),
+                        "size_bytes": written["bytes"],
+                        **(
+                            {"width": extra.get("width")}
+                            if extra.get("width") is not None
+                            else {}
+                        ),
+                        **(
+                            {"height": extra.get("height")}
+                            if extra.get("height") is not None
+                            else {}
+                        ),
+                    },
+                    source_kind=analysis_source_kind,
+                    requested_outputs=clean_requested_outputs,
+                    manifest_by_path=manifest_by_path,
+                    index=extra_index,
+                )
             )
         return {
             **{
@@ -444,6 +524,7 @@ class ToolBroker:
                 for key, value in result.items()
                 if key not in {"artifact_content", "extra_artifacts"}
             },
+            "artifact_manifest": _data_analysis_artifact_manifest(artifacts),
             "artifact": artifacts[0],
             "artifacts": artifacts,
         }

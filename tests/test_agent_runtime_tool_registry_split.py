@@ -108,11 +108,22 @@ def test_tool_broker_call_analyzes_data_file_and_writes_requested_artifacts(tmp_
                 "reports/sales.html",
                 "reports/sales-chart.png",
             ],
+            "requested_outputs": ["report", "table", "chart"],
+            "artifact_manifest": [
+                {"path": "reports/sales.md", "kind": "markdown"},
+                {"path": "reports/sales-summary.csv", "kind": "csv"},
+                {"path": "reports/sales.html", "kind": "html"},
+                {"path": "reports/sales-chart.png", "kind": "chart"},
+            ],
         },
     )
 
     assert result["ok"] is True
     assert result["artifact"]["path"] == "reports/sales.md"
+    assert result["artifact"]["planned_kind"] == "markdown"
+    assert result["artifact"]["source_kind"] == "csv"
+    assert result["artifact"]["requested_outputs"] == ["report", "table", "chart"]
+    assert result["artifact"]["manifest_index"] == 0
     assert result["artifact_paths"] == [
         "reports/sales.md",
         "reports/sales-summary.csv",
@@ -123,6 +134,15 @@ def test_tool_broker_call_analyzes_data_file_and_writes_requested_artifacts(tmp_
     assert result["artifacts"][1]["mime_type"] == "text/csv"
     assert result["artifacts"][2]["mime_type"] == "text/html"
     assert result["artifacts"][3]["mime_type"] == "image/png"
+    assert result["artifacts"][3]["kind"] == "image"
+    assert result["artifacts"][3]["planned_kind"] == "chart"
+    assert result["artifacts"][3]["manifest_index"] == 3
+    assert result["artifact_manifest"] == [
+        {"path": "reports/sales.md", "kind": "markdown"},
+        {"path": "reports/sales-summary.csv", "kind": "csv"},
+        {"path": "reports/sales.html", "kind": "html"},
+        {"path": "reports/sales-chart.png", "kind": "chart", "actual_kind": "image"},
+    ]
     assert (tmp_path / "artifacts" / "reports" / "sales-summary.csv").read_text(
         encoding="utf-8"
     ).startswith("column,type,count")
