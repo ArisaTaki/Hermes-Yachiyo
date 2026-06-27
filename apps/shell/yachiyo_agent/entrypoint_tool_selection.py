@@ -141,6 +141,8 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_observation_owns_selection(requests):
         return False
+    if _runtime_planner_desktop_operation_owns_selection(requests):
+        return False
     if _prompt_contains_shortcut_or_window_followup(prompt) and (
         _request_tool_set(requests) & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS
     ):
@@ -370,6 +372,99 @@ def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str,
         return False
     app_name = str(first_input.get("app_name") or "").strip()
     return _runtime_app_name_is_specific(app_name)
+
+
+_RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
+    {
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.hotkey",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    }
+)
+
+
+def _runtime_planner_desktop_operation_owns_selection(
+    requests: list[dict[str, Any]],
+) -> bool:
+    if not requests:
+        return False
+    if any(bool(request.get("continue_to_model")) for request in requests):
+        return False
+    reasons = _request_planning_reasons(requests)
+    if reasons != {"planner_fallback_desktop_operation"}:
+        return False
+    tools = _request_tool_set(requests)
+    if not tools or not tools <= _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS:
+        return False
+    return all(_runtime_planner_desktop_request_is_complete(request) for request in requests)
+
+
+def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if tool_name.startswith("app.") and not _runtime_app_name_is_specific(
+        str(request_input.get("app_name") or "")
+    ):
+        return False
+    if tool_name in {"app.open", "app.focus"}:
+        return True
+    if tool_name in {"desktop.search_submit"}:
+        return True
+    if tool_name == "desktop.submit_foreground":
+        return _has_text_input(request_input, "action")
+    if tool_name.endswith("safe_shortcut") or tool_name == "desktop.safe_shortcut":
+        return _has_text_input(request_input, "action")
+    if tool_name.endswith("safe_key") or tool_name == "desktop.safe_key":
+        return _has_text_input(request_input, "action")
+    if tool_name.endswith("safe_scroll") or tool_name == "desktop.safe_scroll":
+        return _has_text_input(request_input, "direction")
+    if tool_name.endswith("safe_click") or tool_name == "desktop.safe_click":
+        return _has_numeric_input(request_input, "x") and _has_numeric_input(request_input, "y")
+    if tool_name.endswith("safe_type_text") or tool_name == "desktop.safe_type_text":
+        return _has_text_input(request_input, "text")
+    if tool_name.endswith("hotkey") or tool_name == "desktop.hotkey":
+        return _has_text_input(request_input, "key")
+    if tool_name.endswith("click_ui_element") or tool_name == "desktop.click_ui_element":
+        return _has_text_input(request_input, "target")
+    if tool_name.endswith("type_into_ui_element") or tool_name == "desktop.type_into_ui_element":
+        return _has_text_input(request_input, "target") and _has_text_input(request_input, "text")
+    return False
+
+
+def _has_text_input(payload: Mapping[str, Any], key: str) -> bool:
+    return bool(str(payload.get(key) or "").strip())
+
+
+def _has_numeric_input(payload: Mapping[str, Any], key: str) -> bool:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float))
 
 
 def _runtime_app_name_is_specific(app_name: str) -> bool:

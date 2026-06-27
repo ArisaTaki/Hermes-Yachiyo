@@ -6360,6 +6360,64 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
     assert legacy_calls == []
 
 
+def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
+    cases = (
+        (
+            "切到 Slack 点击搜索框",
+            [
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+            ["app.focus_and_click_ui_element"],
+        ),
+        (
+            "打开 Slack 点击坐标 120, 240",
+            ["desktop.list_apps", "app.open_and_safe_click", "desktop.safe_click"],
+            ["app.open_and_safe_click"],
+        ),
+        (
+            "打开 Obsidian 写 hello",
+            [
+                "desktop.list_apps",
+                "app.open_and_safe_type_text",
+                "desktop.safe_type_text",
+                "desktop.ui_elements",
+            ],
+            ["app.open_and_safe_type_text"],
+        ),
+        (
+            "在 Notes 输入 hello",
+            [
+                "desktop.list_apps",
+                "app.focus_and_safe_type_text",
+                "app.open_and_safe_type_text",
+                "desktop.safe_type_text",
+            ],
+            ["app.focus_and_safe_type_text"],
+        ),
+        (
+            "Slack 回车发送",
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
+        ),
+    )
+
+    for prompt, allowed_tools, expected_tools in cases:
+        legacy_calls: list[dict[str, Any]] = []
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert [request["tool"] for request in selection.requests] == expected_tools
+        assert legacy_calls == []
+
+
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
     requests = planner_tool_requests(
         "把 hello 复制到剪贴板",
