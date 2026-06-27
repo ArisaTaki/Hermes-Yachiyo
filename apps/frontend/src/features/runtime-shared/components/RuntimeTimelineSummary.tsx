@@ -78,6 +78,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') {
     return runtimeTimelinePolicyDecisionLabel(event);
   }
+  if (type === 'agent.plan.selection' || type === 'group.run.plan.selection') {
+    const selectionDetail = runtimeTimelinePlannerSelectionDetail(event);
+    return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
+  }
   const typeLabel = runtimeTimelineEventTypeLabel(type || title);
   if (typeLabel) return typeLabel;
   if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
@@ -106,6 +110,23 @@ function runtimeTimelinePolicyDecisionLabel(event: RuntimeTimelineEventSnapshot)
   return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
 }
 
+function runtimeTimelinePlannerSelectionDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+    ? record.payload as Record<string, unknown>
+    : {};
+  const role = String(record.selection_role || payload.selection_role || '').trim();
+  const source = String(record.selection_source || payload.selection_source || '').trim();
+  const entrypoint = String(record.planner_entrypoint || payload.planner_entrypoint || '').trim();
+  const entrypointSource = String(record.entrypoint_source || payload.entrypoint_source || '').trim();
+  const surface = String(record.launcher_surface || payload.launcher_surface || '').trim();
+  return [
+    role || source,
+    entrypoint || entrypointSource,
+    surface,
+  ].filter(Boolean).join(' · ');
+}
+
 function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'task.created') return '任务已创建';
   if (type === 'run.started' || type === 'task.started') return '任务已启动';
@@ -114,6 +135,9 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.request.failed') return '模型请求失败';
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
+  if (type === 'agent.intent.selected' || type === 'group.run.intent.selected') return 'Intent 识别';
+  if (type === 'agent.plan.created' || type === 'group.run.plan.created') return 'Planner 计划';
+  if (type === 'agent.plan.step' || type === 'group.run.plan.step') return '计划步骤';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') return '工具策略决策';
   if (type === 'agent.tool.input_resolved') return '工具输入解析';
