@@ -4633,6 +4633,14 @@ def _clean_app_name_hint(value: str) -> str:
     )
     if called_app_match:
         app = called_app_match.group("app")
+    app = re.split(
+        r"\s*(?:(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)\s*)?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box)",
+        app,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?(?:我(?:没|没有)提过的|新的|未知的)?"
         r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)(?:叫|名叫|名称是|名字是|called|named)?\s*",
@@ -4640,8 +4648,9 @@ def _clean_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
+    app = re.sub(r"^(?:在|用|通过)\s*", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(
-        r"^(?:在|用|通过|in|inside|within|using|with)\s+",
+        r"^(?:in|inside|within|using|with)\s+",
         "",
         app,
         flags=re.IGNORECASE,
@@ -4649,6 +4658,7 @@ def _clean_app_name_hint(value: str) -> str:
     app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:please|pls)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"(?:应用(?:程序)?|软件)$", "", app).strip(" .，,。")

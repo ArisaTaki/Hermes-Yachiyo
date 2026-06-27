@@ -2139,6 +2139,11 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
         "点击发送按钮",
         allowed_tools=["desktop.click_ui_element"],
     )
+    suffix_type_cases = (
+        ("在 Slack 的消息框输入 hello", "Slack", "消息框", "hello"),
+        ("在微信里的搜索框输入文件传输助手", "WeChat", "搜索框", "文件传输助手"),
+        ("在 Linear 上的搜索框输入 ticket", "Linear", "搜索框", "ticket"),
+    )
 
     assert type_decision.selected_intent.inputs["app_name_hint"] == "Slack"
     assert type_decision.selected_intent.inputs["operation_hint"] == "click"
@@ -2161,6 +2166,26 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
             "app_name": "Slack",
             "target": "搜索框",
             "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+        }
+
+    for prompt, app_name, target, text in suffix_type_cases:
+        suffix_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_type_into_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+        assert suffix_decision.selected_intent.inputs["app_name_hint"] == app_name
+        suffix_step = _step_by_id(suffix_decision, "operate-foreground-ui")
+        assert suffix_step.tool_name == "app.focus_and_type_into_ui_element"
+        assert suffix_step.input_preview == {
+            "app_name": app_name,
+            "target": target,
+            "text": text,
             "role_filter": "text",
             "limit": 80,
         }
@@ -8453,6 +8478,21 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "desktop.safe_type_text",
             ],
             ["app.focus_and_safe_type_text"],
+        ),
+        (
+            "在 Slack 的消息框输入 hello",
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
+            ["app.focus_and_type_into_ui_element"],
+        ),
+        (
+            "在微信里的搜索框输入文件传输助手",
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
+            ["app.focus_and_type_into_ui_element"],
+        ),
+        (
+            "在 Linear 上的搜索框输入 ticket",
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
+            ["app.focus_and_type_into_ui_element"],
         ),
         (
             "Slack 回车发送",

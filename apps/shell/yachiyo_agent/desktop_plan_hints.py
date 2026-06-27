@@ -880,6 +880,8 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
     clean_app_name = clean(app_name)
     if clean_app_name and target.lower().startswith(clean_app_name.lower()):
         target = target[len(clean_app_name):].strip()
+    if clean_app_name:
+        target = _strip_app_prefix_from_type_target(target)
     target = re.sub(r"^(?:的|在|里|中|上|in|inside)\s*", "", target, flags=re.IGNORECASE)
     target = re.sub(
         r"^(?:点击|点一下|点按|单击|按一下|按|click|press|tap)\s*",
@@ -888,6 +890,18 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
         flags=re.IGNORECASE,
     )
     return target.strip(" .，,。") or clean_target(value)
+
+
+def _strip_app_prefix_from_type_target(value: str) -> str:
+    return re.sub(
+        r"^[\w .·-]{1,40}?(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)?\s*"
+        r"(?=(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box))",
+        "",
+        value,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
 
 def clean_followup_text(value: str) -> str:
