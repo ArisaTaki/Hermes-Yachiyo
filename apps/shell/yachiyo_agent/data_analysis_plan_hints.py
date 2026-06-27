@@ -21,6 +21,32 @@ def data_source_hint(text: str, metadata: Mapping[str, Any] | None = None) -> st
     return match.group(1) if match else ""
 
 
+def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None) -> str:
+    metadata = metadata or {}
+    for key in ("data_source_scope", "folder", "directory", "location"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    path_match = re.search(r"((?:~|/)[^\s，,。]+)", text)
+    if path_match:
+        return path_match.group(1).rstrip("。.,")
+    lowered = str(text or "").lower()
+    known_locations = (
+        ("downloads", "Downloads"),
+        ("download folder", "Downloads"),
+        ("下载文件夹", "Downloads"),
+        ("下载目录", "Downloads"),
+        ("desktop", "Desktop"),
+        ("桌面", "Desktop"),
+        ("documents", "Documents"),
+        ("文档", "Documents"),
+    )
+    for marker, location in known_locations:
+        if marker in lowered:
+            return location
+    return ""
+
+
 def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     lowered_source = str(source_hint or "").lower()
     lowered_text = str(text or "").lower()

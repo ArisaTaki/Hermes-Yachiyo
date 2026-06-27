@@ -362,18 +362,26 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             step_ids=("copy-selected-data-context", "read-data-context"),
             planning_reason="planner_prefetch_data_source",
         )
-    if "workspace.read" not in allowed:
-        return []
     source_hint = str(inputs.get("data_source_hint") or "").strip()
-    if not _workspace_readable_data_source(source_hint, inputs):
+    if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
+        request = _request(
+            "workspace.read",
+            {"path": source_hint},
+            planning_reason="planner_prefetch_data_source",
+        )
+        request["continue_to_model"] = True
+        return [request]
+    if source_hint:
         return []
-    request = _request(
-        "workspace.read",
-        {"path": source_hint},
+    source_scope = str(inputs.get("data_source_scope_hint") or "").strip()
+    if source_scope and not _workspace_listable_data_scope(source_scope):
+        return []
+    return _context_prefetch_tool_requests(
+        decision,
+        allowed,
+        step_ids=("inspect-data-source",),
         planning_reason="planner_prefetch_data_source",
     )
-    request["continue_to_model"] = True
-    return [request]
 
 
 def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
@@ -980,6 +988,14 @@ def _workspace_readable_data_source(source_hint: str, inputs: Mapping[str, Any])
     if not source_kind or source_kind == "unknown":
         source_kind = data_source_kind_hint(source_hint)
     return source_kind in {"csv", "tsv", "json", "jsonl", "text", "text_table"}
+
+
+def _workspace_listable_data_scope(scope_hint: str) -> bool:
+    if not scope_hint or scope_hint.startswith(("/", "~")):
+        return False
+    if re.search(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", scope_hint):
+        return False
+    return not any(part == ".." for part in scope_hint.replace("\\", "/").split("/"))
 
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:

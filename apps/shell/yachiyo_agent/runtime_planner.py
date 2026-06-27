@@ -32,6 +32,7 @@ from .data_analysis_plan_hints import (
     data_analysis_artifacts_expected,
     data_source_hint,
     data_source_kind_hint,
+    data_source_scope_hint,
 )
 from .desktop_plan_hints import (
     app_management_hint,
@@ -146,8 +147,13 @@ class TaskIntentRouter:
             ],
         )
         source_hint = data_source_hint(text, metadata)
+        source_scope = data_source_scope_hint(text, metadata)
         context_source = context_source_hint(text)
-        has_source = bool(source_hint or context_source)
+        can_discover_source = _contains_any(
+            text,
+            ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
+        )
+        has_source = bool(source_hint or source_scope or context_source or can_discover_source)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
         if (
@@ -164,6 +170,8 @@ class TaskIntentRouter:
         }
         if context_source:
             inputs["context_source"] = context_source
+        if source_scope and not source_hint:
+            inputs["data_source_scope_hint"] = source_scope
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "data_analysis", text),
             kind="data_analysis",
@@ -1055,6 +1063,7 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
         context_source = str(intent.inputs.get("context_source") or "").strip()
+        source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
         if context_source and not source_hint:
             context_steps = _context_source_steps(
                 intent,
@@ -1121,13 +1130,19 @@ class RuntimePlanner:
                     ),
                 )
             ]
+        inspect_tool_candidates = (
+            ("workspace.read", "workspace.list")
+            if source_hint
+            else ("workspace.list", "workspace.read")
+        )
         return [
             _step(
                 intent,
                 "inspect-data-source",
                 "Inspect data source",
                 "file.workspace_read",
-                _first_allowed(("workspace.read", "workspace.list"), allowed),
+                _first_allowed(inspect_tool_candidates, allowed),
+                input_preview={"path": source_hint or source_scope} if source_hint or source_scope else {},
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),

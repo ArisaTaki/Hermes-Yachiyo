@@ -363,6 +363,29 @@ def test_runtime_planner_uses_file_metadata_for_generic_analysis_requests() -> N
     assert _step_by_id(decision, "inspect-data-source").tool_name == "workspace.read"
 
 
+def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
+    scoped_decision = RuntimePlanner().decision(
+        "分析 Downloads 里的销售数据并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    generic_decision = RuntimePlanner().decision(
+        "分析数据并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert scoped_decision.selected_intent.kind == "data_analysis"
+    assert scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert scoped_decision.selected_intent.missing_inputs == []
+    assert _step_by_id(scoped_decision, "inspect-data-source").tool_name == "workspace.list"
+    assert _step_by_id(scoped_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads"
+    }
+    assert generic_decision.selected_intent.kind == "data_analysis"
+    assert generic_decision.selected_intent.missing_inputs == []
+    assert _step_by_id(generic_decision, "inspect-data-source").tool_name == "workspace.list"
+    assert _step_by_id(generic_decision, "inspect-data-source").input_preview == {}
+
+
 def test_runtime_planner_predicts_data_analysis_artifacts_by_requested_outputs() -> None:
     decision = RuntimePlanner().decision(
         "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",
@@ -5213,6 +5236,38 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
     ]
 
 
+def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
+    scoped_requests = planner_tool_requests(
+        "分析 Downloads 里的销售数据并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    generic_requests = planner_tool_requests(
+        "分析数据并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert scoped_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert generic_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> None:
     requests = planner_tool_requests(
         "请分析 data/sales.csv 并输出报告",
@@ -5271,6 +5326,13 @@ def test_planner_tool_requests_does_not_prefetch_binary_or_external_data_sources
         planner_tool_requests(
             "请分析 report.xlsx",
             allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        )
+        == []
+    )
+    assert (
+        planner_tool_requests(
+            "请分析 /tmp 里的数据",
+            allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
         )
         == []
     )
