@@ -578,6 +578,39 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert _step_by_id(organize_decision, "apply-file-organization").approval_required is True
 
 
+def test_runtime_planner_routes_file_inventory_without_apply_approval() -> None:
+    decision = RuntimePlanner().decision(
+        "整理出 Downloads 里的文件清单",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+    english = RuntimePlanner().decision(
+        "create a file inventory for Downloads",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "inventory",
+    }
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.plan.tool_plan.artifacts_expected == ["file-inventory.md"]
+    assert decision.plan.tool_plan.approvals_required == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+    ]
+    assert _step_by_id(decision, "write-file-organization-plan").input_preview == {
+        "path": "file-inventory.md",
+    }
+    assert "apply-file-organization" not in [
+        step.step_id for step in decision.plan.tool_plan.steps
+    ]
+    assert english.selected_intent.kind == "file_organization"
+    assert english.selected_intent.inputs["operation_hint"] == "inventory"
+    assert english.plan.tool_plan.approvals_required == []
+
+
 def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes() -> None:
     workflow = RuntimePlanner().decision(
         "创建一个 workflow 分析数据然后发微信给我",
@@ -7947,8 +7980,22 @@ def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
         "整理 Downloads 里的文件并按类型归档",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    inventory_requests = planner_tool_requests(
+        "整理出 Downloads 里的文件清单",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
 
     assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+    assert inventory_requests == [
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",

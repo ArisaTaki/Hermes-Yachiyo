@@ -865,9 +865,15 @@ class TaskIntentRouter:
                 "archive files",
                 "clean up files",
                 "delete files",
+                "file inventory",
+                "file list",
                 "整理文件",
                 "整理文件夹",
                 "文件整理",
+                "文件清单",
+                "文件列表",
+                "列出文件",
+                "盘点文件",
                 "归档",
                 "重命名",
                 "移动文件",
@@ -880,6 +886,7 @@ class TaskIntentRouter:
             score = 0.16
         if score <= 0:
             return _empty_intent("file_organization", text)
+        operation_hint = _file_operation_hint(text)
         destructive = _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"])
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "file_organization", text),
@@ -888,12 +895,16 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.88, 0.42 + score),
             description="Inspect files, produce a file organization plan, and apply explicit changes only after approval.",
-            inputs={"location_hint": _file_location_hint(text), "operation_hint": _file_operation_hint(text)},
-            expected_outputs=["file_plan", "report"],
+            inputs={"location_hint": _file_location_hint(text), "operation_hint": operation_hint},
+            expected_outputs=(
+                ["file_inventory", "report"]
+                if operation_hint == "inventory"
+                else ["file_plan", "report"]
+            ),
             required_capabilities=["file.organization"],
             preferred_capabilities=["file.workspace_read", "artifact.write", "desktop.app_control"],
             missing_inputs=[] if _file_location_hint(text) else ["file_location"],
-            risk_level="high" if destructive else "medium",
+            risk_level="low" if operation_hint == "inventory" else ("high" if destructive else "medium"),
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
@@ -2910,7 +2921,20 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         location_hint = str(intent.inputs.get("location_hint") or "").strip()
-        return [
+        operation_hint = str(intent.inputs.get("operation_hint") or "").strip()
+        inventory_only = operation_hint == "inventory"
+        artifact_path = (
+            "file-inventory.md" if inventory_only else "file-organization-plan.md"
+        )
+        plan_title = (
+            "Write file inventory" if inventory_only else "Write file organization plan"
+        )
+        plan_reason = (
+            "Create a replayable file inventory artifact without changing files."
+            if inventory_only
+            else "Create a reviewable plan before moving, renaming, archiving, or deleting files."
+        )
+        steps = [
             _step(
                 intent,
                 "inspect-file-scope",
@@ -2923,13 +2947,18 @@ class RuntimePlanner:
             _step(
                 intent,
                 "write-file-organization-plan",
-                "Write file organization plan",
+                plan_title,
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
-                input_preview={"path": "file-organization-plan.md"},
+                input_preview={"path": artifact_path},
                 depends_on=["inspect-file-scope"],
-                reason="Create a reviewable plan before moving, renaming, archiving, or deleting files.",
+                reason=plan_reason,
             ),
+        ]
+        if inventory_only:
+            return steps
+        return [
+            *steps,
             _step(
                 intent,
                 "apply-file-organization",
@@ -4188,6 +4217,8 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
     if intent.kind == "code_task":
         return ["code-task-summary.md"]
     if intent.kind == "file_organization":
+        if str(intent.inputs.get("operation_hint") or "").strip() == "inventory":
+            return ["file-inventory.md"]
         return ["file-organization-plan.md"]
     return ["report.md"]
 
@@ -4721,6 +4752,19 @@ def _file_operation_hint(text: str) -> str:
         return "archive"
     if _contains_any(text, ["move", "移动"]):
         return "move"
+    if _contains_any(
+        text,
+        [
+            "inventory",
+            "file list",
+            "list files",
+            "清单",
+            "列表",
+            "列出",
+            "盘点",
+        ],
+    ):
+        return "inventory"
     if _contains_any(text, ["sort", "organize", "整理", "分类"]):
         return "organize"
     return "inspect"

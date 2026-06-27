@@ -77,6 +77,30 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     assert planner_events[2][1]["payload"]["step"]["tool_name"] == "data.analyze"
 
 
+def test_legacy_runtime_port_appends_read_only_file_inventory_plan_events() -> None:
+    runtime = _PlannerEventFakeRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "整理出 Downloads 里的文件清单",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    plan = planner_events[1][1]["payload"]["plan"]["tool_plan"]
+    assert task["task_id"] == "task-1"
+    assert planner_events[0][1]["payload"]["intent"]["kind"] == "file_organization"
+    assert planner_events[0][1]["payload"]["intent"]["inputs"]["operation_hint"] == "inventory"
+    assert plan["artifacts_expected"] == ["file-inventory.md"]
+    assert plan["approvals_required"] == []
+    assert [step["step_id"] for step in plan["steps"]] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+    ]
+
+
 def test_legacy_runtime_port_appends_media_planner_events() -> None:
     runtime = _PlannerEventFakeRuntime()
 
