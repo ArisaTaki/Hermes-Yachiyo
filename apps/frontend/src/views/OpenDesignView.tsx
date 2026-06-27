@@ -1383,6 +1383,7 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
         launcher_mode: mode,
         runnable_kind: 'main',
         launcher_surface: 'mode_page',
+        planner_entrypoint: `${mode}_mode_page`,
         ...(options.metadata || {}),
       },
     });

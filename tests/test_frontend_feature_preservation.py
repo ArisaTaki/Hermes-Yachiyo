@@ -411,6 +411,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "launcher_mode: mode,",
             "runnable_kind: 'main',",
             "launcher_surface: 'mode_page'",
+            "planner_entrypoint: `${mode}_mode_page`,",
             "? await approveYachiyoTask(taskId, approvalId)",
             ": await rejectYachiyoTask(taskId, approvalId, 'Rejected from launcher mode page');",
             "refreshLauncherAgentTaskAfterAction({",
