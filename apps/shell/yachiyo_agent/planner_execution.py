@@ -412,6 +412,12 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     if tool_name.startswith("app."):
         return _canonicalize_app_payload(payload)
+    if tool_name == "desktop.list_apps":
+        query = str(payload.get("query") or "").strip()
+        if not query:
+            return payload
+        canonical = _canonical_app_name(query)
+        return {**payload, "query": canonical}
     if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
     if tool_name == "screen.capture":
