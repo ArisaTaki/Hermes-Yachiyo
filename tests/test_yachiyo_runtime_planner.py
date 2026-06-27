@@ -2240,6 +2240,50 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert scroll_step.risk_level == "low"
     assert scroll_step.approval_required is False
 
+    app_key_decision = RuntimePlanner().decision(
+        "打开 Slack 按下箭头三次",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_key",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_key_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert app_key_decision.selected_intent.inputs["operation_hint"] == "safe_key"
+    assert app_key_decision.selected_intent.inputs["safe_key_hint"] == {
+        "action": "arrow_down",
+        "repeat_count": 3,
+    }
+    app_key_step = _step_by_id(app_key_decision, "operate-foreground-ui")
+    assert app_key_step.tool_name == "app.open_and_safe_key"
+    assert app_key_step.input_preview == {
+        "app_name": "Slack",
+        "action": "arrow_down",
+        "repeat_count": 3,
+    }
+
+    app_scroll_decision = RuntimePlanner().decision(
+        "切到 Slack 向下滚动两页",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_scroll",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_scroll_decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert app_scroll_decision.selected_intent.inputs["operation_hint"] == "safe_scroll"
+    assert app_scroll_decision.selected_intent.inputs["safe_scroll_hint"] == {
+        "direction": "down",
+        "pages": 2,
+    }
+    app_scroll_step = _step_by_id(app_scroll_decision, "operate-foreground-ui")
+    assert app_scroll_step.tool_name == "app.focus_and_safe_scroll"
+    assert app_scroll_step.input_preview == {
+        "app_name": "Slack",
+        "direction": "down",
+        "pages": 2,
+    }
+
     click_step = _step_by_id(click_decision, "operate-foreground-ui")
     assert click_decision.selected_intent.inputs["operation_hint"] == "safe_click"
     assert click_decision.selected_intent.inputs["safe_click_hint"] == {
@@ -2250,6 +2294,59 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert click_step.input_preview == {"x": 120, "y": 240}
     assert click_step.risk_level == "low"
     assert click_step.approval_required is False
+
+
+def test_planner_direct_tool_requests_maps_app_scoped_safe_key_and_scroll() -> None:
+    assert planner_direct_tool_requests(
+        "打开 Slack 按下箭头三次",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_key",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Slack", "action": "arrow_down", "repeat_count": 3},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+    assert planner_direct_tool_requests(
+        "切到 Slack 向下滚动两页",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_scroll",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_scroll",
+            "input": {"app_name": "Slack", "direction": "down", "pages": 2},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+    assert planner_direct_tool_requests(
+        "打开 Chrome 然后按 Tab",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_key",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_key",
+            "input": {"app_name": "Google Chrome", "action": "tab", "repeat_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
 
 
 def test_runtime_planner_verifies_desktop_open_result() -> None:

@@ -186,6 +186,11 @@ class TaskIntentRouter:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
+        app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
+        if safe_key is None and app_scoped_safe_operation.get("safe_key"):
+            safe_key = app_scoped_safe_operation["safe_key"]
+        if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
+            safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
         foreground_paste = _foreground_paste_hint(text)
@@ -311,6 +316,7 @@ class TaskIntentRouter:
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
             or (command_palette or {}).get("app_name")
+            or app_scoped_safe_operation.get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
             or _foreground_compose_app_name_hint(text)
@@ -353,6 +359,8 @@ class TaskIntentRouter:
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_foreground" if foreground_submit_action else "")
+            or ("safe_key" if safe_key else "")
+            or ("safe_scroll" if safe_scroll else "")
             or _desktop_operation_hint(text)
         )
         if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
@@ -1112,6 +1120,11 @@ class RuntimePlanner:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
+        app_scoped_safe_operation = _app_scoped_safe_operation_hint(intent.user_goal)
+        if safe_key is None and app_scoped_safe_operation.get("safe_key"):
+            safe_key = app_scoped_safe_operation["safe_key"]
+        if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
+            safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(intent.user_goal)
         foreground_paste = _foreground_paste_hint(intent.user_goal)
         if foreground_paste and safe_shortcut is None:
@@ -1148,6 +1161,7 @@ class RuntimePlanner:
             or (screen_capture or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
             or command_palette.get("app_name")
+            or app_scoped_safe_operation.get("app_name")
             or app_search.get("app_name")
             or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             or (app_management or {}).get("app_name")
@@ -4652,6 +4666,8 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
     safe_shortcut = safe_shortcut_hint(text)
     if _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut):
         return True
+    if _app_scoped_safe_operation_hint(text):
+        return True
     app_name = _app_name_hint(text)
     if app_name and _is_browser_or_search_app_name(app_name):
         return False
@@ -4668,6 +4684,87 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
             ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入"),
         )
     )
+
+
+def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
+    parsed = _app_scoped_followup_hint(text)
+    if not parsed:
+        return {}
+    followup = str(parsed.get("followup") or "").strip()
+    if not followup:
+        return {}
+    safe_key = safe_key_hint(followup)
+    safe_scroll = safe_scroll_hint(followup)
+    if not safe_key and not safe_scroll:
+        return {}
+    result = {
+        "app_name": str(parsed.get("app_name") or "").strip(),
+        "mode": str(parsed.get("mode") or "").strip() or "focus",
+    }
+    if safe_key:
+        result["safe_key"] = safe_key
+    if safe_scroll:
+        result["safe_scroll"] = safe_scroll
+    return result
+
+
+def _app_scoped_followup_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    safe_followup = (
+        r"(?P<followup>(?:按一下|按下|按|发送|触发|"
+        r"向下|往下|朝下|向上|往上|朝上|下滑|上滑|下滚|上滚|"
+        r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉).+)"
+    )
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:(?:并且|并|然后|之后|后(?!退)|再|接着)\s*)?"
+            rf"{safe_followup}$",
+            "",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|里面)?\s*"
+            rf"{safe_followup}$",
+            "focus",
+        ),
+        (
+            r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:(?:and|then)\s+)?(?P<followup>.+)$",
+            "",
+        ),
+        (
+            r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?P<followup>(?:press|send|hit|scroll|page)\s+.+)$",
+            "focus",
+        ),
+    )
+    for pattern, default_mode in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        followup = _clean_app_scoped_followup(groups.get("followup") or "")
+        if not app_name or not followup:
+            continue
+        return {
+            "app_name": app_name,
+            "mode": _command_palette_mode(groups.get("mode") or default_mode),
+            "followup": followup,
+        }
+    return {}
+
+
+def _clean_app_scoped_followup(value: str) -> str:
+    return re.sub(
+        r"^(?:并且|并|然后|之后|后(?!退)|再|接着|and\s+then|and|then)\s*",
+        "",
+        _clean_prompt(value),
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def _app_command_palette_hint(text: str) -> dict[str, Any]:
