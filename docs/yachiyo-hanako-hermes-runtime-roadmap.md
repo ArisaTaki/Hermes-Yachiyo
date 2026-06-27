@@ -125,6 +125,8 @@ only as fallback while coverage is measured.
 
 Exit evidence:
 
+- Main Chat submits no-attachment, non-group messages through the planner-backed
+  `/yachiyo/tasks` facade before falling back to the legacy Chat route.
 - Chat, Bubble, and Live2D can start planner-backed tasks beyond desktop app
   launch/playback cases.
 - Fallback branches are marked by source and planning reason.

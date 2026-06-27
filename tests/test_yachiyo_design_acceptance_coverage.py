@@ -349,6 +349,7 @@ def test_hanako_hermes_runtime_roadmap_is_guarded() -> None:
             "Phase 10 - 删除旧硬编码与收敛代码",
             "Runtime planning follows TaskIntent -> CapabilityPlan -> ToolPlan.",
             "Discovery comes before app-specific rules",
+            "Main Chat submits no-attachment, non-group messages through the planner-backed",
             "Old route response shapes, database schema, Agent Studio, Groups, Workflow",
             "禁止删除 Agent Studio。",
             "禁止一次性重写 NativeRunEngine。",
@@ -388,6 +389,10 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "MessageBubble",
             "publicTaskSnapshotForMessage",
+            "String(activeSessionContext?.conversation_kind || '') !== 'group'",
+            "if (shouldTryPublicTask)",
+            "planner_entrypoint: publicTaskTarget",
+            ": 'chat_default'",
         ],
     )
     _assert_contains(

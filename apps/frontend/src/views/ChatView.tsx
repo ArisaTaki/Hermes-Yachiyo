@@ -716,13 +716,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     focusComposerSoon();
     const clientMessageId = createClientMessageId();
     try {
-      const publicTaskTarget = outgoingAttachments.length === 0
+      const shouldTryPublicTask = (
+        outgoingAttachments.length === 0
+        && String(activeSessionContext?.conversation_kind || '') !== 'group'
+      );
+      const publicTaskTarget = shouldTryPublicTask
         ? yachiyoPublicTaskTarget(text, runnables, assistantProfile)
         : null;
-      const dailyDesktopTaskPrompt = !publicTaskTarget && outgoingAttachments.length === 0
+      const dailyDesktopTaskPrompt = shouldTryPublicTask && !publicTaskTarget
         ? yachiyoDailyDesktopTaskPrompt(text)
         : null;
-      if (publicTaskTarget || dailyDesktopTaskPrompt) {
+      if (shouldTryPublicTask) {
         const handled = await startPublicYachiyoTask({
           clientMessageId,
           conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
@@ -731,6 +735,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           runnableKind: publicTaskTarget?.kind || 'main',
           metadata: {
             daily_desktop_intent: Boolean(dailyDesktopTaskPrompt),
+            planner_entrypoint: publicTaskTarget
+              ? 'mentioned_runnable'
+              : dailyDesktopTaskPrompt
+                ? 'daily_desktop'
+                : 'chat_default',
           },
         });
         if (handled) {
@@ -1145,18 +1154,32 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     stickToBottomRef.current = true;
     try {
       const retryText = messageText(message);
-      const retryDailyDesktopTaskPrompt = !message.attachments?.length
+      const shouldTryPublicTask = (
+        !message.attachments?.length
+        && String(activeSessionContext?.conversation_kind || '') !== 'group'
+      );
+      const publicTaskTarget = shouldTryPublicTask
+        ? yachiyoPublicTaskTarget(retryText, runnables, assistantProfile)
+        : null;
+      const retryDailyDesktopTaskPrompt = shouldTryPublicTask && !publicTaskTarget
         ? yachiyoDailyDesktopTaskPrompt(retryText)
         : null;
-      if (retryDailyDesktopTaskPrompt) {
+      if (shouldTryPublicTask) {
         const handled = await startPublicYachiyoTask({
           clientMessageId: createClientMessageId(),
           conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
-          prompt: retryDailyDesktopTaskPrompt,
-          runnableId: null,
-          runnableKind: 'main',
+          prompt: publicTaskTarget
+            ? yachiyoPublicTaskPrompt(retryText, publicTaskTarget)
+            : retryDailyDesktopTaskPrompt || retryText,
+          runnableId: publicTaskTarget?.id || null,
+          runnableKind: publicTaskTarget?.kind || 'main',
           metadata: {
-            daily_desktop_intent: true,
+            daily_desktop_intent: Boolean(retryDailyDesktopTaskPrompt),
+            planner_entrypoint: publicTaskTarget
+              ? 'mentioned_runnable'
+              : retryDailyDesktopTaskPrompt
+                ? 'daily_desktop'
+                : 'chat_default',
             retry_of_message_id: message.id,
           },
         });
