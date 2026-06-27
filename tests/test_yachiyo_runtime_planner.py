@@ -1966,6 +1966,49 @@ def test_runtime_planner_routes_foreground_window_minimize_to_desktop_tool() -> 
     assert _step_by_id(named_app, "manage-app").tool_name == "app.minimize"
 
 
+def test_runtime_planner_routes_show_all_hidden_apps_to_foreground_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "显示所有隐藏应用",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.show_all_apps",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["operation_hint"] == "show_all_apps"
+    assert decision.selected_intent.inputs["foreground_management_hint"] == {
+        "action": "show_all_apps",
+        "scope": "desktop",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "manage-foreground",
+        "verify-desktop-result",
+    ]
+    manage = _step_by_id(decision, "manage-foreground")
+    assert manage.tool_name == "desktop.show_all_apps"
+    assert manage.action == "show_all_apps"
+    assert manage.risk_level == "low"
+    assert manage.approval_required is False
+    assert decision.plan.tool_plan.approvals_required == []
+    assert planner_direct_tool_requests(
+        "show all hidden apps",
+        ["desktop.running_apps", "desktop.show_all_apps", "desktop.active_window"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.show_all_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+
 def test_runtime_planner_marks_foreground_close_and_quit_as_approval_required() -> None:
     close_decision = RuntimePlanner().decision(
         "关闭当前窗口",
@@ -4955,11 +4998,17 @@ def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
 
 def test_capability_registry_exposes_foreground_management_tools() -> None:
     snapshots = capability_snapshots(
-        allowed_tools=["desktop.minimize_window", "desktop.close_window", "desktop.quit_app"],
+        allowed_tools=[
+            "desktop.show_all_apps",
+            "desktop.minimize_window",
+            "desktop.close_window",
+            "desktop.quit_app",
+        ],
         capability_ids=["desktop.app_control"],
     )
 
     assert snapshots[0].available_tools == [
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.quit_app",

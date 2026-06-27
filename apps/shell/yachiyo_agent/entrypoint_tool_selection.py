@@ -403,6 +403,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.search_submit",
         "desktop.submit_foreground",
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.quit_app",
@@ -442,6 +443,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return True
     if tool_name in {
         "desktop.hide_app",
+        "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.quit_app",

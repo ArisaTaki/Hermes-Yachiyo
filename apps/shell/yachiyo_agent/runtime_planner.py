@@ -230,6 +230,8 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
+            desktop_discovery = None
         context_source = context_source_hint(text)
         dynamic_context_transfer = _dynamic_context_ui_transfer_hint(text)
         if dynamic_context_transfer:
@@ -394,6 +396,8 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
+        if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
+            app_name_hint = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
             app_name_hint = ""
             app_management = None
@@ -1347,6 +1351,8 @@ class RuntimePlanner:
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
+        if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
+            desktop_discovery = {}
         app_search = intent.inputs.get("app_search_hint")
         if not isinstance(app_search, Mapping):
             app_search = _app_search_hint(
@@ -1386,6 +1392,8 @@ class RuntimePlanner:
             or _foreground_compose_app_name_hint(intent.user_goal)
             or ""
         ).strip()
+        if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
+            app_name = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
             app_name = ""
             app_management = None
@@ -1622,6 +1630,7 @@ class RuntimePlanner:
             action = str(foreground_management.get("action") or "").strip()
             tool_name = {
                 "hide_app": "desktop.hide_app",
+                "show_all_apps": "desktop.show_all_apps",
                 "minimize_window": "desktop.minimize_window",
                 "close_window": "desktop.close_window",
                 "quit_app": "desktop.quit_app",
@@ -3888,6 +3897,8 @@ def _foreground_management_action(tool_name: str | None) -> str:
     clean_tool = str(tool_name or "")
     if clean_tool == "desktop.hide_app":
         return "hide_app"
+    if clean_tool == "desktop.show_all_apps":
+        return "show_all_apps"
     if clean_tool == "desktop.minimize_window":
         return "minimize_window"
     if clean_tool == "desktop.close_window":

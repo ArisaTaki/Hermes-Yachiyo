@@ -82,6 +82,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "app.minimize",
             "app.quit",
             "desktop.hide_app",
+            "desktop.show_all_apps",
             "desktop.minimize_window",
             "desktop.close_window",
             "desktop.quit_app",

@@ -883,6 +883,29 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_show_all_hidden_apps_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "显示所有隐藏应用",
+        ["desktop.running_apps", "desktop.show_all_apps", "desktop.active_window"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.show_all_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     allowed_tools = [

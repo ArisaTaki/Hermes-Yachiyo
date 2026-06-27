@@ -384,6 +384,8 @@ def app_management_hint(text: str) -> dict[str, str] | None:
 def foreground_management_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     lowered = value.lower()
+    if _is_show_all_hidden_apps_request(value, lowered):
+        return {"action": "show_all_apps", "scope": "desktop"}
     if _is_foreground_window_close_request(value, lowered):
         return {"action": "close_window", "scope": "window"}
     if _is_foreground_app_quit_request(value, lowered):
@@ -1377,6 +1379,30 @@ def _is_foreground_app_hide_request(value: str, lowered: str) -> bool:
         )
         or re.search(
             r"\bhide\s+(?:the\s+)?(?:current|foreground|active|this)\s+(?:app|application)\b",
+            lowered,
+        )
+    )
+
+
+def _is_show_all_hidden_apps_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:显示|展示|恢复|还原|取消隐藏)\s*(?:所有|全部)?\s*(?:已)?隐藏(?:的)?\s*(?:应用|app|软件|程序)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:所有|全部)?\s*(?:已)?隐藏(?:的)?\s*(?:应用|app|软件|程序)\s*"
+            r"(?:显示|展示|恢复|还原|取消隐藏)(?:出来)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:show|restore|unhide)\s+(?:all\s+)?hidden\s+(?:apps?|applications?)\b",
+            lowered,
+        )
+        or re.search(
+            r"\bshow\s+all\s+(?:apps?|applications?)\b",
             lowered,
         )
     )
