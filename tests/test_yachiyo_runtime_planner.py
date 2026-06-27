@@ -1556,6 +1556,36 @@ def test_runtime_planner_routes_foreground_window_minimize_to_desktop_tool() -> 
         "manage-foreground"
     ]
 
+    for prompt in (
+        "把当前应用最小化",
+        "最小化当前应用",
+        "Can you minimize the current app?",
+    ):
+        current_app = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.active_window", "desktop.minimize_window", "app.minimize"],
+        )
+
+        assert current_app.selected_intent.kind == "desktop_operation"
+        assert current_app.selected_intent.inputs["app_name_hint"] == ""
+        assert current_app.selected_intent.inputs["foreground_management_hint"] == {
+            "action": "minimize_window",
+            "scope": "window",
+        }
+        assert _step_by_id(current_app, "manage-foreground").tool_name == (
+            "desktop.minimize_window"
+        )
+
+    named_app = RuntimePlanner().decision(
+        "最小化 Safari",
+        allowed_tools=["desktop.list_apps", "app.minimize", "desktop.running_apps"],
+    )
+    assert named_app.selected_intent.inputs["app_management_hint"] == {
+        "action": "minimize",
+        "app_name": "Safari",
+    }
+    assert _step_by_id(named_app, "manage-app").tool_name == "app.minimize"
+
 
 def test_runtime_planner_marks_foreground_close_and_quit_as_approval_required() -> None:
     close_decision = RuntimePlanner().decision(

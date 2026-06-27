@@ -1227,6 +1227,21 @@ def _is_foreground_window_minimize_request(value: str, lowered: str) -> bool:
             r"\b(?:minimi[sz]e|hide)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
             lowered,
         )
+        or re.search(
+            r"(?:最小化)\s*(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|软件|程序)\s*(?:最小化)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bminimi[sz]e\s+(?:the\s+)?(?:current|foreground|active|this)\s+"
+            r"(?:app|application)\b",
+            lowered,
+        )
     )
 
 
