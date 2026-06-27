@@ -243,12 +243,16 @@ def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]])
         return False
     tools = _request_tool_set(requests)
     return bool(tools) and tools <= {
+        "app.open",
+        "app.focus",
         "browser.current_page",
+        "browser.click",
         "browser.extract_text",
         "browser.open_url",
         "browser.open_url_and_extract_text",
         "browser.open_url_and_screenshot",
         "browser.screenshot",
+        "browser.type_text",
     }
 
 

@@ -68,6 +68,14 @@ def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
     return str(decision or "").strip()
 
 
+def _entrypoint_planning_context(prompt: str, metadata: dict[str, Any] | None) -> str:
+    if isinstance(metadata, dict):
+        planning_context = str(metadata.get("entrypoint_planning_context") or "").strip()
+        if planning_context:
+            return planning_context
+    return str(prompt or "").strip()
+
+
 class LegacyChatTaskStarter:
     """Starts agent tasks through the existing Chat session path when available."""
 
@@ -219,6 +227,7 @@ class LegacyChatTaskStarter:
             fallback=allowed_daily_desktop_tools,
         )
         execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
+        planning_prompt = _entrypoint_planning_context(prompt or execution_prompt, metadata)
         direct_tool_request = daily_desktop_direct_metadata_request(
             metadata,
             allowed_tools=allowed_daily_desktop_tools,
@@ -229,7 +238,7 @@ class LegacyChatTaskStarter:
         selected_source = ""
         if not direct_tool_request:
             selection = planner_first_direct_tool_selection(
-                prompt or execution_prompt,
+                planning_prompt,
                 allowed_entrypoint_tools,
                 metadata=metadata,
                 legacy_tool_requests=lambda value, tools: daily_desktop_entrypoint_requests(
@@ -247,7 +256,7 @@ class LegacyChatTaskStarter:
             direct_tool_selection_payload = selection.event_payload
             if selected_source == "runtime_planner":
                 direct_tool_requests = _safe_runtime_planner_tool_requests(
-                    prompt or execution_prompt,
+                    planning_prompt,
                     allowed_entrypoint_tools,
                     metadata=metadata,
                     selected_requests=selected_requests,

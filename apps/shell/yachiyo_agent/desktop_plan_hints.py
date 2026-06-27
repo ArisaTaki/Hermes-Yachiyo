@@ -915,7 +915,7 @@ def _clean_media_query(value: str) -> str:
 def clean_target(value: str) -> str:
     target = clean(value)
     target = re.split(
-        r"(?:然后|并且|并|再|接着|之后|后|and\s+then|then|and)",
+        r"(?:然后|并且|并|再|接着|之后|后|输入|键入|填写|填入|写入|写|and\s+then|then|and|type|enter|fill)",
         target,
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -934,6 +934,12 @@ def clean_target(value: str) -> str:
         flags=re.IGNORECASE,
     )
     target = re.sub(
+        r"\s*(?:button|control|element|menu item|menu|checkbox|field|input|text field|text box|textbox)$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    )
+    target = re.sub(
         r"^(?:在|用|通过)\s*[\w .·-]{1,40}?(?:里|中|上|内|的)\s*",
         "",
         target,
@@ -941,6 +947,9 @@ def clean_target(value: str) -> str:
     )
     target = re.sub(r"^(?:的|里|中|上|内)\s*", "", target, flags=re.IGNORECASE)
     target = re.sub(r"^(?:可见的?|visible|shown)\s*", "", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:搜索框|搜索栏)$", "搜索", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:地址栏)$", "地址", target, flags=re.IGNORECASE)
+    target = re.sub(r"^(?:消息框|聊天框)$", "消息", target, flags=re.IGNORECASE)
     return target.strip(" .，,。")
 
 
@@ -970,6 +979,15 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
         target,
         flags=re.IGNORECASE,
     )
+    target = re.sub(r"^.*?(消息框|聊天框)$", r"\1", target, flags=re.IGNORECASE)
+    raw_field_match = re.search(
+        r"(搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box)$",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    if raw_field_match and target in {"搜索", "消息", "地址"}:
+        target = raw_field_match.group(1)
     return target.strip(" .，,。") or clean_target(value)
 
 
@@ -1010,7 +1028,10 @@ def role_filter(value: str) -> str:
         return "menu"
     if contains_any(lowered, ["复选框", "checkbox"]):
         return "checkbox"
-    if contains_any(lowered, ["输入框", "文本框", "输入栏", "field", "input", "text"]):
+    if contains_any(
+        lowered,
+        ["搜索框", "搜索栏", "消息框", "聊天框", "地址栏", "输入框", "文本框", "输入栏", "field", "input", "text"],
+    ):
         return "text"
     if cleaned in {"搜索", "登录", "创建", "确认", "发送", "提交"}:
         return "button"

@@ -407,7 +407,7 @@ class LegacyRuntimePort:
                 continue
             event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
             source = str(event.get("source") or event_payload.get("source") or "").strip()
-            if source == "daily_desktop_intent":
+            if source in {"daily_desktop_intent", "runtime_planner", "daily_desktop_metadata"}:
                 return True
         return False
 

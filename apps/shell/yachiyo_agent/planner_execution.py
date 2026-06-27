@@ -10,7 +10,7 @@ from .app_name_hints import legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
-from .desktop_plan_hints import media_app_query_search_plan, media_tool_preview
+from .desktop_plan_hints import app_control_tool_candidates, media_app_query_search_plan, media_tool_preview
 from .file_access_plan_hints import file_access_tool_preview
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
@@ -416,7 +416,7 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         query = str(payload.get("query") or "").strip()
         if not query:
             return payload
-        canonical = _canonical_app_name(query)
+        canonical = _canonical_app_name(query) if not query.isascii() else query
         return {**payload, "query": canonical}
     if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
@@ -440,9 +440,11 @@ def _canonicalize_app_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not app_name:
         return payload
     canonical = _canonical_app_name(app_name)
-    if canonical == app_name:
-        return payload
-    return {**payload, "app_name": canonical}
+    canonical_payload = payload if canonical == app_name else {**payload, "app_name": canonical}
+    target = str(canonical_payload.get("target") or "").strip()
+    if canonical == "WeChat" and target in {"消息框", "聊天框"}:
+        return {**canonical_payload, "target": "消息"}
+    return canonical_payload
 
 
 def _canonical_app_name(app_name: str) -> str:
@@ -781,10 +783,14 @@ def _direct_communication_context_tool_requests(
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
+    prepare_requests = _web_browser_prepare_requests(decision, allowed)
     if browser_action == "find_current_page":
         return _current_page_find_tool_requests(decision, allowed)
     if browser_action == "click":
         if "browser.click" not in allowed:
+            fallback_requests = _browser_click_desktop_fallback_requests(decision, allowed)
+            if fallback_requests:
+                return fallback_requests
             return []
         selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
         if not selector:
@@ -798,6 +804,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             if value not in (None, ""):
                 payload[key] = value
         return [
+            *prepare_requests,
             _request(
                 "browser.click",
                 payload,
@@ -812,6 +819,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         if not selector or not text:
             return []
         return [
+            *prepare_requests,
             _request(
                 "browser.type_text",
                 {"selector": selector, "text": text},
@@ -834,6 +842,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         if click_count not in (None, ""):
             click_payload["click_count"] = click_count
         return [
+            *prepare_requests,
             _request(
                 "browser.open_url",
                 {"url": url},
@@ -918,7 +927,91 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         )
     ):
         request["continue_to_model"] = True
-    return [request]
+    return [*prepare_requests, request]
+
+
+def _web_browser_prepare_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    app_name = str(inputs.get("app_name") or "").strip()
+    if not app_name:
+        return []
+    mode = str(inputs.get("app_mode") or "focus").strip() or "focus"
+    tool_name = _first_allowed(app_control_tool_candidates(mode), allowed)
+    if not tool_name:
+        return []
+    return [
+        _request(
+            tool_name,
+            _desktop_request_payload(tool_name, {"app_name": app_name}),
+            planning_reason="planner_fallback_web_research",
+        )
+    ]
+
+
+def _browser_click_desktop_fallback_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    app_name = str(inputs.get("app_name") or "").strip()
+    selector = str(inputs.get("selector") or "").strip()
+    if not app_name or not selector.startswith("text="):
+        return []
+    target = selector.removeprefix("text=").strip()
+    if not target:
+        return []
+    payload = {
+        "app_name": app_name,
+        "target": target,
+        "role_filter": "button",
+        "click_count": int(inputs.get("click_count") or 1),
+        "limit": 80,
+    }
+    app_click_tool = _first_allowed(
+        ("app.focus_and_click_ui_element", "app.open_and_click_ui_element"),
+        allowed,
+    )
+    requests: list[dict[str, Any]] = []
+    if app_click_tool:
+        requests.append(
+            _request(
+                app_click_tool,
+                _desktop_request_payload(app_click_tool, payload),
+                planning_reason="planner_desktop_operation",
+            )
+        )
+    elif "app.focus" in allowed and "desktop.click_ui_element" in allowed:
+        requests.extend(
+            [
+                _request(
+                    "app.focus",
+                    _desktop_request_payload("app.focus", {"app_name": app_name}),
+                    planning_reason="planner_desktop_operation",
+                ),
+                _request(
+                    "desktop.click_ui_element",
+                    _desktop_request_payload(
+                        "desktop.click_ui_element",
+                        {
+                            "target": target,
+                            "role_filter": "button",
+                            "click_count": int(inputs.get("click_count") or 1),
+                            "limit": 80,
+                        },
+                    ),
+                    planning_reason="planner_desktop_operation",
+                ),
+            ]
+        )
+    if requests and "desktop.ui_elements" in allowed:
+        requests.append(
+            _request(
+                "desktop.ui_elements",
+                {"role_filter": "button", "limit": 80},
+                planning_reason="planner_desktop_operation",
+            )
+        )
+    return requests
 
 
 def _current_page_find_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

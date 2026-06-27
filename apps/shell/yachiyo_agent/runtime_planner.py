@@ -777,6 +777,19 @@ class TaskIntentRouter:
         if dynamic_source and browser_action_name != "find_current_page":
             inputs["context_source"] = dynamic_source
         inputs.update(browser_action)
+        existing_browser_app_name = str(inputs.get("app_name") or "").strip()
+        browser_app_name = existing_browser_app_name or _browser_action_app_name_hint(
+            text,
+            browser_action_name,
+        )
+        if browser_app_name and not existing_browser_app_name:
+            inputs["app_name"] = browser_app_name
+        if (
+            browser_app_name
+            and not existing_browser_app_name
+            and _browser_app_prepare_needed(text, browser_action_name)
+        ):
+            inputs["app_mode"] = _browser_app_prepare_mode(text)
         uses_dynamic_browser_context = (
             dynamic_source in {"selection", "clipboard"}
             and browser_action_name in {"open_search", "open_url"}
@@ -1032,6 +1045,8 @@ class TaskIntentRouter:
         if scoped_action == "new_message":
             return _empty_intent("communication", text)
         direct_hint = _direct_communication_candidate_hint(text)
+        if not direct_hint and click_target_hint(text) and _app_name_hint(text):
+            return _empty_intent("communication", text)
         if _foreground_submit_action_hint(text) and not direct_hint:
             return _empty_intent("communication", text)
         source = context_source_hint(text)
@@ -1602,6 +1617,7 @@ class RuntimePlanner:
             and not any((type_target, safe_type_text, app_search))
         ):
             submit_action = ""
+        operation_safe_type_text = "" if click_target and safe_type_text else safe_type_text
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
             mode=mode,
@@ -1613,7 +1629,7 @@ class RuntimePlanner:
             safe_click=safe_click,
             hotkey=hotkey,
             type_target=type_target,
-            safe_type_text=safe_type_text,
+            safe_type_text=operation_safe_type_text,
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
@@ -2566,6 +2582,19 @@ class RuntimePlanner:
                     )
                 )
                 previous_step_id = followup_step_id
+        if click_target and safe_type_text and any(step.step_id == "operate-foreground-ui" for step in steps):
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui-followup-type",
+                    "Type after foreground click",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed),
+                    input_preview={"text": safe_type_text},
+                    depends_on=["operate-foreground-ui"],
+                    reason="Type the explicit text only after the requested UI target is selected.",
+                )
+            )
         if submit_action and any(step.step_id == "operate-foreground-ui" for step in steps):
             steps.append(
                 _step(
@@ -2776,6 +2805,21 @@ class RuntimePlanner:
         ):
             return _dynamic_context_browser_steps(intent, allowed)
         if browser_action:
+            app_name = str(intent.inputs.get("app_name") or "").strip()
+            app_mode = str(intent.inputs.get("app_mode") or "focus").strip() or "focus"
+            prepare_step_id = ""
+            prepare_step: ToolPlanStepSnapshot | None = None
+            if app_name and browser_action != "find_current_page":
+                prepare_step_id = "open-or-focus-browser"
+                prepare_step = _step(
+                    intent,
+                    prepare_step_id,
+                    "Open or focus browser",
+                    "desktop.app_control",
+                    _first_allowed(app_control_tool_candidates(app_mode), allowed),
+                    input_preview={"app_name": app_name},
+                    reason="Prepare the requested browser before running the browser tool.",
+                )
             tool_name = {
                 "current_page": "browser.current_page",
                 "extract_text": "browser.extract_text",
@@ -2842,6 +2886,7 @@ class RuntimePlanner:
                 input_preview=input_preview,
                 risk_level="medium" if browser_action in {"click", "type_text"} else "low",
                 approval_required=browser_action in {"click", "type_text"},
+                depends_on=[prepare_step_id] if prepare_step_id else [],
                 reason=(
                     "Use the browser interaction tool so the runtime can enforce browser approval."
                     if browser_action in {"click", "type_text"}
@@ -2858,6 +2903,7 @@ class RuntimePlanner:
                     "click_count": int(intent.inputs.get("click_count") or 1),
                 }
                 return [
+                    *([prepare_step] if prepare_step is not None else []),
                     main_step,
                     _step(
                         intent,
@@ -2872,7 +2918,7 @@ class RuntimePlanner:
                         reason="Click the requested search result only after opening the planned search URL.",
                     ),
                 ]
-            steps = [main_step]
+            steps = [*([prepare_step] if prepare_step is not None else []), main_step]
             if _web_research_artifact_requested(intent) and (
                 allowed is None or "artifact.write" in allowed
             ):
@@ -5463,7 +5509,7 @@ def _app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     app = re.split(
-        r"(?:并|然后|再|接着|之后|后|播放|点击|点按|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|\b(?:and|then|to|paste|thanks)\b)",
+        r"(?:并|然后|再|接着|之后|后|播放|点击|点按|点|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|\b(?:and|then|to|paste|thanks)\b)",
         str(value or "").strip(),
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -8755,8 +8801,62 @@ def _browser_type_text_hint(text: str) -> dict[str, Any]:
 def _has_browser_page_context(text: str) -> bool:
     return bool(
         re.search(r"(?:网页|页面|浏览器|当前页)", text, flags=re.IGNORECASE)
-        or re.search(r"\b(?:browser|page|webpage|web\s+page)\b", text, flags=re.IGNORECASE)
+        or re.search(
+            r"\b(?:browser|page|webpage|web\s+page|chrome|google\s+chrome|safari|firefox|edge|brave)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\b(?:search\s+)?(?:result|link)s?\b", text, flags=re.IGNORECASE)
+    )
+
+
+def _browser_action_app_name_hint(text: str, browser_action: str) -> str:
+    if browser_action not in {"click", "type_text", "open_search", "open_url", "open_url_extract", "open_url_screenshot"}:
+        return ""
+    app_name = _app_name_hint(text)
+    if (
+        app_name
+        and _is_browser_or_search_app_name(app_name)
+        and not _is_generic_browser_app_label(app_name)
+        and (browser_action in {"click", "type_text"} or _browser_app_prepare_needed(text, browser_action))
+    ):
+        return app_name
+    search_surface = _web_search_surface_hint(text)
+    if (
+        search_surface
+        and _is_browser_or_search_app_name(search_surface)
+        and not _is_generic_browser_app_label(search_surface)
+        and _browser_app_prepare_needed(text, browser_action)
+    ):
+        return search_surface
+    return ""
+
+
+def _browser_app_prepare_needed(text: str, browser_action: str) -> bool:
+    if browser_action in {"click", "type_text"}:
+        return True
+    value = str(text or "")
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启)\s*"
+            r"(?:Chrome|Google\s*Chrome|谷歌浏览器|浏览器|Safari|Firefox|Edge|Brave)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:open|launch|start)\s+"
+            r"(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave|browser)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _browser_app_prepare_mode(text: str) -> str:
+    return (
+        "open"
+        if re.search(r"(?:打开|启动|开启|\bopen\b|\blaunch\b|\bstart\b)", str(text or ""), flags=re.IGNORECASE)
+        else "focus"
     )
 
 

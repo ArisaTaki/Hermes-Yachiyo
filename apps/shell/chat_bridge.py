@@ -29,6 +29,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_planned_timeline,
     main_chat_entrypoint_allowed_tools,
 )
+from apps.shell.yachiyo_agent.web_destination_hints import legacy_known_web_destination_url_hint
 from apps.shell.yachiyo_agent.planner_execution import planner_decision_and_tool_requests
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
@@ -439,6 +440,63 @@ def _latest_assistant_reply_content(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _looks_like_bare_browser_click_followup(text: str) -> bool:
+    prompt = str(text or "").strip()
+    if not prompt:
+        return False
+    if re.search(
+        r"(?:网页|页面|浏览器|当前页|\bbrowser\b|\bpage\b|\bchrome\b|\bsafari\b|\bfirefox\b|\bedge\b|\bbrave\b)",
+        prompt,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:点击|点一下|点按|单击|点)\s*[^。！？!?，,]{1,40}(?:按钮|链接|元素)?$",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:click|press)\s+(?:the\s+)?[^.!?]{1,40}(?:\s+(?:button|link|element))?$",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _recent_messages_include_browser_page(messages: list[Any]) -> bool:
+    for message in reversed(messages[-8:]):
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        if re.search(
+            r"https?://|\bwww\.|\b[a-z0-9-]+\.[a-z]{2,}\b|网页|网站|浏览器|\bbrowser\b|\bweb\s*page\b",
+            content,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        if _message_contains_known_web_destination(content):
+            return True
+    return False
+
+
+def _message_contains_known_web_destination(content: str) -> bool:
+    patterns = (
+        r"(?:已打开|打开|访问|进入|前往|open(?:ed)?|visit(?:ed)?)\s*(?P<target>[^。！？!?，,\n]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, content, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = str(match.group("target") or "").strip(" .，,。")
+        if target and legacy_known_web_destination_url_hint(target):
+            return True
+    return False
+
+
 class ChatBridge:
     """轻量级聊天摘要桥接，供 bubble/live2d 使用。
 
@@ -464,6 +522,10 @@ class ChatBridge:
         metadata: dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """快捷发送消息，委托 ChatAPI"""
+        planning_text = self._planning_text_for_quick_message(text)
+        execution_metadata = dict(metadata or {})
+        if planning_text != str(text or "").strip():
+            execution_metadata["entrypoint_planning_context"] = planning_text
         result = self._chat_api.send_message(text, metadata=metadata)
         if result.get("ok") is False:
             return result
@@ -476,15 +538,15 @@ class ChatBridge:
             _runtime_agent_service(self._runtime),
         )
         desktop_candidates = _desktop_candidates_for_quick_message(
-            text,
-            metadata=metadata,
+            planning_text,
+            metadata=execution_metadata,
             allowed_tools=planner_allowed_tools,
         )
         if desktop_candidates:
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,
                 text,
-                metadata=metadata,
+                metadata=execution_metadata,
             )
             if executed_task is not None:
                 return {**result, "agent_task": executed_task}
@@ -494,17 +556,32 @@ class ChatBridge:
         )
         if agent_task is None:
             planned_task = planned_agent_task_snapshot_for_quick_message(
-                text=text,
+                text=planning_text,
                 task_id=task_id,
                 session_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
                 candidates=desktop_candidates,
                 allowed_tools=planner_allowed_tools,
-                metadata=metadata,
+                metadata=execution_metadata,
             )
             if planned_task is None:
                 return result
             return {**result, "agent_task": planned_task}
         return {**result, "agent_task": agent_task}
+
+    def _planning_text_for_quick_message(self, text: str) -> str:
+        prompt = str(text or "").strip()
+        if not _looks_like_bare_browser_click_followup(prompt):
+            return prompt
+        try:
+            messages_result = self._chat_api.get_messages(limit=12)
+        except Exception:
+            return prompt
+        if not messages_result.get("ok"):
+            return prompt
+        messages = messages_result.get("messages")
+        if not isinstance(messages, list) or not _recent_messages_include_browser_page(messages):
+            return prompt
+        return f"当前浏览器页面 {prompt}"
 
     def _execute_yachiyo_desktop_quick_task(
         self,
