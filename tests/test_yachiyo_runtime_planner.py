@@ -2511,6 +2511,64 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert _step_by_id(focused_search, "open-or-focus-app").tool_name == "app.focus"
 
+    selected_context_search = RuntimePlanner().decision(
+        "在微信里查找选中的内容",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+    assert selected_context_search.selected_intent.kind == "desktop_operation"
+    assert selected_context_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "选中的内容",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in selected_context_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "copy-selected-app-search-query",
+        "open-or-focus-app",
+        "focus-app-search-field",
+        "paste-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(selected_context_search, "copy-selected-app-search-query").input_preview == {
+        "action": "copy"
+    }
+    assert _step_by_id(selected_context_search, "open-or-focus-app").depends_on == [
+        "copy-selected-app-search-query"
+    ]
+    assert _step_by_id(selected_context_search, "paste-app-search-query").input_preview == {
+        "action": "paste"
+    }
+
+    clipboard_context_search = RuntimePlanner().decision(
+        "在 Slack 里查找剪贴板内容",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+    assert clipboard_context_search.selected_intent.kind == "desktop_operation"
+    assert clipboard_context_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "剪贴板内容",
+        "target": "搜索",
+    }
+    assert "copy-selected-app-search-query" not in [
+        step.step_id for step in clipboard_context_search.plan.tool_plan.steps
+    ]
+    assert _step_by_id(clipboard_context_search, "paste-app-search-query").input_preview == {
+        "action": "paste"
+    }
+
     command_palette = RuntimePlanner().decision(
         "切到 Obsidian 打开命令面板输入 Toggle reading view 并回车",
         allowed_tools=[

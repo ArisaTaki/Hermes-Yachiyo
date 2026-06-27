@@ -1369,6 +1369,7 @@ class RuntimePlanner:
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
             )
+        app_search_context_source = _app_search_query_context_source(app_search)
         command_palette = intent.inputs.get("command_palette_hint")
         if not isinstance(command_palette, Mapping):
             command_palette = _app_command_palette_hint(intent.user_goal)
@@ -2111,7 +2112,12 @@ class RuntimePlanner:
                 )
             )
             return steps
-        if app_name and not operation_uses_app_tool and not focus_step_added:
+        if (
+            app_name
+            and not operation_uses_app_tool
+            and not focus_step_added
+            and not (app_search and app_search_context_source == "selection")
+        ):
             prepare_mode = _app_search_prepare_mode(intent.user_goal, mode) if app_search else mode
             steps.append(
                 _step(
@@ -2159,6 +2165,45 @@ class RuntimePlanner:
             search_query = str(app_search.get("query") or "").strip()
             search_target = str(app_search.get("target") or "").strip() or "Search"
             search_followup = _app_search_followup_hint(intent.user_goal)
+            app_search_context_source = _app_search_query_context_source(app_search)
+            context_shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+            app_search_prepare_step_id = "open-or-focus-app"
+            if app_search_context_source == "selection":
+                if not context_shortcut_tool:
+                    return steps
+                steps.append(
+                    _step(
+                        intent,
+                        "copy-selected-app-search-query",
+                        "Copy selected app-search query",
+                        "desktop.ui_operation",
+                        context_shortcut_tool,
+                        input_preview={"action": "copy"},
+                        depends_on=["discover-desktop-state"],
+                        action="shortcut",
+                        reason="Copy the current selection before focusing the app search field.",
+                    )
+                )
+                app_search_prepare_step_id = "copy-selected-app-search-query"
+            if (
+                app_name
+                and not any(step.step_id == "open-or-focus-app" for step in steps)
+                and not focus_step_added
+            ):
+                prepare_mode = _app_search_prepare_mode(intent.user_goal, mode)
+                steps.append(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        _first_allowed(app_control_tool_candidates(prepare_mode), allowed),
+                        input_preview={"app_name": app_name},
+                        depends_on=[app_search_prepare_step_id],
+                        reason="Resolve the requested app by name after preserving the dynamic search query.",
+                    )
+                )
+                app_search_prepare_step_id = "open-or-focus-app"
             search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
             search_focus_preview = (
                 {
@@ -2174,7 +2219,7 @@ class RuntimePlanner:
             if focus_step_added:
                 search_depends_on = ["focus-app-window"]
             elif app_name:
-                search_depends_on = ["open-or-focus-app"]
+                search_depends_on = [app_search_prepare_step_id]
             steps.append(
                 _step(
                     intent,
@@ -2188,20 +2233,38 @@ class RuntimePlanner:
                     reason="Focus the requested app's search affordance without relying on app-specific aliases.",
                 )
             )
-            steps.append(
-                _step(
-                    intent,
-                    "type-app-search-query",
-                    "Type app search query",
-                    "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text",), allowed),
-                    input_preview={"text": search_query},
-                    depends_on=["focus-app-search-field"],
-                    action="type",
-                    reason="Type only the explicit app-search query from the user prompt.",
+            if app_search_context_source in {"selection", "clipboard"}:
+                if not context_shortcut_tool:
+                    return steps
+                steps.append(
+                    _step(
+                        intent,
+                        "paste-app-search-query",
+                        "Paste app search query",
+                        "desktop.ui_operation",
+                        context_shortcut_tool,
+                        input_preview={"action": "paste"},
+                        depends_on=["focus-app-search-field"],
+                        action="shortcut",
+                        reason="Paste the dynamic app-search query instead of typing its source label.",
+                    )
                 )
-            )
-            search_terminal_step_id = "type-app-search-query"
+                search_terminal_step_id = "paste-app-search-query"
+            else:
+                steps.append(
+                    _step(
+                        intent,
+                        "type-app-search-query",
+                        "Type app search query",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_type_text",), allowed),
+                        input_preview={"text": search_query},
+                        depends_on=["focus-app-search-field"],
+                        action="type",
+                        reason="Type only the explicit app-search query from the user prompt.",
+                    )
+                )
+                search_terminal_step_id = "type-app-search-query"
             if search_followup.get("action") == "arrow_down_confirm":
                 steps.append(
                     _step(
@@ -6860,6 +6923,44 @@ def _clean_app_search_query(query: str) -> str:
     )[0].strip()
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     return value
+
+
+def _app_search_query_context_source(app_search: Mapping[str, Any]) -> str:
+    query = _clean_app_search_query(str(app_search.get("query") or ""))
+    normalized = re.sub(r"[\s._-]+", "", query.lower())
+    if normalized in {
+        "选中内容",
+        "选中的内容",
+        "选中文本",
+        "选中的文本",
+        "选中文字",
+        "选中的文字",
+        "当前选中内容",
+        "当前选中的内容",
+        "当前选中文本",
+        "当前选中文字",
+        "selection",
+        "selected",
+        "selectedtext",
+        "selectedcontent",
+        "currentselection",
+        "currentselectedtext",
+    }:
+        return "selection"
+    if normalized in {
+        "剪贴板",
+        "剪贴板内容",
+        "粘贴板",
+        "粘贴板内容",
+        "clipboard",
+        "clipboardcontent",
+        "clipboardcontents",
+        "clipboardtext",
+        "theclipboard",
+        "systemclipboard",
+    }:
+        return "clipboard"
+    return ""
 
 
 def _app_search_followup_hint(text: str) -> dict[str, Any]:

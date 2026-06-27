@@ -452,6 +452,51 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_search_dynamic_context_without_legacy() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        (
+            "在微信里查找选中的内容",
+            [
+                "desktop.safe_shortcut",
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+            ],
+        ),
+        (
+            "在 Slack 里查找剪贴板内容",
+            [
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+            ],
+        ),
+    )
+
+    for prompt, expected_tools in cases:
+        legacy_calls: list[dict[str, Any]] = []
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.event_payload["selected_tools"] == expected_tools
+        assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     allowed = [
