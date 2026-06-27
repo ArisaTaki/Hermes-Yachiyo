@@ -2051,6 +2051,55 @@ def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
     ]
 
 
+def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
+    cases = (
+        ("在 Keynote 新建一个演示文稿", "Keynote", "app.focus_and_safe_shortcut"),
+        ("用 Pages 新建一份文档", "Pages", "app.focus_and_safe_shortcut"),
+        ("在 Numbers 新建一个表格", "Numbers", "app.focus_and_safe_shortcut"),
+        ("打开 Keynote 新建演示", "Keynote", "app.open_and_safe_shortcut"),
+    )
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+        "data.analyze",
+        "artifact.write",
+    ]
+
+    for prompt, app_name, expected_tool in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": app_name,
+            "operation_hint": "safe_shortcut",
+            "safe_shortcut_hint": {"action": "new_document"},
+        }
+        discover = _step_by_id(decision, "discover-desktop-state")
+        assert discover.tool_name == "desktop.list_apps"
+        assert discover.input_preview == {"query": app_name, "limit": 20}
+        operate = _step_by_id(decision, "operate-foreground-ui")
+        assert operate.tool_name == expected_tool
+        assert operate.input_preview == {"app_name": app_name, "action": "new_document"}
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
+
+    foreground = RuntimePlanner().decision(
+        "新建一个演示文稿",
+        allowed_tools=["desktop.safe_shortcut", "desktop.ui_elements"],
+    )
+    assert foreground.selected_intent.kind == "desktop_operation"
+    assert foreground.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+    }
+    assert _step_by_id(foreground, "operate-foreground-ui").input_preview == {
+        "action": "new_document"
+    }
+
+
 def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() -> None:
     decision = RuntimePlanner().decision(
         "打开 Notes，输入 hello，再复制",

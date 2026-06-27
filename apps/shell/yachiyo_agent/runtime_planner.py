@@ -3405,6 +3405,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.24
     if (
         intent.kind == "desktop_operation"
+        and str(
+            (intent.inputs.get("safe_shortcut_hint") or {}).get("action") or ""
+        ).strip()
+        == "new_document"
+    ):
+        score += 0.12
+    if (
+        intent.kind == "desktop_operation"
         and intent.inputs.get("app_search_hint")
         and not _looks_like_media_search_play_request(text)
     ):
@@ -4041,6 +4049,7 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "refresh",
         "new_tab",
         "new_window",
+        "new_document",
         "new_private_window",
         "close_tab",
         "next_tab",
@@ -4173,6 +4182,11 @@ def _safe_shortcut_has_explicit_app_scope(text: str, app_name_hint: str) -> bool
             flags=re.IGNORECASE,
         )
         or re.search(
+            rf"(?:打开|启动|开启|切到|聚焦)\s*{re.escape(app_name)}\s*",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             rf"(?:open|launch|focus|start|activate)\s+(?:the\s+)?{re.escape(app_name)}\b",
             text,
             flags=re.IGNORECASE,
@@ -4183,7 +4197,8 @@ def _safe_shortcut_has_explicit_app_scope(text: str, app_name_hint: str) -> bool
             flags=re.IGNORECASE,
         )
         or re.search(
-            rf"(?:在|用|通过)\s*{re.escape(app_name)}(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
+            rf"(?:在|用|通过)\s*{re.escape(app_name)}\s*"
+            r"(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|播放|创建|新建|写|发送|分析|操作|帮|$)",
             text,
             flags=re.IGNORECASE,
         )
