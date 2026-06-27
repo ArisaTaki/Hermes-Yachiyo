@@ -409,6 +409,50 @@ def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_w
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed = [
+        "desktop.list_apps",
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "app.focus",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_click_ui_element",
+        "desktop.close_window",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    cases = (
+        ("微信关闭窗口", ["app.focus", "desktop.close_window"]),
+        (
+            "在 VS Code 里执行命令 Format Document",
+            ["app.focus_and_safe_shortcut", "desktop.safe_type_text", "desktop.submit_foreground"],
+        ),
+        (
+            "Finder look for Downloads",
+            ["app.focus", "desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+        ),
+        ("微信打开搜索", ["app.open_and_safe_shortcut"]),
+        ("Chrome 点登录", ["app.focus_and_click_ui_element"]),
+    )
+
+    for prompt, expected_tools in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.event_payload["selected_tools"] == expected_tools
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     cases = (

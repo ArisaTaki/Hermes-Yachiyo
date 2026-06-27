@@ -333,6 +333,14 @@ class TaskIntentRouter:
             score = 0.24
         if (
             score <= 0
+            and click_target_hint(text)
+            and not _looks_like_generic_media_control_request(text)
+            and not str(media_playback_hint(text).get("action") or "").strip()
+            and not _looks_like_file_organization_request(text)
+        ):
+            score = 0.18
+        if (
+            score <= 0
             and not metadata.get("daily_desktop_intent")
             and ui_inspection is None
             and screen_capture is None
@@ -1459,6 +1467,11 @@ class RuntimePlanner:
             dict(item) for item in safe_shortcut_sequence[1:] if isinstance(item, Mapping)
         ]
         primary_safe_shortcut = None if followup_safe_shortcut else safe_shortcut
+        if (
+            str((primary_safe_shortcut or {}).get("action") or "").strip() == "find"
+            and not any((type_target, safe_type_text, app_search))
+        ):
+            submit_action = ""
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
             mode=mode,
@@ -1614,6 +1627,21 @@ class RuntimePlanner:
                 "quit_app": "desktop.quit_app",
             }.get(action)
             requires_approval = action in {"close_window", "quit_app"}
+            manage_depends_on = ["discover-desktop-state"]
+            if app_name:
+                steps.append(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        input_preview={"app_name": app_name},
+                        depends_on=["discover-desktop-state"],
+                        reason="Focus the named app before running the foreground window management action.",
+                    )
+                )
+                manage_depends_on = ["open-or-focus-app"]
             steps.append(
                 _step(
                     intent,
@@ -1623,7 +1651,7 @@ class RuntimePlanner:
                     _first_allowed((tool_name,), allowed) if tool_name else None,
                     risk_level="high" if requires_approval else "low",
                     approval_required=requires_approval,
-                    depends_on=["discover-desktop-state"],
+                    depends_on=manage_depends_on,
                     reason="Run the requested foreground app/window management action through the desktop policy gate.",
                 )
             )
@@ -4539,6 +4567,8 @@ def _app_name_hint(text: str) -> str:
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点\s*[^。！？!?，,]+",
+        r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)"
+        r"(?:关闭|隐藏|最小化|退出)(?:窗口|应用|app|application)?",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)"
         r"(?:按|敲|tap|press|hit).{0,8}(?:回车|return|enter)",
         r"^(?!(?:can|could|would|please|pls|search|find|open|launch|focus|start)\b)"
@@ -6206,7 +6236,7 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"(?P<followup>(?:按一下|按下|按|发送|触发|"
         r"向下|往下|朝下|向上|往上|朝上|下滑|上滑|下滚|上滚|"
         r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉|"
-        r"复制|粘贴|全选|撤销|重做|查找|刷新|后退|前进|最大化|全屏|"
+        r"复制|粘贴|全选|撤销|重做|查找|搜索|打开搜索|刷新|后退|前进|最大化|全屏|"
         r"新建|创建|"
         r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
         r"新建提醒事项|新建提醒|新提醒|创建提醒事项|创建提醒|"
@@ -6263,7 +6293,10 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _clean_app_name_hint(groups.get("app") or "")
+        raw_app_name = groups.get("app") or ""
+        if re.search(r"(?:点击|点按|点)\s*$", raw_app_name, flags=re.IGNORECASE):
+            continue
+        app_name = _clean_app_name_hint(raw_app_name)
         followup = _clean_app_scoped_followup(groups.get("followup") or "")
         if not app_name or _invalid_app_scoped_followup_app(app_name) or not followup:
             continue
@@ -6277,6 +6310,8 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
 
 def _invalid_app_scoped_followup_app(app_name: str) -> bool:
     normalized = re.sub(r"[\s._·-]+", "", str(app_name or "").strip().lower())
+    if normalized.endswith(("点", "点击", "点按")):
+        return True
     return normalized in {
         "",
         "你",
@@ -6317,7 +6352,11 @@ def _clean_app_scoped_followup(value: str) -> str:
 
 def _app_command_palette_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
-    if not re.search(r"命令面板|指令面板|command\s+palette", value, flags=re.IGNORECASE):
+    if not re.search(
+        r"命令面板|指令面板|command\s+palette|(?:执行|运行|打开)\s*命令|\b(?:run|execute|open)\s+(?:the\s+)?command\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return {}
     palette = r"(?:命令面板|指令面板|命令\s*palette|command\s+palette)"
     verb = (
@@ -6414,6 +6453,40 @@ def _app_command_palette_hint(text: str) -> dict[str, Any]:
         if safe_key:
             result["safe_key"] = safe_key
         if _command_palette_should_submit(raw_command, str(groups.get("verb") or "")):
+            result["submit"] = True
+        return result
+    implicit_patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|里面)?\s*"
+            r"(?P<verb>执行|运行|打开|run|execute|open)\s*命令\s*(?P<command>[^。！？!?]+)$",
+            "focus",
+        ),
+        (
+            r"^(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?P<verb>run|execute|open)\s+(?:the\s+)?command\s+(?P<command>[^.!?]+)$",
+            "focus",
+        ),
+    )
+    for pattern, default_mode in implicit_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        command_text = _clean_command_palette_text(groups.get("command") or "")
+        if not app_name or not command_text:
+            continue
+        result = {
+            "app_name": app_name,
+            "mode": default_mode,
+            "action": _command_palette_action_for_app(app_name),
+            "text": command_text,
+        }
+        if _command_palette_should_submit(
+            str(groups.get("command") or ""),
+            str(groups.get("verb") or ""),
+        ):
             result["submit"] = True
         return result
     return {}
@@ -6566,10 +6639,10 @@ def _leading_app_search_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     patterns = (
         r"^(?P<app>[\w .·-]{1,40}?)\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
-        r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
-        r"^(?:search|find|look\s+up)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?"
+        r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up|look)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
+        r"^(?:search|find|look\s+up|look)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?"
         r"(?P<app_in>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:for\s+)?(?P<query_in>[^.!?,]+)$",
-        r"^(?:search|find|look\s+up)\s+(?:the\s+)?"
+        r"^(?:search|find|look\s+up|look)\s+(?:the\s+)?"
         r"(?P<app_prefix>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+for\s+(?P<query_prefix>[^.!?,]+)$",
     )
     for pattern in patterns:

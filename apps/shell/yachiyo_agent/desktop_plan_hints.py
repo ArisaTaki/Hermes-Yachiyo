@@ -1475,6 +1475,8 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "redo": "redo",
         "查找": "find",
         "打开查找": "find",
+        "搜索": "find",
+        "打开搜索": "find",
         "find": "find",
         "刷新": "refresh",
         "浏览器刷新": "refresh",

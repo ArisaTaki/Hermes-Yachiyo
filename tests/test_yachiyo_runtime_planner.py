@@ -3047,6 +3047,125 @@ def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
     ]
 
 
+def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "app.focus",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_click_ui_element",
+        "desktop.close_window",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    close_decision = RuntimePlanner().decision("微信关闭窗口", allowed_tools=allowed)
+    assert close_decision.selected_intent.kind == "desktop_operation"
+    assert close_decision.selected_intent.inputs["operation_hint"] == "close_window"
+    assert _step_by_id(close_decision, "open-or-focus-app").tool_name == "app.focus"
+    close_step = _step_by_id(close_decision, "manage-foreground")
+    assert close_step.tool_name == "desktop.close_window"
+    assert close_step.approval_required is True
+    assert planner_direct_tool_requests("微信关闭窗口", allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_direct_tool_requests("在 VS Code 里执行命令 Format Document", allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert planner_direct_tool_requests("Finder look for Downloads", allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Finder"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert planner_direct_tool_requests("微信打开搜索", allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_direct_tool_requests("Chrome 点登录", allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "登录",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+
 def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
     cases = (
         ("在 Keynote 新建一个演示文稿", "Keynote", "new_document", "app.focus_and_safe_shortcut"),
