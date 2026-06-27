@@ -4174,7 +4174,15 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
             }
         ]
 
-    for prompt in ("当前播放什么", "现在播放什么歌", "Apple Music 现在在播什么", "音乐状态"):
+    for prompt in (
+        "当前播放什么",
+        "现在播放什么歌",
+        "Apple Music 现在在播什么",
+        "音乐状态",
+        "查看当前 Apple Music 播放状态",
+        "Apple Music 播放进度",
+        "Apple Music 在播状态",
+    ):
         status_requests = daily_desktop_entrypoint_requests(prompt)
 
         assert status_requests == [

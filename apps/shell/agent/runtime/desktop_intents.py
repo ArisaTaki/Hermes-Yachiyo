@@ -13433,8 +13433,8 @@ def _is_apple_music_status_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:播放|播|放).{0,4}(?:状态|情况)|(?:音乐|apple\s*music|苹果音乐).{0,8}"
-            r"(?:状态|播放状态|播放情况)",
+            r"(?:播放|播|放).{0,4}(?:状态|情况|进度)|(?:音乐|apple\s*music|苹果音乐).{0,8}"
+            r"(?:状态|播放状态|播放情况|播放进度|在播状态)",
             clean,
             flags=re.IGNORECASE,
         )
@@ -13542,6 +13542,9 @@ def _is_specific_music_query(query: str) -> bool:
         "啥",
         "状态",
         "播放状态",
+        "播放进度",
+        "在播状态",
+        "进度",
         "播放",
         "播",
         "放",

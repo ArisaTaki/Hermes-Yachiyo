@@ -2489,6 +2489,25 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
+def test_runtime_planner_routes_media_status_to_readonly_tool() -> None:
+    for prompt in (
+        "查看当前 Apple Music 播放状态",
+        "Apple Music 播放进度",
+        "Apple Music 在播状态",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.apple_music_status", "media.apple_music_play"],
+        )
+
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs["action"] == "status"
+        assert decision.selected_intent.inputs["query"] == ""
+        step = _step_by_id(decision, "control-media-playback")
+        assert step.tool_name == "media.apple_music_status"
+        assert step.input_preview == {}
+
+
 def test_runtime_planner_routes_named_music_app_query_through_app_search() -> None:
     decision = RuntimePlanner().decision(
         "在 Spotify 播放 lo-fi",

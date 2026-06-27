@@ -21,6 +21,11 @@ _GENERIC_MUSIC_QUERIES = {
     "歌曲",
     "播放器",
     "音乐播放器",
+    "状态",
+    "播放状态",
+    "播放进度",
+    "在播状态",
+    "进度",
     "apple",
     "个",
     "一下",
@@ -644,7 +649,20 @@ def media_app_query_search_plan(
 
 def media_action_hint(text: str) -> str:
     lowered = str(text or "").lower()
-    if contains_any(lowered, ["当前播放", "现在播放", "正在播放", "播放什么", "status", "currently playing"]):
+    if contains_any(
+        lowered,
+        [
+            "当前播放",
+            "现在播放",
+            "正在播放",
+            "播放什么",
+            "播放状态",
+            "播放进度",
+            "在播状态",
+            "status",
+            "currently playing",
+        ],
+    ):
         return "status"
     if contains_any(lowered, ["下一首", "下一曲", "下首", "切歌", "换歌", "跳过", "next", "skip"]):
         return "next"
