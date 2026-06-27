@@ -6341,6 +6341,11 @@ def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
         ["desktop.active_window", "desktop.ui_elements", "screen.capture"],
         legacy_tool_requests=legacy_requests,
     )
+    list_apps = planner_first_direct_tool_selection(
+        "列出所有应用",
+        ["desktop.list_apps", "desktop.running_apps"],
+        legacy_tool_requests=legacy_requests,
+    )
 
     assert current_ui.selected_source == "runtime_planner"
     assert current_ui.event_payload["legacy_request_count"] == 0
@@ -6349,6 +6354,17 @@ def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert list_apps.selected_source == "runtime_planner"
+    assert list_apps.event_payload["legacy_request_count"] == 0
+    assert list_apps.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }

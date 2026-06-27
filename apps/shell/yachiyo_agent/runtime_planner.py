@@ -6117,7 +6117,10 @@ def _looks_like_running_apps_request(value: str, lowered: str) -> bool:
 def _looks_like_installed_apps_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(r"(?:列出|列一下|查看|看看|有哪些).{0,8}(?:已安装|可用).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:列出|列一下|查看|看看|显示).{0,8}(?:所有|全部).{0,4}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:有哪些|有什么|有啥).{0,4}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
         or re.search(r"\bshow\s+installed\s+apps?\b", lowered)
+        or re.search(r"\b(?:list|show)\s+all\s+(?:apps?|applications?)\b", lowered)
         or re.search(r"\blist\s+(?:installed|available)\s+(?:apps?|applications?)\b", lowered)
     )
 
