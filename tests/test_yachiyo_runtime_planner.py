@@ -4543,6 +4543,9 @@ def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> Non
     assert _step_by_id(decision, "focus-media-app-search").tool_name == (
         "app.open_and_safe_shortcut"
     )
+    assert _step_by_id(decision, "focus-media-app-search").capability_id == (
+        "desktop.ui_operation"
+    )
     assert _step_by_id(decision, "focus-media-app-search").input_preview == {
         "app_name": "Music",
         "action": "find",
@@ -4551,6 +4554,8 @@ def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> Non
         "text": "超时空辉夜姬"
     }
     assert _step_by_id(decision, "submit-media-search").tool_name == "desktop.search_submit"
+    assert decision.plan.tool_plan.required_capabilities == ["desktop.ui_operation"]
+    assert decision.plan.tool_plan.missing_capabilities == []
 
 
 def test_runtime_planner_verifies_media_app_search_when_observation_tool_is_available() -> None:
@@ -4575,6 +4580,15 @@ def test_runtime_planner_verifies_media_app_search_when_observation_tool_is_avai
     assert verify.capability_id == "desktop.app_discovery"
     assert verify.action == "read_ui"
     assert verify.depends_on == ["submit-media-search"]
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.ui_operation",
+        "desktop.app_discovery",
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == []
+    operation_capability = _capability_by_id(decision, "desktop.ui_operation")
+    discovery_capability = _capability_by_id(decision, "desktop.app_discovery")
+    assert "app.open_and_safe_shortcut" in operation_capability.available_tools
+    assert "desktop.ui_elements" in discovery_capability.available_tools
 
 
 def test_runtime_planner_routes_media_status_to_readonly_tool() -> None:
@@ -4623,6 +4637,9 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
     assert _step_by_id(decision, "focus-media-app-search").tool_name == (
         "app.open_and_safe_shortcut"
     )
+    assert _step_by_id(decision, "focus-media-app-search").capability_id == (
+        "desktop.ui_operation"
+    )
     assert _step_by_id(decision, "focus-media-app-search").input_preview == {
         "app_name": "Spotify",
         "action": "find",
@@ -4635,6 +4652,11 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
     assert play_step.tool_name == "media.music_app_open_and_play"
     assert play_step.input_preview == {"app_name": "Spotify"}
     assert play_step.depends_on == ["submit-media-search"]
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.ui_operation",
+        "media.playback",
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == []
 
 
 def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:

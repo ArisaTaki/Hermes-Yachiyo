@@ -654,7 +654,7 @@ class TaskIntentRouter:
             inputs=hint,
             expected_outputs=["media_state"],
             required_capabilities=["media.playback"],
-            preferred_capabilities=["desktop.app_control"],
+            preferred_capabilities=[],
             risk_level="low",
         )
 
@@ -2537,7 +2537,7 @@ class RuntimePlanner:
                 elif tool_name.startswith("app."):
                     step_id = "focus-media-app-search"
                     title = "Focus media app search"
-                    capability_id = "desktop.app_control"
+                    capability_id = "desktop.ui_operation"
                     action = "shortcut" if tool_name.endswith("_safe_shortcut") else "open"
                     reason = (
                         "Open the requested media app and focus its search affordance because "
@@ -4206,6 +4206,13 @@ def _required_capabilities_for_plan(
     intent: TaskIntentSnapshot,
     steps: list[ToolPlanStepSnapshot],
 ) -> list[str]:
+    if intent.kind == "media_playback":
+        required: list[str] = []
+        for step in steps:
+            capability_id = str(step.capability_id or "").strip()
+            if capability_id and capability_id not in required:
+                required.append(capability_id)
+        return required or list(intent.required_capabilities)
     if intent.kind == "data_analysis":
         required = (
             ["data.analysis"]
