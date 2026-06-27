@@ -6418,6 +6418,44 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
         assert legacy_calls == []
 
 
+def test_planner_first_owns_app_window_and_management_over_legacy() -> None:
+    cases = (
+        (
+            "切到 Slack 的主窗口",
+            ["desktop.list_apps", "desktop.windows", "app.focus_window", "app.focus"],
+            ["app.focus_window"],
+        ),
+        (
+            "最小化 Safari",
+            ["desktop.list_apps", "app.minimize", "desktop.running_apps"],
+            ["app.minimize"],
+        ),
+        (
+            "隐藏 Slack",
+            ["desktop.list_apps", "app.hide", "desktop.running_apps"],
+            ["app.hide"],
+        ),
+        (
+            "退出 Slack",
+            ["desktop.list_apps", "app.quit", "desktop.running_apps"],
+            ["app.quit"],
+        ),
+    )
+
+    for prompt, allowed_tools, expected_tools in cases:
+        legacy_calls: list[dict[str, Any]] = []
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert [request["tool"] for request in selection.requests] == expected_tools
+        assert legacy_calls == []
+
+
 def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
     requests = planner_tool_requests(
         "把 hello 复制到剪贴板",
