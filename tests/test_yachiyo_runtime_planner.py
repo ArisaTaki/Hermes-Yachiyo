@@ -2632,6 +2632,80 @@ def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> N
     )
 
 
+def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> None:
+    allowed_tools = [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    examples = [
+        (
+            "帮我在微信给文件传输助手说测试一下",
+            {
+                "app_name": "WeChat",
+                "recipient": "文件传输助手",
+                "body": "测试一下",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
+            "send hello in Slack to yachiyo",
+            {
+                "app_name": "Slack",
+                "recipient": "yachiyo",
+                "body": "hello",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
+            "message yachiyo in Slack hello",
+            {
+                "app_name": "Slack",
+                "recipient": "yachiyo",
+                "body": "hello",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
+            "发微信给张三：你好",
+            {
+                "app_name": "WeChat",
+                "recipient": "张三",
+                "body": "你好",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
+            "给张三发微信：你好",
+            {
+                "app_name": "WeChat",
+                "recipient": "张三",
+                "body": "你好",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+    ]
+
+    for prompt, direct_hint in examples:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "communication"
+        assert decision.selected_intent.inputs == {"direct_message_hint": direct_hint}
+
+    generic_decision = RuntimePlanner().decision(
+        "发送消息给 Alice：今晚八点见",
+        allowed_tools=allowed_tools,
+    )
+    assert generic_decision.selected_intent.kind == "communication"
+    assert generic_decision.selected_intent.inputs == {}
+
+
 def test_runtime_planner_routes_direct_context_communication_send_sequence() -> None:
     decision = RuntimePlanner().decision(
         "send selected text in Slack to yachiyo",

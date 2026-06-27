@@ -3311,6 +3311,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.08
     if intent.kind == "communication" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score += 0.16
+    if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
+        score += 0.18
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
     if (
@@ -4101,10 +4103,23 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     patterns = (
         (
-            r"^(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
             r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
             r"(?:给|向|对|发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:发送|发出|发消息|发|说|message|send)\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:发送|发消息|发)\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:给|到|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)"
+            r"\s*[:：]\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:发送|发消息|发)\s*(?P<app>[\w .·-]{1,40}?)"
+            r"\s*[:：]\s*(?P<body>.+)$"
         ),
         (
             r"^(?:打开|启动|开启)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
@@ -4131,6 +4146,16 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
         ),
         (
+            r"^(?:please\s+)?(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
+            r"(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
+        ),
+        (
+            r"^(?:please\s+)?(?:message|send)\s+(?P<recipient>[^.!?,]+?)\s+"
+            r"(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?P<body>[^.!?]+)$"
+        ),
+        (
             r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
             r"(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
             r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
@@ -4151,6 +4176,8 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         else:
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
             body = _clean_communication_body_text(groups.get("body") or "")
+        if _is_generic_communication_app_label(groups.get("app") or ""):
+            continue
         if not app_name or not recipient or not body:
             continue
         return {
@@ -4300,6 +4327,24 @@ def _clean_communication_recipient_text(value: str) -> str:
 
 def _clean_communication_body_text(value: str) -> str:
     return _clean_foreground_compose_text(_clean_communication_hint_text(value))
+
+
+def _is_generic_communication_app_label(value: str) -> bool:
+    normalized = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
+    return normalized in {
+        "消息",
+        "送消息",
+        "信息",
+        "私信",
+        "邮件",
+        "电子邮件",
+        "mail",
+        "email",
+        "message",
+        "messages",
+        "msg",
+        "dm",
+    }
 
 
 def _app_scoped_desktop_operation_hint(text: str) -> bool:
