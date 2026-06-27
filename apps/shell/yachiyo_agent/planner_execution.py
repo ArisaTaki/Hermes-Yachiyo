@@ -634,10 +634,16 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     if not isinstance(direct_hint, Mapping):
         return []
     body_source = str(direct_hint.get("body_source") or "").strip()
+    steps_by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in decision.plan.tool_plan.steps
+    }
     if body_source in {"selection", "current_page_link"}:
         required_step_ids = ("copy-communication-body-source",)
     else:
         required_step_ids = ()
+    if "open-or-focus-app" in steps_by_id:
+        required_step_ids += ("open-or-focus-app",)
     required_step_ids += (
         "focus-communication-recipient-search",
         "type-communication-recipient",
@@ -650,10 +656,6 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     required_step_ids += (
         "send-communication-message",
     )
-    steps_by_id = {
-        str(getattr(step, "step_id", "") or "").strip(): step
-        for step in decision.plan.tool_plan.steps
-    }
     requests: list[dict[str, Any]] = []
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)

@@ -1748,7 +1748,8 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
     assert metadata["daily_desktop_tools"] == [
         "desktop.safe_shortcut",
-        "app.focus_and_safe_shortcut",
+        "app.focus",
+        "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.safe_shortcut",
@@ -1763,7 +1764,8 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
     assert selection_events[0][1]["payload"]["selected_tools"] == [
         "desktop.safe_shortcut",
-        "app.focus_and_safe_shortcut",
+        "app.focus",
+        "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.safe_shortcut",

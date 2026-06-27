@@ -1418,6 +1418,7 @@ def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
         allowed_tools=[
             "desktop.safe_shortcut",
             "desktop.search_submit",
+            "app.open",
             "app.open_and_safe_shortcut",
         ],
     )
@@ -1453,11 +1454,18 @@ def test_runtime_planner_tracks_dynamic_web_context_source() -> None:
         "browser_action": "open_search",
         "app_name": "Safari",
     }
+    assert [step.step_id for step in safari.plan.tool_plan.steps] == [
+        "copy-selected-browser-context",
+        "open-or-focus-app",
+        "focus-browser-address-bar",
+        "paste-browser-context",
+        "submit-browser-context",
+    ]
+    assert _step_by_id(safari, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(safari, "focus-browser-address-bar").tool_name == (
-        "app.open_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
     assert _step_by_id(safari, "focus-browser-address-bar").input_preview == {
-        "app_name": "Safari",
         "action": "focus_address_bar",
     }
 
@@ -1490,6 +1498,7 @@ def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
         allowed_tools=[
             "desktop.safe_shortcut",
             "desktop.search_submit",
+            "app.open",
             "app.open_and_safe_shortcut",
         ],
     )
@@ -1513,8 +1522,9 @@ def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
         "browser_action": "open_url",
         "app_name": "Safari",
     }
+    assert _step_by_id(safari, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(safari, "focus-browser-address-bar").tool_name == (
-        "app.open_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
 
 
@@ -5509,8 +5519,11 @@ def test_runtime_planner_routes_implicit_chinese_direct_communication_send_seque
 
 def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> None:
     allowed_tools = [
+        "app.open",
+        "app.focus",
         "app.focus_and_safe_shortcut",
         "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.submit_foreground",
@@ -5534,8 +5547,15 @@ def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> N
     assert planner_direct_tool_requests("用微信给文件传输助手发送你好", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "find"},
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_communication_send",
         },
@@ -5582,8 +5602,9 @@ def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> N
         "mode": "open",
         "send_action": "send",
     }
+    assert _step_by_id(open_decision, "open-or-focus-app").tool_name == "app.open"
     assert _step_by_id(open_decision, "focus-communication-recipient-search").tool_name == (
-        "app.open_and_safe_shortcut"
+        "desktop.safe_shortcut"
     )
 
 
@@ -5754,6 +5775,7 @@ def test_runtime_planner_routes_direct_context_communication_send_sequence() -> 
 
 def test_runtime_planner_infers_known_communication_surface_for_context_send() -> None:
     allowed_tools = [
+        "app.focus",
         "app.focus_and_safe_shortcut",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
@@ -5777,14 +5799,15 @@ def test_runtime_planner_infers_known_communication_surface_for_context_send() -
         },
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
         "focus-communication-recipient-search",
         "type-communication-recipient",
         "submit-communication-recipient-search",
         "paste-communication-message",
         "send-communication-message",
     ]
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(decision, "focus-communication-recipient-search").input_preview == {
-        "app_name": "WeChat",
         "action": "find",
     }
     assert _step_by_id(decision, "paste-communication-message").input_preview == {
@@ -5794,8 +5817,15 @@ def test_runtime_planner_infers_known_communication_surface_for_context_send() -
     assert planner_tool_requests("给文件传输助手发送剪贴板内容", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "find"},
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_communication_send",
         },
@@ -5861,6 +5891,7 @@ def test_runtime_planner_cleans_app_prefix_for_context_communication() -> None:
 
 def test_runtime_planner_routes_paste_to_recipient_as_communication() -> None:
     allowed_tools = [
+        "app.focus",
         "app.focus_and_safe_shortcut",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
@@ -5883,14 +5914,15 @@ def test_runtime_planner_routes_paste_to_recipient_as_communication() -> None:
         }
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
         "focus-communication-recipient-search",
         "type-communication-recipient",
         "submit-communication-recipient-search",
         "paste-communication-message",
         "send-communication-message",
     ]
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(decision, "focus-communication-recipient-search").input_preview == {
-        "app_name": "WeChat",
         "action": "find",
     }
     assert _step_by_id(decision, "type-communication-recipient").input_preview == {
@@ -5905,8 +5937,15 @@ def test_runtime_planner_routes_paste_to_recipient_as_communication() -> None:
     assert planner_direct_tool_requests("微信给文件传输助手粘贴并发送", allowed_tools) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "find"},
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_communication_send",
         },
@@ -9939,6 +9978,8 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
     allowed = [
         "desktop.safe_shortcut",
         "desktop.click_ui_element",
+        "app.open",
+        "app.focus",
         "app.focus_and_safe_shortcut",
         "app.open_and_safe_shortcut",
         "app.focus_and_click_ui_element",
@@ -10005,6 +10046,20 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
     }
+    slack_focus = {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Slack"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
+    slack_open = {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Slack"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
     verify_ui = {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
@@ -10018,45 +10073,25 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         ("把当前页面内容复制到剪贴板", [*current_content_copy]),
         ("把当前网页链接粘贴到 Slack", [
             current_page_link_copy,
-            {
-                "protocol": "json_fallback",
-                "tool": "app.focus_and_safe_shortcut",
-                "input": {"app_name": "Slack", "action": "paste"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+            slack_focus,
+            paste,
             verify_ui,
         ]),
         ("在 Slack 粘贴当前页面内容", [
             *current_content_copy,
-            {
-                "protocol": "json_fallback",
-                "tool": "app.focus_and_safe_shortcut",
-                "input": {"app_name": "Slack", "action": "paste"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+            slack_focus,
+            paste,
             verify_ui,
         ]),
         ("打开 Slack 粘贴当前页面内容", [
             *current_content_copy,
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open_and_safe_shortcut",
-                "input": {"app_name": "Slack", "action": "paste"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+            slack_open,
+            paste,
             verify_ui,
         ]),
         ("把剪贴板内容粘贴到 Slack", [
-            {
-                "protocol": "json_fallback",
-                "tool": "app.focus_and_safe_shortcut",
-                "input": {"app_name": "Slack", "action": "paste"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+            slack_focus,
+            paste,
             verify_ui,
         ]),
         ("把选中的内容填到当前输入框", [selected_copy, paste, verify_ui]),

@@ -3450,6 +3450,20 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
     return None
 
 
+def _app_scoped_safe_shortcut_split_tools(
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+) -> tuple[str | None, str | None]:
+    if not app_name:
+        return None, None
+    app_tool = _first_allowed(app_control_tool_candidates(mode or "focus"), allowed)
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    if not app_tool or not shortcut_tool:
+        return None, None
+    return app_tool, shortcut_tool
+
+
 def _append_app_scoped_safe_shortcut_steps(
     steps: list[ToolPlanStepSnapshot],
     intent: TaskIntentSnapshot,
@@ -3466,8 +3480,11 @@ def _append_app_scoped_safe_shortcut_steps(
     fallback_reason: str,
 ) -> str:
     clean_mode = mode or "focus"
-    app_tool = _first_allowed(app_control_tool_candidates(clean_mode), allowed)
-    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(
+        app_name,
+        clean_mode,
+        allowed,
+    )
     if app_name and app_tool and shortcut_tool:
         steps.append(
             _step(
@@ -3700,11 +3717,16 @@ def _dynamic_context_ui_transfer_steps(
     if target_kind == "app_paste":
         if not app_name:
             return list(base_steps)
+        app_paste_app_tool, app_paste_shortcut_tool = _app_scoped_safe_shortcut_split_tools(
+            app_name,
+            mode,
+            allowed,
+        )
         app_paste_tool = _first_allowed(
             app_foreground_tool_candidates(mode, "safe_shortcut"),
             allowed,
         )
-        if not app_paste_tool:
+        if not ((app_paste_app_tool and app_paste_shortcut_tool) or app_paste_tool):
             return list(base_steps)
     elif target_kind == "ui_field":
         if not target:
@@ -3787,19 +3809,46 @@ def _dynamic_context_ui_transfer_steps(
         return steps
 
     if target_kind == "app_paste":
-        append_step(
-            _step(
-                intent,
-                "paste-context-into-app",
-                "Paste context into app",
-                "desktop.app_control",
-                app_paste_tool,
-                input_preview={"app_name": app_name, "action": "paste"},
-                depends_on=[previous_step_id] if previous_step_id else [],
-                action="shortcut",
-                reason="Focus or open the requested app and paste the captured context.",
+        if app_paste_app_tool and app_paste_shortcut_tool:
+            append_step(
+                _step(
+                    intent,
+                    "open-or-focus-app",
+                    "Open or focus app",
+                    "desktop.app_control",
+                    app_paste_app_tool,
+                    input_preview={"app_name": app_name},
+                    depends_on=[previous_step_id] if previous_step_id else [],
+                    reason="Prepare the requested app before pasting the captured context.",
+                )
             )
-        )
+            append_step(
+                _step(
+                    intent,
+                    "paste-context-into-app",
+                    "Paste context into app",
+                    "desktop.ui_operation",
+                    app_paste_shortcut_tool,
+                    input_preview={"action": "paste"},
+                    depends_on=[previous_step_id],
+                    action="shortcut",
+                    reason="Paste the captured context into the foreground app.",
+                )
+            )
+        else:
+            append_step(
+                _step(
+                    intent,
+                    "paste-context-into-app",
+                    "Paste context into app",
+                    "desktop.app_control",
+                    app_paste_tool,
+                    input_preview={"app_name": app_name, "action": "paste"},
+                    depends_on=[previous_step_id] if previous_step_id else [],
+                    action="shortcut",
+                    reason="Focus or open the requested app and paste the captured context.",
+                )
+            )
     else:
         if target_kind == "ui_field":
             field_payload = {
@@ -3892,10 +3941,11 @@ def _direct_communication_steps(
         or (not body and body_source not in {"clipboard", "selection", "current_page_link"})
     ):
         return []
-    shortcut_tool = _first_allowed(
+    app_shortcut_tool = _first_allowed(
         app_foreground_tool_candidates(mode, "safe_shortcut"),
         allowed,
     )
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
     type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
@@ -3931,18 +3981,41 @@ def _direct_communication_steps(
         )
 
     focus_depends_on = [source_step_id] if source_step_id else []
+    if app_tool and shortcut_tool:
+        steps.append(
+            _step(
+                intent,
+                "open-or-focus-app",
+                "Open or focus app",
+                "desktop.app_control",
+                app_tool,
+                input_preview={"app_name": app_name},
+                depends_on=focus_depends_on,
+                reason="Prepare the requested communication app before resolving the recipient.",
+            )
+        )
+        focus_depends_on = ["open-or-focus-app"]
+        focus_tool = shortcut_tool
+        focus_input = {"action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open foreground recipient search with a generic safe shortcut."
+    else:
+        focus_tool = app_shortcut_tool
+        focus_input = {"app_name": app_name, "action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open the app's recipient search with a safe shortcut before drafting the message."
     steps.extend(
         [
             _step(
                 intent,
                 "focus-communication-recipient-search",
                 "Focus communication recipient search",
-                "communication.compose",
-                shortcut_tool,
-                input_preview={"app_name": app_name, "action": "find"},
+                focus_capability,
+                focus_tool,
+                input_preview=focus_input,
                 action="resolve_recipient",
                 depends_on=focus_depends_on,
-                reason="Open the app's recipient search with a safe shortcut before drafting the message.",
+                reason=focus_reason,
             ),
             _step(
                 intent,
@@ -4116,8 +4189,31 @@ def _dynamic_context_browser_steps(
     focus_payload = {"action": "focus_address_bar"}
     focus_capability = "desktop.ui_operation"
     if app_name:
-        app_focus_tool = _first_allowed(app_foreground_tool_candidates("open", "safe_shortcut"), allowed)
-        if app_focus_tool:
+        app_tool, app_shortcut_tool = _app_scoped_safe_shortcut_split_tools(
+            app_name,
+            "open",
+            allowed,
+        )
+        app_focus_tool = _first_allowed(
+            app_foreground_tool_candidates("open", "safe_shortcut"),
+            allowed,
+        )
+        if app_tool and app_shortcut_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "open-or-focus-app",
+                    "Open or focus app",
+                    "desktop.app_control",
+                    app_tool,
+                    input_preview={"app_name": app_name},
+                    depends_on=focus_depends_on,
+                    reason="Prepare the requested browser before focusing its address bar.",
+                )
+            )
+            focus_depends_on = ["open-or-focus-app"]
+            focus_tool = app_shortcut_tool
+        elif app_focus_tool:
             focus_tool = app_focus_tool
             focus_payload = {"app_name": app_name, "action": "focus_address_bar"}
             focus_capability = "desktop.app_control"
