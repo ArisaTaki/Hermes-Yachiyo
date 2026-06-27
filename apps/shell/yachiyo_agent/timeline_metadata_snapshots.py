@@ -120,7 +120,13 @@ def planner_trace_summary_from_payload(
     intent_title = None
     route_to_studio = None
     selection_source = None
+    selection_role = None
     selection_reason = None
+    planner_entrypoint = None
+    entrypoint_source = None
+    launcher_mode = None
+    launcher_surface = None
+    runnable_kind = None
     plan_tools: list[str] = []
     selected_tools: list[str] = []
     plan_capabilities: list[str] = []
@@ -207,7 +213,13 @@ def planner_trace_summary_from_payload(
 
         if event_type in _PLANNER_SELECTION_EVENTS:
             selection_source = selection_source or _optional_text(payload_record.get("selection_source"))
+            selection_role = selection_role or _optional_text(payload_record.get("selection_role"))
             selection_reason = selection_reason or _optional_text(payload_record.get("selection_reason"))
+            planner_entrypoint = planner_entrypoint or _optional_text(payload_record.get("planner_entrypoint"))
+            entrypoint_source = entrypoint_source or _optional_text(payload_record.get("entrypoint_source"))
+            launcher_mode = launcher_mode or _optional_text(payload_record.get("launcher_mode"))
+            launcher_surface = launcher_surface or _optional_text(payload_record.get("launcher_surface"))
+            runnable_kind = runnable_kind or _optional_text(payload_record.get("runnable_kind"))
             _add_strings(plan_tools, payload_record.get("plan_tools"))
             _add_strings(selected_tools, payload_record.get("selected_tools"))
             _add_strings(plan_capabilities, payload_record.get("plan_capabilities"))
@@ -240,7 +252,13 @@ def planner_trace_summary_from_payload(
         intent_title=intent_title,
         route_to_studio=route_to_studio,
         selection_source=selection_source,
+        selection_role=selection_role,
         selection_reason=selection_reason,
+        planner_entrypoint=planner_entrypoint,
+        entrypoint_source=entrypoint_source,
+        launcher_mode=launcher_mode,
+        launcher_surface=launcher_surface,
+        runnable_kind=runnable_kind,
         plan_tools=plan_tools,
         selected_tools=selected_tools,
         plan_capabilities=plan_capabilities,

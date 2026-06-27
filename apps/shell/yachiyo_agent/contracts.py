@@ -248,7 +248,13 @@ class PlannerTraceSummarySnapshot(_PublicSnapshot):
     intent_title: str | None = None
     route_to_studio: bool | None = None
     selection_source: str | None = None
+    selection_role: str | None = None
     selection_reason: str | None = None
+    planner_entrypoint: str | None = None
+    entrypoint_source: str | None = None
+    launcher_mode: str | None = None
+    launcher_surface: str | None = None
+    runnable_kind: str | None = None
     plan_tools: list[str] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     plan_capabilities: list[str] = Field(default_factory=list)

@@ -131,7 +131,10 @@ def test_agent_task_snapshot_projects_planner_summary_from_visible_events() -> N
                     "payload": {
                         "source": "runtime_planner",
                         "selection_source": "runtime_planner",
+                        "selection_role": "runtime_planner_primary",
                         "selection_reason": "capability_plan",
+                        "planner_entrypoint": "bubble_default",
+                        "entrypoint_source": "bubble",
                         "plan_tools": ["workspace.read", "python.pandas"],
                         "plan_capabilities": [
                             "file.read",
@@ -155,7 +158,10 @@ def test_agent_task_snapshot_projects_planner_summary_from_visible_events() -> N
         intent_kind="data_analysis",
         intent_title="Analyze data",
         selection_source="runtime_planner",
+        selection_role="runtime_planner_primary",
         selection_reason="capability_plan",
+        planner_entrypoint="bubble_default",
+        entrypoint_source="bubble",
         plan_tools=["workspace.read", "python.pandas"],
         selected_tools=["workspace.read", "python.pandas"],
         plan_capabilities=["file.read", "artifact.output", "data.analysis"],

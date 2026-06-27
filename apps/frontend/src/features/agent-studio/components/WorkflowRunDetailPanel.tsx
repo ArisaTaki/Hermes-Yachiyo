@@ -126,10 +126,14 @@ function publicChildPlannerSummary(child: RunTimelineChildSnapshot): string {
   if (!summary) return '';
   const parts = [
     summary.intent_kind,
+    summary.plan_capabilities?.length ? `${summary.plan_capabilities.length} capabilities` : '',
     summary.step_count ? `${summary.step_count} steps` : '',
     summary.approvals_required?.length ? `${summary.approvals_required.length} approvals` : '',
     summary.artifacts_expected?.length ? `${summary.artifacts_expected.length} artifacts` : '',
     summary.open_questions?.length ? `${summary.open_questions.length} questions` : '',
+    summary.selection_role || summary.selection_source || summary.selected_tools?.length ? 'selection' : '',
+    summary.planner_entrypoint ? `entrypoint ${summary.planner_entrypoint}` : '',
+    summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',
   ].filter(Boolean);
   return parts.join(' · ');
 }

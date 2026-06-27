@@ -838,6 +838,10 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def timeline_child_snapshots_from_events",
             "def timeline_child_snapshot_from_event",
             "def merge_timeline_child_snapshots",
+            "def planner_trace_summary_from_payload",
+            "selection_role = selection_role or _optional_text(payload_record.get(\"selection_role\"))",
+            "planner_entrypoint = planner_entrypoint or _optional_text(payload_record.get(\"planner_entrypoint\"))",
+            "entrypoint_source = entrypoint_source or _optional_text(payload_record.get(\"entrypoint_source\"))",
             "def run_timeline_rerun_provenance_from_payload",
             "def run_timeline_agent_id_from_payload",
             "def workflow_run_id_from_payload",
@@ -1279,6 +1283,11 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         "apps/shell/yachiyo_agent/contracts.py",
         [
             "class GroupRunSnapshot",
+            "class PlannerTraceSummarySnapshot",
+            "selection_role: str | None = None",
+            "planner_entrypoint: str | None = None",
+            "entrypoint_source: str | None = None",
+            "launcher_surface: str | None = None",
             "tool_calls: list[ToolCallSnapshot]",
             "memory_traces: list[MemoryTraceSnapshot]",
             "skill_traces: list[SkillTraceSnapshot]",
@@ -1351,7 +1360,9 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "summary.intent_kind ? 'intent' : '',",
             "summary.plan_capabilities?.length ? `${summary.plan_capabilities.length} capabilities` : '',",
             "summary.step_count ? `${summary.step_count} steps` : '',",
-            "summary.selection_source || summary.selected_tools?.length ? 'selection' : '',",
+            "summary.selection_role || summary.selection_source || summary.selected_tools?.length ? 'selection' : '',",
+            "summary.planner_entrypoint ? `entrypoint ${summary.planner_entrypoint}` : '',",
+            "summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',",
         ],
     )
     _assert_smoke_script(

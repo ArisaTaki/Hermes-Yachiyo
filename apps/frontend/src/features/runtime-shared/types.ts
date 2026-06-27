@@ -190,7 +190,13 @@ export type PlannerTraceSummarySnapshot = {
   intent_title?: string | null;
   route_to_studio?: boolean | null;
   selection_source?: string | null;
+  selection_role?: string | null;
   selection_reason?: string | null;
+  planner_entrypoint?: string | null;
+  entrypoint_source?: string | null;
+  launcher_mode?: string | null;
+  launcher_surface?: string | null;
+  runnable_kind?: string | null;
   plan_tools?: string[];
   selected_tools?: string[];
   plan_capabilities?: string[];
