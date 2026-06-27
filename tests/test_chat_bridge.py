@@ -6621,20 +6621,24 @@ def test_chat_bridge_quick_message_executes_app_find_sequence_without_model(
 
     assert calls == [
         ("open", "Finder"),
-        ("focus", "Finder"),
         ("shortcut", "find"),
         ("type", "下载"),
     ]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
-    assert agent_task["summary"] == "已打开 Finder 并打开查找。 已向前台输入文字（2 个字符）。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
-        "app.open_and_safe_shortcut",
+    assert agent_task["summary"] == (
+        "已打开 Finder。 已打开查找。 已向前台输入文字（2 个字符）。 已提交前台搜索。"
+    )
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-5:]] == [
+        "app.open",
+        "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert event_types.count("agent.desktop.intent_planned") == 6
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 

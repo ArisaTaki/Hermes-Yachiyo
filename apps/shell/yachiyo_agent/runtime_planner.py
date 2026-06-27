@@ -218,10 +218,12 @@ class TaskIntentRouter:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
         context_source = context_source_hint(text)
-        if _browser_type_text_hint(text) or _browser_click_hint(text):
+        app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        if (
+            _browser_type_text_hint(text) or _browser_click_hint(text)
+        ) and not app_scoped_desktop_operation:
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
-        app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
         app_preferences = _app_preferences_hint(text)
@@ -389,6 +391,7 @@ class TaskIntentRouter:
         app_search_app_name = str(app_search.get("app_name") or "").strip()
         if app_search_app_name and (
             not app_name_hint
+            or _looks_like_app_search_followup_app(app_name_hint)
             or _compact_app_alias(app_name_hint).startswith(
                 _compact_app_alias(app_search_app_name)
             )
@@ -440,6 +443,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not app_search
             and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
@@ -456,6 +460,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not app_search
             and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
@@ -627,7 +632,7 @@ class TaskIntentRouter:
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
-        if _app_scoped_desktop_operation_hint(text) and not browser_interaction:
+        if _app_scoped_desktop_operation_hint(text):
             return _empty_intent("web_research", text)
         browser_action = (
             web_search
@@ -5012,6 +5017,12 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:发送|发消息|发)\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            r"(?:说|内容是|内容为)\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:发送|发消息|发)\s*(?P<app>[\w .·-]{1,40}?)"
             r"\s*[:：]\s*(?P<body>.+)$"
         ),
@@ -5250,6 +5261,8 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
     app_name = _app_name_hint(text)
     if app_name and _is_browser_or_search_app_name(app_name):
         return False
+    if app_name and _looks_like_non_app_operation_fragment(app_name):
+        return False
     if _app_search_hint(text, app_name):
         return True
     if not app_name:
@@ -5262,6 +5275,26 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
             text,
             ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入"),
         )
+    )
+
+
+def _looks_like_non_app_operation_fragment(app_name: str) -> bool:
+    value = _clean_prompt(app_name)
+    lowered = value.lower()
+    if re.match(r"^(?:click|press|tap|type|enter|fill|open|visit)\b", lowered):
+        return True
+    return _contains_any(
+        lowered,
+        (
+            "current page",
+            "current webpage",
+            "search field",
+            "search box",
+            "search input",
+            "search result",
+            "webpage search",
+            "browser search",
+        ),
     )
 
 
@@ -5606,6 +5639,7 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
         parsed_app = str(parsed.get("app_name") or "").strip() if parsed else ""
         if parsed and (
             not app
+            or _looks_like_app_search_followup_app(app)
             or parsed_app.lower() == app.lower()
             or _compact_app_alias(app).startswith(_compact_app_alias(parsed_app))
         ):
@@ -5616,6 +5650,17 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
         "query": query,
         "target": "搜索" if _contains_any(text, ("搜索", "查找", "检索", "找")) else "Search",
     }
+
+
+def _looks_like_app_search_followup_app(app_name: str) -> bool:
+    value = _clean_prompt(app_name)
+    return bool(
+        re.fullmatch(
+            r"(?:第?一个|第一条|首个|第1个|第1条|1)\s*(?:搜索结果|结果|链接|条目)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_app_search_field_input(text: str) -> bool:

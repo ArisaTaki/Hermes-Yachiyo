@@ -2088,6 +2088,29 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "target": "Search",
     }
 
+    mixed_language_search = RuntimePlanner().decision(
+        "打开 Raycast 然后搜索 clipboard history",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "clipboard.read",
+        ],
+    )
+    assert mixed_language_search.selected_intent.kind == "desktop_operation"
+    assert mixed_language_search.selected_intent.inputs["app_name_hint"] == "Raycast"
+    assert mixed_language_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "clipboard history",
+        "target": "搜索",
+    }
+    assert _step_by_id(mixed_language_search, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(mixed_language_search, "type-app-search-query").input_preview == {
+        "text": "clipboard history"
+    }
+
     focused_search = RuntimePlanner().decision(
         "切到微信，搜索张三",
         allowed_tools=[
@@ -2278,6 +2301,34 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(first_result, "verify-desktop-result").depends_on == [
         "select-app-search-result"
     ]
+
+    first_result_with_context_word = RuntimePlanner().decision(
+        "在 Raycast 搜索 clipboard history 并打开第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "browser.click",
+            "clipboard.read",
+        ],
+    )
+    assert first_result_with_context_word.selected_intent.kind == "desktop_operation"
+    assert first_result_with_context_word.selected_intent.inputs["app_name_hint"] == "Raycast"
+    assert first_result_with_context_word.selected_intent.inputs["app_search_hint"] == {
+        "app_name": "Raycast",
+        "query": "clipboard history",
+        "target": "搜索",
+    }
+    context_word_click = _step_by_id(
+        first_result_with_context_word,
+        "select-app-search-result",
+    )
+    assert context_word_click.tool_name == "desktop.click_ui_element"
+    assert context_word_click.approval_required is True
 
     arrow_confirm = RuntimePlanner().decision(
         "在 Slack 搜索 Alice 后按下箭头再确认",
@@ -3598,6 +3649,10 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
         "屏幕太亮了，调暗一点",
         allowed_tools=["system.brightness"],
     )
+    brightness_up = RuntimePlanner().decision(
+        "把亮度调高一点",
+        allowed_tools=["system.brightness", "system.volume"],
+    )
     display_sleep = RuntimePlanner().decision(
         "关闭屏幕",
         allowed_tools=["system.display_sleep"],
@@ -3613,6 +3668,14 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
         "action": "down",
         "step": 2,
     }
+    assert brightness_up.selected_intent.kind == "system_control"
+    assert brightness_up.selected_intent.inputs == {
+        "kind": "brightness",
+        "payload": {"action": "up", "step": 2},
+    }
+    assert _step_by_id(brightness_up, "control-system-state").tool_name == (
+        "system.brightness"
+    )
     assert display_sleep.selected_intent.kind == "system_control"
     assert _step_by_id(display_sleep, "control-system-state").tool_name == "system.display_sleep"
     assert screen_saver.selected_intent.kind == "system_control"
@@ -3925,6 +3988,16 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
                 "app_name": "WeChat",
                 "recipient": "张三",
                 "body": "你好",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
+            "给 Alice 发微信说我晚点到",
+            {
+                "app_name": "WeChat",
+                "recipient": "Alice",
+                "body": "我晚点到",
                 "mode": "focus",
                 "send_action": "send",
             },
@@ -4601,6 +4674,57 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.click_ui_element",
             "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    assert planner_direct_tool_requests(
+        "在 Raycast 搜索 clipboard history 并打开第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "browser.click",
+            "clipboard.read",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Raycast"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "clipboard history"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "第一个结果", "role_filter": "", "limit": 80, "click_count": 2},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },

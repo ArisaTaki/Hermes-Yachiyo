@@ -16,12 +16,12 @@ def system_control_hint(prompt: str) -> dict[str, Any]:
     settings_payload = _settings_open_payload(text)
     if settings_payload:
         return {"kind": "settings_open", **settings_payload}
-    volume_payload = _volume_payload(text)
-    if volume_payload:
-        return {"kind": "volume", "payload": volume_payload}
     brightness_payload = _brightness_payload(text)
     if brightness_payload:
         return {"kind": "brightness", "payload": brightness_payload}
+    volume_payload = _volume_payload(text)
+    if volume_payload:
+        return {"kind": "volume", "payload": volume_payload}
     if _display_sleep_request(text):
         return {"kind": "display_sleep", "payload": {}}
     return {}
@@ -216,6 +216,11 @@ def _brightness_payload(text: str) -> dict[str, Any]:
     lowered = text.lower()
     if _contains_any(text, ["设置", "设为", "设成", "%", "百分之"]):
         return {}
+    has_brightness_context = _contains_any(text, ["亮度", "屏幕亮度", "brightness"])
+    if has_brightness_context and _contains_any(text, ["调高", "提高", "高一点", "高点", "调大"]):
+        return {"action": "up", "step": _brightness_step(text)}
+    if has_brightness_context and _contains_any(text, ["调低", "降低", "低一点", "低点", "调小"]):
+        return {"action": "down", "step": _brightness_step(text)}
     if _contains_any(text, ["调亮", "亮一点", "亮点", "太暗", "brightness up", "brighter"]):
         return {"action": "up", "step": _brightness_step(text)}
     if _contains_any(text, ["调暗", "暗一点", "暗点", "太亮", "brightness down", "dimmer"]):
