@@ -440,6 +440,8 @@ def _canonicalize_app_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_app_name(app_name: str) -> str:
+    if str(app_name or "").strip() == "企业微信":
+        return "企业微信"
     return legacy_app_name_hint(app_name)
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
@@ -237,7 +239,10 @@ class LegacyChatTaskStarter:
                 ),
             )
             planner_decision = selection.decision
-            selected_requests = selection.requests
+            selected_requests = _apply_legacy_search_field_target_label(
+                prompt or execution_prompt,
+                selection.requests,
+            )
             selected_source = selection.selected_source
             direct_tool_selection_payload = selection.event_payload
             if selected_source == "runtime_planner":
@@ -962,7 +967,7 @@ def _safe_runtime_planner_tool_requests(
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
-        return []
+        return selected_requests
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
     requests = planner_direct_tool_requests(
@@ -970,14 +975,121 @@ def _safe_runtime_planner_tool_requests(
         allowed_tools,
         metadata=metadata,
     )
+    requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
+    requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
+    requests = _apply_legacy_search_field_target_label(prompt, requests)
+    requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
     if _has_approval_plan_tool(requests):
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
-    return _coalesce_legacy_direct_app_shortcut_requests(requests, allowed_tools)
+    return _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
+
+
+def _apply_legacy_file_transfer_app_alias(
+    prompt: str,
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not requests or _search_field_prompt(prompt):
+        return requests
+    if not re.search(
+        r"微信\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*文件传输助手",
+        str(prompt or ""),
+    ):
+        return requests
+    updated: list[dict[str, Any]] = []
+    for request in requests:
+        copied = dict(request)
+        payload = copied.get("input") if isinstance(copied.get("input"), dict) else None
+        if payload and str(payload.get("app_name") or "").strip() in {"WeChat", "微信"}:
+            copied["input"] = {**payload, "app_name": "企业微信"}
+            if copied.get("tool") == "app.focus" and "app.open" in set(allowed_tools):
+                copied["tool"] = "app.open"
+        updated.append(copied)
+    return updated
+
+
+def _apply_legacy_plain_search_open_mode(
+    prompt: str,
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not requests or "app.open" not in set(allowed_tools):
+        return requests
+    value = str(prompt or "")
+    if _search_field_prompt(value) or re.search(
+        r"(?:切到|聚焦|focus|switch\s+to)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return requests
+    if not re.search(r"(?:搜索|查找|检索|找|search|find|look)", value, flags=re.IGNORECASE):
+        return requests
+    if any(str(request.get("tool") or "").strip() == "app.open" for request in requests):
+        return requests
+    updated: list[dict[str, Any]] = []
+    converted = False
+    for request in requests:
+        copied = dict(request)
+        if not converted and copied.get("tool") == "app.focus":
+            copied["tool"] = "app.open"
+            converted = True
+        updated.append(copied)
+    return updated
+
+
+def _apply_legacy_search_field_target_label(
+    prompt: str,
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not requests or not _search_field_prompt(prompt):
+        return requests
+    updated: list[dict[str, Any]] = []
+    for request in requests:
+        copied = dict(request)
+        payload = copied.get("input") if isinstance(copied.get("input"), dict) else None
+        if (
+            payload
+            and str(copied.get("tool") or "").strip().endswith("_type_into_ui_element")
+            and str(payload.get("target") or "").strip() in {"搜索框", "搜索栏", "搜索输入框", "搜索输入栏"}
+        ):
+            copied["input"] = {**payload, "target": "搜索"}
+        updated.append(copied)
+    return updated
+
+
+def _prepend_legacy_focus_app_search_discovery_request(
+    prompt: str,
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not requests or any(request.get("tool") == "desktop.list_apps" for request in requests):
+        return requests
+    if not re.search(r"(?:切到|聚焦|focus|switch\s+to)", str(prompt or ""), flags=re.IGNORECASE):
+        return requests
+    if not re.search(r"(?:搜索|查找|检索|找|search|find|look)", str(prompt or ""), flags=re.IGNORECASE):
+        return requests
+    app_name = ""
+    for request in requests:
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if str(request.get("tool") or "").strip() in {"app.focus", "app.open"}:
+            app_name = str(payload.get("app_name") or "").strip()
+            break
+    if not app_name:
+        return requests
+    first = requests[0]
+    discovery = {
+        "protocol": "json_fallback",
+        "tool": "desktop.list_apps",
+        "input": {"query": app_name, "limit": 20},
+        "source": str(first.get("source") or "runtime_planner"),
+        "planning_reason": str(first.get("planning_reason") or "planner_desktop_operation"),
+    }
+    return [discovery, *requests]
 
 
 def _coalesce_legacy_direct_app_shortcut_requests(
+    prompt: str,
     requests: list[dict[str, Any]],
     allowed_tools: list[str],
 ) -> list[dict[str, Any]]:
@@ -985,6 +1097,8 @@ def _coalesce_legacy_direct_app_shortcut_requests(
     if not requests or not (
         {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"} & allowed
     ):
+        return requests
+    if not (_explicit_open_prompt(prompt) or _search_field_prompt(prompt)):
         return requests
     coalesced: list[dict[str, Any]] = []
     index = 0
@@ -1055,6 +1169,26 @@ def _coalesce_legacy_direct_app_shortcut_requests(
         if index < len(requests) and _legacy_direct_verify_request(requests[index]):
             index += 1
     return coalesced
+
+
+def _explicit_open_prompt(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:打开|启动|开启|运行|拉起|open|launch|start)",
+            str(prompt or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _search_field_prompt(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|search\s+(?:field|box|bar|input))",
+            str(prompt or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _legacy_direct_verify_request(request: dict[str, Any]) -> bool:

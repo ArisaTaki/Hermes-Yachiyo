@@ -1544,6 +1544,13 @@ class RuntimePlanner:
         if app_name and click_target and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
+        if (
+            app_search
+            and type_target
+            and _looks_like_app_search_field_input(intent.user_goal)
+            and not _app_search_safe_sequence_available(intent.user_goal, app_search, allowed)
+        ):
+            app_search = {}
         foreground_compose_text = str(
             intent.inputs.get("foreground_compose_text_hint")
             or _foreground_compose_text_hint(intent.user_goal)
@@ -2215,6 +2222,13 @@ class RuntimePlanner:
             if (
                 prepare_tool == "app.open"
                 and focus_tool
+                and (
+                    not app_search
+                    or _contains_any(
+                        intent.user_goal,
+                        ["打开", "启动", "开启", "open ", "launch ", "start "],
+                    )
+                )
                 and any(
                     item
                     for item in (
@@ -2277,6 +2291,7 @@ class RuntimePlanner:
             search_query = str(app_search.get("query") or "").strip()
             search_target = str(app_search.get("target") or "").strip() or "Search"
             search_followup = _app_search_followup_hint(intent.user_goal)
+            app_search_needs_verify = False
             app_search_context_source = _app_search_query_context_source(app_search)
             context_shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
             app_search_prepare_step_id = "open-or-focus-app"
@@ -2410,7 +2425,8 @@ class RuntimePlanner:
                     )
                 )
                 search_terminal_step_id = "confirm-app-search-result"
-            else:
+                app_search_needs_verify = True
+            elif _app_search_should_submit(intent.user_goal, search_followup):
                 steps.append(
                     _step(
                         intent,
@@ -2427,6 +2443,7 @@ class RuntimePlanner:
                     )
                 )
                 search_terminal_step_id = "submit-app-search"
+                app_search_needs_verify = True
                 if search_followup.get("action") == "click_first_result":
                     click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
                     steps.append(
@@ -2450,6 +2467,9 @@ class RuntimePlanner:
                         )
                     )
                     search_terminal_step_id = "select-app-search-result"
+                    app_search_needs_verify = True
+            if not app_search_needs_verify or not app_name:
+                return steps
             verify_tool = _first_allowed(
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
                 allowed,
@@ -5467,6 +5487,13 @@ def _clean_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
+    app = re.sub(r"\s*(?:搜索|查找|检索|找)\s*.+$", "", app).strip(" .，,。")
+    app = re.sub(
+        r"\s+\b(?:search|find|look\s+up|look)\b\s+.+$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
@@ -5534,6 +5561,8 @@ def _clean_app_name_hint(value: str) -> str:
         "我",
         "帮我",
         "请",
+        "点",
+        "点击",
     }
     if context_source_hint(app):
         return ""
@@ -7597,12 +7626,18 @@ def _command_palette_should_submit(value: str, verb: str) -> bool:
 def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
     if _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         return {}
-    if _looks_like_app_search_field_input(text):
-        return {}
+    field_query = ""
     app = str(app_name or "").strip()
-    if app and _is_browser_or_search_app_name(app):
+    if _looks_like_app_search_field_input(text):
+        if _app_search_field_input_allows_safe_search(text):
+            field_query = _app_search_field_input_submit_query(text)
+            if not field_query and app:
+                field_query = _app_search_field_input_query(text)
+        if not field_query:
+            return {}
+    if app and _is_browser_or_search_app_name(app) and not field_query:
         return {}
-    query = _app_search_query_hint(text, app)
+    query = field_query or _app_search_query_hint(text, app)
     if not query:
         parsed = _leading_app_search_hint(text)
         parsed_app = str(parsed.get("app_name") or "").strip() if parsed else ""
@@ -7653,6 +7688,71 @@ def _looks_like_app_search_field_input(text: str) -> bool:
             and _contains_any(value, ("输入", "键入", "填写", "填入", "写入", "写"))
         )
     )
+
+
+def _app_search_field_input_allows_safe_search(text: str) -> bool:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:点击|点按|点一下|点|单击|选中|选择|聚焦|定位).{0,12}"
+            r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:click|tap|focus|select)\b.{0,36}"
+            r"(?:search field|search box|search input|search bar)",
+            lowered,
+        )
+    )
+
+
+def _app_search_field_input_submit_query(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)\s*"
+        r"(?:输入|键入|填写|填入|写入|写)\s*"
+        r"(?P<query>[^。！？!?，,]+?)\s*"
+        r"(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车)$",
+        r"(?:type|enter|fill)\s+(?P<query_en>[^.!?,]+?)\s+"
+        r"(?:into|in|inside)\s+(?:the\s+)?"
+        r"(?:search field|search box|search input|search bar)\s+"
+        r"(?:and|then)?\s*(?:search|submit|confirm|press\s+enter|hit\s+enter)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_app_search_query(
+            match.groupdict().get("query") or match.groupdict().get("query_en") or ""
+        )
+        if query:
+            return query
+    return ""
+
+
+def _app_search_field_input_query(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)\s*"
+        r"(?:输入|键入|填写|填入|写入|写)\s*"
+        r"(?P<query>[^。！？!?，,]+?)(?:\s*(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车))?$",
+        r"(?:type|enter|fill)\s+(?P<query_en>[^.!?,]+?)\s+"
+        r"(?:into|in|inside)\s+(?:the\s+)?"
+        r"(?:search field|search box|search input|search bar)"
+        r"(?:\s+(?:and|then)?\s*(?:search|submit|confirm|press\s+enter|hit\s+enter))?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_app_search_query(
+            match.groupdict().get("query") or match.groupdict().get("query_en") or ""
+        )
+        if query:
+            return query
+    return ""
 
 
 def _leading_app_search_hint(text: str) -> dict[str, str]:
@@ -7815,6 +7915,47 @@ def _app_search_query_context_source(app_search: Mapping[str, Any]) -> str:
     }:
         return "clipboard"
     return ""
+
+
+def _app_search_safe_sequence_available(
+    text: str,
+    app_search: Mapping[str, Any],
+    allowed: set[str] | None,
+) -> bool:
+    allowed_tools = allowed or set()
+    if "desktop.safe_shortcut" not in allowed_tools:
+        return False
+    context_source = _app_search_query_context_source(app_search)
+    if context_source not in {"selection", "clipboard"} and "desktop.safe_type_text" not in allowed_tools:
+        return False
+    followup = _app_search_followup_hint(text)
+    if followup.get("action") == "arrow_down_confirm":
+        return "desktop.safe_key" in allowed_tools and "desktop.submit_foreground" in allowed_tools
+    if _app_search_should_submit(text, followup) and "desktop.search_submit" not in allowed_tools:
+        return False
+    if followup.get("action") == "click_first_result" and "desktop.click_ui_element" not in allowed_tools:
+        return False
+    return True
+
+
+def _app_search_should_submit(text: str, search_followup: Mapping[str, Any]) -> bool:
+    if search_followup:
+        return True
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    return bool(
+        re.search(r"(?:搜索|查找|检索)(?!框|栏|输入|结果)", value)
+        or re.search(r"\b(?:search|find|look\s+up|look)\b", lowered)
+        or (
+            not _contains_any(value, ("打开", "启动", "开启", "open ", "launch ", "start "))
+            and re.search(r"^[\w .·-]{1,40}?\s*找\s*\S+", value)
+        )
+        or re.search(r"(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车)$", value)
+        or re.search(
+            r"\b(?:and|then)?\s*(?:search|submit|confirm|press\s+enter|hit\s+enter)$",
+            lowered,
+        )
+    )
 
 
 def _app_search_followup_hint(text: str) -> dict[str, Any]:
