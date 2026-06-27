@@ -197,6 +197,7 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        command_palette = _app_command_palette_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
         score = _score_terms(
@@ -268,7 +269,7 @@ class TaskIntentRouter:
         )
         if score <= 0 and (foreground_submit_action or foreground_compose_text or foreground_paste):
             score = 0.18
-        if score <= 0 and app_scoped_desktop_operation:
+        if score <= 0 and (app_scoped_desktop_operation or command_palette):
             score = 0.18
         if score <= 0 and spotlight_search_query:
             score = 0.18
@@ -288,6 +289,7 @@ class TaskIntentRouter:
             and not foreground_paste
             and desktop_discovery is None
             and not foreground_submit_action
+            and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -308,6 +310,7 @@ class TaskIntentRouter:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
+            or (command_palette or {}).get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
             or _foreground_compose_app_name_hint(text)
@@ -372,6 +375,7 @@ class TaskIntentRouter:
             and not app_search
             and not spotlight_search_query
             and not foreground_submit_action
+            and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
         if (
@@ -386,6 +390,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
         if (
@@ -401,6 +406,7 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not command_palette
         ):
             return _empty_intent("desktop_operation", text)
         inputs: dict[str, Any] = {
@@ -421,6 +427,8 @@ class TaskIntentRouter:
             inputs["app_management_prepare_mode"] = app_management_prepare_mode
         if app_search:
             inputs["app_search_hint"] = app_search
+        if command_palette:
+            inputs["command_palette_hint"] = command_palette
         if spotlight_search_query:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
         if foreground_management is not None:
@@ -1126,6 +1134,9 @@ class RuntimePlanner:
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
             )
+        command_palette = intent.inputs.get("command_palette_hint")
+        if not isinstance(command_palette, Mapping):
+            command_palette = _app_command_palette_hint(intent.user_goal)
         spotlight_search = intent.inputs.get("spotlight_search_hint")
         if not isinstance(spotlight_search, Mapping):
             spotlight_query = _spotlight_search_query_hint(intent.user_goal)
@@ -1136,6 +1147,7 @@ class RuntimePlanner:
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
             or intent.inputs.get("app_name_hint")
+            or command_palette.get("app_name")
             or app_search.get("app_name")
             or _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             or (app_management or {}).get("app_name")
@@ -1536,6 +1548,101 @@ class RuntimePlanner:
                     input_preview={},
                     depends_on=["manage-app"],
                     reason="Observe desktop state after the app management action.",
+                )
+            )
+            return steps
+        if command_palette:
+            palette_app = str(command_palette.get("app_name") or app_name or "").strip()
+            command_text = str(command_palette.get("text") or "").strip()
+            palette_mode = str(command_palette.get("mode") or mode or "focus").strip()
+            shortcut_action = str(
+                command_palette.get("action")
+                or _command_palette_action_for_app(palette_app)
+                or "command_palette"
+            ).strip()
+            shortcut_tool = _first_allowed(
+                (f"app.{palette_mode}_and_safe_shortcut", "app.focus_and_safe_shortcut"),
+                allowed,
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "open-app-command-palette",
+                    "Open app command palette",
+                    "desktop.app_control",
+                    shortcut_tool,
+                    input_preview={"app_name": palette_app, "action": shortcut_action},
+                    depends_on=["discover-desktop-state"],
+                    action="shortcut",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Open the requested app command palette with a safe app-scoped shortcut.",
+                )
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "type-command-palette-query",
+                    "Type command palette query",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_type_text",), allowed),
+                    input_preview={"text": command_text},
+                    depends_on=["open-app-command-palette"],
+                    action="type",
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Type only the explicit command text from the user prompt.",
+                )
+            )
+            previous_step_id = "type-command-palette-query"
+            safe_key = command_palette.get("safe_key")
+            if isinstance(safe_key, Mapping) and safe_key:
+                steps.append(
+                    _step(
+                        intent,
+                        "navigate-command-palette-result",
+                        "Navigate command palette result",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_key",), allowed),
+                        input_preview=dict(safe_key),
+                        depends_on=[previous_step_id],
+                        action="key",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Navigate command palette results with the explicit safe key from the prompt.",
+                    )
+                )
+                previous_step_id = "navigate-command-palette-result"
+            if command_palette.get("submit"):
+                steps.append(
+                    _step(
+                        intent,
+                        "submit-command-palette",
+                        "Submit command palette",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.submit_foreground",), allowed),
+                        input_preview={"action": "confirm"},
+                        depends_on=[previous_step_id],
+                        action="submit",
+                        risk_level="high",
+                        approval_required=True,
+                        reason="Confirm the command palette selection only when the prompt asks to run or confirm it.",
+                    )
+                )
+                previous_step_id = "submit-command-palette"
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    _first_allowed(
+                        ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+                        allowed,
+                    ),
+                    input_preview={},
+                    depends_on=[previous_step_id],
+                    reason="Observe the app after the command palette operation.",
                 )
             )
             return steps
@@ -4559,6 +4666,153 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
         or _contains_any(
             text,
             ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入"),
+        )
+    )
+
+
+def _app_command_palette_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not re.search(r"命令面板|指令面板|command\s+palette", value, flags=re.IGNORECASE):
+        return {}
+    palette = r"(?:命令面板|指令面板|命令\s*palette|command\s+palette)"
+    verb = (
+        r"(?P<verb>输入|打字|键入|敲入|打入|打上|搜索|查找|找|执行|运行|打开|启动|"
+        r"type|enter|search|find|run|execute|open|launch)"
+    )
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|里面)?\s*"
+            rf"(?:打开|调出|唤起|显示|open|show)?\s*{palette}\s*"
+            r"(?:(?:并且|并|然后|之后|后(?!退)|再|and\s+then|and|then)\s*)?"
+            rf"{verb}\s*(?P<command>[^。！？!?]+)$",
+            "focus",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s*"
+            rf"(?:的)?(?:打开|调出|唤起|显示|open|show)?\s*{palette}\s*"
+            r"(?:(?:并且|并|然后|之后|后(?!退)|再|and\s+then|and|then)\s*)?"
+            rf"{verb}\s*(?P<command>[^。！？!?]+)$",
+            "",
+        ),
+        (
+            rf"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+{palette}\s+"
+            rf"{verb}\s+(?P<command>[^.!?]+)$",
+            "focus",
+        ),
+        (
+            r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            rf"(?:(?:and|then)\s+)?(?:open|show)?\s*{palette}\s+"
+            rf"(?:(?:and|then)\s+)?{verb}\s+(?P<command>[^.!?]+)$",
+            "",
+        ),
+    )
+    for pattern, default_mode in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        command_text = _clean_command_palette_text(groups.get("command") or "")
+        if not app_name or not command_text:
+            continue
+        mode = _command_palette_mode(groups.get("mode") or default_mode)
+        raw_command = str(groups.get("command") or "")
+        result: dict[str, Any] = {
+            "app_name": app_name,
+            "mode": mode,
+            "action": _command_palette_action_for_app(app_name),
+            "text": command_text,
+        }
+        safe_key = _command_palette_safe_key_hint(raw_command)
+        if safe_key:
+            result["safe_key"] = safe_key
+        if _command_palette_should_submit(raw_command, str(groups.get("verb") or "")):
+            result["submit"] = True
+        return result
+    return {}
+
+
+def _command_palette_mode(value: str) -> str:
+    lowered = str(value or "").strip().lower()
+    if lowered in {"打开", "启动", "开启", "open", "launch", "start"}:
+        return "open"
+    return "focus"
+
+
+def _command_palette_action_for_app(app_name: str) -> str:
+    if _compact_app_alias(app_name) == "obsidian":
+        return "obsidian_command_palette"
+    return "command_palette"
+
+
+def _clean_command_palette_text(value: str) -> str:
+    text = _clean_prompt(value)
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:(?:按一下|按下|按|发送|触发)\s*)?"
+        r"(?:回车|enter|return|确认|确定)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*(?:(?:press|hit|send)\s+)?(?:the\s+)?"
+        r"(?:enter|return|confirm|ok)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:(?:按一下|按下|按|发送|触发)\s*)?"
+        r"(?:下箭头|向下箭头|down\s+arrow)\s*"
+        r"(?:再|然后|并|and\s+then|then|and)?\s*(?:确认|确定|回车|enter|return)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|随后|后(?!退)|再|接着)\s*"
+        r"(?:选择|选中|打开|点击|点一下|点按|单击|点|进入|访问|执行|确认)?\s*"
+        r"(?:搜索结果|结果|命令|指令|条目|项目)?(?:中|里|里的|的)?\s*"
+        r"(?:第?一个|第一条|首个|第1个|第1条|1)\s*"
+        r"(?:搜索结果|结果|命令|指令|条目|项目)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and\s+then|then|and)\s*"
+        r"(?:select|choose|open|click|run|execute|confirm)\s+"
+        r"(?:the\s+)?(?:first|1st)\s+(?:result|item|command|match)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip(" .，,。 「」『』“”\"'`")
+
+
+def _command_palette_safe_key_hint(value: str) -> dict[str, Any]:
+    if re.search(r"(?:下箭头|向下箭头|down\s+arrow)", str(value or ""), flags=re.IGNORECASE):
+        return {"action": "arrow_down", "repeat_count": 1}
+    return {}
+
+
+def _command_palette_should_submit(value: str, verb: str) -> bool:
+    raw = str(value or "")
+    lowered_verb = str(verb or "").strip().lower()
+    if lowered_verb in {"执行", "运行", "打开", "启动", "run", "execute", "open", "launch"}:
+        return True
+    return bool(
+        re.search(r"(?:回车|确认|确定|enter|return|confirm|ok)", raw, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:选择|选中|打开|点击|执行|select|choose|open|click|run|execute).{0,12}"
+            r"(?:第?一个|第一条|首个|第1个|第1条|1|first|1st)",
+            raw,
+            flags=re.IGNORECASE,
         )
     )
 

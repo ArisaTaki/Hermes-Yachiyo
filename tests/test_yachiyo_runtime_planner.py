@@ -1900,6 +1900,46 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert _step_by_id(focused_search, "open-or-focus-app").tool_name == "app.focus"
 
+    command_palette = RuntimePlanner().decision(
+        "切到 Obsidian 打开命令面板输入 Toggle reading view 并回车",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert command_palette.selected_intent.kind == "desktop_operation"
+    assert command_palette.selected_intent.inputs["app_name_hint"] == "Obsidian"
+    assert command_palette.selected_intent.inputs["command_palette_hint"] == {
+        "app_name": "Obsidian",
+        "mode": "focus",
+        "action": "obsidian_command_palette",
+        "text": "Toggle reading view",
+        "submit": True,
+    }
+    assert [step.step_id for step in command_palette.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-app-command-palette",
+        "type-command-palette-query",
+        "submit-command-palette",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(command_palette, "open-app-command-palette").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+    assert _step_by_id(command_palette, "open-app-command-palette").input_preview == {
+        "app_name": "Obsidian",
+        "action": "obsidian_command_palette",
+    }
+    assert _step_by_id(command_palette, "type-command-palette-query").input_preview == {
+        "text": "Toggle reading view"
+    }
+    assert _step_by_id(command_palette, "submit-command-palette").tool_name == (
+        "desktop.submit_foreground"
+    )
+
     finder_file_search = RuntimePlanner().decision(
         "在 Finder 搜索 budget.xlsx",
         allowed_tools=[
@@ -3665,6 +3705,82 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    command_palette_requests = planner_direct_tool_requests(
+        "切到 Obsidian 打开命令面板输入 Toggle reading view 并回车",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert command_palette_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "obsidian_command_palette"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Toggle reading view"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    command_palette_key_requests = planner_direct_tool_requests(
+        "在 VS Code 里打开命令面板输入 Format Document 后按下箭头再确认",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert command_palette_key_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Format Document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
