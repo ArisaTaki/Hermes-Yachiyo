@@ -3908,6 +3908,23 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         "inspect_ui": False,
     }
 
+    display_settings = RuntimePlanner().decision(
+        "打开显示设置",
+        allowed_tools=["system.settings_open", "app.show", "desktop.running_apps"],
+    )
+    assert display_settings.selected_intent.kind == "system_control"
+    assert display_settings.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "显示器"},
+        "inspect_ui": False,
+    }
+    assert _step_by_id(display_settings, "open-system-settings").tool_name == (
+        "system.settings_open"
+    )
+    assert _step_by_id(display_settings, "open-system-settings").input_preview == {
+        "target": "显示器"
+    }
+
     sound_settings = RuntimePlanner().decision(
         "open sound settings",
         allowed_tools=["system.settings_open", "app.open_and_safe_shortcut"],
@@ -4029,6 +4046,47 @@ def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
     assert followup.depends_on == ["operate-foreground-ui"]
     assert _step_by_id(decision, "verify-desktop-result").depends_on == [
         "operate-foreground-ui-followup"
+    ]
+
+
+def test_runtime_planner_focuses_opened_app_before_generic_foreground_shortcut() -> None:
+    decision = RuntimePlanner().decision(
+        "open Notes and make a new note",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "Notes",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(decision, "focus-opened-app").tool_name == "app.focus"
+    assert _step_by_id(decision, "focus-opened-app").depends_on == [
+        "open-or-focus-app"
+    ]
+    assert _step_by_id(decision, "operate-foreground-ui").tool_name == (
+        "desktop.safe_shortcut"
+    )
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {
+        "action": "new_note"
+    }
+    assert _step_by_id(decision, "operate-foreground-ui").depends_on == [
+        "focus-opened-app"
     ]
 
 
@@ -5365,6 +5423,35 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
         step = _step_by_id(decision, "control-media-playback")
         assert step.tool_name == "media.system_control"
         assert step.input_preview == {"action": action}
+
+
+def test_runtime_planner_keeps_generic_back_to_app_out_of_media_controls() -> None:
+    decision = RuntimePlanner().decision(
+        "go back to WeChat",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.active_window",
+            "media.system_control",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "WeChat"
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "WeChat"
+    }
+
+    previous = RuntimePlanner().decision(
+        "previous track",
+        allowed_tools=["media.system_control", "desktop.list_apps", "app.focus"],
+    )
+    assert previous.selected_intent.kind == "media_playback"
+    assert previous.selected_intent.inputs["action"] == "previous"
+    assert _step_by_id(previous, "control-media-playback").tool_name == (
+        "media.system_control"
+    )
 
 
 def test_runtime_planner_routes_system_volume_to_system_control() -> None:

@@ -251,9 +251,14 @@ class LegacyChatTaskStarter:
             return None
         if not direct_tool_request and not selected_requests:
             return None
+        metadata_tool_requests = (
+            [direct_tool_request]
+            if direct_tool_request
+            else (direct_tool_requests or selected_requests)
+        )
         self._sync_chat_user_daily_desktop_metadata(
             task_id,
-            [direct_tool_request] if direct_tool_request else selected_requests,
+            metadata_tool_requests,
             planner_decision=(
                 planner_decision if selected_source == "runtime_planner" else None
             ),
@@ -969,7 +974,96 @@ def _safe_runtime_planner_tool_requests(
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
-    return requests
+    return _coalesce_legacy_direct_app_shortcut_requests(requests, allowed_tools)
+
+
+def _coalesce_legacy_direct_app_shortcut_requests(
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    if not requests or not (
+        {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"} & allowed
+    ):
+        return requests
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(requests):
+        request = requests[index]
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in {"app.open", "app.focus"}:
+            coalesced.append(request)
+            index += 1
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        combined_tool = (
+            "app.open_and_safe_shortcut"
+            if tool_name == "app.open"
+            else "app.focus_and_safe_shortcut"
+        )
+        if not app_name or combined_tool not in allowed:
+            coalesced.append(request)
+            index += 1
+            continue
+        shortcut_index = index + 1
+        if (
+            tool_name == "app.open"
+            and shortcut_index < len(requests)
+            and str(requests[shortcut_index].get("tool") or "").strip() == "app.focus"
+        ):
+            focus_payload = (
+                requests[shortcut_index].get("input")
+                if isinstance(requests[shortcut_index].get("input"), dict)
+                else {}
+            )
+            if str(focus_payload.get("app_name") or "").strip() == app_name:
+                shortcut_index += 1
+        if shortcut_index >= len(requests):
+            coalesced.append(request)
+            index += 1
+            continue
+        shortcut_request = requests[shortcut_index]
+        if str(shortcut_request.get("tool") or "").strip() != "desktop.safe_shortcut":
+            coalesced.append(request)
+            index += 1
+            continue
+        shortcut_payload = (
+            shortcut_request.get("input")
+            if isinstance(shortcut_request.get("input"), dict)
+            else {}
+        )
+        action = str(shortcut_payload.get("action") or "").strip()
+        if not action:
+            coalesced.append(request)
+            index += 1
+            continue
+        coalesced.append(
+            {
+                "protocol": request.get("protocol") or "json_fallback",
+                "tool": combined_tool,
+                "input": {"app_name": app_name, "action": action},
+                "source": request.get("source") or shortcut_request.get("source") or "runtime_planner",
+                "planning_reason": (
+                    shortcut_request.get("planning_reason")
+                    or request.get("planning_reason")
+                    or "planner_desktop_operation"
+                ),
+            }
+        )
+        index = shortcut_index + 1
+        if index < len(requests) and _legacy_direct_verify_request(requests[index]):
+            index += 1
+    return coalesced
+
+
+def _legacy_direct_verify_request(request: dict[str, Any]) -> bool:
+    return str(request.get("tool") or "").strip() in {
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "screen.capture",
+    }
 
 
 def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:

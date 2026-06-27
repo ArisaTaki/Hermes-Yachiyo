@@ -267,6 +267,9 @@ class TaskIntentRouter:
                 "launch ",
                 "focus ",
                 "switch ",
+                "go back to",
+                "switch back to",
+                "back to",
                 "activate ",
                 "bring ",
                 "click ",
@@ -672,10 +675,13 @@ class TaskIntentRouter:
             return _empty_intent("system_control", text)
         if _finder_special_location_hint(text):
             return _empty_intent("system_control", text)
-        if _browser_internal_page_hint(text) or _app_preferences_hint(text):
+        if _browser_internal_page_hint(text):
             return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
+            return _empty_intent("system_control", text)
+        settings_target = str((hint.get("payload") or {}).get("target") or "").strip()
+        if _app_preferences_hint(text) and settings_target in {"", "系统设置"}:
             return _empty_intent("system_control", text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "system_control", text),
@@ -2181,18 +2187,51 @@ class RuntimePlanner:
             and not (app_search and app_search_context_source == "selection")
         ):
             prepare_mode = _app_search_prepare_mode(intent.user_goal, mode) if app_search else mode
+            prepare_tool = _first_allowed(app_control_tool_candidates(prepare_mode), allowed)
             steps.append(
                 _step(
                     intent,
                     "open-or-focus-app",
                     "Open or focus app",
                     "desktop.app_control",
-                    _first_allowed(app_control_tool_candidates(prepare_mode), allowed),
+                    prepare_tool,
                     input_preview={"app_name": app_name},
                     depends_on=["discover-desktop-state"],
                     reason="Resolve the requested app by name at runtime.",
                 )
             )
+            focus_tool = _first_allowed(("app.focus",), allowed)
+            if (
+                prepare_tool == "app.open"
+                and focus_tool
+                and any(
+                    item
+                    for item in (
+                        app_search,
+                        click_target,
+                        type_target,
+                        safe_type_text,
+                        hotkey,
+                        primary_safe_shortcut,
+                        safe_key,
+                        safe_scroll,
+                        safe_click,
+                    )
+                    if item
+                )
+            ):
+                steps.append(
+                    _step(
+                        intent,
+                        "focus-opened-app",
+                        "Focus opened app",
+                        "desktop.app_control",
+                        focus_tool,
+                        input_preview={"app_name": app_name},
+                        depends_on=["open-or-focus-app"],
+                        reason="Bring the opened app to the foreground before running the generic desktop operation.",
+                    )
+                )
         pre_submit_operation = any(
             item
             for item in (
@@ -2433,6 +2472,8 @@ class RuntimePlanner:
             operation_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 operation_depends_on = ["focus-app-window"]
+            elif any(step.step_id == "focus-opened-app" for step in steps):
+                operation_depends_on = ["focus-opened-app"]
             elif not operation_uses_app_tool and app_name:
                 operation_depends_on = ["open-or-focus-app"]
             steps.append(
@@ -5329,6 +5370,7 @@ def _url_hint(text: str) -> str:
 def _app_name_hint(text: str) -> str:
     patterns = [
         r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
+        r"(?:go\s+back\s+to|switch\s+back\s+to|back\s+to)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?:the\s+)?(?:app|application)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:bring|switch)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:to\s+(?:the\s+)?(?:front|foreground)|forward)",
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",

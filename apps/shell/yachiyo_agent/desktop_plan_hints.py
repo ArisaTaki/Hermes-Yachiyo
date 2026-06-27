@@ -89,7 +89,18 @@ def app_control_mode(text: str) -> str:
         "focus"
         if contains_any(
             text,
-            ["切到", "聚焦", "focus", "switch to", "switch ", "activate ", "bring "],
+            [
+                "切到",
+                "聚焦",
+                "focus",
+                "switch to",
+                "switch ",
+                "activate ",
+                "bring ",
+                "go back to",
+                "switch back to",
+                "back to",
+            ],
         )
         else "open"
     )
@@ -764,7 +775,10 @@ def media_action_hint(text: str) -> str:
         return "status"
     if contains_any(lowered, ["下一首", "下一曲", "下首", "切歌", "换歌", "跳过", "next", "skip"]):
         return "next"
-    if contains_any(lowered, ["上一首", "上一曲", "previous", "back"]):
+    if contains_any(lowered, ["上一首", "上一曲", "previous"]) or re.search(
+        r"\bback\s+(?:one\s+)?(?:track|song)\b",
+        lowered,
+    ):
         return "previous"
     if contains_any(
         lowered,

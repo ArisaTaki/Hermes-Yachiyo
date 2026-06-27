@@ -384,7 +384,7 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         }
     if tool_name == "desktop.windows":
         app_name = str(payload.get("app_name") or "").strip()
-        return {"app_name": app_name} if app_name else {}
+        return {"app_name": _canonical_app_name(app_name)} if app_name else {}
     return payload
 
 
