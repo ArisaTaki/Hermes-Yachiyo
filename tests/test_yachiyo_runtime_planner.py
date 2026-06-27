@@ -10066,19 +10066,6 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
     }
-    slack_search_click = {
-        "protocol": "json_fallback",
-        "tool": "app.focus_and_click_ui_element",
-        "input": {
-            "app_name": "Slack",
-            "target": "搜索",
-            "role_filter": "text",
-            "limit": 80,
-            "click_count": 1,
-        },
-        "source": "runtime_planner",
-        "planning_reason": "planner_desktop_operation",
-    }
     slack_focus = {
         "protocol": "json_fallback",
         "tool": "app.focus",
@@ -10144,31 +10131,22 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         ]),
         ("把当前网页链接输入到 Slack 搜索框", [
             current_page_link_copy,
-            slack_search_click,
+            slack_focus,
+            foreground_search_click,
             paste,
             verify_ui,
         ]),
         ("把当前页面内容输入到 Slack 搜索框", [
             *current_content_copy,
-            slack_search_click,
+            slack_focus,
+            foreground_search_click,
             paste,
             verify_ui,
         ]),
         ("打开 Slack 搜索框输入选中的内容", [
             selected_copy,
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open_and_click_ui_element",
-                "input": {
-                    "app_name": "Slack",
-                    "target": "搜索",
-                    "role_filter": "text",
-                    "limit": 80,
-                    "click_count": 1,
-                },
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+            slack_open,
+            foreground_search_click,
             paste,
             verify_ui,
         ]),

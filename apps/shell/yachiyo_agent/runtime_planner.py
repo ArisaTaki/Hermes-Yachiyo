@@ -3455,13 +3455,27 @@ def _app_scoped_safe_shortcut_split_tools(
     mode: str,
     allowed: set[str] | None,
 ) -> tuple[str | None, str | None]:
+    return _app_scoped_operation_split_tools(
+        app_name,
+        mode,
+        ("desktop.safe_shortcut",),
+        allowed,
+    )
+
+
+def _app_scoped_operation_split_tools(
+    app_name: str,
+    mode: str,
+    operation_tools: Iterable[str],
+    allowed: set[str] | None,
+) -> tuple[str | None, str | None]:
     if not app_name:
         return None, None
     app_tool = _first_allowed(app_control_tool_candidates(mode or "focus"), allowed)
-    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
-    if not app_tool or not shortcut_tool:
+    operation_tool = _first_allowed(operation_tools, allowed)
+    if not app_tool or not operation_tool:
         return None, None
-    return app_tool, shortcut_tool
+    return app_tool, operation_tool
 
 
 def _append_app_scoped_safe_shortcut_steps(
@@ -3713,6 +3727,7 @@ def _dynamic_context_ui_transfer_steps(
         return list(base_steps)
 
     app_paste_tool: str | None = None
+    field_click_app_tool: str | None = None
     field_click_tool: str | None = None
     if target_kind == "app_paste":
         if not app_name:
@@ -3732,10 +3747,18 @@ def _dynamic_context_ui_transfer_steps(
         if not target:
             return list(base_steps)
         if app_name:
-            field_click_tool = _first_allowed(
+            field_click_app_tool, field_click_tool = _app_scoped_operation_split_tools(
+                app_name,
+                mode,
+                ("desktop.click_ui_element",),
+                allowed,
+            )
+            field_click_app_scoped_tool = _first_allowed(
                 app_foreground_tool_candidates(mode, "click_ui_element"),
                 allowed,
             )
+            if not field_click_tool:
+                field_click_tool = field_click_app_scoped_tool
         else:
             field_click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
         if not field_click_tool:
@@ -3857,7 +3880,20 @@ def _dynamic_context_ui_transfer_steps(
                 "limit": 80,
                 "click_count": 1,
             }
-            if field_click_tool and field_click_tool.startswith("app."):
+            if field_click_app_tool:
+                append_step(
+                    _step(
+                        intent,
+                        "open-or-focus-app",
+                        "Open or focus app",
+                        "desktop.app_control",
+                        field_click_app_tool,
+                        input_preview={"app_name": app_name},
+                        depends_on=[previous_step_id] if previous_step_id else [],
+                        reason="Prepare the requested app before focusing the transfer field.",
+                    )
+                )
+            elif field_click_tool and field_click_tool.startswith("app."):
                 field_payload = {"app_name": app_name, **field_payload}
             append_step(
                 _step(
