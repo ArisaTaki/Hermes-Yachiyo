@@ -959,6 +959,7 @@ export function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | n
     if (step.task) return `等待前置节点完成后执行：${step.task}`;
     return '等待前置节点完成后执行。';
   }
+  const plannerSummary = workflowChildPlannerOutputSummary(childRun);
   if (step.kind === 'start') return 'Workflow 开始执行。';
   if (step.kind === 'approval') {
     const detail = step.payload ? `\n${step.payload}` : '';
@@ -976,13 +977,85 @@ export function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | n
     return step.payload || '并行分支已完成。';
   }
   if (step.kind === 'workflow') {
-    return childRun?.result || step.payload || '子 Workflow 正在执行或等待继续。';
+    return appendWorkflowPlannerSummary(
+      childRun?.result || step.payload || '子 Workflow 正在执行或等待继续。',
+      plannerSummary,
+    );
   }
   if (step.kind === 'loop') {
     return step.payload || (step.task ? `循环条件已判断：${step.task}` : '循环节点已执行。');
   }
   if (step.kind === 'unknown') return step.payload || '未知 Workflow 节点，建议检查 Workflow 定义或导入数据。';
-  return childRun?.result || step.payload || 'No result yet.';
+  return appendWorkflowPlannerSummary(
+    childRun?.result || step.payload || 'No result yet.',
+    plannerSummary,
+  );
+}
+
+function appendWorkflowPlannerSummary(summary: string, plannerSummary: string): string {
+  return plannerSummary ? `${summary}\n${plannerSummary}` : summary;
+}
+
+function workflowChildPlannerOutputSummary(childRun: RunSpec | null): string {
+  const counts = workflowChildPlannerOutputCounts(childRun);
+  const parts = [
+    counts.approvals ? `${counts.approvals} approvals` : '',
+    counts.artifacts ? `${counts.artifacts} artifacts` : '',
+    counts.questions ? `${counts.questions} questions` : '',
+  ].filter(Boolean);
+  return parts.length ? `Planner outputs · ${parts.join(' · ')}` : '';
+}
+
+function workflowChildPlannerOutputCounts(childRun: RunSpec | null): {
+  approvals: number;
+  artifacts: number;
+  questions: number;
+} {
+  const approvals = new Set<string>();
+  const artifacts = new Set<string>();
+  const questions = new Set<string>();
+  (childRun?.timeline || []).forEach((event) => {
+    const eventName = String(event.event || event.event_type || '').trim();
+    const payload = workflowPlannerEventPayload(event);
+    if (eventName === 'agent.plan.created') {
+      const plan = workflowRecord(payload.plan);
+      const toolPlan = workflowRecord(plan.tool_plan);
+      addWorkflowStringValues(approvals, toolPlan.approvals_required);
+      addWorkflowStringValues(artifacts, toolPlan.artifacts_expected);
+      addWorkflowStringValues(questions, toolPlan.open_questions);
+      return;
+    }
+    if (eventName !== 'agent.plan.selection') return;
+    addWorkflowStringValues(approvals, payload.approvals_required);
+    addWorkflowStringValues(artifacts, payload.artifacts_expected);
+    addWorkflowStringValues(questions, payload.open_questions);
+  });
+  return {
+    approvals: approvals.size,
+    artifacts: artifacts.size,
+    questions: questions.size,
+  };
+}
+
+function workflowPlannerEventPayload(event: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...event,
+    ...workflowRecord(event.payload),
+  };
+}
+
+function workflowRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function addWorkflowStringValues(target: Set<string>, value: unknown): void {
+  if (!Array.isArray(value)) return;
+  value.forEach((item) => {
+    const clean = String(item || '').trim();
+    if (clean) target.add(clean);
+  });
 }
 
 export function workflowStepArtifacts(childRun: RunSpec | null) {
