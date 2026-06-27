@@ -2102,6 +2102,10 @@ def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
         ("打开浏览器历史记录", "show_history"),
         ("打开开发者工具", "open_devtools"),
         ("把当前网页加入书签", "bookmark_page"),
+        ("把当前网页链接复制给我", "copy_current_page_link"),
+        ("把当前链接复制给我", "copy_current_page_link"),
+        ("当前页地址复制一下", "copy_current_page_link"),
+        ("copy current page link to clipboard", "copy_current_page_link"),
     ]
 
     for prompt, action in cases:

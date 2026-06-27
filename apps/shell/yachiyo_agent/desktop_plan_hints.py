@@ -1373,14 +1373,28 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     )
     phrase = re.sub(r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
     normalized = re.sub(r"\s+", "", phrase).lower()
+    if re.fullmatch(
+        r"(?:把|将)?(?:当前|这个|该)?(?:网页|页面|页|标签页)?(?:链接|网址|地址)"
+        r"(?:复制|拷贝|复制给我|拷贝给我|放到剪贴板|放进剪贴板|放到系统剪贴板|放进系统剪贴板)",
+        normalized,
+    ) or re.fullmatch(
+        r"(?:copy|put)(?:the)?(?:current|active)?(?:page|tab)?(?:link|url)"
+        r"(?:to(?:the)?(?:system)?clipboard|tome)?",
+        normalized,
+    ):
+        return "copy_current_page_link"
     mapping = {
         "复制": "copy",
         "复制这个": "copy",
         "复制选中内容": "copy",
         "复制选中的内容": "copy",
         "复制当前选中内容": "copy",
+        "当前链接复制给我": "copy_current_page_link",
+        "当前网页链接复制给我": "copy_current_page_link",
+        "当前页面链接复制给我": "copy_current_page_link",
         "复制当前网页链接": "copy_current_page_link",
         "复制当前页面链接": "copy_current_page_link",
+        "当前页地址复制": "copy_current_page_link",
         "copy": "copy",
         "copyselection": "copy",
         "copyselectedtext": "copy",

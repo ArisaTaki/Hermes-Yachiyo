@@ -298,6 +298,36 @@ def test_planner_first_direct_selection_owns_current_page_web_actions_without_le
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_current_page_link_copy_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    for prompt in (
+        "把当前网页链接复制给我",
+        "把当前链接复制给我",
+        "当前页地址复制一下",
+        "copy current page link to clipboard",
+    ):
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            ["desktop.safe_shortcut"],
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "copy_current_page_link"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     data_selection = planner_first_direct_tool_selection(

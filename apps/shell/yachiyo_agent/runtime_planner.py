@@ -213,6 +213,8 @@ class TaskIntentRouter:
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
+        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+            app_scoped_safe_operation = {}
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -362,6 +364,9 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
+        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+            app_name_hint = ""
+            app_management = None
         if (
             window_list is not None
             and not str((window_list or {}).get("app_name") or "").strip()
@@ -1239,6 +1244,8 @@ class RuntimePlanner:
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(intent.user_goal)
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
+        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+            app_scoped_safe_operation = {}
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -1294,6 +1301,9 @@ class RuntimePlanner:
             or _foreground_compose_app_name_hint(intent.user_goal)
             or ""
         ).strip()
+        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+            app_name = ""
+            app_management = None
         if _safe_shortcut_requires_finder_scope_for_text(intent.user_goal, safe_shortcut):
             if _is_finder_app_name(app_name):
                 app_name = "Finder"
@@ -4958,6 +4968,7 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "show_history",
         "open_devtools",
         "focus_address_bar",
+        "copy_current_page_link",
         "paste",
     }
 
