@@ -13,7 +13,7 @@ import {
   yachiyoTaskStudioRunId,
   yachiyoTaskStudioUrl,
 } from '../taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, PlannerTraceSummarySnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ToolCallSummary } from './ToolCallSummary';
@@ -55,7 +55,7 @@ export function AgentTaskCard({
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
-  const plannerSummary = plannerSummaryFromTaskMetadata(task.metadata);
+  const plannerSummary = plannerSummaryFromTask(task);
 
   return (
     <section
@@ -270,7 +270,7 @@ export function AgentTaskCard({
   );
 }
 
-type TaskPlannerMetadataSummary = {
+type TaskPlannerSummarySnapshot = {
   approvals: string[];
   artifacts: string[];
   capabilities: string[];
@@ -281,7 +281,7 @@ type TaskPlannerMetadataSummary = {
   tools: string[];
 };
 
-function TaskPlannerSummary({ summary }: { summary: TaskPlannerMetadataSummary }) {
+function TaskPlannerSummary({ summary }: { summary: TaskPlannerSummarySnapshot }) {
   const chips = plannerSummaryChips(summary);
   return (
     <div
@@ -322,7 +322,38 @@ function TaskPlannerSummary({ summary }: { summary: TaskPlannerMetadataSummary }
   );
 }
 
-function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerMetadataSummary | null {
+function plannerSummaryFromTask(task: AgentTaskSnapshot): TaskPlannerSummarySnapshot | null {
+  return plannerSummaryFromStructuredTrace(task.planner_summary)
+    || plannerSummaryFromTaskMetadata(task.metadata);
+}
+
+function plannerSummaryFromStructuredTrace(
+  value: PlannerTraceSummarySnapshot | null | undefined,
+): TaskPlannerSummarySnapshot | null {
+  const trace = objectValue(value);
+  const intentKind = String(trace.intent_kind || '').trim();
+  const tools = uniqueStrings([
+    ...stringList(trace.plan_tools),
+    ...stringList(trace.selected_tools),
+  ]);
+  const capabilities = uniqueStrings([
+    ...stringList(trace.plan_capabilities),
+    ...stringList(trace.required_capabilities),
+  ]);
+  const summary: TaskPlannerSummarySnapshot = {
+    approvals: stringList(trace.approvals_required),
+    artifacts: stringList(trace.artifacts_expected),
+    capabilities,
+    intentKind,
+    missingCapabilities: stringList(trace.missing_capabilities),
+    openQuestions: stringList(trace.open_questions),
+    routeToStudio: booleanMetadataValue(trace.route_to_studio),
+    tools,
+  };
+  return emptyPlannerSummary(summary) ? null : summary;
+}
+
+function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerSummarySnapshot | null {
   const metadata = objectValue(value);
   if (!booleanMetadataValue(metadata.yachiyo_runtime_planner)) return null;
   const intentKind = String(metadata.yachiyo_intent_kind || '').trim();
@@ -331,7 +362,7 @@ function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerMetadataSumm
     ...stringList(metadata.yachiyo_plan_capabilities),
     ...stringList(metadata.yachiyo_required_capabilities),
   ]);
-  const summary: TaskPlannerMetadataSummary = {
+  const summary: TaskPlannerSummarySnapshot = {
     approvals: stringList(metadata.yachiyo_plan_approvals_required),
     artifacts: stringList(metadata.yachiyo_plan_artifacts_expected),
     capabilities,
@@ -341,21 +372,20 @@ function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerMetadataSumm
     routeToStudio: booleanMetadataValue(metadata.yachiyo_route_to_studio),
     tools,
   };
-  if (
-    !summary.intentKind
+  return emptyPlannerSummary(summary) ? null : summary;
+}
+
+function emptyPlannerSummary(summary: TaskPlannerSummarySnapshot): boolean {
+  return !summary.intentKind
     && !summary.tools.length
     && !summary.capabilities.length
     && !summary.approvals.length
     && !summary.artifacts.length
     && !summary.openQuestions.length
-    && !summary.missingCapabilities.length
-  ) {
-    return null;
-  }
-  return summary;
+    && !summary.missingCapabilities.length;
 }
 
-function plannerSummaryDetail(summary: TaskPlannerMetadataSummary): string {
+function plannerSummaryDetail(summary: TaskPlannerSummarySnapshot): string {
   const parts = [
     summary.capabilities.length ? `${summary.capabilities.length} 个能力` : '',
     summary.tools.length ? `${summary.tools.length} 个工具` : '',
@@ -367,7 +397,7 @@ function plannerSummaryDetail(summary: TaskPlannerMetadataSummary): string {
   return parts.join(' · ') || 'runtime plan';
 }
 
-function plannerSummaryChips(summary: TaskPlannerMetadataSummary) {
+function plannerSummaryChips(summary: TaskPlannerSummarySnapshot) {
   const chips = [
     ...summary.capabilities.slice(0, 3).map((value) => ({ kind: 'capability', label: '能力', value })),
     ...summary.tools.slice(0, 4).map((value) => ({ kind: 'tool', label: '工具', value })),

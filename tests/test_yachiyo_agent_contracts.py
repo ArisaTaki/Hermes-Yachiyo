@@ -479,6 +479,14 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
             "yachiyo_intent_kind": "code_task",
             "yachiyo_plan_tools": ["workspace.write_patch"],
         },
+        planner_summary=PlannerTraceSummarySnapshot(
+            source="runtime_planner",
+            intent_kind="code_task",
+            plan_tools=["workspace.write_patch"],
+            plan_capabilities=["terminal.execute"],
+            step_count=1,
+            event_count=2,
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -500,6 +508,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "tool_calls",
         "artifacts",
         "metadata",
+        "planner_summary",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -508,6 +517,8 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.write_patch"
     assert payload["metadata"]["yachiyo_plan_tools"] == ["workspace.write_patch"]
+    assert payload["planner_summary"]["intent_kind"] == "code_task"
+    assert payload["planner_summary"]["plan_capabilities"] == ["terminal.execute"]
     assert "event" not in payload["recent_events"][0]
 
 

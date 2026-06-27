@@ -438,6 +438,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    planner_summary: PlannerTraceSummarySnapshot | None = None
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""

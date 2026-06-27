@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.shell.yachiyo_agent.contracts import AgentTaskSnapshot
+from apps.shell.yachiyo_agent.contracts import AgentTaskSnapshot, PlannerTraceSummarySnapshot
 from apps.shell.yachiyo_agent.task_snapshots import (
     agent_task_snapshot_from_payload,
     agent_task_snapshots_from_payloads,
@@ -82,6 +82,88 @@ def test_agent_task_snapshot_prefers_explicit_open_in_studio_url() -> None:
     )
 
     assert task.open_in_studio_url == "#/agents?run_id=custom"
+
+
+def test_agent_task_snapshot_projects_planner_summary_from_visible_events() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-report",
+            "run_id": "run-report",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.plan.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "decision_id": "decision-report",
+                        "plan": {
+                            "plan_id": "plan-report",
+                            "intent": {
+                                "intent_id": "intent-report",
+                                "kind": "data_analysis",
+                                "title": "Analyze data",
+                                "required_capabilities": ["data.analysis"],
+                            },
+                            "capabilities": [
+                                {"capability_id": "file.read"},
+                                {"capability_id": "artifact.output"},
+                            ],
+                            "tool_plan": {
+                                "steps": [
+                                    {
+                                        "step_id": "read-data",
+                                        "capability_id": "file.read",
+                                        "tool_name": "workspace.read",
+                                    },
+                                    {
+                                        "step_id": "analyze-data",
+                                        "capability_id": "data.analysis",
+                                        "tool_name": "python.pandas",
+                                    },
+                                ],
+                                "artifacts_expected": ["markdown_report", "chart"],
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.plan.selection",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "selection_source": "runtime_planner",
+                        "selection_reason": "capability_plan",
+                        "plan_tools": ["workspace.read", "python.pandas"],
+                        "plan_capabilities": [
+                            "file.read",
+                            "artifact.output",
+                            "data.analysis",
+                        ],
+                        "required_capabilities": ["data.analysis"],
+                        "artifacts_expected": ["markdown_report", "chart"],
+                        "selected_tools": ["workspace.read", "python.pandas"],
+                        "plan_step_count": 2,
+                    },
+                },
+            ],
+        }
+    )
+
+    assert task.planner_summary == PlannerTraceSummarySnapshot(
+        source="runtime_planner",
+        decision_id="decision-report",
+        plan_id="plan-report",
+        intent_kind="data_analysis",
+        intent_title="Analyze data",
+        selection_source="runtime_planner",
+        selection_reason="capability_plan",
+        plan_tools=["workspace.read", "python.pandas"],
+        selected_tools=["workspace.read", "python.pandas"],
+        plan_capabilities=["file.read", "artifact.output", "data.analysis"],
+        required_capabilities=["data.analysis"],
+        artifacts_expected=["markdown_report", "chart"],
+        step_count=2,
+        event_count=2,
+    )
 
 
 def test_agent_task_snapshot_derives_progress_from_planned_desktop_intent() -> None:

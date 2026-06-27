@@ -10,6 +10,7 @@ export type {
   ChatRunnableCatalogSnapshot,
   ChatRunnableParticipantSnapshot,
   ChatRunnableSnapshot,
+  PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RunEventPageSnapshot,
   RunTimelineSnapshot,

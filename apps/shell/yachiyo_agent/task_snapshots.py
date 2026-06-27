@@ -24,6 +24,7 @@ from .contracts import AgentTaskSnapshot, PublicRunEvent, ToolCallSnapshot
 from .events import public_run_event_from_payload
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
+from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
@@ -129,6 +130,12 @@ def agent_task_snapshot_from_payload(
             events=recent_events,
         ),
         metadata=_public_task_metadata(payload),
+        planner_summary=planner_trace_summary_from_payload(
+            {
+                "planner_summary": payload.get("planner_summary"),
+                "events": recent_events,
+            }
+        ),
         open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
         or studio_run_url(run_id, group_run_id=group_run_id),
         created_at=_text(payload.get("created_at")),

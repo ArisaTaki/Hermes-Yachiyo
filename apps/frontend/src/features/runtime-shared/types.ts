@@ -388,6 +388,7 @@ export type AgentTaskSnapshot = {
   tool_calls?: ToolCallSnapshot[];
   artifacts?: ArtifactSnapshot[];
   metadata?: Record<string, unknown>;
+  planner_summary?: PlannerTraceSummarySnapshot | null;
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;
