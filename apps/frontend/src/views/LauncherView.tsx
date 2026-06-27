@@ -264,6 +264,7 @@ function useLauncher(mode: 'bubble' | 'live2d') {
         launcher_mode: mode,
         runnable_kind: 'main',
         launcher_surface: 'desktop_launcher',
+        planner_entrypoint: `${mode}_default`,
         ...(options.metadata || {}),
       },
     });

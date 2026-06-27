@@ -225,6 +225,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "launcher_mode: mode,",
             "runnable_kind: 'main',",
             "launcher_surface: 'desktop_launcher'",
+            "planner_entrypoint: `${mode}_default`,",
             "runtimeToolRecoveryActionPrompt",
             "runtimeToolRecoveryActionTaskMetadata",
             "function runLauncherRecoveryAction(",

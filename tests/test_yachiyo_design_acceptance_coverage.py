@@ -1051,6 +1051,7 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
             "launcher_mode: mode,",
             "runnable_kind: 'main',",
             "launcher_surface: 'desktop_launcher'",
+            "planner_entrypoint: `${mode}_default`,",
             "LauncherAgentTaskLight",
             "type LauncherQuickMessageResult",
             "const result = await apiPost<LauncherQuickMessageResult>('/ui/launcher/quick-message'",
