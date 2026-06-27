@@ -4914,6 +4914,16 @@ def _clean_app_name_hint(value: str) -> str:
     }
     if context_source_hint(app):
         return ""
+    if _compact_app_alias(app) in {
+        "folder",
+        "folders",
+        "afolder",
+        "directory",
+        "directories",
+        "文件夹",
+        "目录",
+    }:
+        return "Finder"
     return "" if app.lower() in generic else app
 
 

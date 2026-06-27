@@ -9999,7 +9999,7 @@ def test_chat_bridge_quick_message_waits_briefly_for_daily_desktop_snapshot(tmp_
         store.close()
 
 
-def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(tmp_path):
+def test_chat_bridge_quick_message_returns_planned_web_task_before_run_link(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
     runtime.agent_runtime_service = _FakePendingDesktopIntentRuntimeService()
@@ -10023,24 +10023,24 @@ def test_chat_bridge_quick_message_returns_planned_desktop_task_before_run_link(
         assert result["agent_task"]["task_id"] == "task-pending-browser"
         assert result["agent_task"]["conversation_id"] == "session-current"
         assert result["agent_task"]["status"] == "queued"
-        assert result["agent_task"]["current_step"] == "准备执行 · 发现已安装应用"
-        assert result["agent_task"]["progress_text"] == "准备执行 · 发现已安装应用"
+        assert result["agent_task"]["current_step"] == "准备执行 · 打开网页"
+        assert result["agent_task"]["progress_text"] == "准备执行 · 打开网页"
         assert result["agent_task"]["open_in_studio_url"] is None
         _assert_planner_trace_prefix(
             result["agent_task"],
-            intent_kind="desktop_operation",
+            intent_kind="web_research",
         )
         planned_event = _agent_task_event(
             result["agent_task"],
             "agent.desktop.intent_planned",
-            detail="desktop.list_apps",
+            detail="browser.open_url",
         )
         assert planned_event["payload"] == {
-            "input_preview": {"query": "GitHub", "limit": 20},
-            "planning_reason": "planner_fallback_desktop_operation",
+            "input_preview": {"url": "https://github.com"},
+            "planning_reason": "planner_fallback_web_research",
             "source": "runtime_planner",
             "status": "planned",
-            "tool": "desktop.list_apps",
+            "tool": "browser.open_url",
         }
         assert runtime.agent_runtime_service.calls == [
             ("get_task_run_link", "task-pending-browser")
@@ -10082,7 +10082,7 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
         )
         assert planned_event["payload"] == {
             "input_preview": {"reason": "user asked to capture the screen"},
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
             "source": "runtime_planner",
             "status": "planned",
             "tool": "screen.capture",
@@ -10133,7 +10133,7 @@ def test_chat_bridge_quick_message_uses_runtime_planner_for_launcher_modes(tmp_p
                 detail="screen.capture",
             )
             assert planned_event["payload"]["source"] == "runtime_planner"
-            assert planned_event["payload"]["planning_reason"] == "planner_fallback_desktop_operation"
+            assert planned_event["payload"]["planning_reason"] == "planner_desktop_operation"
         finally:
             store.close()
 
@@ -10171,7 +10171,7 @@ def test_chat_bridge_quick_message_plans_app_observe_for_lightweight_entrypoints
         )
         assert planned_event["payload"] == {
             "input_preview": {"query": "Chrome", "limit": 20},
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
             "source": "runtime_planner",
             "status": "planned",
             "tool": "desktop.list_apps",
@@ -10214,8 +10214,8 @@ def test_chat_bridge_quick_message_plans_app_open_visual_followup_for_lightweigh
             detail="desktop.list_apps",
         )
         assert planned_event["payload"] == {
-            "input_preview": {"query": "微信", "limit": 20},
-            "planning_reason": "planner_fallback_desktop_operation",
+            "input_preview": {"query": "WeChat", "limit": 20},
+            "planning_reason": "planner_desktop_operation",
             "source": "runtime_planner",
             "status": "planned",
             "tool": "desktop.list_apps",

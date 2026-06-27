@@ -413,7 +413,7 @@ def test_planner_first_direct_selection_owns_current_page_link_copy_without_lega
                 "tool": "desktop.safe_shortcut",
                 "input": {"action": "copy_current_page_link"},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
 
@@ -447,7 +447,7 @@ def test_planner_first_direct_selection_owns_screenshot_shortcuts_without_legacy
                 "tool": "desktop.safe_shortcut",
                 "input": {"action": action},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
 
@@ -713,7 +713,7 @@ def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_lega
                 "tool": tool_name,
                 "input": {"app_name": app_name, "action": action},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
 
@@ -748,7 +748,7 @@ def test_planner_first_direct_selection_owns_finder_special_locations_without_le
                 "tool": tool_name,
                 "input": {"app_name": "Finder", "action": action},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
 
@@ -911,7 +911,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "desktop.permissions",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert active_window_selection.selected_source == "runtime_planner"
@@ -922,7 +922,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "desktop.active_window",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert observe_window_selection.selected_source == "runtime_planner"
@@ -939,7 +939,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "desktop.running_apps",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert list_apps_selection.selected_source == "runtime_planner"
@@ -950,7 +950,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "desktop.list_apps",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert capture_selection.selected_source == "runtime_planner"
@@ -961,7 +961,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "screen.capture",
             "input": {"reason": "user asked to capture the screen"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert windows_selection.selected_source == "runtime_planner"
@@ -972,7 +972,7 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "tool": "desktop.windows",
             "input": {"app_name": "Slack"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert legacy_calls == []
@@ -1005,7 +1005,7 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
             "tool": "app.open",
             "input": {"app_name": "PixelForge"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert chinese_app_selection.selected_source == "runtime_planner"
@@ -1016,7 +1016,7 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
             "tool": "app.open",
             "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert focus_selection.selected_source == "runtime_planner"
@@ -1027,7 +1027,7 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
             "tool": "app.focus",
             "input": {"app_name": "Slack"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert legacy_calls == []
@@ -1072,7 +1072,7 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
                 "tool": tool_name,
                 "input": tool_input,
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
     assert legacy_calls == []
@@ -1095,7 +1095,7 @@ def test_planner_first_direct_selection_owns_show_all_hidden_apps_without_legacy
             "tool": "desktop.show_all_apps",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert legacy_calls == []
@@ -1119,7 +1119,7 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
                     "tool": "desktop.search_submit",
                     "input": {},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 }
             ],
         ),
@@ -1131,7 +1131,7 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
                     "tool": "desktop.search_submit",
                     "input": {},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 }
             ],
         ),
@@ -1143,7 +1143,7 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
                     "tool": "desktop.safe_shortcut",
                     "input": {"action": "spotlight_search"},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 }
             ],
         ),
@@ -1155,14 +1155,14 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
                     "tool": "desktop.safe_shortcut",
                     "input": {"action": "spotlight_search"},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 },
                 {
                     "protocol": "json_fallback",
                     "tool": "desktop.safe_type_text",
                     "input": {"text": "yachiyo"},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 },
             ],
         ),
@@ -1198,7 +1198,7 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
                     "tool": "desktop.safe_shortcut",
                     "input": {"action": "copy"},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_operation",
+                    "planning_reason": "planner_desktop_operation",
                 }
             ],
         ),
@@ -1210,7 +1210,7 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
                     "tool": "app.focus_and_hotkey",
                     "input": {"app_name": "WeChat", "key": "return", "modifiers": []},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_hotkey",
+                    "planning_reason": "planner_desktop_hotkey",
                 }
             ],
         ),
@@ -1222,7 +1222,7 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
                     "tool": "app.focus_and_hotkey",
                     "input": {"app_name": "Slack", "key": "return", "modifiers": []},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_hotkey",
+                    "planning_reason": "planner_desktop_hotkey",
                 }
             ],
         ),
@@ -1234,7 +1234,7 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
                     "tool": "app.open_and_hotkey",
                     "input": {"app_name": "Slack", "key": "return", "modifiers": []},
                     "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_desktop_hotkey",
+                    "planning_reason": "planner_desktop_hotkey",
                 }
             ],
         ),
@@ -1287,7 +1287,7 @@ def test_planner_first_direct_selection_owns_app_clicks_without_legacy() -> None
                     "limit": 80,
                 },
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             }
         ]
     assert legacy_calls == []
@@ -1403,14 +1403,14 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "app.open_and_safe_shortcut",
             "input": {"app_name": "WeChat", "action": "select_all"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         },
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
             "input": {"action": "copy"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         },
     ]
     assert window_selection.selected_source == "runtime_planner"
@@ -1421,7 +1421,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "desktop.safe_shortcut",
             "input": {"action": "next_window"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert app_switch_selection.selected_source == "runtime_planner"
@@ -1432,7 +1432,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "desktop.safe_shortcut",
             "input": {"action": "switch_next_app"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert maximize_selection.selected_source == "runtime_planner"
@@ -1443,7 +1443,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert browser_back_selection.selected_source == "runtime_planner"
@@ -1454,7 +1454,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "desktop.safe_shortcut",
             "input": {"action": "browser_back"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert paste_selection.selected_source == "runtime_planner"
@@ -1465,7 +1465,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "desktop.safe_shortcut",
             "input": {"action": "paste"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert finder_selection.selected_source == "runtime_planner"
@@ -1476,7 +1476,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Finder", "action": "new_folder"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_desktop_operation",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
     assert legacy_calls == []
@@ -1503,10 +1503,10 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert metadata["daily_desktop_tool"] == "app.open"
     assert metadata["daily_desktop_tools"] == ["app.open"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_desktop_operation"
+    assert metadata["daily_desktop_planning_reason"] == "planner_desktop_operation"
     assert metadata["entrypoint_plan"] is True
     assert metadata["entrypoint_plan_source"] == "runtime_planner"
-    assert metadata["entrypoint_plan_reason"] == "planner_fallback_desktop_operation"
+    assert metadata["entrypoint_plan_reason"] == "planner_desktop_operation"
     assert metadata["entrypoint_plan_tools"] == ["app.open"]
     assert metadata["entrypoint_plan_legacy_fallback"] is False
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]

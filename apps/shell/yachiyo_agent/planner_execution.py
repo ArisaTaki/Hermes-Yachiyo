@@ -199,7 +199,7 @@ def _request(
     tool: str,
     payload: dict[str, Any],
     *,
-    planning_reason: str = "planner_fallback_desktop_operation",
+    planning_reason: str = "planner_desktop_operation",
 ) -> dict[str, Any]:
     return {
         "protocol": "json_fallback",
@@ -365,8 +365,8 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
         and input_preview.get("key")
         and input_preview.get("modifiers") is not None
     ):
-        return "planner_fallback_desktop_hotkey"
-    return "planner_fallback_desktop_operation"
+        return "planner_desktop_hotkey"
+    return "planner_desktop_operation"
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
