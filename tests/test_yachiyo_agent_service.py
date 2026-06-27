@@ -386,7 +386,8 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     assert metadata["yachiyo_route_to_studio"] is True
     assert metadata["yachiyo_plan_tools"] == [
         "desktop.list_apps",
-        "app.open_and_click_ui_element",
+        "app.open",
+        "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
     assert metadata["yachiyo_plan_capabilities"] == [
@@ -399,6 +400,7 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_required_capabilities"] == [
         "desktop.app_discovery",
+        "desktop.app_control",
         "desktop.ui_operation",
     ]
     assert metadata["yachiyo_missing_capabilities"] == []
@@ -421,7 +423,8 @@ def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -
     assert task.metadata["yachiyo_intent_kind"] == "desktop_operation"
     assert task.metadata["yachiyo_plan_tools"] == [
         "desktop.list_apps",
-        "app.open_and_click_ui_element",
+        "app.open",
+        "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
     assert task.metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]

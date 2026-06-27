@@ -643,7 +643,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
                 "desktop.ui_elements",
             ],
         ),
-        ("微信打开搜索", ["app.open_and_safe_shortcut", "desktop.ui_elements"]),
+        ("微信打开搜索", ["app.focus", "desktop.safe_shortcut", "desktop.ui_elements"]),
         ("Chrome 点登录", ["app.focus_and_click_ui_element", "desktop.ui_elements"]),
     )
 
@@ -1487,8 +1487,15 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
     assert open_shortcut_selection.requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "select_all"},
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

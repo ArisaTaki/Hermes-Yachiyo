@@ -8705,6 +8705,20 @@ def _looks_like_ui_operation(text: str) -> bool:
     )
 
 
+def _generic_app_foreground_operation_tool(
+    *,
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+    operation_tools: Iterable[str],
+) -> str | None:
+    if not app_name:
+        return None
+    if not _first_allowed(app_control_tool_candidates(mode), allowed):
+        return None
+    return _first_allowed(operation_tools, allowed)
+
+
 def _desktop_operation_tool_preview(
     *,
     app_name: str,
@@ -8721,6 +8735,14 @@ def _desktop_operation_tool_preview(
     allow_app_tools: bool = True,
 ) -> tuple[str | None, dict[str, Any]]:
     if safe_shortcut:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.safe_shortcut",),
+        )
+        if generic_tool:
+            return generic_tool, dict(safe_shortcut)
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_shortcut"), allowed)
             if app_tool:
@@ -8729,6 +8751,14 @@ def _desktop_operation_tool_preview(
         if shortcut_tool:
             return shortcut_tool, dict(safe_shortcut)
     if safe_key:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.safe_key",),
+        )
+        if generic_tool:
+            return generic_tool, dict(safe_key)
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_key"), allowed)
             if app_tool:
@@ -8737,6 +8767,14 @@ def _desktop_operation_tool_preview(
         if key_tool:
             return key_tool, dict(safe_key)
     if safe_scroll:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.safe_scroll",),
+        )
+        if generic_tool:
+            return generic_tool, dict(safe_scroll)
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_scroll"), allowed)
             if app_tool:
@@ -8745,6 +8783,14 @@ def _desktop_operation_tool_preview(
         if scroll_tool:
             return scroll_tool, dict(safe_scroll)
     if safe_click:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.safe_click", "desktop.click"),
+        )
+        if generic_tool:
+            return generic_tool, dict(safe_click)
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_click"), allowed)
             if app_tool:
@@ -8756,12 +8802,28 @@ def _desktop_operation_tool_preview(
         if raw_click_tool:
             return raw_click_tool, dict(safe_click)
     if hotkey:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.hotkey",),
+        )
+        if generic_tool:
+            return generic_tool, dict(hotkey)
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
             if app_tool:
                 return app_tool, {"app_name": app_name, **hotkey}
         return _first_allowed(("desktop.hotkey",), allowed), dict(hotkey)
     if app_name and type_target:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.type_into_ui_element",),
+        )
+        if generic_tool:
+            return generic_tool, {**type_target, "limit": 80}
         if allow_app_tools:
             app_tool = _first_allowed(
                 app_foreground_tool_candidates(mode, "type_into_ui_element"),
@@ -8771,6 +8833,14 @@ def _desktop_operation_tool_preview(
                 return app_tool, {"app_name": app_name, **type_target, "limit": 80}
         return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
     if app_name and safe_type_text:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.safe_type_text", "desktop.type_text"),
+        )
+        if generic_tool:
+            return generic_tool, {"text": safe_type_text}
         if allow_app_tools:
             app_tool = _first_allowed(
                 app_foreground_tool_candidates(mode, "safe_type_text"),
@@ -8781,6 +8851,14 @@ def _desktop_operation_tool_preview(
         type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
         return type_tool, {"text": safe_type_text}
     if app_name and click_target:
+        generic_tool = _generic_app_foreground_operation_tool(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            operation_tools=("desktop.click_ui_element",),
+        )
+        if generic_tool:
+            return generic_tool, {**click_target, "limit": 80}
         if allow_app_tools:
             app_tool = _first_allowed(
                 app_foreground_tool_candidates(mode, "click_ui_element"),

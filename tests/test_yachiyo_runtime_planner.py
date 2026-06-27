@@ -3925,8 +3925,15 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     assert planner_direct_tool_requests("微信打开搜索", allowed) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "find"},
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -7656,13 +7663,38 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
     ]
 
 
-def test_planner_desktop_tool_requests_prefers_combined_app_foreground_tool() -> None:
+def test_planner_desktop_tool_requests_prefers_generic_foreground_sequence() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",
         allowed_tools=["app.open_and_click_ui_element", "app.open", "desktop.click_ui_element"],
     )
 
     assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    assert planner_desktop_tool_requests(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=["app.open_and_click_ui_element"],
+    ) == [
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_click_ui_element",
