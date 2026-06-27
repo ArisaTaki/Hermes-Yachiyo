@@ -742,6 +742,8 @@ class TaskIntentRouter:
         )
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _app_command_palette_hint(text):
+            return _empty_intent("code_task", text)
         terminal_hint = terminal_command_hint(text)
         if terminal_hint:
             return TaskIntentSnapshot(

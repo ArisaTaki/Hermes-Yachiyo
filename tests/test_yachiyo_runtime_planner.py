@@ -2120,6 +2120,40 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "action": "obsidian_command_palette",
     }
 
+    vscode_command_palette = RuntimePlanner().decision(
+        "打开 VS Code 命令面板",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert vscode_command_palette.selected_intent.kind == "desktop_operation"
+    assert vscode_command_palette.selected_intent.inputs["app_name_hint"] == (
+        "Visual Studio Code"
+    )
+    assert vscode_command_palette.selected_intent.inputs["command_palette_hint"] == {
+        "app_name": "Visual Studio Code",
+        "mode": "open",
+        "action": "command_palette",
+    }
+    assert planner_direct_tool_requests(
+        "打开 VS Code 命令面板",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Visual Studio Code", "action": "command_palette"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
     finder_file_search = RuntimePlanner().decision(
         "在 Finder 搜索 budget.xlsx",
         allowed_tools=[
