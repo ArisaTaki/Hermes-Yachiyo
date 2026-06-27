@@ -412,6 +412,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     recent_events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""

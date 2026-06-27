@@ -101,6 +101,7 @@ export function agentTaskSnapshotFromMessage(
     pending_approvals: pendingApprovals,
     recent_events: messageTaskEvents(message, runId),
     artifacts: messageTaskArtifacts(message, runId),
+    metadata: { ...metadata },
     open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',

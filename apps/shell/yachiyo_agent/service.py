@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_json_value
+
 from .adapters import readiness_snapshot_from_payload
 from .artifacts import artifact_content_snapshot_from_payload
 from .chat_runnables import chat_runnable_catalog_from_payloads
@@ -76,11 +78,18 @@ class YachiyoAgentService:
         request: StartChatTaskRequest | Mapping[str, Any],
     ) -> AgentTaskSnapshot:
         payload = planner_enriched_chat_request(_request_payload(request))
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
         if self._chat_task_starter is not None:
             chat_payload = self._chat_task_starter.start_chat_task(payload)
             if chat_payload is not None:
-                return agent_task_snapshot_from_payload(chat_payload)
-        return agent_task_snapshot_from_payload(self._runtime_port.start_chat_task(payload))
+                return _task_with_request_metadata(
+                    agent_task_snapshot_from_payload(chat_payload),
+                    metadata,
+                )
+        return _task_with_request_metadata(
+            agent_task_snapshot_from_payload(self._runtime_port.start_chat_task(payload)),
+            metadata,
+        )
 
     def get_task_snapshot(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
@@ -207,6 +216,19 @@ def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
     if not isinstance(items, Iterable) or isinstance(items, (str, bytes)):
         return []
     return [dict(item) for item in items if isinstance(item, Mapping)]
+
+
+def _task_with_request_metadata(
+    task: AgentTaskSnapshot,
+    metadata: Mapping[str, Any],
+) -> AgentTaskSnapshot:
+    if not metadata:
+        return task
+    redacted = redact_json_value(dict(metadata))
+    if not isinstance(redacted, Mapping):
+        return task
+    merged = {**dict(redacted), **dict(task.metadata or {})}
+    return task.model_copy(update={"metadata": merged})
 
 
 def _payload_run_id(payload: Any) -> str:

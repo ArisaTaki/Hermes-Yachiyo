@@ -562,6 +562,12 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
 
         assert result["ok"] is True
         assert result["agent_task"]["task_id"] == "task-data-analysis"
+        metadata = result["agent_task"]["metadata"]
+        assert metadata["launcher_mode"] == "bubble"
+        assert metadata["yachiyo_runtime_planner"] is True
+        assert metadata["yachiyo_intent_kind"] == "data_analysis"
+        assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+        assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
         _assert_planner_trace_prefix(
             result["agent_task"],
             intent_kind="data_analysis",

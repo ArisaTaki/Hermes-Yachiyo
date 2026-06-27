@@ -34,6 +34,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     planner_selection_timeline_event,
     planner_timeline_events,
+    runtime_planner_metadata,
 )
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 from packages.protocol.enums import TaskStatus
@@ -326,17 +327,19 @@ def planned_agent_task_snapshot_for_quick_message(
     tool_name = str(request.get("tool") or "").strip()
     if not tool_name:
         return None
+    planner_timeline, planner_metadata = _planner_trace_for_quick_message(
+        text,
+        candidates,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
     timeline = [
-        *_planner_trace_timeline_for_quick_message(
-            text,
-            candidates,
-            allowed_tools=allowed_tools,
-            metadata=metadata,
-        ),
+        *planner_timeline,
         *daily_desktop_planned_timeline(text, requests=candidates),
     ]
     if not timeline:
         return None
+    task_metadata = {**dict(metadata or {}), **planner_metadata}
     snapshot = agent_task_snapshot_from_payload(
         {
             "task_id": task_id,
@@ -346,24 +349,25 @@ def planned_agent_task_snapshot_for_quick_message(
             "current_step": "",
             "progress_text": "",
             "timeline": timeline,
+            "metadata": task_metadata,
         }
     ).model_dump(mode="json")
     snapshot["open_in_studio_url"] = None
     return snapshot
 
 
-def _planner_trace_timeline_for_quick_message(
+def _planner_trace_for_quick_message(
     text: str,
     candidates: list[dict[str, Any]],
     *,
     allowed_tools: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not any(
         str(candidate.get("source") or "") == "runtime_planner"
         for candidate in candidates
     ):
-        return []
+        return [], {}
     try:
         decision, planned_requests = planner_decision_and_tool_requests(
             text,
@@ -372,9 +376,9 @@ def _planner_trace_timeline_for_quick_message(
         )
     except Exception:
         logger.debug("Launcher planner trace preview unavailable", exc_info=True)
-        return []
+        return [], {}
     if not planned_requests:
-        return []
+        return [], {}
     candidate_tools = [
         str(candidate.get("tool") or "").strip()
         for candidate in candidates
@@ -386,7 +390,7 @@ def _planner_trace_timeline_for_quick_message(
         if str(candidate.get("tool") or "").strip()
     ]
     if candidate_tools != planned_tools:
-        return []
+        return [], {}
     selection_payload = planner_selection_payload(
         decision=decision,
         planner_requests=planned_requests,
@@ -398,7 +402,7 @@ def _planner_trace_timeline_for_quick_message(
     return [
         *planner_timeline_events(decision),
         planner_selection_timeline_event(selection_payload),
-    ]
+    ], runtime_planner_metadata(decision)
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:

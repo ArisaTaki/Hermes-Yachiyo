@@ -398,6 +398,29 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     assert metadata["yachiyo_missing_capabilities"] == []
 
 
+def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="打开 PixelForge 并点击导出",
+            conversation_id="chat-1",
+            metadata={"client_message_id": "client-1"},
+        )
+    )
+
+    assert task.metadata["client_message_id"] == "client-1"
+    assert task.metadata["yachiyo_runtime_planner"] is True
+    assert task.metadata["yachiyo_intent_kind"] == "desktop_operation"
+    assert task.metadata["yachiyo_plan_tools"] == [
+        "desktop.list_apps",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert task.metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]
+
+
 def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)

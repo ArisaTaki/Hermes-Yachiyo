@@ -55,6 +55,7 @@ export function AgentTaskCard({
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
+  const plannerSummary = plannerSummaryFromTaskMetadata(task.metadata);
 
   return (
     <section
@@ -106,6 +107,7 @@ export function AgentTaskCard({
         ) : null}
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
+      {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
       {timelineEvents.length || toolCallFacts.length ? (
         <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
       ) : null}
@@ -266,6 +268,133 @@ export function AgentTaskCard({
       ) : null}
     </section>
   );
+}
+
+type TaskPlannerMetadataSummary = {
+  approvals: string[];
+  artifacts: string[];
+  capabilities: string[];
+  intentKind: string;
+  missingCapabilities: string[];
+  openQuestions: string[];
+  routeToStudio: boolean | null;
+  tools: string[];
+};
+
+function TaskPlannerSummary({ summary }: { summary: TaskPlannerMetadataSummary }) {
+  const chips = plannerSummaryChips(summary);
+  return (
+    <div
+      className="yachiyo-agent-task-planner"
+      data-intent-kind={summary.intentKind}
+      data-plan-approvals={summary.approvals.join(',')}
+      data-plan-artifacts={summary.artifacts.join(',')}
+      data-plan-capabilities={summary.capabilities.join(',')}
+      data-plan-missing-capabilities={summary.missingCapabilities.join(',')}
+      data-plan-open-questions={summary.openQuestions.join(',')}
+      data-plan-tools={summary.tools.join(',')}
+      data-route-to-studio={summary.routeToStudio === null ? '' : String(summary.routeToStudio)}
+      data-testid="yachiyo-agent-task-planner-summary"
+    >
+      <UiIcon name="activity" title="Runtime Planner" />
+      <div className="yachiyo-agent-task-planner-body">
+        <div className="yachiyo-agent-task-planner-head">
+          <strong>Planner · {summary.intentKind || 'runtime'}</strong>
+          <span>{plannerSummaryDetail(summary)}</span>
+        </div>
+        {chips.length ? (
+          <div className="yachiyo-agent-task-planner-chips">
+            {chips.map((chip) => (
+              <span
+                className={`yachiyo-agent-task-planner-chip ${chip.kind}`}
+                data-planner-chip-kind={chip.kind}
+                data-planner-chip-value={chip.value}
+                key={`${chip.kind}:${chip.value}`}
+                title={chip.value}
+              >
+                {chip.label} · {chip.value}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerMetadataSummary | null {
+  const metadata = objectValue(value);
+  if (!booleanMetadataValue(metadata.yachiyo_runtime_planner)) return null;
+  const intentKind = String(metadata.yachiyo_intent_kind || '').trim();
+  const tools = stringList(metadata.yachiyo_plan_tools);
+  const capabilities = uniqueStrings([
+    ...stringList(metadata.yachiyo_plan_capabilities),
+    ...stringList(metadata.yachiyo_required_capabilities),
+  ]);
+  const summary: TaskPlannerMetadataSummary = {
+    approvals: stringList(metadata.yachiyo_plan_approvals_required),
+    artifacts: stringList(metadata.yachiyo_plan_artifacts_expected),
+    capabilities,
+    intentKind,
+    missingCapabilities: stringList(metadata.yachiyo_missing_capabilities),
+    openQuestions: stringList(metadata.yachiyo_plan_open_questions),
+    routeToStudio: booleanMetadataValue(metadata.yachiyo_route_to_studio),
+    tools,
+  };
+  if (
+    !summary.intentKind
+    && !summary.tools.length
+    && !summary.capabilities.length
+    && !summary.approvals.length
+    && !summary.artifacts.length
+    && !summary.openQuestions.length
+    && !summary.missingCapabilities.length
+  ) {
+    return null;
+  }
+  return summary;
+}
+
+function plannerSummaryDetail(summary: TaskPlannerMetadataSummary): string {
+  const parts = [
+    summary.capabilities.length ? `${summary.capabilities.length} 个能力` : '',
+    summary.tools.length ? `${summary.tools.length} 个工具` : '',
+    summary.approvals.length ? `${summary.approvals.length} 个审批` : '',
+    summary.artifacts.length ? `${summary.artifacts.length} 个产物` : '',
+    summary.openQuestions.length ? `${summary.openQuestions.length} 个待确认` : '',
+    summary.missingCapabilities.length ? `${summary.missingCapabilities.length} 个缺失能力` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'runtime plan';
+}
+
+function plannerSummaryChips(summary: TaskPlannerMetadataSummary) {
+  const chips = [
+    ...summary.capabilities.slice(0, 3).map((value) => ({ kind: 'capability', label: '能力', value })),
+    ...summary.tools.slice(0, 4).map((value) => ({ kind: 'tool', label: '工具', value })),
+    ...summary.approvals.slice(0, 2).map((value) => ({ kind: 'approval', label: '审批', value })),
+    ...summary.artifacts.slice(0, 2).map((value) => ({ kind: 'artifact', label: '产物', value })),
+    ...summary.openQuestions.slice(0, 2).map((value) => ({ kind: 'question', label: '待确认', value })),
+    ...summary.missingCapabilities.slice(0, 2).map((value) => ({ kind: 'missing', label: '缺失', value })),
+  ];
+  const visibleCount = chips.length;
+  const totalCount = summary.capabilities.length
+    + summary.tools.length
+    + summary.approvals.length
+    + summary.artifacts.length
+    + summary.openQuestions.length
+    + summary.missingCapabilities.length;
+  if (totalCount > visibleCount) {
+    chips.push({ kind: 'more', label: '更多', value: String(totalCount - visibleCount) });
+  }
+  return chips;
+}
+
+function booleanMetadataValue(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return null;
 }
 
 function taskStatusLabel(status: string) {

@@ -362,6 +362,7 @@ export type AgentTaskSnapshot = {
   recent_events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   artifacts?: ArtifactSnapshot[];
+  metadata?: Record<string, unknown>;
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;

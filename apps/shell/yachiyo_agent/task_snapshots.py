@@ -8,7 +8,7 @@ from typing import Any
 from apps.shell.agent.runtime.desktop_tool_labels import (
     TASK_PROGRESS_DESKTOP_TOOL_LABELS as _DESKTOP_TOOL_PROGRESS_LABELS,
 )
-from apps.shell.agent.runtime.events import redact_secrets
+from apps.shell.agent.runtime.events import redact_json_value, redact_secrets
 
 from .approval_event_snapshots import (
     approval_snapshots_from_events,
@@ -128,6 +128,7 @@ def agent_task_snapshot_from_payload(
             run_id=run_id,
             events=recent_events,
         ),
+        metadata=_public_task_metadata(payload),
         open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
         or studio_run_url(run_id, group_run_id=group_run_id),
         created_at=_text(payload.get("created_at")),
@@ -139,6 +140,14 @@ def agent_task_snapshots_from_payloads(payloads: Any) -> list[AgentTaskSnapshot]
     if not isinstance(payloads, list):
         return []
     return [agent_task_snapshot_from_payload(item) for item in payloads]
+
+
+def _public_task_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return {}
+    redacted = redact_json_value(dict(metadata))
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
 
 
 def _chat_task_tool_calls(
@@ -312,6 +321,11 @@ def _desktop_intent_progress_text(
     if has_explicit_progress or task_status not in _ACTIVE_TASK_STATUSES:
         return None
 
+    if not _has_desktop_intent_result_event(events):
+        planned_progress = _first_planned_desktop_intent_progress_text(events)
+        if planned_progress:
+            return planned_progress
+
     for event in reversed(events):
         if event.event_type not in {
             _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
@@ -345,6 +359,28 @@ def _desktop_intent_progress_text(
             )
         if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             return f"准备执行 · {label}" if label else "准备执行桌面动作"
+    return None
+
+
+def _has_desktop_intent_result_event(events: list[PublicRunEvent]) -> bool:
+    result_event_types = {
+        _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
+        _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
+        _TOOL_CALL_EVENT_TYPE,
+    }
+    return any(event.event_type in result_event_types for event in events)
+
+
+def _first_planned_desktop_intent_progress_text(events: list[PublicRunEvent]) -> str | None:
+    for event in events:
+        if event.event_type != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+            continue
+        tool_name = _event_tool_name(event)
+        if tool_name not in _DESKTOP_TOOL_PROGRESS_LABELS:
+            continue
+        label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
+        return f"准备执行 · {label}" if label else "准备执行桌面动作"
     return None
 
 

@@ -287,6 +287,11 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
                 path="report.md",
             )
         ],
+        metadata={
+            "yachiyo_runtime_planner": True,
+            "yachiyo_intent_kind": "code_task",
+            "yachiyo_plan_tools": ["workspace.write_patch"],
+        },
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -307,6 +312,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "recent_events",
         "tool_calls",
         "artifacts",
+        "metadata",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -314,6 +320,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["pending_approvals"][0]["approval_id"] == "approval-1"
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.write_patch"
+    assert payload["metadata"]["yachiyo_plan_tools"] == ["workspace.write_patch"]
     assert "event" not in payload["recent_events"][0]
 
 
@@ -382,6 +389,37 @@ def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool(
     assert [event.event_type for event in snapshot.recent_events].count("agent.tool.call") == 3
     assert [tool_call.tool_name for tool_call in snapshot.tool_calls] == ["app.open"]
     assert snapshot.tool_calls[0].input_preview == {"app_name": "Microsoft Word"}
+
+
+def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_planned",
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "input_preview": {"limit": 20, "query": "Apple Music"},
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_planned",
+                    "payload": {
+                        "tool": "app.open",
+                        "input_preview": {"app_name": "Music"},
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_planned",
+                    "payload": {"tool": "desktop.active_window", "input_preview": {}},
+                },
+            ],
+        }
+    )
+
+    assert snapshot.current_step == "准备执行 · 发现已安装应用"
 
 
 def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
