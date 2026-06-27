@@ -44,6 +44,64 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
+def test_daily_desktop_planned_timeline_keeps_each_runtime_planner_request() -> None:
+    requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+            "continue_to_model": True,
+        },
+    ]
+
+    assert daily_desktop_planned_timeline(requests=requests) == [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.list_apps",
+            "tool": "desktop.list_apps",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+            "input_preview": {"query": "PixelForge", "limit": 20},
+        },
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "app.open",
+            "tool": "app.open",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+            "input_preview": {"app_name": "PixelForge"},
+        },
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.active_window",
+            "tool": "desktop.active_window",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+            "input_preview": {},
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_entrypoint_plan_user_metadata_preserves_legacy_keys_with_plan_aliases() -> None:
     requests = [
         {

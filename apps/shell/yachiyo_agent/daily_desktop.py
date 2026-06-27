@@ -132,25 +132,27 @@ def daily_desktop_planned_timeline(
         )
     if not planned_requests:
         return []
-    request = planned_requests[0]
-    tool_name = str(request.get("tool") or "").strip()
-    if not tool_name:
-        return []
-    tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
-    event = {
-        "event": "agent.desktop.intent_planned",
-        "detail": tool_name,
-        "tool": tool_name,
-        "status": "planned",
-        "source": str(request.get("source") or "daily_desktop_intent"),
-        "planning_reason": str(
-            request.get("planning_reason") or "clear_daily_desktop_intent"
-        ),
-        "input_preview": dict(tool_input),
-    }
-    if request.get("continue_to_model"):
-        event["continue_to_model"] = True
-    return [event]
+    timeline: list[dict[str, Any]] = []
+    for request in planned_requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        tool_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+        event = {
+            "event": "agent.desktop.intent_planned",
+            "detail": tool_name,
+            "tool": tool_name,
+            "status": "planned",
+            "source": str(request.get("source") or "daily_desktop_intent"),
+            "planning_reason": str(
+                request.get("planning_reason") or "clear_daily_desktop_intent"
+            ),
+            "input_preview": dict(tool_input),
+        }
+        if request.get("continue_to_model"):
+            event["continue_to_model"] = True
+        timeline.append(event)
+    return timeline
 
 
 def _runtime_main_chat_tool_policies(runtime: Any | None) -> list[Mapping[str, Any]]:
