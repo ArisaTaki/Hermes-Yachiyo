@@ -405,6 +405,10 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
             ["desktop.safe_shortcut", "app.focus_and_safe_shortcut"],
         ),
         (
+            "把剪贴板内容粘贴到 Slack",
+            ["app.focus_and_safe_shortcut"],
+        ),
+        (
             "把当前网页链接输入到 Slack 搜索框",
             ["desktop.safe_shortcut", "app.focus_and_click_ui_element", "desktop.safe_shortcut"],
         ),
@@ -419,6 +423,10 @@ def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without
         (
             "把选中的内容填到当前输入框",
             ["desktop.safe_shortcut", "desktop.safe_shortcut"],
+        ),
+        (
+            "把剪贴板内容填到当前输入框",
+            ["desktop.safe_shortcut"],
         ),
     )
     for prompt, expected_tools in cases:

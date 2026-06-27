@@ -8259,7 +8259,17 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
                 "planning_reason": "planner_fallback_desktop_operation",
             },
         ]),
+        ("把剪贴板内容粘贴到 Slack", [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": "Slack", "action": "paste"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+        ]),
         ("把选中的内容填到当前输入框", [selected_copy, paste]),
+        ("把剪贴板内容填到当前输入框", [paste]),
         ("把剪贴板内容输入到搜索框", [foreground_search_click, paste]),
         ("把当前网页链接输入到地址栏", [
             current_page_link_copy,
