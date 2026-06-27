@@ -490,6 +490,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     rerun_of_runnable_name: str | None = None
     rerun_original_created_at: str | None = None
     rerun_original_updated_at: str | None = None
+    planner_summary: PlannerTraceSummarySnapshot | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)

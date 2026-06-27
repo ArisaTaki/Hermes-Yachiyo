@@ -358,116 +358,18 @@ function groupRunChildSkillTraces(publicRuns: RunTimelineSnapshot[]) {
 }
 
 function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null): string {
-  const events = publicRun?.events || [];
-  if (!events.length) return '';
-  const hasIntent = events.some((event) => event.event_type === 'agent.intent.selected');
-  const hasPlan = events.some((event) => event.event_type === 'agent.plan.created');
-  const planSteps = groupRunChildPlannerStepCount(events);
-  const capabilityCount = groupRunChildPlannerCapabilityCount(events);
-  const outputCounts = groupRunChildPlannerOutputCounts(events);
-  const hasSelection = events.some((event) => event.event_type === 'agent.plan.selection');
-  const hasOutputs = Boolean(outputCounts.approvals || outputCounts.artifacts || outputCounts.questions);
-  if (!hasIntent && !hasPlan && !planSteps && !capabilityCount && !hasSelection && !hasOutputs) return '';
+  const summary = publicRun?.planner_summary;
+  if (!summary) return '';
   return [
-    hasIntent ? 'intent' : '',
-    hasPlan ? 'plan' : '',
-    capabilityCount ? `${capabilityCount} capabilities` : '',
-    planSteps ? `${planSteps} steps` : '',
-    outputCounts.approvals ? `${outputCounts.approvals} approvals` : '',
-    outputCounts.artifacts ? `${outputCounts.artifacts} artifacts` : '',
-    outputCounts.questions ? `${outputCounts.questions} questions` : '',
-    hasSelection ? 'selection' : '',
+    summary.intent_kind ? 'intent' : '',
+    summary.plan_id || summary.step_count ? 'plan' : '',
+    summary.plan_capabilities?.length ? `${summary.plan_capabilities.length} capabilities` : '',
+    summary.step_count ? `${summary.step_count} steps` : '',
+    summary.approvals_required?.length ? `${summary.approvals_required.length} approvals` : '',
+    summary.artifacts_expected?.length ? `${summary.artifacts_expected.length} artifacts` : '',
+    summary.open_questions?.length ? `${summary.open_questions.length} questions` : '',
+    summary.selection_source || summary.selected_tools?.length ? 'selection' : '',
   ].filter(Boolean).join(' · ');
-}
-
-function groupRunChildPlannerStepCount(events: PublicRunEvent[]): number {
-  const explicitSteps = events.filter((event) => event.event_type === 'agent.plan.step').length;
-  if (explicitSteps) return explicitSteps;
-  return events.reduce((count, event) => {
-    if (event.event_type !== 'agent.plan.created') return count;
-    const payload = objectRecord(event.payload);
-    const plan = objectRecord(payload.plan);
-    const toolPlan = objectRecord(plan.tool_plan);
-    const steps = Array.isArray(toolPlan.steps) ? toolPlan.steps : [];
-    return count + steps.length;
-  }, 0);
-}
-
-function groupRunChildPlannerCapabilityCount(events: PublicRunEvent[]): number {
-  const capabilityIds = new Set<string>();
-  events.forEach((event) => {
-    const payload = objectRecord(event.payload);
-    if (event.event_type === 'agent.plan.step') {
-      const step = objectRecord(payload.step);
-      const capabilityId = stringValue(step.capability_id) || stringValue(payload.capability_id);
-      if (capabilityId) capabilityIds.add(capabilityId);
-      return;
-    }
-    if (event.event_type !== 'agent.plan.created') return;
-    const plan = objectRecord(payload.plan);
-    const toolPlan = objectRecord(plan.tool_plan);
-    const capabilities = Array.isArray(plan.capabilities) ? plan.capabilities : [];
-    capabilities.forEach((capability) => {
-      const capabilityId = stringValue(objectRecord(capability).capability_id);
-      if (capabilityId) capabilityIds.add(capabilityId);
-    });
-    const requiredCapabilities = Array.isArray(toolPlan.required_capabilities)
-      ? toolPlan.required_capabilities
-      : [];
-    requiredCapabilities.forEach((capabilityId) => {
-      const value = stringValue(capabilityId);
-      if (value) capabilityIds.add(value);
-    });
-  });
-  return capabilityIds.size;
-}
-
-function groupRunChildPlannerOutputCounts(events: PublicRunEvent[]): {
-  approvals: number;
-  artifacts: number;
-  questions: number;
-} {
-  const approvals = new Set<string>();
-  const artifacts = new Set<string>();
-  const questions = new Set<string>();
-  events.forEach((event) => {
-    const payload = objectRecord(event.payload);
-    if (event.event_type === 'agent.plan.created') {
-      const plan = objectRecord(payload.plan);
-      const toolPlan = objectRecord(plan.tool_plan);
-      addStringValues(approvals, toolPlan.approvals_required);
-      addStringValues(artifacts, toolPlan.artifacts_expected);
-      addStringValues(questions, toolPlan.open_questions);
-      return;
-    }
-    if (event.event_type !== 'agent.plan.selection') return;
-    addStringValues(approvals, payload.approvals_required);
-    addStringValues(artifacts, payload.artifacts_expected);
-    addStringValues(questions, payload.open_questions);
-  });
-  return {
-    approvals: approvals.size,
-    artifacts: artifacts.size,
-    questions: questions.size,
-  };
-}
-
-function addStringValues(target: Set<string>, value: unknown): void {
-  if (!Array.isArray(value)) return;
-  value.forEach((item) => {
-    const clean = stringValue(item);
-    if (clean) target.add(clean);
-  });
-}
-
-function objectRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function groupRunEventIsMemorySkillTrace(event: PublicRunEvent): boolean {

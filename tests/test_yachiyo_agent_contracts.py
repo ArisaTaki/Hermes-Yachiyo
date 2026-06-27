@@ -363,6 +363,71 @@ def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events(
     ]
 
 
+def test_run_timeline_snapshot_projects_planner_summary_from_events() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "agent.plan.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "decision_id": "decision-1",
+                        "plan": {
+                            "plan_id": "plan-1",
+                            "intent": {
+                                "intent_id": "intent-1",
+                                "kind": "report_generation",
+                                "title": "Write report",
+                            },
+                            "capabilities": [{"capability_id": "artifact.output"}],
+                            "tool_plan": {
+                                "steps": [
+                                    {
+                                        "step_id": "write-report",
+                                        "capability_id": "artifact.output",
+                                        "tool_name": "artifact.write",
+                                    }
+                                ],
+                                "required_capabilities": ["artifact.output"],
+                                "artifacts_expected": ["markdown_report"],
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.plan.selection",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "selection_source": "runtime_planner",
+                        "selection_reason": "runtime_planner_direct",
+                        "selected_tools": ["artifact.write"],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert snapshot.planner_summary == PlannerTraceSummarySnapshot(
+        source="runtime_planner",
+        decision_id="decision-1",
+        plan_id="plan-1",
+        intent_kind="report_generation",
+        intent_title="Write report",
+        selection_source="runtime_planner",
+        selection_reason="runtime_planner_direct",
+        plan_tools=["artifact.write"],
+        selected_tools=["artifact.write"],
+        plan_capabilities=["artifact.output"],
+        required_capabilities=["artifact.output"],
+        artifacts_expected=["markdown_report"],
+        step_count=1,
+        event_count=2,
+    )
+    assert _json(snapshot)["planner_summary"]["artifacts_expected"] == ["markdown_report"]
+
+
 def test_agent_task_snapshot_json_shape_is_stable() -> None:
     snapshot = AgentTaskSnapshot(
         task_id="task-1",
@@ -1932,6 +1997,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "rerun_of_runnable_name",
         "rerun_original_created_at",
         "rerun_original_updated_at",
+        "planner_summary",
         "events",
         "tool_calls",
         "memory_traces",
@@ -1947,6 +2013,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["session_id"] == "chat-1"
     assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["rerun_of_run_id"] == "original-run-1"
+    assert payload["planner_summary"] is None
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
     assert payload["memory_traces"][0]["event_type"] == "memory.retrieved"
     assert payload["skill_traces"][0]["event_type"] == "skill.selected"

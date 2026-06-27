@@ -1321,11 +1321,11 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             'data-testid="agent-run-detail-group-run-child-planner-trace"',
             'itemTestId="agent-run-detail-group-run-artifact-item"',
             "function groupRunChildPlannerTraceSummary",
-            "event.event_type === 'agent.intent.selected'",
-            "event.event_type === 'agent.plan.created'",
-            "groupRunChildPlannerStepCount",
-            "groupRunChildPlannerCapabilityCount",
-            "event.event_type === 'agent.plan.step'",
+            "const summary = publicRun?.planner_summary;",
+            "summary.intent_kind ? 'intent' : '',",
+            "summary.plan_capabilities?.length ? `${summary.plan_capabilities.length} capabilities` : '',",
+            "summary.step_count ? `${summary.step_count} steps` : '',",
+            "summary.selection_source || summary.selected_tools?.length ? 'selection' : '',",
         ],
     )
     _assert_smoke_script(
