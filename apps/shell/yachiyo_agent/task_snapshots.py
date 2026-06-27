@@ -49,7 +49,6 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.windows",
     "desktop.ui_elements",
-    "screen.capture",
 }
 
 

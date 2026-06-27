@@ -395,6 +395,11 @@ class TaskIntentRouter:
             window_list = None
             app_management = None
             screen_capture = None
+        if screen_capture is not None and not str((screen_capture or {}).get("app_name") or "").strip():
+            app_management = None
+        if screen_capture is not None:
+            safe_shortcut = None
+            safe_shortcut_sequence = []
         if window_list is not None:
             app_management = None
         app_name_hint = str(
@@ -1445,6 +1450,11 @@ class RuntimePlanner:
             window_list = None
             app_management = None
             screen_capture = None
+        if screen_capture is not None and not str((screen_capture or {}).get("app_name") or "").strip():
+            app_management = None
+        if screen_capture is not None:
+            safe_shortcut = None
+            safe_shortcut_sequence = []
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)

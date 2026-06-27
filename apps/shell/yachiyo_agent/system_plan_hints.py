@@ -175,12 +175,16 @@ def _volume_payload(text: str) -> dict[str, Any]:
             "调大",
             "调高",
             "提高",
+            "放大音量",
+            "放大声音",
             "大声",
             "大点声",
             "大一点声",
             "声音大点",
             "声音大一点",
             "volume up",
+            "sound up",
+            "turn it up",
             "louder",
         ],
     ) or (
@@ -194,20 +198,27 @@ def _volume_payload(text: str) -> dict[str, Any]:
             "调小",
             "调低",
             "降低",
+            "缩小音量",
+            "缩小声音",
             "小声",
             "小点声",
             "小一点声",
             "声音小点",
             "声音小一点",
             "volume down",
+            "sound down",
             "quieter",
+            "make it quieter",
         ],
     ) or (
         has_volume_context
         and _contains_any(text, ["小一点", "小点", "低一点", "低点"])
     ):
         return {"action": "down"}
-    if _contains_any(text, ["查看音量", "读取音量", "当前音量", "音量多少", "volume status"]):
+    if _contains_any(
+        text,
+        ["查看音量", "读取音量", "当前音量", "音量多少", "volume status", "current volume"],
+    ) or re.search(r"\bshow\s+(?:the\s+)?current\s+volume\b", lowered):
         return {"action": "status"}
     return {}
 

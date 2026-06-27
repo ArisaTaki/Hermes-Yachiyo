@@ -1216,7 +1216,7 @@ def _ui_inspection_app_name_hint(value: str) -> str:
 def _clean_ui_app_name_hint(value: str) -> str:
     app = clean(value)
     app = re.sub(
-        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|观察|识别|"
+        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|把|将|列出|查看|看看|看一下|看下|显示|读取|观察|识别|"
         r"list|show|read|inspect|the)\s*",
         "",
         app,
@@ -1229,6 +1229,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE)
     app = re.split(
         r"(?:看看|看一下|看下|查看|读取|观察|识别|有哪些|有什么|有啥|"
         r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
@@ -1332,6 +1333,17 @@ def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
             r".{0,8}(?:是什么|是啥|内容|画面|有什么|有啥)",
             value,
         )
+        or re.search(
+            r"(?:打开|启动|开启|拉起|切到|聚焦|把|将).{1,40}"
+            r"(?:看看|看一下|看下|查看|读取|读一下|读下|看).{0,16}"
+            r"(?:消息|聊天|未读|新消息|cpu|CPU)",
+            value,
+        )
+        or re.search(
+            r"\b(?:open|launch|start|focus)\s+.+?\s+(?:and|then)\s+"
+            r"(?:read|check|view|look\s+at)\s+(?:messages?|cpu)\b",
+            lowered,
+        )
         or "take a screenshot" in lowered
         or "capture the screen" in lowered
         or "screen capture" in lowered
@@ -1357,6 +1369,16 @@ def _screen_capture_app_name_hint(value: str) -> str:
         r"(?P<app>[^。！？!?，,]+?)\s*(?:界面|画面)",
         r"(?P<app2>[^。！？!?，,]+?)\s*(?:界面|画面).{0,8}(?:截图|截屏|看一下|看看|查看|观察)",
         r"(?P<app3>[^。！？!?，,]+?)\s*(?:看一下|看看|看下|查看|观察(?:一下|下)?)\s*(?:界面|画面)",
+        r"^(?:把|将)?\s*(?P<app_preopen>[^。！？!?，,]+?)\s*"
+        r"(?:打开|启动|开启|拉起)\s*(?:然后|并|再|接着|之后)?\s*"
+        r"(?:看看|看一下|看下|查看|读取|读一下|读下|看).{0,16}"
+        r"(?:消息|聊天|未读|新消息|cpu|CPU)",
+        r"^(?:打开|启动|开启|拉起|切到|聚焦)?\s*(?P<app_messages>[^。！？!?，,]+?)\s*"
+        r"(?:然后|并|再|接着|之后)?\s*"
+        r"(?:看看|看一下|看下|查看|读取|读一下|读下|看).{0,16}"
+        r"(?:消息|聊天|未读|新消息|cpu|CPU)",
+        r"\b(?:open|launch|start|focus)\s+(?P<app_messages_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:and|then)\s+(?:read|check|view|look\s+at)\s+(?:messages?|cpu)\b",
         r"\b(?:look at|inspect|view|show me|show)\s+(?P<app_en>.+?)\s+"
         r"(?:screen|interface|ui)\b",
     )

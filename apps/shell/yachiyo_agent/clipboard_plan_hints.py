@@ -202,6 +202,11 @@ def _selected_text_read_request(text: str) -> bool:
             lowered,
         )
         or re.search(
+            r"\bcopy\s+(?:the\s+)?(?:selected|highlighted)\s+(?:text|content|selection)"
+            r".{0,40}\bread\s+(?:the\s+)?(?:system\s+)?clipboard\b",
+            lowered,
+        )
+        or re.search(
             r"\bwhat(?:'s| is)\s+(?:the\s+)?"
             r"(?:selected|highlighted)\s+(?:text|content|selection)\b",
             lowered,
