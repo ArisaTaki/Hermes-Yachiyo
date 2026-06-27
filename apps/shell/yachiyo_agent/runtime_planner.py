@@ -187,6 +187,8 @@ class TaskIntentRouter:
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
+        if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
+            safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -339,8 +341,10 @@ class TaskIntentRouter:
                 safe_shortcut = None
                 safe_shortcut_sequence = []
                 safe_shortcut_missing_required_scope = True
-        if _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint) and not (
-            foreground_paste and _foreground_compose_app_name_hint(text)
+        if (
+            _safe_shortcut_targets_foreground(text, safe_shortcut, app_name_hint)
+            and not (foreground_paste and _foreground_compose_app_name_hint(text))
+            and not app_scoped_safe_operation.get("safe_shortcut")
         ):
             app_management = None
             app_name_hint = ""
@@ -359,6 +363,8 @@ class TaskIntentRouter:
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_foreground" if foreground_submit_action else "")
+            or ("safe_shortcut_sequence" if safe_shortcut_sequence else "")
+            or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
             or ("safe_scroll" if safe_scroll else "")
             or _desktop_operation_hint(text)
@@ -1121,6 +1127,8 @@ class RuntimePlanner:
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(intent.user_goal)
+        if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
+            safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if safe_key is None and app_scoped_safe_operation.get("safe_key"):
             safe_key = app_scoped_safe_operation["safe_key"]
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
@@ -1176,8 +1184,10 @@ class RuntimePlanner:
             else:
                 safe_shortcut = None
                 safe_shortcut_sequence = []
-        if _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name) and not (
-            foreground_paste and _foreground_compose_app_name_hint(intent.user_goal)
+        if (
+            _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name)
+            and not (foreground_paste and _foreground_compose_app_name_hint(intent.user_goal))
+            and not app_scoped_safe_operation.get("safe_shortcut")
         ):
             app_management = None
             app_name = ""
@@ -4695,16 +4705,31 @@ def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
         return {}
     safe_key = safe_key_hint(followup)
     safe_scroll = safe_scroll_hint(followup)
-    if not safe_key and not safe_scroll:
+    safe_shortcut = safe_shortcut_hint(followup)
+    if not safe_key and not safe_scroll and not safe_shortcut:
         return {}
+    app_name = str(parsed.get("app_name") or "").strip()
+    if (
+        safe_shortcut
+        and _safe_shortcut_requires_finder_scope(safe_shortcut)
+        and not _is_finder_app_name(app_name)
+    ):
+        safe_shortcut = None
+        if not safe_key and not safe_scroll:
+            return {}
     result = {
-        "app_name": str(parsed.get("app_name") or "").strip(),
+        "app_name": app_name,
         "mode": str(parsed.get("mode") or "").strip() or "focus",
     }
     if safe_key:
         result["safe_key"] = safe_key
     if safe_scroll:
         result["safe_scroll"] = safe_scroll
+    if safe_shortcut and (
+        not _safe_shortcut_requires_finder_scope(safe_shortcut)
+        or _is_finder_app_name(str(result.get("app_name") or ""))
+    ):
+        result["safe_shortcut"] = safe_shortcut
     return result
 
 
@@ -4713,9 +4738,21 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
     safe_followup = (
         r"(?P<followup>(?:按一下|按下|按|发送|触发|"
         r"向下|往下|朝下|向上|往上|朝上|下滑|上滑|下滚|上滚|"
-        r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉).+)"
+        r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉|"
+        r"复制|粘贴|全选|撤销|重做|查找|刷新|后退|前进|最大化|全屏|"
+        r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
+        r"显示简介|查看简介|快速查看|快速预览|预览|重命名|上一级目录|上一级|"
+        r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|"
+        r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e).*)"
     )
     patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)\s*"
+            r"(?P<app>[\w .·-]{1,40}?)\s*(?P<mode>打开|启动|开启|切到|聚焦)\s*"
+            r"(?:(?:并且|并|然后|之后|后(?!退)|再|接着)\s*)?"
+            rf"{safe_followup}$",
+            "",
+        ),
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?P<mode>打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s*"
@@ -4736,8 +4773,7 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
             "",
         ),
         (
-            r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
-            r"(?P<followup>(?:press|send|hit|scroll|page)\s+.+)$",
+            rf"^(?P<app>[\w .·-]{{1,40}}?)\s*{safe_followup}$",
             "focus",
         ),
     )
@@ -4746,9 +4782,9 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        app_name = _clean_app_name_hint(groups.get("app") or "")
         followup = _clean_app_scoped_followup(groups.get("followup") or "")
-        if not app_name or not followup:
+        if not app_name or _invalid_app_scoped_followup_app(app_name) or not followup:
             continue
         return {
             "app_name": app_name,
@@ -4756,6 +4792,37 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
             "followup": followup,
         }
     return {}
+
+
+def _invalid_app_scoped_followup_app(app_name: str) -> bool:
+    normalized = re.sub(r"[\s._·-]+", "", str(app_name or "").strip().lower())
+    return normalized in {
+        "",
+        "你",
+        "你能",
+        "你能帮我",
+        "帮我",
+        "请",
+        "麻烦",
+        "可以",
+        "能否",
+        "能不能",
+        "打开",
+        "启动",
+        "开启",
+        "切到",
+        "聚焦",
+        "在",
+        "用",
+        "通过",
+        "把",
+        "将",
+        "please",
+        "can",
+        "canyou",
+        "couldyou",
+        "wouldyou",
+    }
 
 
 def _clean_app_scoped_followup(value: str) -> str:

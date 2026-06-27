@@ -2284,6 +2284,26 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
         "pages": 2,
     }
 
+    app_shortcut_decision = RuntimePlanner().decision(
+        "切到 Chrome 后退一下",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_shortcut_decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert app_shortcut_decision.selected_intent.inputs["operation_hint"] == "safe_shortcut"
+    assert app_shortcut_decision.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "browser_back"
+    }
+    app_shortcut_step = _step_by_id(app_shortcut_decision, "operate-foreground-ui")
+    assert app_shortcut_step.tool_name == "app.focus_and_safe_shortcut"
+    assert app_shortcut_step.input_preview == {
+        "app_name": "Chrome",
+        "action": "browser_back",
+    }
+
     click_step = _step_by_id(click_decision, "operate-foreground-ui")
     assert click_decision.selected_intent.inputs["operation_hint"] == "safe_click"
     assert click_decision.selected_intent.inputs["safe_click_hint"] == {
@@ -2296,7 +2316,7 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert click_step.approval_required is False
 
 
-def test_planner_direct_tool_requests_maps_app_scoped_safe_key_and_scroll() -> None:
+def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
     assert planner_direct_tool_requests(
         "打开 Slack 按下箭头三次",
         allowed_tools=[
@@ -2347,6 +2367,41 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_key_and_scroll() -> N
             "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
+
+    for prompt, tool_name, payload in (
+        (
+            "切到 Chrome 后退一下",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Google Chrome", "action": "browser_back"},
+        ),
+        (
+            "打开 Slack 并复制",
+            "app.open_and_safe_shortcut",
+            {"app_name": "Slack", "action": "copy"},
+        ),
+        (
+            "Chrome 新建标签页",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Google Chrome", "action": "new_tab"},
+        ),
+    ):
+        assert planner_direct_tool_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open_and_safe_shortcut",
+                "app.focus_and_safe_shortcut",
+                "desktop.ui_elements",
+            ],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": payload,
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
 
 
 def test_runtime_planner_verifies_desktop_open_result() -> None:
