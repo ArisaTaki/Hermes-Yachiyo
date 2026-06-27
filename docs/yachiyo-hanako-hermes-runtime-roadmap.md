@@ -13,6 +13,13 @@ The target shape is:
 - Old route response shapes, database schema, Agent Studio, Groups, Workflow,
   Run Timeline, Approval, and Artifact behavior stay compatible.
 
+## Execution Rule
+
+This Phase 0-10 sequence is the authoritative implementation route for the
+Hanako/Hermes runtime migration. Each implementation batch should map to one
+of these phases, and cleanup of old app-specific hardcoding belongs in Phase
+10 only after the replacement planner/runtime path is covered by tests.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,
