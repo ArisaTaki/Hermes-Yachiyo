@@ -81,6 +81,7 @@ def planner_first_direct_tool_selection(
                 selected_requests=selected_requests,
                 selected_source=selected_source,
                 selected_reason=selected_reason,
+                metadata=metadata,
             ),
             selected_source=selected_source,
         )
@@ -95,6 +96,7 @@ def planner_first_direct_tool_selection(
                 selected_requests=selected_requests,
                 selected_source="daily_desktop_intent",
                 selected_reason="legacy_available_without_planner_direct_plan",
+                metadata=metadata,
             ),
             selected_source="daily_desktop_intent",
         )
@@ -108,6 +110,7 @@ def planner_first_direct_tool_selection(
             selected_requests=[],
             selected_source="none",
             selected_reason="no_direct_entrypoint_plan",
+            metadata=metadata,
         ),
         selected_source="none",
     )

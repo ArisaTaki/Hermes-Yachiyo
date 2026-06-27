@@ -460,10 +460,20 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
         selected_requests=planner_requests,
         selected_source="runtime_planner",
         selected_reason="runtime_planner_direct",
+        metadata={
+            "source": "chat",
+            "planner_entrypoint": "chat_default",
+            "runnable_kind": "main",
+            "daily_desktop_intent": False,
+        },
     )
     event = planner_selection_timeline_event(payload)
 
     assert payload["source"] == "runtime_planner"
+    assert payload["entrypoint_source"] == "chat"
+    assert payload["planner_entrypoint"] == "chat_default"
+    assert payload["runnable_kind"] == "main"
+    assert payload["entrypoint_daily_desktop_intent"] is False
     assert payload["selection_source"] == "runtime_planner"
     assert payload["selection_role"] == "runtime_planner_primary"
     assert payload["legacy_fallback"] is False
@@ -529,9 +539,21 @@ def test_runtime_planner_selection_projection_marks_legacy_desktop_intent_as_fal
         selected_requests=legacy_requests,
         selected_source="daily_desktop_intent",
         selected_reason="legacy_selected_after_planner_gap",
+        metadata={
+            "source": "launcher",
+            "launcher_mode": "bubble",
+            "launcher_surface": "desktop_launcher",
+            "planner_entrypoint": "bubble_default",
+            "daily_desktop_intent": True,
+        },
     )
 
     assert payload["source"] == "runtime_planner"
+    assert payload["entrypoint_source"] == "launcher"
+    assert payload["planner_entrypoint"] == "bubble_default"
+    assert payload["launcher_mode"] == "bubble"
+    assert payload["launcher_surface"] == "desktop_launcher"
+    assert payload["entrypoint_daily_desktop_intent"] is True
     assert payload["selection_source"] == "daily_desktop_intent"
     assert payload["selection_role"] == "legacy_desktop_intent_fallback"
     assert payload["legacy_fallback"] is True
@@ -10291,6 +10313,31 @@ def test_planner_first_owns_desktop_discovery_requests_over_legacy() -> None:
             "planning_reason": "planner_desktop_operation",
         }
     ]
+
+
+def test_planner_first_selection_payload_keeps_entrypoint_metadata_for_studio() -> None:
+    selection = planner_first_direct_tool_selection(
+        "当前界面有哪些按钮",
+        ["desktop.active_window", "desktop.ui_elements", "screen.capture"],
+        metadata={
+            "source": "launcher",
+            "launcher_mode": "live2d",
+            "launcher_surface": "desktop_launcher",
+            "planner_entrypoint": "live2d_default",
+            "runnable_kind": "main",
+            "daily_desktop_intent": False,
+        },
+        legacy_tool_requests=lambda _prompt, _allowed_tools: [],
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["source"] == "runtime_planner"
+    assert selection.event_payload["entrypoint_source"] == "launcher"
+    assert selection.event_payload["planner_entrypoint"] == "live2d_default"
+    assert selection.event_payload["launcher_mode"] == "live2d"
+    assert selection.event_payload["launcher_surface"] == "desktop_launcher"
+    assert selection.event_payload["runnable_kind"] == "main"
+    assert selection.event_payload["entrypoint_daily_desktop_intent"] is False
 
 
 def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> None:

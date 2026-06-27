@@ -121,6 +121,7 @@ def planner_selection_payload(
     selected_requests: Iterable[Mapping[str, Any]],
     selected_source: str,
     selected_reason: str,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     planner_request_list = _request_list(planner_requests)
     legacy_request_list = _request_list(legacy_requests)
@@ -175,6 +176,27 @@ def planner_selection_payload(
     route_to_studio = getattr(plan, "route_to_studio", None)
     if isinstance(route_to_studio, bool):
         payload["route_to_studio"] = route_to_studio
+    payload.update(_selection_entrypoint_payload(metadata))
+    return payload
+
+
+def _selection_entrypoint_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    payload: dict[str, Any] = {}
+    key_map = {
+        "planner_entrypoint": "planner_entrypoint",
+        "source": "entrypoint_source",
+        "launcher_mode": "launcher_mode",
+        "launcher_surface": "launcher_surface",
+        "runnable_kind": "runnable_kind",
+    }
+    for key, payload_key in key_map.items():
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            payload[payload_key] = value
+    if isinstance(metadata.get("daily_desktop_intent"), bool):
+        payload["entrypoint_daily_desktop_intent"] = bool(metadata.get("daily_desktop_intent"))
     return payload
 
 

@@ -398,6 +398,7 @@ def _planner_trace_for_quick_message(
         selected_requests=planned_requests,
         selected_source="runtime_planner",
         selected_reason="runtime_planner_direct",
+        metadata=metadata,
     )
     return [
         *planner_timeline_events(decision),

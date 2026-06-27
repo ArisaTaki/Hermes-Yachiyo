@@ -38,7 +38,13 @@ type PlannerSelection = {
   plannerRequestCount: number;
   reason: string;
   requiredCapabilities: string[];
+  dailyDesktopIntent: boolean;
+  entrypointSource: string;
+  launcherMode: string;
+  launcherSurface: string;
   legacyFallback: boolean;
+  plannerEntrypoint: string;
+  runnableKind: string;
   selectedRole: string;
   selectedSource: string;
   selectedTools: string[];
@@ -187,12 +193,17 @@ export function PlannerTraceInspector({
 
         {trace.selection ? (
           <section
+            data-entrypoint-source={trace.selection.entrypointSource}
             data-legacy-request-count={trace.selection.legacyRequestCount}
             data-legacy-fallback={String(trace.selection.legacyFallback)}
+            data-launcher-mode={trace.selection.launcherMode}
+            data-launcher-surface={trace.selection.launcherSurface}
             data-missing-capability-count={trace.selection.missingCapabilityCount}
             data-plan-capability-count={trace.selection.planCapabilityCount}
             data-plan-step-count={trace.selection.planStepCount}
+            data-planner-entrypoint={trace.selection.plannerEntrypoint}
             data-planner-request-count={trace.selection.plannerRequestCount}
+            data-runnable-kind={trace.selection.runnableKind}
             data-selection-role={trace.selection.selectedRole}
             data-selected-request-count={trace.selection.selectedRequestCount}
             data-testid="agent-run-detail-planner-selection"
@@ -205,6 +216,36 @@ export function PlannerTraceInspector({
               <span className="studio-tool-permission" data-selection-role={trace.selection.selectedRole}>
                 role · {trace.selection.selectedRole || 'not recorded'}
               </span>
+              {trace.selection.plannerEntrypoint ? (
+                <span className="studio-tool-permission" data-planner-entrypoint={trace.selection.plannerEntrypoint}>
+                  entrypoint · {trace.selection.plannerEntrypoint}
+                </span>
+              ) : null}
+              {trace.selection.entrypointSource ? (
+                <span className="studio-tool-permission" data-entrypoint-source={trace.selection.entrypointSource}>
+                  source · {trace.selection.entrypointSource}
+                </span>
+              ) : null}
+              {trace.selection.launcherMode ? (
+                <span className="studio-tool-permission" data-launcher-mode={trace.selection.launcherMode}>
+                  mode · {trace.selection.launcherMode}
+                </span>
+              ) : null}
+              {trace.selection.launcherSurface ? (
+                <span className="studio-tool-permission" data-launcher-surface={trace.selection.launcherSurface}>
+                  surface · {trace.selection.launcherSurface}
+                </span>
+              ) : null}
+              {trace.selection.runnableKind ? (
+                <span className="studio-tool-permission" data-runnable-kind={trace.selection.runnableKind}>
+                  runnable · {trace.selection.runnableKind}
+                </span>
+              ) : null}
+              {trace.selection.dailyDesktopIntent ? (
+                <span className="studio-tool-permission" data-daily-desktop-intent="true">
+                  daily desktop
+                </span>
+              ) : null}
               <span className="studio-tool-permission" data-selection-reason={trace.selection.reason}>
                 reason · {trace.selection.reason || 'not recorded'}
               </span>
@@ -679,6 +720,11 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const selectedSource = stringValue(payload.selection_source);
   const selectedRole = stringValue(payload.selection_role);
   const reason = stringValue(payload.selection_reason);
+  const plannerEntrypoint = stringValue(payload.planner_entrypoint);
+  const entrypointSource = stringValue(payload.entrypoint_source);
+  const launcherMode = stringValue(payload.launcher_mode);
+  const launcherSurface = stringValue(payload.launcher_surface);
+  const runnableKind = stringValue(payload.runnable_kind);
   const selectedTools = uniqueStrings(Array.isArray(payload.selected_tools) ? payload.selected_tools : []);
   const planTools = uniqueStrings(Array.isArray(payload.plan_tools) ? payload.plan_tools : []);
   const planCapabilities = uniqueStrings(
@@ -720,10 +766,19 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     && !openQuestions.length
     && !plannerTools.length
     && !legacyTools.length
+    && !plannerEntrypoint
+    && !entrypointSource
+    && !launcherMode
+    && !launcherSurface
+    && !runnableKind
   ) return null;
   return {
     approvalsRequired,
     artifactsExpected,
+    dailyDesktopIntent: booleanValue(payload.entrypoint_daily_desktop_intent, false) || false,
+    entrypointSource,
+    launcherMode,
+    launcherSurface,
     legacyTools,
     legacyRequestCount,
     missingCapabilities,
@@ -735,8 +790,10 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     planStepCount,
     plannerTools,
     plannerRequestCount,
+    plannerEntrypoint,
     reason,
     requiredCapabilities,
+    runnableKind,
     legacyFallback: booleanValue(
       payload.legacy_fallback,
       selectedRole === 'legacy_desktop_intent_fallback',
