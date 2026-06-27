@@ -395,9 +395,9 @@ class TaskIntentRouter:
             or app_scoped_safe_operation.get("app_name")
             or app_scoped_safe_shortcut_app
             or (app_management or {}).get("app_name")
+            or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or dynamic_context_transfer.get("app_name")
             or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
-            or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or _app_name_hint(text)
             or ""
         ).strip()
@@ -4223,6 +4223,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
         score += 0.08
+    if intent.kind == "desktop_operation" and intent.inputs.get("foreground_submit_action_hint"):
+        score += 0.28 if intent.inputs.get("app_name_hint") else 0.14
     if intent.kind == "desktop_operation" and intent.inputs.get("app_management_hint"):
         score += -0.18 if _looks_like_generic_media_control_request(text) else 0.24
     if (
@@ -4782,9 +4784,14 @@ def _is_finder_app_name(value: str) -> bool:
 def _foreground_submit_action_hint(text: str) -> str:
     value = _clean_prompt(text)
     lowered = value.lower()
-    if _contains_any(value, ("发送", "send")) and _looks_like_foreground_submit_scope(value, lowered):
+    app_scoped_submit = bool(_app_scoped_foreground_submit_app_name_hint(value))
+    if _contains_any(value, ("发送", "send")) and (
+        _looks_like_foreground_submit_scope(value, lowered) or app_scoped_submit
+    ):
         return "send"
-    if _contains_any(value, ("提交", "submit")) and _looks_like_foreground_submit_scope(value, lowered):
+    if _contains_any(value, ("提交", "submit")) and (
+        _looks_like_foreground_submit_scope(value, lowered) or app_scoped_submit
+    ):
         return "submit"
     if re.search(r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:发送|send)", value, flags=re.IGNORECASE):
         return "send"
@@ -5224,6 +5231,9 @@ def _foreground_submit_app_name_hint(text: str, action: str) -> str:
     if not action:
         return ""
     value = _clean_prompt(text)
+    app_scoped_submit = _app_scoped_foreground_submit_app_name_hint(value)
+    if app_scoped_submit:
+        return app_scoped_submit
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<app>[\w .·-]{1,40}?)"
         r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:发送|提交|send|submit)",
@@ -5236,6 +5246,39 @@ def _foreground_submit_app_name_hint(text: str, action: str) -> str:
             continue
         app = _canonical_app_name_hint(match.group("app"))
         if app:
+            return app
+    return ""
+
+
+def _app_scoped_foreground_submit_app_name_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value or _looks_like_recipient_message_request(value):
+        return ""
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?"
+        r"(?:在|到|用|通过)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*(?:确认)?(?:发送|提交)\s*$",
+        r"^(?:please\s+)?(?:open|launch|focus|switch\s+to)?\s*"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:confirm\s+)?(?:send|submit)\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = str(match.group("app") or "").strip()
+        if not raw_app or raw_app.startswith(("给", "向", "对")):
+            continue
+        if re.search(
+            r"(?:粘贴|输入|键入|填写|写入|点击|搜索|查找|复制|剪贴板|"
+            r"paste|type|enter|click|search|copy|clipboard)",
+            raw_app,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        if _is_generic_foreground_app_label(raw_app):
+            continue
+        app = _canonical_app_name_hint(raw_app)
+        if app and not _is_generic_foreground_app_label(app):
             return app
     return ""
 

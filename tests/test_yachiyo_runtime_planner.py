@@ -3752,6 +3752,34 @@ def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
         "action": "send"
     }
 
+    for prompt, app_name in (
+        ("在 Slack 里发送", "Slack"),
+        ("在微信里确认发送", "WeChat"),
+        ("Slack send", "Slack"),
+    ):
+        scoped_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.running_apps",
+                "app.focus",
+                "desktop.submit_foreground",
+                "desktop.active_window",
+            ],
+        )
+
+        assert scoped_decision.selected_intent.kind == "desktop_operation"
+        assert scoped_decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert scoped_decision.selected_intent.inputs["operation_hint"] == "submit_foreground"
+        focus = _step_by_id(scoped_decision, "open-or-focus-app")
+        assert focus.tool_name == "app.focus"
+        assert focus.input_preview == {"app_name": app_name}
+        submit = _step_by_id(scoped_decision, "submit-foreground-ui")
+        assert submit.tool_name == "desktop.submit_foreground"
+        assert submit.input_preview == {"action": "send"}
+        assert submit.risk_level == "high"
+        assert submit.approval_required is True
+        assert submit.depends_on == ["open-or-focus-app"]
+
 
 def test_runtime_planner_keeps_plain_current_window_enter_as_hotkey() -> None:
     decision = RuntimePlanner().decision(
@@ -8428,6 +8456,16 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
         ),
         (
             "Slack 回车发送",
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
+        ),
+        (
+            "在 Slack 里发送",
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
+        ),
+        (
+            "在微信里确认发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
             ["app.focus", "desktop.submit_foreground"],
         ),
