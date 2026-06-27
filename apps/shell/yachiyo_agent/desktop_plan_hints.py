@@ -861,6 +861,7 @@ def media_query_hint(text: str) -> str:
         r"(?:(?:并|然后|再|接着|之后)\s*)?(?:播放|播|放)(?:一下)?",
         r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*(?P<query_zh_search>[^。！？!?，,]+?)(?:并|然后|再)?(?:播放|播|放)(?:一下)?",
         r"(?P<query_zh_suffix>[^。！？!?，,]+?)(?:播放|播|放)(?:一下)?$",
+        r"(?:想听|听听|听一首|听首|听点|来点)\s*(?P<query_listen>[^。！？!?，,]+)",
         r"(?:播放|播|放)(?:一下|一首|首|个|点)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:play|start playing)\s+(?P<query_en>[^.!?,]+)",
     )
@@ -878,6 +879,7 @@ def media_query_hint(text: str) -> str:
             or groups.get("query_zh_scoped_search")
             or groups.get("query_zh_search")
             or groups.get("query_zh_suffix")
+            or groups.get("query_listen")
             or groups.get("query")
             or groups.get("query_en")
             or ""
@@ -906,6 +908,7 @@ def _clean_media_query(value: str) -> str:
         flags=re.IGNORECASE,
     )[0]
     query = query.strip(" .，,。")
+    query = re.sub(r"(?:吧|嘛|吗|呢|么)$", "", query).strip(" .，,。")
     return "" if query.lower() in _GENERIC_MUSIC_QUERIES else query
 
 

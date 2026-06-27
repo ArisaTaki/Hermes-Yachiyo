@@ -709,6 +709,8 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             return []
+        if step_id == "open-or-focus-app" and tool_name == "app.open" and "app.focus" in allowed:
+            tool_name = "app.focus"
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         requests.append(
