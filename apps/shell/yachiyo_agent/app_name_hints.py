@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.app_aliases import (
     EMAIL_APP_NAMES,
     compact_app_alias,
 )
+from apps.shell.agent.runtime.media_apps import music_app_name_from_text
 
 
 def legacy_app_name_hint(value: str) -> str:
@@ -28,3 +29,7 @@ def compact_app_name_hint(value: str) -> str:
 
 def supports_new_message_app_hint(value: str) -> bool:
     return str(value or "").strip() in (COMMUNICATION_APP_NAMES | EMAIL_APP_NAMES)
+
+
+def legacy_music_app_name_hint(value: str) -> str:
+    return music_app_name_from_text(value)

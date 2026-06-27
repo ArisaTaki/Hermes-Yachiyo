@@ -10,7 +10,8 @@ from apps.shell.agent.runtime.hotkeys import (
     normalize_hotkey_token,
     parse_hotkey_combo,
 )
-from apps.shell.agent.runtime.media_apps import music_app_name_from_text
+
+from .app_name_hints import legacy_music_app_name_hint
 
 _GENERIC_MUSIC_QUERIES = {
     "",
@@ -795,7 +796,7 @@ def media_control_only_hint(text: str, *, action: str = "") -> bool:
 
 
 def music_app_name_hint(text: str) -> str:
-    return music_app_name_from_text(text)
+    return legacy_music_app_name_hint(text)
 
 
 def media_query_hint(text: str) -> str:

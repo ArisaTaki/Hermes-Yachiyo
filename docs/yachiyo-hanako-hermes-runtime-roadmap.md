@@ -18,7 +18,10 @@ The target shape is:
 This Phase 0-10 sequence is the authoritative implementation route for the
 Hanako/Hermes runtime migration. Each implementation batch should map to one
 of these phases, and cleanup of old app-specific hardcoding belongs in Phase
-10 only after the replacement planner/runtime path is covered by tests.
+10 only after the replacement planner/runtime path is covered by tests. Phase
+0 is a mandatory protection baseline, not a feature refactor. Phase-specific
+application optimizations must not replace the capability discovery,
+intent-routing, planning, execution, and verification chain.
 
 ## Phase 0 - 基线审计与保护网
 

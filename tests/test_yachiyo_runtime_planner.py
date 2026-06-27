@@ -15,6 +15,7 @@ from apps.shell.yachiyo_agent import (
 from apps.shell.yachiyo_agent.app_name_hints import (
     compact_app_name_hint,
     legacy_app_name_hint,
+    legacy_music_app_name_hint,
     supports_new_message_app_hint,
 )
 from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
@@ -83,6 +84,8 @@ def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() ->
     assert compact_app_name_hint("Google Chrome") == "googlechrome"
     assert supports_new_message_app_hint("Messages") is True
     assert supports_new_message_app_hint("一个我没提过的新应用") is False
+    assert legacy_music_app_name_hint("网易云音乐") == "网易云音乐"
+    assert legacy_music_app_name_hint("Apple Music") == "Music"
 
 
 def _recording_legacy_requests(
