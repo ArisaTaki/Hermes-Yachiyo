@@ -15,6 +15,8 @@ from typing import Any
 from urllib.parse import quote_plus
 
 from apps.shell.agent.runtime.app_aliases import APP_ALIASES as _APP_ALIASES
+from apps.shell.agent.runtime.app_aliases import COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES
+from apps.shell.agent.runtime.app_aliases import EMAIL_APP_NAMES as _EMAIL_APP_NAMES
 from apps.shell.agent.runtime.app_aliases import compact_app_alias as _compact_app_alias
 from apps.shell.agent.runtime.web_destinations import known_web_destination_url_hint
 
@@ -221,6 +223,8 @@ class TaskIntentRouter:
             safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
+        if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
+            foreground_compose_text = ""
         foreground_paste = _foreground_paste_hint(text)
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
@@ -894,6 +898,12 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        scoped_new_item = _app_scoped_safe_operation_hint(text)
+        scoped_action = str(
+            (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
+        ).strip()
+        if scoped_action == "new_message":
+            return _empty_intent("communication", text)
         direct_hint = _direct_communication_candidate_hint(text)
         if _foreground_submit_action_hint(text) and not direct_hint:
             return _empty_intent("communication", text)
@@ -1354,7 +1364,13 @@ class RuntimePlanner:
             or _foreground_compose_text_hint(intent.user_goal)
             or ""
         ).strip()
-        safe_type_text = "" if type_target else (safe_type_text_hint(intent.user_goal) or foreground_compose_text)
+        if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
+            foreground_compose_text = ""
+        safe_type_text = (
+            ""
+            if type_target or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
+            else (safe_type_text_hint(intent.user_goal) or foreground_compose_text)
+        )
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
             or _foreground_submit_action_hint(intent.user_goal)
@@ -5579,10 +5595,16 @@ def _app_new_item_shortcut_target_name(
         "new_reminder": "Reminders",
         "new_event": "Calendar",
     }
+    if action == "new_message" and _app_supports_new_message_shortcut(canonical_app_name):
+        return canonical_app_name
     expected_app_name = app_by_action.get(action, "")
     if canonical_app_name == expected_app_name:
         return expected_app_name
     return ""
+
+
+def _app_supports_new_message_shortcut(app_name: str) -> bool:
+    return app_name in (_COMMUNICATION_APP_NAMES | _EMAIL_APP_NAMES)
 
 
 def _app_scoped_followup_hint(text: str) -> dict[str, str]:
@@ -5597,12 +5619,16 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"新建提醒事项|新建提醒|新提醒|创建提醒事项|创建提醒|"
         r"新建日程|新建日历事件|新建事件|新建会议|新日程|新事件|新会议|创建日程|创建事件|"
         r"新建备忘录|新建笔记|新笔记|新备忘录|创建备忘录|创建笔记|"
+        r"新建消息|新消息|创建消息|写消息|撰写消息|新建聊天|新聊天|创建聊天|新建会话|新会话|"
+        r"新建邮件|新邮件|创建邮件|写邮件|写新邮件|撰写邮件|撰写新邮件|发邮件|发送邮件|"
         r"显示简介|查看简介|快速查看|快速预览|预览|重命名|上一级目录|上一级|"
         r"打开开发者工具|显示开发者工具|开发者工具|"
         r"打开当前网页开发者工具|打开当前网页的开发者工具|"
         r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|new|compose|"
         r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e|"
         r"new\s+note|new\s+reminder|new\s+event|new\s+meeting|compose(?:\s+(?:note|reminder|event|meeting))?|"
+        r"new\s+message|new\s+chat|new\s+conversation|compose\s+message|compose\s+email|"
+        r"new\s+email|new\s+mail|write\s+email|write\s+mail|"
         r"open\s+dev\s*tools|show\s+dev\s*tools|dev\s*tools|developer\s+tools).*)"
     )
     patterns: tuple[tuple[str, str], ...] = (

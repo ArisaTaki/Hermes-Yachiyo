@@ -3000,6 +3000,16 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         ("提醒事项新建", "Reminders", "new_reminder", "app.focus_and_safe_shortcut"),
         ("打开日历新建日程", "Calendar", "new_event", "app.open_and_safe_shortcut"),
         ("Calendar new meeting", "Calendar", "new_event", "app.focus_and_safe_shortcut"),
+        ("打开邮件新建邮件", "Mail", "new_message", "app.open_and_safe_shortcut"),
+        ("Mail compose email", "Mail", "new_message", "app.focus_and_safe_shortcut"),
+        ("打开 Mail 写邮件", "Mail", "new_message", "app.open_and_safe_shortcut"),
+        ("Outlook 新建邮件", "Microsoft Outlook", "new_message", "app.focus_and_safe_shortcut"),
+        ("打开 Outlook 写邮件", "Microsoft Outlook", "new_message", "app.open_and_safe_shortcut"),
+        ("打开 Slack 新建消息", "Slack", "new_message", "app.open_and_safe_shortcut"),
+        ("Slack 新建消息", "Slack", "new_message", "app.focus_and_safe_shortcut"),
+        ("Slack new message", "Slack", "new_message", "app.focus_and_safe_shortcut"),
+        ("微信新建聊天", "WeChat", "new_message", "app.focus_and_safe_shortcut"),
+        ("Messages compose message", "Messages", "new_message", "app.focus_and_safe_shortcut"),
     )
     allowed_tools = [
         "desktop.list_apps",

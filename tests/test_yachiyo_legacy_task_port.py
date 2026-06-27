@@ -337,6 +337,16 @@ def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_lega
         ("提醒事项新建", "app.focus_and_safe_shortcut", "Reminders", "new_reminder"),
         ("打开日历新建日程", "app.open_and_safe_shortcut", "Calendar", "new_event"),
         ("Calendar new meeting", "app.focus_and_safe_shortcut", "Calendar", "new_event"),
+        ("打开邮件新建邮件", "app.open_and_safe_shortcut", "Mail", "new_message"),
+        ("Mail compose email", "app.focus_and_safe_shortcut", "Mail", "new_message"),
+        ("打开 Mail 写邮件", "app.open_and_safe_shortcut", "Mail", "new_message"),
+        ("Outlook 新建邮件", "app.focus_and_safe_shortcut", "Microsoft Outlook", "new_message"),
+        ("打开 Outlook 写邮件", "app.open_and_safe_shortcut", "Microsoft Outlook", "new_message"),
+        ("打开 Slack 新建消息", "app.open_and_safe_shortcut", "Slack", "new_message"),
+        ("Slack 新建消息", "app.focus_and_safe_shortcut", "Slack", "new_message"),
+        ("Slack new message", "app.focus_and_safe_shortcut", "Slack", "new_message"),
+        ("微信新建聊天", "app.focus_and_safe_shortcut", "WeChat", "new_message"),
+        ("Messages compose message", "app.focus_and_safe_shortcut", "Messages", "new_message"),
     )
 
     for prompt, tool_name, app_name, action in cases:
