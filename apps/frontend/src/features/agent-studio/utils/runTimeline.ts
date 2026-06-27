@@ -41,7 +41,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.intent.selected') return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
   if (name === 'agent.plan.created') return detail ? `Planner 计划 · ${detail}` : 'Planner 计划';
   if (name === 'agent.plan.step') return detail ? `计划步骤 · ${detail}` : '计划步骤';
-  if (name === 'agent.plan.selection') return detail ? `Planner 选择 · ${detail}` : 'Planner 选择';
+  if (name === 'agent.plan.selection') {
+    const selectionDetail = plannerSelectionTimelineDetail(event, detail);
+    return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
+  }
   if (name === 'agent.desktop.intent_planned') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
@@ -199,6 +202,23 @@ function policyDecisionTitle(event: Record<string, unknown>, detail: string): st
     ? '策略拦截'
     : '策略放行';
   return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
+}
+
+function plannerSelectionTimelineDetail(event: Record<string, unknown>, fallback: string): string {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const role = String(event.selection_role || payload.selection_role || '').trim();
+  const source = String(event.selection_source || payload.selection_source || '').trim();
+  const entrypoint = String(event.planner_entrypoint || payload.planner_entrypoint || '').trim();
+  const entrypointSource = String(event.entrypoint_source || payload.entrypoint_source || '').trim();
+  const surface = String(event.launcher_surface || payload.launcher_surface || '').trim();
+  const parts = [
+    role || source,
+    entrypoint || entrypointSource,
+    surface,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : fallback;
 }
 
 export function timelineEventName(event: Record<string, unknown>): string {
@@ -395,12 +415,20 @@ function publicRunEventPlannerSummary(eventType: string, payload: Record<string,
     );
   }
   if (eventType === 'agent.plan.selection') {
-    return (
-      publicRunEventPayloadString(payload, 'selection_reason')
-      || publicRunEventPayloadString(payload, 'selection_source')
-    );
+    return publicRunEventPlannerSelectionSummary(payload);
   }
   return '';
+}
+
+function publicRunEventPlannerSelectionSummary(payload: Record<string, unknown>): string {
+  const reason = publicRunEventPayloadString(payload, 'selection_reason');
+  if (reason) return reason;
+  const role = publicRunEventPayloadString(payload, 'selection_role')
+    || publicRunEventPayloadString(payload, 'selection_source');
+  const entrypoint = publicRunEventPayloadString(payload, 'planner_entrypoint')
+    || publicRunEventPayloadString(payload, 'entrypoint_source');
+  const surface = publicRunEventPayloadString(payload, 'launcher_surface');
+  return [role, entrypoint, surface].filter(Boolean).join(' · ');
 }
 
 function publicRunEventArtifactSummary(payload: Record<string, unknown>): string {

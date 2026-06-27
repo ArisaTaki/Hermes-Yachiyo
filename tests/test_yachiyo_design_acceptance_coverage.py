@@ -661,6 +661,21 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
             "data-testid={loadMoreTestId}",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
+        [
+            "data-run-event-selection-role={plannerContext.selectionRole}",
+            "data-run-event-selection-source={plannerContext.selectionSource}",
+            "data-run-event-planner-entrypoint={plannerContext.plannerEntrypoint}",
+            "data-run-event-entrypoint-source={plannerContext.entrypointSource}",
+            "data-run-event-launcher-surface={plannerContext.launcherSurface}",
+            "data-run-event-runnable-kind={plannerContext.runnableKind}",
+            "function runtimeEventPlannerContext(",
+            "selectionRole: runtimeEventString(event, payload, 'selection_role')",
+            "plannerEntrypoint: runtimeEventString(event, payload, 'planner_entrypoint')",
+            "entrypointSource: runtimeEventString(event, payload, 'entrypoint_source')",
+        ],
+    )
 
 
 def test_runtime_core_split_acceptance_paths_are_guarded() -> None:

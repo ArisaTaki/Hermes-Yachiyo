@@ -65,10 +65,12 @@ export function RuntimeTimelineEventList({
           const payload = eventIsSecret ? '' : getEventPayload(event);
           const payloadRecord = runtimeEventPayloadRecord(event);
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
+          const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
           const eventMetadata = runtimeEventMetadata(
             event,
             payloadRecord,
             traceContext,
+            plannerContext,
             eventSequence,
             eventRunId,
           );
@@ -86,6 +88,13 @@ export function RuntimeTimelineEventList({
               data-run-event-group-id={traceContext.groupId}
               data-run-event-group-run-id={traceContext.groupRunId}
               data-run-event-member-agent-id={traceContext.memberAgentId}
+              data-run-event-launcher-mode={plannerContext.launcherMode}
+              data-run-event-launcher-surface={plannerContext.launcherSurface}
+              data-run-event-entrypoint-source={plannerContext.entrypointSource}
+              data-run-event-planner-entrypoint={plannerContext.plannerEntrypoint}
+              data-run-event-runnable-kind={plannerContext.runnableKind}
+              data-run-event-selection-role={plannerContext.selectionRole}
+              data-run-event-selection-source={plannerContext.selectionSource}
               data-run-event-status={eventStatus || ''}
               data-run-event-tone={eventTone}
               data-run-event-visibility={defaultEventVisibility(event)}
@@ -271,6 +280,7 @@ function runtimeEventMetadata(
   event: RuntimeTimelineEventRecord,
   payload: RuntimeTimelineEventRecord,
   traceContext: RuntimeTimelineTraceContext,
+  plannerContext: RuntimeTimelinePlannerContext,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
@@ -294,6 +304,19 @@ function runtimeEventMetadata(
         || traceContext.workflowRunId
         || traceContext.workflowId,
     },
+    {
+      label: 'planner',
+      value: plannerContext.selectionRole || plannerContext.selectionSource,
+    },
+    {
+      label: 'entrypoint',
+      value: plannerContext.plannerEntrypoint || plannerContext.entrypointSource,
+    },
+    {
+      label: 'surface',
+      value: plannerContext.launcherSurface || plannerContext.launcherMode,
+    },
+    { label: 'runnable', value: plannerContext.runnableKind },
     { label: 'group', value: traceContext.groupRunId || traceContext.groupId },
     { label: 'member', value: traceContext.memberAgentName || traceContext.memberAgentId },
     { label: 'child', value: defaultChildRunId(event) || runtimeEventString(event, payload, 'child_run_id') },
@@ -313,6 +336,16 @@ type RuntimeTimelineTraceContext = {
   workflowNodeId: string;
   workflowNodeLabel: string;
   workflowRunId: string;
+};
+
+type RuntimeTimelinePlannerContext = {
+  entrypointSource: string;
+  launcherMode: string;
+  launcherSurface: string;
+  plannerEntrypoint: string;
+  runnableKind: string;
+  selectionRole: string;
+  selectionSource: string;
 };
 
 function runtimeEventTraceContext(
@@ -347,6 +380,21 @@ function runtimeEventTraceContext(
     workflowNodeId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_id'),
     workflowNodeLabel: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_label'),
     workflowRunId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_run_id'),
+  };
+}
+
+function runtimeEventPlannerContext(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelinePlannerContext {
+  return {
+    entrypointSource: runtimeEventString(event, payload, 'entrypoint_source'),
+    launcherMode: runtimeEventString(event, payload, 'launcher_mode'),
+    launcherSurface: runtimeEventString(event, payload, 'launcher_surface'),
+    plannerEntrypoint: runtimeEventString(event, payload, 'planner_entrypoint'),
+    runnableKind: runtimeEventString(event, payload, 'runnable_kind'),
+    selectionRole: runtimeEventString(event, payload, 'selection_role'),
+    selectionSource: runtimeEventString(event, payload, 'selection_source'),
   };
 }
 
