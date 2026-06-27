@@ -47,6 +47,33 @@ def _recording_legacy_requests(
     return record
 
 
+def test_task_intent_router_covers_agent_work_domains() -> None:
+    cases = (
+        (
+            "分析 data/sales.csv 并输出图表报告",
+            "data_analysis",
+            ["file.workspace_read", "terminal.execution", "artifact.write"],
+        ),
+        ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
+        ("调研 https://example.com 的最新信息", "web_research", ["browser.research"]),
+        ("整理 Downloads 里的 PDF 文件", "file_organization", ["file.organization"]),
+        ("给 Alice 发消息说会议改到三点", "communication", ["communication.compose"]),
+        ("明天上午九点提醒我提交报告", "schedule", ["schedule.reminder"]),
+        ("修复这个仓库里的 failing tests", "code_task", ["file.workspace_read"]),
+        ("运行日报 Workflow", "workflow_orchestration", ["workflow.orchestration"]),
+        ("让研究群组协作比较三个方案", "multi_agent", ["group.multi_agent"]),
+        ("打开 PixelForge", "desktop_operation", ["desktop.app_discovery"]),
+        ("把剪贴板内容读出来", "clipboard_operation", ["clipboard.read_write"]),
+    )
+
+    planner = RuntimePlanner()
+    for prompt, expected_kind, expected_capabilities in cases:
+        decision = planner.decision(prompt)
+
+        assert decision.selected_intent.kind == expected_kind
+        assert decision.selected_intent.required_capabilities == expected_capabilities
+
+
 def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告和图表",

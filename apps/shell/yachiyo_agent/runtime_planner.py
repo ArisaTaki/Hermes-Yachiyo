@@ -3773,6 +3773,17 @@ _COMMUNICATION_ACTION_TERMS = (
     "发邮件",
 )
 
+_SCHEDULE_ACTION_TERMS = (
+    "remind",
+    "calendar",
+    "schedule",
+    "event",
+    "提醒",
+    "日历",
+    "日程",
+    "安排",
+)
+
 _UI_CONTROL_TERMS = (
     "search box",
     "search field",
@@ -3801,6 +3812,10 @@ _BROWSER_TEXT_INPUT_SELECTOR = (
 
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
+    if intent.kind == "desktop_operation" and _looks_like_recipient_message_request(text):
+        score -= 0.3
+    if intent.kind == "desktop_operation" and _looks_like_schedule_request(text):
+        score -= 0.2
     if (
         intent.kind == "desktop_operation"
         and _contains_any(text, _TASK_DELIVERABLE_TERMS)
@@ -3845,8 +3860,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.08
     if intent.kind == "communication" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score += 0.16
+    if intent.kind == "communication" and _looks_like_recipient_message_request(text):
+        score += 0.28
     if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
         score += 0.18
+    if intent.kind == "schedule" and _looks_like_schedule_request(text):
+        score += 0.22
     if intent.kind == "workflow_orchestration" and _contains_any(
         text,
         ["workflow", "flow", "工作流", "流程"],
@@ -3904,6 +3923,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if _looks_like_schedule_request(text):
+            score -= 0.24
         if str(intent.inputs.get("context_source") or "").strip():
             score += 0.34
         if _contains_any(text, ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索"]):
@@ -4475,7 +4496,25 @@ def _looks_like_too_short_cjk_app_label(value: str) -> bool:
 def _looks_like_recipient_message_request(value: str) -> bool:
     return bool(
         re.search(r"(?:发消息|发送|发)\s*(?:给|到)", value, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:给|向|对)\s*[^：:，,。]+?\s*(?:发送|发消息|发)\s*(?:说|[:：]|内容是|内容为)",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\b(?:send|message)\s+.+?\s+(?:to|for)\s+", value, flags=re.IGNORECASE)
+    )
+
+
+def _looks_like_schedule_request(value: str) -> bool:
+    return bool(
+        _contains_any(value, _SCHEDULE_ACTION_TERMS)
+        or (
+            "会议" in value
+            and _contains_any(
+                value,
+                ("今天", "明天", "后天", "上午", "下午", "晚上", "点", "时间", "日程"),
+            )
+        )
     )
 
 
