@@ -137,6 +137,16 @@ def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
         ["clipboard.write"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    set_selection = planner_first_direct_tool_selection(
+        "设置剪贴板为 hello world",
+        ["clipboard.write"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    short_copy_selection = planner_first_direct_tool_selection(
+        "把 hello world 复制一下",
+        ["clipboard.write"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
     read_selection = planner_first_direct_tool_selection(
         "read selected text",
         ["desktop.safe_shortcut", "clipboard.read"],
@@ -154,6 +164,12 @@ def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
         },
     ]
     assert write_selection.event_payload["legacy_request_count"] == 0
+    assert set_selection.selected_source == "runtime_planner"
+    assert set_selection.requests == write_selection.requests
+    assert set_selection.event_payload["legacy_request_count"] == 0
+    assert short_copy_selection.selected_source == "runtime_planner"
+    assert short_copy_selection.requests == write_selection.requests
+    assert short_copy_selection.event_payload["legacy_request_count"] == 0
     assert read_selection.selected_source == "runtime_planner"
     assert read_selection.event_payload["legacy_request_count"] == 0
     assert [request["tool"] for request in read_selection.requests] == [

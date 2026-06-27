@@ -57,6 +57,8 @@ def _clipboard_paste_to_foreground_request(text: str) -> bool:
 
 def _clipboard_write_text(text: str) -> str:
     patterns = (
+        r"(?:设置|设定|设为|设成)\s*(?:系统)?(?:剪贴板|粘贴板)\s*(?:为|成|=|：|:)\s*(?P<text>.+)$",
+        r"(?:系统)?(?:剪贴板|粘贴板)\s*(?:写入|设置为|设为|设成|=|：|:)\s*(?P<text>.+)$",
         r"(?:把|将)?\s*(?:这段话|这段文字|这段文本|以下内容|下面内容|内容)?\s*"
         r"(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
         r"(?:系统)?(?:剪贴板|粘贴板)\s*[:：]\s*(?P<text>.+)$",
@@ -65,17 +67,20 @@ def _clipboard_write_text(text: str) -> str:
         r"(?:写入|放入|放进|保存到)\s*(?:系统)?(?:剪贴板|粘贴板|clipboard)\s+(?P<text>.+)$",
         r"(?:把|将)\s*(?P<text>.+?)\s*(?:复制|拷贝|写入|放到|放进|保存到)(?:一下|下)?\s*(?:到|进|至)?\s*"
         r"(?:系统)?(?:剪贴板|粘贴板|clipboard)",
+        r"\bset\s+(?:the\s+)?(?:system\s+)?clipboard\s+(?:to|as)\s+(?P<text>.+)$",
+        r"\b(?:the\s+)?(?:system\s+)?clipboard\s*(?:=|:|to)\s*(?P<text>.+)$",
         r"\b(?:copy|write|put)\s+(?P<text>.+?)\s+(?:to|into)\s+(?:the\s+)?"
         r"(?:system\s+)?clipboard\b",
         r"\b(?:copy|write)\s+(?:to\s+)?(?:the\s+)?(?:system\s+)?clipboard\s*[:：]\s*"
         r"(?P<text>.+)$",
+        r"(?:把|将)\s*(?P<text>[^。！？!?，,\n]+?)\s*(?:复制|拷贝)(?:一下|下)?\s*(?:吧|给我)?$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
         cleaned = _normalize_clipboard_text(match.group("text"))
-        if cleaned:
+        if cleaned and not _looks_like_dynamic_clipboard_source(cleaned):
             return cleaned
     return ""
 
@@ -194,6 +199,32 @@ def _selected_text_read_request(text: str) -> bool:
 
 def _normalize_clipboard_text(value: str) -> str:
     return str(value or "").strip().strip("「」\"'“”‘’")
+
+
+def _looks_like_dynamic_clipboard_source(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"(?:当前|这个|该|选中|选取|高亮|选择).{0,8}"
+            r"(?:网页|页面|标签页|窗口|屏幕|内容|文字|文本|选区|链接|网址)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:网页|页面|标签页|窗口|屏幕|链接|网址).{0,8}"
+            r"(?:内容|链接|网址|地址|当前)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:current|active|selected|highlighted)\s+"
+            r"(?:page|tab|window|screen|content|text|selection|link|url)\b",
+            text,
+        )
+        or re.search(r"\bclipboard\s+contents?\b", text)
+    )
 
 
 def _first_allowed(tools: tuple[str, ...], allowed: set[str] | None) -> str | None:

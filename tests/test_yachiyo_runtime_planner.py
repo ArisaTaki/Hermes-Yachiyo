@@ -4547,6 +4547,28 @@ def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> Non
     assert step.tool_name == "clipboard.write"
     assert step.input_preview == {"text": "hello"}
 
+    for prompt in (
+        "设置剪贴板为 hello",
+        "set clipboard to hello",
+        "剪贴板写入 hello",
+        "把 hello 复制一下",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["clipboard.write"],
+        )
+        assert decision.selected_intent.kind == "clipboard_operation"
+        assert decision.selected_intent.inputs == {"action": "write", "text": "hello"}
+        assert _step_by_id(decision, "write-clipboard").input_preview == {
+            "text": "hello"
+        }
+
+    dynamic_source_decision = RuntimePlanner().decision(
+        "复制当前网页链接",
+        allowed_tools=["clipboard.write", "desktop.safe_shortcut"],
+    )
+    assert dynamic_source_decision.selected_intent.kind != "clipboard_operation"
+
 
 def test_runtime_planner_routes_clipboard_read_to_clipboard_capability() -> None:
     decision = RuntimePlanner().decision(
@@ -7782,6 +7804,19 @@ def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
             "planning_reason": "planner_fallback_clipboard",
         }
     ]
+
+    assert planner_tool_requests(
+        "设置剪贴板为 hello",
+        allowed_tools=["clipboard.write"],
+    ) == requests
+    assert planner_tool_requests(
+        "set clipboard to hello",
+        allowed_tools=["clipboard.write"],
+    ) == requests
+    assert planner_tool_requests(
+        "把 hello 复制一下",
+        allowed_tools=["clipboard.write"],
+    ) == requests
 
 
 def test_planner_tool_requests_maps_selected_text_read_plan() -> None:
