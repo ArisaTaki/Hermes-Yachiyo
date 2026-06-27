@@ -223,6 +223,7 @@ class TaskIntentRouter:
         foreground_submit_action = _foreground_submit_action_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
         command_palette = _app_command_palette_hint(text)
+        browser_internal_page = _browser_internal_page_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         spotlight_search_query = _spotlight_search_query_hint(text)
         score = _score_terms(
@@ -296,6 +297,8 @@ class TaskIntentRouter:
             score = 0.18
         if score <= 0 and (app_scoped_desktop_operation or command_palette):
             score = 0.18
+        if score <= 0 and browser_internal_page:
+            score = 0.24
         if score <= 0 and spotlight_search_query:
             score = 0.18
         if (
@@ -315,6 +318,7 @@ class TaskIntentRouter:
             and desktop_discovery is None
             and not foreground_submit_action
             and not command_palette
+            and not browser_internal_page
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
@@ -335,6 +339,7 @@ class TaskIntentRouter:
             or (window_list or {}).get("app_name")
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
+            or browser_internal_page.get("app_name")
             or (command_palette or {}).get("app_name")
             or app_scoped_safe_operation.get("app_name")
             or app_scoped_safe_shortcut_app
@@ -387,6 +392,7 @@ class TaskIntentRouter:
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_foreground" if foreground_submit_action else "")
+            or ("browser_internal_page" if browser_internal_page else "")
             or ("safe_shortcut_sequence" if safe_shortcut_sequence else "")
             or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
@@ -467,6 +473,8 @@ class TaskIntentRouter:
             inputs["app_search_hint"] = app_search
         if command_palette:
             inputs["command_palette_hint"] = command_palette
+        if browser_internal_page:
+            inputs["browser_internal_page_hint"] = browser_internal_page
         if spotlight_search_query:
             inputs["spotlight_search_hint"] = {"query": spotlight_search_query}
         if foreground_management is not None:
@@ -576,6 +584,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if metadata.get("desktop_permission_recovery") and metadata.get("recovery_tool"):
+            return _empty_intent("system_control", text)
+        if _browser_internal_page_hint(text):
             return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
@@ -797,7 +807,7 @@ class TaskIntentRouter:
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        if _explicit_browser_url_hint(text):
+        if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
             return _empty_intent("file_access", text)
         hint = file_access_hint(text)
         if not hint:
@@ -1230,6 +1240,9 @@ class RuntimePlanner:
         command_palette = intent.inputs.get("command_palette_hint")
         if not isinstance(command_palette, Mapping):
             command_palette = _app_command_palette_hint(intent.user_goal)
+        browser_internal_page = intent.inputs.get("browser_internal_page_hint")
+        if not isinstance(browser_internal_page, Mapping):
+            browser_internal_page = _browser_internal_page_hint(intent.user_goal)
         spotlight_search = intent.inputs.get("spotlight_search_hint")
         if not isinstance(spotlight_search, Mapping):
             spotlight_query = _spotlight_search_query_hint(intent.user_goal)
@@ -1240,6 +1253,7 @@ class RuntimePlanner:
             or (ui_inspection or {}).get("app_name")
             or (screen_capture or {}).get("app_name")
             or command_palette.get("app_name")
+            or browser_internal_page.get("app_name")
             or app_scoped_safe_operation.get("app_name")
             or app_search.get("app_name")
             or intent.inputs.get("app_name_hint")
@@ -1644,6 +1658,103 @@ class RuntimePlanner:
                     input_preview={},
                     depends_on=["manage-app"],
                     reason="Observe desktop state after the app management action.",
+                )
+            )
+            return steps
+        if browser_internal_page:
+            browser_app = str(browser_internal_page.get("app_name") or app_name or "").strip()
+            page_mode = str(browser_internal_page.get("mode") or mode or "focus").strip()
+            page_action = str(browser_internal_page.get("action") or "").strip()
+            page_url = str(browser_internal_page.get("url") or "").strip()
+            previous_step_id = "discover-desktop-state"
+            if page_action:
+                steps.append(
+                    _step(
+                        intent,
+                        "open-browser-internal-page",
+                        "Open browser internal page",
+                        "desktop.app_control",
+                        _first_allowed(
+                            app_foreground_tool_candidates(page_mode, "safe_shortcut"),
+                            allowed,
+                        ),
+                        input_preview={"app_name": browser_app, "action": page_action},
+                        depends_on=[previous_step_id],
+                        action="shortcut",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Open the requested browser surface through an app-scoped safe shortcut.",
+                    )
+                )
+                previous_step_id = "open-browser-internal-page"
+            elif page_url:
+                steps.append(
+                    _step(
+                        intent,
+                        "focus-browser-address-bar",
+                        "Focus browser address bar",
+                        "desktop.app_control",
+                        _first_allowed(
+                            app_foreground_tool_candidates(page_mode, "safe_shortcut"),
+                            allowed,
+                        ),
+                        input_preview={"app_name": browser_app, "action": "focus_address_bar"},
+                        depends_on=[previous_step_id],
+                        action="shortcut",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Focus the browser address bar before opening the requested internal surface.",
+                    )
+                )
+                steps.append(
+                    _step(
+                        intent,
+                        "type-browser-internal-url",
+                        "Type browser internal URL",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.safe_type_text",), allowed),
+                        input_preview={"text": page_url},
+                        depends_on=["focus-browser-address-bar"],
+                        action="type",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Type only the internal browser URL for the requested surface.",
+                    )
+                )
+                steps.append(
+                    _step(
+                        intent,
+                        "submit-browser-internal-url",
+                        "Submit browser internal URL",
+                        "desktop.ui_operation",
+                        _first_allowed(("desktop.search_submit",), allowed),
+                        input_preview={},
+                        depends_on=["type-browser-internal-url"],
+                        action="submit",
+                        risk_level="low",
+                        approval_required=False,
+                        reason="Submit the internal browser URL with the safe search submit tool.",
+                    )
+                )
+                previous_step_id = "submit-browser-internal-url"
+            verify_tool = _first_allowed(
+                ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+                allowed,
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=browser_app,
+                        operation_preview={},
+                    ),
+                    depends_on=[previous_step_id],
+                    reason="Observe the browser after opening the requested internal surface.",
                 )
             )
             return steps
@@ -4208,6 +4319,148 @@ def _canonical_app_name_hint(value: str) -> str:
     if not app:
         return ""
     return _APP_ALIASES.get(_compact_app_alias(app), app)
+
+
+def _browser_internal_page_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    surface = (
+        r"(?:下载内容|下载页面|下载页|下载记录|下载|书签|收藏夹|扩展程序|扩展|插件|"
+        r"历史记录|浏览历史|设置|偏好设置|"
+        r"downloads?|download\s+page|bookmarks?|favorites?|extensions?|add-?ons?|addons?|"
+        r"history|settings|preferences)"
+    )
+    patterns: tuple[tuple[str, str], ...] = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*"
+            rf"(?P<app>[\w .·-]{{1,40}}?)\s*(?:的)?\s*(?P<surface>{surface})"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            rf"(?P<app>[\w .·-]{{1,40}}?)\s*(?:打开|显示|查看|进入|切到|聚焦)\s*"
+            rf"(?P<surface>{surface})(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            "focus",
+        ),
+        (
+            r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            rf"(?:the\s+)?(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+"
+            rf"(?:the\s+)?(?P<surface>{surface})$",
+            "",
+        ),
+        (
+            rf"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+"
+            rf"(?P<surface>{surface})$",
+            "focus",
+        ),
+    )
+    for pattern, default_mode in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        app_name = _clean_app_name_hint(groups.get("app") or "")
+        if (
+            not app_name
+            or _is_generic_browser_app_label(app_name)
+            or not _is_browser_or_search_app_name(app_name)
+        ):
+            continue
+        surface_kind = _browser_internal_surface_kind(groups.get("surface") or "")
+        if not surface_kind:
+            continue
+        result: dict[str, str] = {
+            "app_name": app_name,
+            "surface": surface_kind,
+            "mode": _command_palette_mode(groups.get("mode") or default_mode),
+        }
+        shortcut_action = _browser_internal_shortcut_action(surface_kind)
+        if shortcut_action:
+            result["action"] = shortcut_action
+            return result
+        url = _browser_internal_surface_url(app_name, surface_kind)
+        if url:
+            result["url"] = url
+            return result
+    return {}
+
+
+def _browser_internal_surface_kind(value: str) -> str:
+    normalized = re.sub(r"[\s_-]+", "", str(value or "").strip().lower())
+    if "下载" in normalized or "download" in normalized:
+        return "downloads"
+    if "书签" in normalized or "收藏" in normalized or "bookmark" in normalized or "favorite" in normalized:
+        return "bookmarks"
+    if "扩展" in normalized or "插件" in normalized or "extension" in normalized or "addon" in normalized:
+        return "extensions"
+    if "历史" in normalized or "history" in normalized:
+        return "history"
+    if "设置" in normalized or "偏好" in normalized or "setting" in normalized or "preference" in normalized:
+        return "settings"
+    return ""
+
+
+def _is_generic_browser_app_label(app_name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
+    return normalized in {
+        "browser",
+        "浏览器",
+        "网页",
+        "页面",
+        "当前网页",
+        "当前页面",
+        "current page",
+        "current webpage",
+        "web page",
+    }
+
+
+def _browser_internal_shortcut_action(surface: str) -> str:
+    if surface == "history":
+        return "show_history"
+    if surface == "settings":
+        return "preferences"
+    return ""
+
+
+def _browser_internal_surface_url(app_name: str, surface: str) -> str:
+    family = _browser_family(app_name)
+    urls = {
+        "chrome": {
+            "downloads": "chrome://downloads/",
+            "bookmarks": "chrome://bookmarks/",
+            "extensions": "chrome://extensions/",
+        },
+        "edge": {
+            "downloads": "edge://downloads/",
+            "bookmarks": "edge://favorites/",
+            "extensions": "edge://extensions/",
+        },
+        "brave": {
+            "downloads": "brave://downloads/",
+            "bookmarks": "brave://bookmarks/",
+            "extensions": "brave://extensions/",
+        },
+        "firefox": {
+            "downloads": "about:downloads",
+            "extensions": "about:addons",
+        },
+    }
+    return urls.get(family, {}).get(surface, "")
+
+
+def _browser_family(app_name: str) -> str:
+    compact = _compact_app_alias(app_name)
+    if compact in {"chrome", "googlechrome", "chromium"}:
+        return "chrome"
+    if compact in {"edge", "microsoftedge"}:
+        return "edge"
+    if compact in {"brave", "bravebrowser"}:
+        return "brave"
+    if compact == "firefox":
+        return "firefox"
+    return ""
 
 
 def _desktop_operation_hint(text: str) -> str:

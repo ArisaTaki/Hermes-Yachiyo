@@ -2216,6 +2216,225 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert confirm.approval_required is True
 
 
+def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> None:
+    browser_internal = RuntimePlanner().decision(
+        "打开 Chrome 下载内容",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "system.settings_open",
+            "desktop.open_path",
+        ],
+    )
+
+    assert browser_internal.selected_intent.kind == "desktop_operation"
+    assert browser_internal.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert browser_internal.selected_intent.inputs["browser_internal_page_hint"] == {
+        "app_name": "Chrome",
+        "surface": "downloads",
+        "mode": "open",
+        "url": "chrome://downloads/",
+    }
+    assert [step.step_id for step in browser_internal.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-browser-address-bar",
+        "type-browser-internal-url",
+        "submit-browser-internal-url",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(browser_internal, "focus-browser-address-bar").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(browser_internal, "focus-browser-address-bar").input_preview == {
+        "app_name": "Chrome",
+        "action": "focus_address_bar",
+    }
+    assert _step_by_id(browser_internal, "type-browser-internal-url").input_preview == {
+        "text": "chrome://downloads/"
+    }
+
+    browser_settings = RuntimePlanner().decision(
+        "打开 Chrome 设置",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    )
+    assert browser_settings.selected_intent.kind == "desktop_operation"
+    assert browser_settings.selected_intent.inputs["browser_internal_page_hint"] == {
+        "app_name": "Chrome",
+        "surface": "settings",
+        "mode": "open",
+        "action": "preferences",
+    }
+    assert _step_by_id(browser_settings, "open-browser-internal-page").input_preview == {
+        "app_name": "Chrome",
+        "action": "preferences",
+    }
+
+    browser_history = RuntimePlanner().decision(
+        "Chrome 打开历史记录",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert browser_history.selected_intent.kind == "desktop_operation"
+    assert browser_history.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert browser_history.selected_intent.inputs["browser_internal_page_hint"] == {
+        "app_name": "Chrome",
+        "surface": "history",
+        "mode": "focus",
+        "action": "show_history",
+    }
+    assert _step_by_id(browser_history, "open-browser-internal-page").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+
+    assert planner_direct_tool_requests(
+        "打开 Chrome 下载内容",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "system.settings_open",
+            "desktop.open_path",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "chrome://downloads/"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert planner_direct_tool_requests(
+        "open Chrome downloads",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.open_path",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "chrome://downloads/"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    for prompt, shortcut_tool, url in (
+        ("Chrome 打开书签", "app.focus_and_safe_shortcut", "chrome://bookmarks/"),
+        ("open Chrome extensions", "app.open_and_safe_shortcut", "chrome://extensions/"),
+    ):
+        assert planner_direct_tool_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open_and_safe_shortcut",
+                "app.focus_and_safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "desktop.ui_elements",
+            ],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": shortcut_tool,
+                "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": url},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            },
+        ]
+    assert planner_direct_tool_requests(
+        "打开 Chrome 设置",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "system.settings_open",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "preferences"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+    assert planner_direct_tool_requests(
+        "Chrome 打开历史记录",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "show_history"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> None:
     decision = RuntimePlanner().decision(
         "Spotlight 搜索 yachiyo",
