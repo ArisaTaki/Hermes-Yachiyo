@@ -414,7 +414,10 @@ def _runtime_planner_desktop_operation_owns_selection(
     if any(bool(request.get("continue_to_model")) for request in requests):
         return False
     reasons = _request_planning_reasons(requests)
-    if reasons != {"planner_fallback_desktop_operation"}:
+    if reasons not in (
+        {"planner_fallback_desktop_operation"},
+        {"planner_fallback_desktop_hotkey"},
+    ):
         return False
     tools = _request_tool_set(requests)
     if not tools or not tools <= _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS:

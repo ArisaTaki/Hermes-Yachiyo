@@ -801,6 +801,78 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.safe_shortcut",
+        "desktop.hotkey",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+    ]
+    cases = [
+        (
+            "复制选中文本",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_operation",
+                }
+            ],
+        ),
+        (
+            "微信按回车",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_hotkey",
+                    "input": {"app_name": "WeChat", "key": "return", "modifiers": []},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_hotkey",
+                }
+            ],
+        ),
+        (
+            "在 Slack 里按回车",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_hotkey",
+                    "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_hotkey",
+                }
+            ],
+        ),
+        (
+            "打开 Slack 后按回车",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open_and_hotkey",
+                    "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_desktop_hotkey",
+                }
+            ],
+        ),
+    ]
+
+    for prompt, expected_requests in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == expected_requests
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 

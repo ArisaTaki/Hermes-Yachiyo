@@ -1394,6 +1394,8 @@ class RuntimePlanner:
             mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
+        if app_name and hotkey and not _explicit_app_open_request(intent.user_goal):
+            mode = "focus"
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
         foreground_compose_text = str(
             intent.inputs.get("foreground_compose_text_hint")
@@ -4310,6 +4312,8 @@ def _app_name_hint(text: str) -> str:
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
+        r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)"
+        r"(?:按|敲|tap|press|hit).{0,8}(?:回车|return|enter)",
         r"^(?!(?:can|could|would|please|pls|search|find|open|launch|focus|start)\b)"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:点击|点按|按|输入|搜索|查找|click|press|tap|type|enter|search)\b",

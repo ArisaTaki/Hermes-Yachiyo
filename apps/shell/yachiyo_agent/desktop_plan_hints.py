@@ -79,8 +79,10 @@ _FINDER_SAFE_SHORTCUT_PHRASES: tuple[tuple[str, str], ...] = (
     ("finder_get_info", "showinfo"),
     ("copy", "复制选中项"),
     ("copy", "复制选中文件"),
+    ("copy", "复制选中文本"),
     ("copy", "复制当前选中项"),
     ("copy", "复制当前选中文件"),
+    ("copy", "复制当前选中文本"),
     ("copy", "copyselectedfile"),
 )
 
@@ -1421,7 +1423,9 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "复制这个": "copy",
         "复制选中内容": "copy",
         "复制选中的内容": "copy",
+        "复制选中文本": "copy",
         "复制当前选中内容": "copy",
+        "复制当前选中文本": "copy",
         "当前链接复制给我": "copy_current_page_link",
         "当前网页链接复制给我": "copy_current_page_link",
         "当前页面链接复制给我": "copy_current_page_link",

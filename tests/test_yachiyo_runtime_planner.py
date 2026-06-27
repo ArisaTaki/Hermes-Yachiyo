@@ -2126,6 +2126,17 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
         "operate-foreground-ui"
     ]
 
+    copy_selection = RuntimePlanner().decision(
+        "复制选中文本",
+        allowed_tools=["desktop.active_window", "desktop.safe_shortcut", "desktop.ui_elements"],
+    )
+    assert copy_selection.selected_intent.kind == "desktop_operation"
+    assert copy_selection.selected_intent.inputs["safe_shortcut_hint"] == {"action": "copy"}
+    copy_operation = _step_by_id(copy_selection, "operate-foreground-ui")
+    assert copy_operation.tool_name == "desktop.safe_shortcut"
+    assert copy_operation.input_preview == {"action": "copy"}
+    assert copy_operation.approval_required is False
+
 
 def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
     cases = [
@@ -6701,12 +6712,38 @@ def test_planner_tool_requests_maps_app_hotkey_plan() -> None:
         "open Chrome and press command l",
         allowed_tools=["app.open_and_hotkey", "app.open_and_click_ui_element"],
     )
+    focus_requests = planner_tool_requests(
+        "在 Slack 里按回车",
+        allowed_tools=["app.open_and_hotkey", "app.focus_and_hotkey"],
+    )
+    chinese_focus_requests = planner_tool_requests(
+        "微信按回车",
+        allowed_tools=["app.open_and_hotkey", "app.focus_and_hotkey"],
+    )
 
     assert requests == [
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_hotkey",
             "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_hotkey",
+        }
+    ]
+    assert focus_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {"app_name": "Slack", "key": "return", "modifiers": []},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_hotkey",
+        }
+    ]
+    assert chinese_focus_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {"app_name": "WeChat", "key": "return", "modifiers": []},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_hotkey",
         }
