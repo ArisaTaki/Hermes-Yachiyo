@@ -8262,6 +8262,9 @@ def _desktop_operation_tool_preview(
         click_tool = _first_allowed(("desktop.safe_click",), allowed)
         if click_tool:
             return click_tool, dict(safe_click)
+        raw_click_tool = _first_allowed(("desktop.click",), allowed)
+        if raw_click_tool:
+            return raw_click_tool, dict(safe_click)
     if hotkey:
         if app_name and allow_app_tools:
             app_tool = _first_allowed(app_foreground_tool_candidates(mode, "hotkey"), allowed)
@@ -8285,7 +8288,8 @@ def _desktop_operation_tool_preview(
             )
             if app_tool:
                 return app_tool, {"app_name": app_name, "text": safe_type_text}
-        return _first_allowed(("desktop.safe_type_text",), allowed), {"text": safe_type_text}
+        type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
+        return type_tool, {"text": safe_type_text}
     if app_name and click_target:
         if allow_app_tools:
             app_tool = _first_allowed(
@@ -8298,7 +8302,8 @@ def _desktop_operation_tool_preview(
     if type_target:
         return _first_allowed(("desktop.type_into_ui_element",), allowed), {**type_target, "limit": 80}
     if safe_type_text:
-        return _first_allowed(("desktop.safe_type_text",), allowed), {"text": safe_type_text}
+        type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
+        return type_tool, {"text": safe_type_text}
     if click_target:
         return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
     return None, {}

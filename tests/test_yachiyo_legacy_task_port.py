@@ -1101,6 +1101,45 @@ def test_planner_first_direct_selection_owns_show_all_hidden_apps_without_legacy
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_approved_low_level_foreground_click_and_type_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    click_selection = planner_first_direct_tool_selection(
+        "点击坐标 120, 240",
+        ["desktop.active_window", "desktop.click"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    type_selection = planner_first_direct_tool_selection(
+        "输入 hello",
+        ["desktop.active_window", "desktop.type_text"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert click_selection.selected_source == "runtime_planner"
+    assert click_selection.event_payload["legacy_request_count"] == 0
+    assert click_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click",
+            "input": {"x": 120, "y": 240},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+    assert type_selection.selected_source == "runtime_planner"
+    assert type_selection.event_payload["legacy_request_count"] == 0
+    assert type_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     allowed_tools = [

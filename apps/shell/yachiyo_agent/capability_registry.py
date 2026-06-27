@@ -125,6 +125,8 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "desktop.type_into_ui_element",
             "desktop.hotkey",
             "desktop.submit_foreground",
+            "desktop.type_text",
+            "desktop.click",
         ),
         risk_level="medium",
         approval_required=True,

@@ -3774,6 +3774,84 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert click_step.approval_required is False
 
 
+def test_runtime_planner_uses_approved_low_level_foreground_click_and_type_when_safe_tools_are_unavailable() -> None:
+    click_decision = RuntimePlanner().decision(
+        "点击坐标 120, 240",
+        allowed_tools=["desktop.active_window", "desktop.click"],
+    )
+    type_decision = RuntimePlanner().decision(
+        "输入 hello",
+        allowed_tools=["desktop.active_window", "desktop.type_text"],
+    )
+
+    click_step = _step_by_id(click_decision, "operate-foreground-ui")
+    assert click_step.tool_name == "desktop.click"
+    assert click_step.input_preview == {"x": 120, "y": 240}
+    assert click_step.risk_level == "medium"
+    assert click_step.approval_required is True
+
+    type_step = _step_by_id(type_decision, "operate-foreground-ui")
+    assert type_step.tool_name == "desktop.type_text"
+    assert type_step.input_preview == {"text": "hello"}
+    assert type_step.risk_level == "medium"
+    assert type_step.approval_required is True
+
+
+def test_planner_tool_requests_maps_approved_low_level_foreground_click_and_type() -> None:
+    assert planner_tool_requests(
+        "点击坐标 120, 240",
+        allowed_tools=["desktop.active_window", "desktop.click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click",
+            "input": {"x": 120, "y": 240},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert planner_tool_requests(
+        "输入 hello",
+        allowed_tools=["desktop.active_window", "desktop.type_text"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
     assert planner_direct_tool_requests(
         "打开 Slack 按下箭头三次",
@@ -5375,6 +5453,8 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
             "desktop.safe_shortcut",
+            "desktop.type_text",
+            "desktop.click",
         ],
         "clipboard.read_write": ["clipboard.read", "clipboard.write"],
         "schedule.reminder": ["reminders.create", "calendar.create_event", "future_task.schedule"],

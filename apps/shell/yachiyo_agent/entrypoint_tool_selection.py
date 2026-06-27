@@ -412,6 +412,8 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.hotkey",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.click",
+        "desktop.type_text",
         "desktop.search_submit",
         "desktop.submit_foreground",
         "desktop.hide_app",
@@ -478,6 +480,10 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return _has_text_input(request_input, "target")
     if tool_name.endswith("type_into_ui_element") or tool_name == "desktop.type_into_ui_element":
         return _has_text_input(request_input, "target") and _has_text_input(request_input, "text")
+    if tool_name == "desktop.click":
+        return _has_numeric_input(request_input, "x") and _has_numeric_input(request_input, "y")
+    if tool_name == "desktop.type_text":
+        return _has_text_input(request_input, "text")
     return False
 
 
