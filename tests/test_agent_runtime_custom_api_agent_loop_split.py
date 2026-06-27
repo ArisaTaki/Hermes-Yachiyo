@@ -356,6 +356,12 @@ def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() 
     assert "prefer structured desktop tools" in calls[0]["messages"][0]["content"]
     assert "desktop.list_apps" in calls[0]["messages"][0]["content"]
     assert "uncertain app names to desktop.list_apps before app.open" in calls[0]["messages"][0]["content"]
+    assert "prefer split execution" in calls[0]["messages"][0]["content"]
+    assert "Treat app.*_and_* tools as compatibility fallbacks" in calls[0]["messages"][0]["content"]
+    assert "app.open/app.focus followed by desktop.safe_shortcut" in calls[0]["messages"][0]["content"]
+    assert "use app.open_and_safe_shortcut or app.focus_and_safe_shortcut only as compatibility fallbacks" in (
+        calls[0]["messages"][0]["content"]
+    )
     assert "Do not default song search or playback queries to media.apple_music_play" in (
         calls[0]["messages"][0]["content"]
     )
@@ -460,6 +466,19 @@ def test_custom_api_agent_loop_guides_report_generation_toward_artifacts() -> No
     assert "1. Gather available context: workspace.list" in system_prompt
     assert "2. Write report artifact: artifact.write" in system_prompt
     assert "Use available tools to execute the request" in system_prompt
+
+
+def test_custom_api_agent_loop_guides_desktop_tasks_to_split_app_operation_path() -> None:
+    system_prompt = _runtime_planner_guidance_prompt(
+        "打开 PixelForge 并点击导出按钮",
+        ["desktop.list_apps", "app.open", "desktop.click_ui_element", "desktop.ui_elements"],
+    )
+
+    assert "selected intent=desktop_operation" in system_prompt
+    assert "app.open -> desktop.click_ui_element -> desktop.ui_elements" in system_prompt
+    assert "Follow the planned tool path in order" in system_prompt
+    assert "do not replace a split app.open/app.focus plus desktop.* plan" in system_prompt
+    assert "older app.*_and_* shortcut tools unless a required split step is unavailable" in system_prompt
 
 
 def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() -> None:

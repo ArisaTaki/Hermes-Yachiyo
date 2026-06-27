@@ -94,6 +94,10 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "desktop.active_window" in config["instructions"]
     assert "desktop.list_apps" in config["instructions"]
     assert "未知应用名、不确定窗口或需要 UI 上下文时" in config["instructions"]
+    assert "优先拆成“打开/聚焦应用 -> 前台操作 -> 验证”" in config["instructions"]
+    assert "app.*_and_* 只作为拆分链路不可用时的兼容 fallback" in config[
+        "instructions"
+    ]
     assert "desktop.running_apps" in config["instructions"]
     assert "desktop.windows" in config["instructions"]
     assert "app.status" in config["instructions"]
