@@ -11,6 +11,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_recovery_execution_prompt,
     daily_desktop_user_metadata,
     entrypoint_plan_user_metadata,
+    planner_first_daily_desktop_entrypoint_requests,
 )
 
 
@@ -99,6 +100,39 @@ def test_daily_desktop_planned_timeline_keeps_each_runtime_planner_request() -> 
             "input_preview": {},
             "continue_to_model": True,
         },
+    ]
+
+
+def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_default() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert {request["source"] for request in requests} == {"runtime_planner"}
+    assert requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+
+
+def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "可以帮我打开 Word 吗",
+        allowed_tools=["app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Word"},
+        }
     ]
 
 

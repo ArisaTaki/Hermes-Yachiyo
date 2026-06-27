@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -11,6 +12,8 @@ from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_recovery_prompt,
 )
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+
+logger = logging.getLogger(__name__)
 
 
 def daily_desktop_allowed_tools(
@@ -47,6 +50,42 @@ def daily_desktop_entrypoint_requests(
         str(text or ""),
         daily_desktop_allowed_tools(allowed_tools),
         metadata=metadata,
+    )
+
+
+def planner_first_daily_desktop_entrypoint_requests(
+    text: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    allowed_tools: Sequence[str] | None = None,
+    metadata_allowed_tools: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return daily entrypoint requests with Runtime Planner as the default."""
+
+    allowed = daily_desktop_allowed_tools(allowed_tools)
+    direct_tool_request = daily_desktop_direct_metadata_request(
+        metadata,
+        allowed_tools=metadata_allowed_tools if metadata_allowed_tools is not None else allowed,
+    )
+    if direct_tool_request:
+        return [direct_tool_request]
+    try:
+        from .planner_execution import planner_tool_requests
+
+        planner_requests = planner_tool_requests(
+            str(text or ""),
+            allowed,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("Runtime planner daily desktop candidates unavailable", exc_info=True)
+        planner_requests = []
+    if planner_requests:
+        return planner_requests
+    return daily_desktop_entrypoint_requests(
+        text,
+        metadata=metadata,
+        allowed_tools=allowed,
     )
 
 
