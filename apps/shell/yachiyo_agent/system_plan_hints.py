@@ -11,6 +11,8 @@ def system_control_hint(prompt: str) -> dict[str, Any]:
     text = str(prompt or "").strip()
     if not text:
         return {}
+    if _screen_saver_request(text):
+        return {"kind": "screen_saver", "payload": {}}
     settings_payload = _settings_open_payload(text)
     if settings_payload:
         return {"kind": "settings_open", **settings_payload}
@@ -22,8 +24,6 @@ def system_control_hint(prompt: str) -> dict[str, Any]:
         return {"kind": "brightness", "payload": brightness_payload}
     if _display_sleep_request(text):
         return {"kind": "display_sleep", "payload": {}}
-    if _screen_saver_request(text):
-        return {"kind": "screen_saver", "payload": {}}
     return {}
 
 
@@ -204,7 +204,24 @@ def _screen_saver_request(text: str) -> bool:
     lowered = text.lower()
     if _contains_any(text, ["设置", "设定", "preferences", "settings"]):
         return False
-    return _contains_any(text, ["启动屏幕保护程序", "打开屏保", "开启屏保", "start screen saver", "screensaver"])
+    return _contains_any(
+        text,
+        [
+            "启动屏幕保护程序",
+            "打开屏幕保护程序",
+            "开启屏幕保护程序",
+            "开始屏幕保护程序",
+            "启动屏保",
+            "打开屏保",
+            "开启屏保",
+            "开始屏保",
+            "start screen saver",
+            "start the screen saver",
+            "activate screen saver",
+            "launch screen saver",
+            "screensaver",
+        ],
+    )
 
 
 def _brightness_step(text: str) -> int:

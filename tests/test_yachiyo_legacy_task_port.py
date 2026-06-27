@@ -172,8 +172,8 @@ def test_planner_first_direct_selection_owns_system_control_without_legacy() -> 
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
     screen_saver_selection = planner_first_direct_tool_selection(
-        "打开屏保",
-        ["system.screen_saver_start"],
+        "启动屏幕保护程序",
+        ["system.settings_open", "system.screen_saver_start"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
 

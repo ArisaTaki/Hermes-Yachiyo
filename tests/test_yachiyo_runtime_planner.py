@@ -3042,6 +3042,10 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
         "关闭屏幕",
         allowed_tools=["system.display_sleep"],
     )
+    screen_saver = RuntimePlanner().decision(
+        "启动屏幕保护程序",
+        allowed_tools=["system.settings_open", "system.screen_saver_start"],
+    )
 
     assert brightness.selected_intent.kind == "system_control"
     assert _step_by_id(brightness, "control-system-state").tool_name == "system.brightness"
@@ -3051,12 +3055,19 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
     }
     assert display_sleep.selected_intent.kind == "system_control"
     assert _step_by_id(display_sleep, "control-system-state").tool_name == "system.display_sleep"
+    assert screen_saver.selected_intent.kind == "system_control"
+    assert screen_saver.selected_intent.inputs == {"kind": "screen_saver", "payload": {}}
+    assert _step_by_id(screen_saver, "control-system-state").tool_name == "system.screen_saver_start"
 
 
 def test_runtime_planner_routes_system_settings_open_to_system_control() -> None:
     decision = RuntimePlanner().decision(
         "打开蓝牙",
         allowed_tools=["system.settings_open", "desktop.ui_elements"],
+    )
+    screen_saver_settings = RuntimePlanner().decision(
+        "打开屏幕保护程序设置",
+        allowed_tools=["system.settings_open", "system.screen_saver_start"],
     )
 
     assert decision.selected_intent.kind == "system_control"
@@ -3073,6 +3084,16 @@ def test_runtime_planner_routes_system_settings_open_to_system_control() -> None
     assert step.tool_name == "system.settings_open"
     assert step.action == "open_settings"
     assert step.input_preview == {"target": "蓝牙"}
+    assert screen_saver_settings.selected_intent.kind == "system_control"
+    assert screen_saver_settings.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "屏幕保护程序"},
+        "inspect_ui": False,
+    }
+    assert (
+        _step_by_id(screen_saver_settings, "open-system-settings").tool_name
+        == "system.settings_open"
+    )
 
     inspect = RuntimePlanner().decision(
         "打开系统设置看看有哪些选项",
