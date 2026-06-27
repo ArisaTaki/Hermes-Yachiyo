@@ -391,6 +391,17 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert apply_step.risk_level == "high"
     assert apply_step.approval_required is True
 
+    organize_decision = RuntimePlanner().decision(
+        "整理 Downloads 里的文件",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+    assert organize_decision.selected_intent.kind == "file_organization"
+    assert organize_decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "organize",
+    }
+    assert _step_by_id(organize_decision, "apply-file-organization").approval_required is True
+
 
 def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:
     decision = RuntimePlanner().decision(

@@ -710,6 +710,8 @@ class TaskIntentRouter:
                 "删除文件",
             ],
         )
+        if score <= 0 and _looks_like_file_organization_request(text):
+            score = 0.16
         if score <= 0:
             return _empty_intent("file_organization", text)
         destructive = _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"])
@@ -3460,6 +3462,38 @@ def _file_location_hint(text: str) -> str:
         if marker in lowered:
             return location
     return ""
+
+
+def _looks_like_file_organization_request(text: str) -> bool:
+    return _contains_any(
+        text,
+        [
+            "organize",
+            "sort",
+            "clean up",
+            "整理",
+            "分类",
+            "清理",
+        ],
+    ) and _contains_any(
+        text,
+        [
+            "file",
+            "files",
+            "folder",
+            "folders",
+            "directory",
+            "downloads",
+            "desktop",
+            "documents",
+            "文件",
+            "文件夹",
+            "目录",
+            "下载",
+            "桌面",
+            "文档",
+        ],
+    )
 
 
 def _file_operation_hint(text: str) -> str:
