@@ -364,13 +364,18 @@ function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null)
   const hasPlan = events.some((event) => event.event_type === 'agent.plan.created');
   const planSteps = groupRunChildPlannerStepCount(events);
   const capabilityCount = groupRunChildPlannerCapabilityCount(events);
+  const outputCounts = groupRunChildPlannerOutputCounts(events);
   const hasSelection = events.some((event) => event.event_type === 'agent.plan.selection');
-  if (!hasIntent && !hasPlan && !planSteps && !capabilityCount && !hasSelection) return '';
+  const hasOutputs = Boolean(outputCounts.approvals || outputCounts.artifacts || outputCounts.questions);
+  if (!hasIntent && !hasPlan && !planSteps && !capabilityCount && !hasSelection && !hasOutputs) return '';
   return [
     hasIntent ? 'intent' : '',
     hasPlan ? 'plan' : '',
     capabilityCount ? `${capabilityCount} capabilities` : '',
     planSteps ? `${planSteps} steps` : '',
+    outputCounts.approvals ? `${outputCounts.approvals} approvals` : '',
+    outputCounts.artifacts ? `${outputCounts.artifacts} artifacts` : '',
+    outputCounts.questions ? `${outputCounts.questions} questions` : '',
     hasSelection ? 'selection' : '',
   ].filter(Boolean).join(' · ');
 }
@@ -415,6 +420,44 @@ function groupRunChildPlannerCapabilityCount(events: PublicRunEvent[]): number {
     });
   });
   return capabilityIds.size;
+}
+
+function groupRunChildPlannerOutputCounts(events: PublicRunEvent[]): {
+  approvals: number;
+  artifacts: number;
+  questions: number;
+} {
+  const approvals = new Set<string>();
+  const artifacts = new Set<string>();
+  const questions = new Set<string>();
+  events.forEach((event) => {
+    const payload = objectRecord(event.payload);
+    if (event.event_type === 'agent.plan.created') {
+      const plan = objectRecord(payload.plan);
+      const toolPlan = objectRecord(plan.tool_plan);
+      addStringValues(approvals, toolPlan.approvals_required);
+      addStringValues(artifacts, toolPlan.artifacts_expected);
+      addStringValues(questions, toolPlan.open_questions);
+      return;
+    }
+    if (event.event_type !== 'agent.plan.selection') return;
+    addStringValues(approvals, payload.approvals_required);
+    addStringValues(artifacts, payload.artifacts_expected);
+    addStringValues(questions, payload.open_questions);
+  });
+  return {
+    approvals: approvals.size,
+    artifacts: artifacts.size,
+    questions: questions.size,
+  };
+}
+
+function addStringValues(target: Set<string>, value: unknown): void {
+  if (!Array.isArray(value)) return;
+  value.forEach((item) => {
+    const clean = stringValue(item);
+    if (clean) target.add(clean);
+  });
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
