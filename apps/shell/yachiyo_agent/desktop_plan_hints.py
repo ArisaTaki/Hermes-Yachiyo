@@ -686,7 +686,9 @@ def media_app_query_search_plan(
     action = str(inputs.get("action") or "").strip() or "play"
     app_name = str(inputs.get("app_name") or "").strip()
     query = str(inputs.get("query") or "").strip()
-    if action != "play" or not app_name or app_name == "Music" or not query:
+    if action != "play" or not app_name or not query:
+        return []
+    if app_name == "Music" and _first_allowed(("media.apple_music_play",), allowed):
         return []
 
     type_tool = _first_allowed(("desktop.safe_type_text",), allowed)

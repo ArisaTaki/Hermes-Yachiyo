@@ -4470,6 +4470,41 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
+def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Music",
+        "query": "超时空辉夜姬",
+        "control_only": "",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+    ]
+    assert _step_by_id(decision, "focus-media-app-search").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+        "app_name": "Music",
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-media-search-query").input_preview == {
+        "text": "超时空辉夜姬"
+    }
+    assert _step_by_id(decision, "submit-media-search").tool_name == "desktop.search_submit"
+
+
 def test_runtime_planner_routes_media_status_to_readonly_tool() -> None:
     for prompt in (
         "查看当前 Apple Music 播放状态",
@@ -7146,6 +7181,41 @@ def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
             "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_query() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "超时空辉夜姬"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
