@@ -56,6 +56,12 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "intent to capabilities before choosing concrete tools" in config["instructions"]
     assert "Treat mounted Skills as execution manuals" in config["instructions"]
     assert "planner decisions, tool attempts, approvals, artifacts, failures" in config["instructions"]
+    assert "Do not start tool-capable requests with claims" in config["instructions"]
+    assert "Siri, Shortcuts, browser-only fallbacks, or manual user steps" in config["instructions"]
+    assert (
+        "until the allowed runtime tools have been attempted or the missing capability/permission has been observed"
+        in config["instructions"]
+    )
     assert "approval cards and pause/resume execution" in config["instructions"]
     assert "After a failed tool result, read the error and hint" in config["instructions"]
     assert "do not retry the same unchanged failing request" in config["instructions"]
@@ -66,6 +72,9 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "能力类别包括" in config["instructions"]
     assert "not as fixed branches that must be prewritten" in config["instructions"]
     assert "Do not answer with recipes like 'you can open the app yourself'" in config["instructions"]
+    assert "attempt the corresponding capability path before offering external assistants" in config[
+        "instructions"
+    ]
     assert "discover available applications/windows/UI first" in config["instructions"]
     assert (
         "prefer data.analyze for straightforward CSV/TSV/JSON/JSONL/XLSX/text-table reports, "
