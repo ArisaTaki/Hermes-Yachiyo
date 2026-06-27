@@ -307,6 +307,59 @@ def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
         "body_source": "selection",
     }
 
+    selected_table = RuntimePlanner().decision(
+        "分析当前选中的表格并输出报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+
+    assert selected_table.selected_intent.kind == "data_analysis"
+    assert selected_table.selected_intent.inputs["context_source"] == "selection"
+    assert selected_table.selected_intent.missing_inputs == []
+    assert [step.step_id for step in selected_table.plan.tool_plan.steps][:2] == [
+        "copy-selected-data-context",
+        "read-data-context",
+    ]
+
+
+def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "把当前窗口里的表格复制出来，分析并输出报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["context_source"] == "current_page_content"
+    assert decision.selected_intent.missing_inputs == []
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.ui_operation",
+        "clipboard.read_write",
+        "data.analysis",
+        "artifact.write",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "select-current-data-context",
+        "copy-current-data-context",
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "select-current-data-context").input_preview == {
+        "action": "select_all"
+    }
+    assert _step_by_id(decision, "copy-current-data-context").input_preview == {
+        "action": "copy"
+    }
+    assert _step_by_id(decision, "read-data-context").tool_name == "clipboard.read"
+    assert _step_by_id(decision, "run-analysis").depends_on == [
+        "select-current-data-context",
+        "copy-current-data-context",
+        "read-data-context",
+    ]
+    assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md"],
+        "body_source": "current_page_content",
+    }
+
 
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
     decision = RuntimePlanner().decision(
@@ -7648,6 +7701,10 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "分析剪贴板里的表格并输出 csv",
         allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
     )
+    current_window_requests = planner_tool_requests(
+        "把当前窗口里的表格复制出来，分析并输出报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
     report_requests = planner_tool_requests(
         "把选中的内容做成报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
@@ -7679,6 +7736,30 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
         }
+    ]
+    assert current_window_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "select_all"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        },
     ]
     assert [request["planning_reason"] for request in report_requests] == [
         "planner_prefetch_report_context",

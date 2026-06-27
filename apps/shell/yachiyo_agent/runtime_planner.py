@@ -1212,13 +1212,7 @@ class RuntimePlanner:
         source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
         spreadsheet_app_step = _spreadsheet_app_open_step(intent, allowed)
         if context_source and not source_hint:
-            context_steps = _context_source_steps(
-                intent,
-                allowed,
-                context_source,
-                step_prefix="data",
-                capability_id="data.analysis",
-            )
+            context_steps = _data_analysis_context_source_steps(intent, allowed, context_source)
             context_depends_on = [step.step_id for step in context_steps]
             spreadsheet_steps = (
                 [_with_step_dependencies(spreadsheet_app_step, context_depends_on)]
@@ -3453,6 +3447,60 @@ def _context_source_steps(
         ]
 
     return []
+
+
+def _data_analysis_context_source_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    source: str,
+) -> list[ToolPlanStepSnapshot]:
+    if (
+        source == "current_page_content"
+        and _contains_any(
+            intent.user_goal,
+            ("表格", "数据", "table", "tabular", "spreadsheet", "data", "csv"),
+        )
+    ):
+        shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+        read_tool = _first_allowed(("clipboard.read",), allowed)
+        if shortcut_tool and read_tool:
+            return [
+                _step(
+                    intent,
+                    "select-current-data-context",
+                    "Select current data context",
+                    "desktop.ui_operation",
+                    shortcut_tool,
+                    input_preview={"action": "select_all"},
+                    reason="Select visible foreground data before copying it for local analysis.",
+                ),
+                _step(
+                    intent,
+                    "copy-current-data-context",
+                    "Copy current data context",
+                    "clipboard.read_write",
+                    shortcut_tool,
+                    input_preview={"action": "copy"},
+                    depends_on=["select-current-data-context"],
+                    reason="Copy the selected foreground table or data into the clipboard.",
+                ),
+                _step(
+                    intent,
+                    "read-data-context",
+                    "Read captured context",
+                    "clipboard.read_write",
+                    read_tool,
+                    depends_on=["copy-current-data-context"],
+                    reason="Read the copied foreground data before running analysis.",
+                ),
+            ]
+    return _context_source_steps(
+        intent,
+        allowed,
+        source,
+        step_prefix="data",
+        capability_id="data.analysis",
+    )
 
 
 def _dynamic_context_ui_transfer_steps(

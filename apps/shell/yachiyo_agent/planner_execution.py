@@ -467,6 +467,18 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             planning_reason="planner_prefetch_data_source",
         )
         return _append_model_followup_requests(context_requests, app_requests)
+    if context_source == "current_page_content":
+        context_requests = _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=(
+                "select-current-data-context",
+                "copy-current-data-context",
+                "read-data-context",
+            ),
+            planning_reason="planner_prefetch_data_source",
+        )
+        return _append_model_followup_requests(context_requests, app_requests)
     source_hint = str(inputs.get("data_source_hint") or "").strip()
     if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
         request = _request(
