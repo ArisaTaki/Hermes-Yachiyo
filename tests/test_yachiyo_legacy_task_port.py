@@ -130,6 +130,32 @@ def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> 
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_music_app_search_play_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开 Spotify 搜索 Taylor Swift 并播放",
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert [request["tool"] for request in selection.requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+    ]
+    assert selection.requests[-1]["input"] == {"app_name": "Spotify"}
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_clipboard_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 

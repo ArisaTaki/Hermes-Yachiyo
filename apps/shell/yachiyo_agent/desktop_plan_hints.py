@@ -699,22 +699,30 @@ def media_app_query_search_plan(
         allowed,
     )
     if app_search_tool:
-        return [
+        plan = [
             (app_search_tool, {"app_name": app_name, "action": "find"}),
             (type_tool, {"text": query}),
             (submit_tool, {}),
         ]
+        play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
+        if play_tool:
+            plan.append((play_tool, {"app_name": app_name}))
+        return plan
 
     app_tool = _first_allowed(("app.open", "app.focus"), allowed)
     shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
     if not app_tool or not shortcut_tool:
         return []
-    return [
+    plan = [
         (app_tool, {"app_name": app_name}),
         (shortcut_tool, {"action": "find"}),
         (type_tool, {"text": query}),
         (submit_tool, {}),
     ]
+    play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
+    if play_tool:
+        plan.append((play_tool, {"app_name": app_name}))
+    return plan
 
 
 def media_action_hint(text: str) -> str:

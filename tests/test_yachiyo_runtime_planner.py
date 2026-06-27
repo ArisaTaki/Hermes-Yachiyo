@@ -4180,6 +4180,7 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
         "focus-media-app-search",
         "type-media-search-query",
         "submit-media-search",
+        "play-media-search-result",
     ]
     assert _step_by_id(decision, "focus-media-app-search").tool_name == (
         "app.open_and_safe_shortcut"
@@ -4192,6 +4193,10 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
         "text": "lo-fi"
     }
     assert _step_by_id(decision, "submit-media-search").tool_name == "desktop.search_submit"
+    play_step = _step_by_id(decision, "play-media-search-result")
+    assert play_step.tool_name == "media.music_app_open_and_play"
+    assert play_step.input_preview == {"app_name": "Spotify"}
+    assert play_step.depends_on == ["submit-media-search"]
 
 
 def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
@@ -6693,6 +6698,13 @@ def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

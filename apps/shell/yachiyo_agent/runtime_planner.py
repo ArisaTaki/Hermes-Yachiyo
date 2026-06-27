@@ -2452,6 +2452,12 @@ class RuntimePlanner:
                     capability_id = "desktop.ui_operation"
                     action = "type"
                     reason = "Type only the explicit media query from the user prompt."
+                elif tool_name == "media.music_app_open_and_play":
+                    step_id = "play-media-search-result"
+                    title = "Play media search result"
+                    capability_id = "media.playback"
+                    action = "play"
+                    reason = "Start playback from the media app results after submitting the explicit search."
                 else:
                     step_id = "submit-media-search"
                     title = "Submit media search"
