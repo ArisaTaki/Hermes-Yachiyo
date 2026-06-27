@@ -30,6 +30,10 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
     planner_first_direct_tool_selection,
 )
+from apps.shell.yachiyo_agent.hotkey_hints import (
+    legacy_normalize_hotkey_token,
+    legacy_parse_hotkey_combo,
+)
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     planner_selection_timeline_event,
@@ -104,6 +108,11 @@ def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() ->
 def test_runtime_planner_path_aliases_are_behind_compatibility_boundary() -> None:
     assert legacy_common_desktop_path_hint("打开下载目录") == "~/Downloads"
     assert legacy_common_desktop_path_hint("打开桌面文件夹") == "~/Desktop"
+
+
+def test_runtime_planner_hotkeys_are_behind_compatibility_boundary() -> None:
+    assert legacy_parse_hotkey_combo("Command+L") == {"key": "l", "modifiers": ["command"]}
+    assert legacy_normalize_hotkey_token("回车") == "return"
 
 
 def _recording_legacy_requests(

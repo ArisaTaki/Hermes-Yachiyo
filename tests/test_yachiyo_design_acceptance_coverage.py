@@ -417,6 +417,22 @@ def test_runtime_planner_path_aliases_are_behind_discovery_compatibility_boundar
     assert "apps.shell.agent.runtime.path_aliases" not in file_hints
 
 
+def test_runtime_planner_hotkeys_are_behind_discovery_compatibility_boundary() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/hotkey_hints.py",
+        [
+            "def legacy_parse_hotkey_combo(value: str) -> dict[str, Any] | None:",
+            "def legacy_normalize_hotkey_token(value: str) -> str:",
+            "parse_hotkey_combo(value)",
+            "normalize_hotkey_token(value)",
+        ],
+    )
+    desktop_hints = _read("apps/shell/yachiyo_agent/desktop_plan_hints.py")
+    assert "legacy_parse_hotkey_combo" in desktop_hints
+    assert "legacy_normalize_hotkey_token" in desktop_hints
+    assert "apps.shell.agent.runtime.hotkeys" not in desktop_hints
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]

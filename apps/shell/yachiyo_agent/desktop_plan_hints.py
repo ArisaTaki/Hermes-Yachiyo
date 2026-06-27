@@ -6,12 +6,8 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from apps.shell.agent.runtime.hotkeys import (
-    normalize_hotkey_token,
-    parse_hotkey_combo,
-)
-
 from .app_name_hints import legacy_music_app_name_hint
+from .hotkey_hints import legacy_normalize_hotkey_token, legacy_parse_hotkey_combo
 
 _GENERIC_MUSIC_QUERIES = {
     "",
@@ -1488,7 +1484,7 @@ def _parse_hotkey_combo(value: str) -> dict[str, Any] | None:
     if re.search(r"(?:to\s+send|发送|提交|确认)", combo, flags=re.IGNORECASE):
         return None
     combo = re.sub(r"\bkey\b", " ", combo, flags=re.IGNORECASE)
-    return parse_hotkey_combo(combo)
+    return legacy_parse_hotkey_combo(combo)
 
 
 def _safe_shortcut_action_from_hotkey_hint(value: str) -> str:
@@ -2245,7 +2241,7 @@ def _numeric_value(value: str) -> int | float:
 
 
 def _normalize_hotkey_token(value: str) -> str:
-    return normalize_hotkey_token(value)
+    return legacy_normalize_hotkey_token(value)
 
 
 def clean(value: str) -> str:
