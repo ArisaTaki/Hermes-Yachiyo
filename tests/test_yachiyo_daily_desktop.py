@@ -864,6 +864,14 @@ def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
             "input": {"app_name": "Google Chrome"},
         }
     ]
+    for prompt in ("查看当前应用所有窗口", "显示所有窗口"):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.windows",
+                "input": {},
+            }
+        ]
 
 
 def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:
@@ -3878,6 +3886,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("切到上一个窗口", "desktop.safe_shortcut", {"action": "previous_window"}),
         ("打开任务控制中心", "desktop.safe_shortcut", {"action": "mission_control"}),
         ("显示当前应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
+        ("显示当前应用所有窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("显示前台应用窗口", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("应用窗口都显示一下", "desktop.safe_shortcut", {"action": "application_windows"}),
         ("显示当前应用的所有窗口", "desktop.safe_shortcut", {"action": "application_windows"}),

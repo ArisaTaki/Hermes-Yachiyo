@@ -825,9 +825,15 @@ def _clean_window_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(r"\s*(?:窗口|windows?)\s*$", "", app, flags=re.IGNORECASE)
     app = re.sub(
-        r"\s*(?:有|打开了|开了|正在显示|open|opened|running)?\s*"
-        r"(?:哪些|什么|几个|多少|all|open)?\s*(?:窗口|windows?)?$",
+        r"\s*(?:所有|全部|哪些|什么|几个|多少|all|open)\s*$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    )
+    app = re.sub(
+        r"\s*(?:有|打开了|开了|正在显示|open|opened|running)\s*$",
         "",
         app,
         flags=re.IGNORECASE,
@@ -1484,7 +1490,9 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "showdevtools": "open_devtools",
         "显示应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
+        "显示当前应用所有窗口": "application_windows",
         "显示前台应用窗口": "application_windows",
+        "显示前台应用所有窗口": "application_windows",
         "应用窗口": "application_windows",
         "应用窗口都显示": "application_windows",
         "showappwindows": "application_windows",

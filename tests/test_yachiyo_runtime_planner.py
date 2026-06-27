@@ -1128,6 +1128,21 @@ def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
         allowed_tools=["desktop.list_apps", "desktop.windows"],
     )
     assert question_decision.selected_intent.inputs["app_name_hint"] == "微信"
+
+    for prompt in ("查看当前应用所有窗口", "显示所有窗口"):
+        generic_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "desktop.windows"],
+        )
+
+        assert generic_decision.selected_intent.kind == "desktop_operation"
+        assert generic_decision.selected_intent.inputs["app_name_hint"] == ""
+        assert generic_decision.selected_intent.inputs["operation_hint"] == "list_windows"
+        assert generic_decision.selected_intent.inputs["window_list_hint"] == {}
+        assert "app_management_hint" not in generic_decision.selected_intent.inputs
+        generic_list_windows = _step_by_id(generic_decision, "list-app-windows")
+        assert generic_list_windows.tool_name == "desktop.windows"
+        assert generic_list_windows.input_preview == {}
     assert _step_by_id(question_decision, "list-app-windows").input_preview == {
         "app_name": "微信",
     }
@@ -1753,7 +1768,7 @@ def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
 
 
 def test_runtime_planner_routes_foreground_application_windows_shortcut() -> None:
-    for prompt in ("显示当前应用窗口", "show app windows"):
+    for prompt in ("显示当前应用窗口", "显示当前应用所有窗口", "show app windows"):
         decision = RuntimePlanner().decision(
             prompt,
             allowed_tools=[

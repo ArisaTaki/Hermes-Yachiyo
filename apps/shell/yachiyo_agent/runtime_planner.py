@@ -301,6 +301,8 @@ class TaskIntentRouter:
             window_list = None
             app_management = None
             screen_capture = None
+        if window_list is not None:
+            app_management = None
         app_name_hint = str(
             (focus_window or {}).get("app_name")
             or (window_list or {}).get("app_name")
@@ -313,6 +315,11 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
+        if (
+            window_list is not None
+            and not str((window_list or {}).get("app_name") or "").strip()
+        ):
+            app_name_hint = ""
         safe_shortcut_missing_required_scope = False
         if _safe_shortcut_requires_finder_scope_for_text(text, safe_shortcut):
             if _is_finder_app_name(app_name_hint):
@@ -3402,6 +3409,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and not _looks_like_media_search_play_request(text)
     ):
         score += 0.26
+    if intent.kind == "desktop_operation" and "window_list_hint" in intent.inputs:
+        score += 0.2
     if intent.kind == "media_playback" and _contains_any(
         text,
         ["music", "song", "songs", "音乐", "歌曲", "歌"],

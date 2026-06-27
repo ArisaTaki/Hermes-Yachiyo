@@ -14506,15 +14506,19 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "显示应用窗口": "application_windows",
         "显示所有应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
+        "显示当前应用所有窗口": "application_windows",
         "显示当前应用的所有窗口": "application_windows",
         "显示前台应用窗口": "application_windows",
+        "显示前台应用所有窗口": "application_windows",
         "显示前台应用的所有窗口": "application_windows",
         "应用窗口都显示": "application_windows",
         "当前应用窗口都显示": "application_windows",
         "前台应用窗口都显示": "application_windows",
         "所有应用窗口": "application_windows",
         "当前应用的所有窗口": "application_windows",
+        "当前应用所有窗口": "application_windows",
         "前台应用的所有窗口": "application_windows",
+        "前台应用所有窗口": "application_windows",
         "当前应用窗口": "application_windows",
         "前台应用窗口": "application_windows",
         "应用expose": "application_windows",
@@ -16184,7 +16188,7 @@ def _is_active_window_request(text: str) -> bool:
     if re.search(r"(?:哪些|几个|多少).{0,4}(?:窗口|windows?)", text, flags=re.IGNORECASE):
         return False
     if re.search(
-        r"(?:列出|列一下|列下|显示|读取).{0,12}(?:窗口|windows?)|"
+        r"(?:列出|列一下|列下|显示|查看|看看|看一下|看下|读取).{0,12}(?:窗口|windows?)|"
         r"(?:窗口|windows?).{0,8}(?:列表|清单|列出|列一下|列下)",
         text,
         flags=re.IGNORECASE,
