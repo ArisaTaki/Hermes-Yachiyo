@@ -588,6 +588,20 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert summary_step.action == "extract_text"
     assert summary.plan.tool_plan.artifacts_expected == []
 
+    english_summary = RuntimePlanner().decision(
+        "what is this page about",
+        allowed_tools=["browser.current_page", "browser.extract_text"],
+    )
+
+    assert english_summary.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+        "presentation": "summary",
+    }
+    english_summary_step = _step_by_id(english_summary, "extract-current-page-text")
+    assert english_summary_step.tool_name == "browser.extract_text"
+    assert english_summary_step.action == "extract_text"
+
     content = RuntimePlanner().decision(
         "读取当前网页内容",
         allowed_tools=["browser.current_page", "browser.extract_text"],
@@ -1867,6 +1881,25 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     }
     assert _step_by_id(scoped_search, "open-or-focus-app").tool_name == "app.focus"
 
+    focused_search = RuntimePlanner().decision(
+        "切到微信，搜索张三",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "browser.open_url",
+        ],
+    )
+    assert focused_search.selected_intent.kind == "desktop_operation"
+    assert focused_search.selected_intent.inputs["app_name_hint"] == "微信"
+    assert focused_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "张三",
+        "target": "搜索",
+    }
+    assert _step_by_id(focused_search, "open-or-focus-app").tool_name == "app.focus"
+
     finder_file_search = RuntimePlanner().decision(
         "在 Finder 搜索 budget.xlsx",
         allowed_tools=[
@@ -2537,6 +2570,9 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         ("play Some Nights", "Some Nights"),
         ("put some jazz on Apple Music", "jazz"),
         ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
+        ("search Space Oddity in Apple Music and play it", "Space Oddity"),
+        ("Apple Music search Space Oddity and play it", "Space Oddity"),
+        ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "超时空辉夜姬"),
         ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
         ("超时空辉夜姬播放", "超时空辉夜姬"),
         ("周杰伦播放一下", "周杰伦"),
@@ -3587,6 +3623,48 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.click_ui_element",
             "input": {"target": "first result", "role_filter": "", "limit": 80, "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+    ]
+
+    chinese_alias_requests = planner_direct_tool_requests(
+        "切到微信，搜索张三",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "browser.open_url",
+        ],
+    )
+    assert chinese_alias_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "张三"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
@@ -4882,7 +4960,7 @@ def test_planner_tool_requests_maps_app_hotkey_plan() -> None:
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_hotkey",
-            "input": {"app_name": "Chrome", "key": "l", "modifiers": ["command"]},
+            "input": {"app_name": "Google Chrome", "key": "l", "modifiers": ["command"]},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_hotkey",
         }
@@ -4924,6 +5002,16 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
         }
     ]
     assert planner_tool_requests("总结当前网页", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+        }
+    ]
+    assert planner_tool_requests("what is this page about", allowed_tools=allowed) == [
         {
             "protocol": "json_fallback",
             "tool": "browser.extract_text",

@@ -6,6 +6,8 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.app_aliases import APP_ALIASES
+
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
@@ -283,6 +285,8 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if tool_name.startswith("app."):
+        return _canonicalize_app_payload(payload)
     if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
     if tool_name == "screen.capture":
@@ -298,6 +302,21 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         app_name = str(payload.get("app_name") or "").strip()
         return {"app_name": app_name} if app_name else {}
     return payload
+
+
+def _canonicalize_app_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return payload
+    canonical = _canonical_app_name(app_name)
+    if canonical == app_name:
+        return payload
+    return {**payload, "app_name": canonical}
+
+
+def _canonical_app_name(app_name: str) -> str:
+    compact = re.sub(r"[\s._-]+", "", str(app_name or "").strip().lower())
+    return APP_ALIASES.get(compact, str(app_name or "").strip())
 
 
 def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

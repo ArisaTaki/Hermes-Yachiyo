@@ -4681,7 +4681,8 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
     )
     chinese_patterns = (
         rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
-        rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:并|然后|再|接着|之后)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:[，,]\s*)?"
+        rf"(?:并|然后|再|接着|之后)?\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
     )
     for pattern in chinese_patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -5524,6 +5525,11 @@ def _browser_current_page_hint(text: str) -> dict[str, Any]:
             "browser_action": "screenshot",
             "reason": "user asked to capture the browser page",
         }
+    if (
+        _looks_like_browser_current_page_text(value, lowered)
+        and _looks_like_browser_current_page_summary(value, lowered)
+    ):
+        return {"browser_action": "extract_text", "presentation": "summary"}
     if _looks_like_browser_current_page_metadata(value, lowered):
         return {"browser_action": "current_page"}
     if _looks_like_browser_current_page_text(value, lowered):
@@ -5569,6 +5575,11 @@ def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
             r"\s+(?:web\s*)?page(?:\s+text)?\b",
             lowered,
         )
+        or re.search(
+            r"\bwhat(?:'s|\s+is)\s+(?:this|the\s+current|current)"
+            r"\s+(?:web\s*)?page\s+about\b",
+            lowered,
+        )
         or re.search(r"\bextract\s+(?:the\s+)?(?:current|this)\s+page\s+text\b", lowered)
     )
 
@@ -5576,6 +5587,11 @@ def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
 def _looks_like_browser_current_page_summary(value: str, lowered: str) -> bool:
     return _contains_any(value, ("总结", "摘要", "概括")) or bool(
         re.search(r"\bsummari[sz]e|summary\b", lowered)
+        or re.search(
+            r"\bwhat(?:'s|\s+is)\s+(?:this|the\s+current|current)"
+            r"\s+(?:web\s*)?page\s+about\b",
+            lowered,
+        )
     )
 
 

@@ -2770,15 +2770,36 @@ def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_ent
 
     assert result["ok"] is True
     assert calls == [("focus", "WeChat"), ("shortcut", "find"), ("type", "张三")]
-    assert agent_task["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（2 个字符）。"
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
-        "app.focus_and_safe_shortcut",
+    assert agent_task["summary"] == (
+        "已切换到 WeChat。 已打开查找。 已向前台输入文字（2 个字符）。 已提交前台搜索。"
+    )
+    tool_names = [tool_call["tool_name"] for tool_call in agent_task["tool_calls"]]
+    for tool_name in (
+        "app.focus",
+        "desktop.safe_shortcut",
         "desktop.safe_type_text",
+        "desktop.search_submit",
+    ):
+        assert tool_name in tool_names
+    assert tool_names.index("app.focus") < tool_names.index("desktop.safe_shortcut")
+    assert tool_names.index("desktop.safe_shortcut") < tool_names.index(
+        "desktop.safe_type_text"
+    )
+    assert tool_names.index("desktop.safe_type_text") < tool_names.index(
+        "desktop.search_submit"
+    )
+    timeline_tool_names = [
+        tool_call["tool_name"] for tool_call in result["_task_timeline"]["tool_calls"]
     ]
-    assert result["_task_timeline"]["tool_calls"][-2]["tool_name"] == "app.focus_and_safe_shortcut"
-    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
+    for tool_name in (
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ):
+        assert tool_name in timeline_tool_names
     run_event_types = [event["event_type"] for event in result["_events"]]
-    assert run_event_types.count("agent.desktop.intent_planned") == 2
+    assert run_event_types.count("agent.desktop.intent_planned") == 6
     assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
         "agent.tool.call"
     ) < run_event_types.index("agent.desktop.intent_completed")

@@ -702,8 +702,19 @@ def media_query_hint(text: str) -> str:
     patterns = (
         r"(?:put|play)\s+(?P<query_put>.+?)\s+(?:on|in|with)\s+(?:apple\s*music|music)",
         r"(?:search|find)\s+(?:apple\s*music|music)\s+for\s+(?P<query_search>.+?)\s+(?:and\s+)?(?:play|start)",
+        r"(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query_search_in>.+?)\s+"
+        r"(?:in|on|with|using)\s+(?:apple\s*music|music)(?:\s+app)?\s+"
+        r"(?:and\s+)?(?:play|start)",
+        r"(?:apple\s*music|music)(?:\s+app)?\s+(?:search|find|look\s+up)\s+"
+        r"(?:for\s+)?(?P<query_app_search>.+?)\s+(?:and\s+)?(?:play|start)",
         r"(?:open|launch|start)\s+(?:apple\s*music|music)\s+(?:and\s+)?(?:search|find)\s+(?P<query_open_search>.+?)\s+(?:and\s+)?(?:play|start)",
-        r"(?:搜索|查找|找)\s*(?P<query_zh_search>[^。！？!?，,]+?)(?:并|然后|再)?(?:播放|播|放)(?:一下)?",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过|打开|启动)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)?)"
+        r"(?:里|中|上|内|里面)?\s*"
+        r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*"
+        r"(?P<query_zh_scoped_search>[^。！？!?，,]+?)\s*"
+        r"(?:(?:并|然后|再|接着|之后)\s*)?(?:播放|播|放)(?:一下)?",
+        r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*(?P<query_zh_search>[^。！？!?，,]+?)(?:并|然后|再)?(?:播放|播|放)(?:一下)?",
         r"(?P<query_zh_suffix>[^。！？!?，,]+?)(?:播放|播|放)(?:一下)?$",
         r"(?:播放|播|放)(?:一下|一首|首|个|点)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:play|start playing)\s+(?P<query_en>[^.!?,]+)",
@@ -716,7 +727,10 @@ def media_query_hint(text: str) -> str:
         query = (
             groups.get("query_put")
             or groups.get("query_search")
+            or groups.get("query_search_in")
+            or groups.get("query_app_search")
             or groups.get("query_open_search")
+            or groups.get("query_zh_scoped_search")
             or groups.get("query_zh_search")
             or groups.get("query_zh_suffix")
             or groups.get("query")

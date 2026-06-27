@@ -922,6 +922,7 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
     calls: list[tuple[str, str]] = []
+    windows_calls: list[str] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -966,9 +967,25 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
             },
         }
 
+    def fake_windows(app_name: str = "") -> dict:
+        windows_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "desktop.windows",
+            "summary": "Read open windows",
+            "data": {
+                "app_name": app_name,
+                "windows": [
+                    {"app_name": "Google Chrome", "title": "ChatGPT"},
+                    {"app_name": "Finder", "title": "Downloads"},
+                ],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
     try:
         result = api.send_message("打开 Word 新建文档")
         task = runtime.state.get_task(result["task_id"])
@@ -987,8 +1004,13 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
         ]
         assert result["agent_task"]["status"] == "completed"
         assert result["agent_task"]["summary"] == "已打开 Microsoft Word 并新建文档。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open_and_safe_shortcut"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
+        tool_calls = result["agent_task"]["tool_calls"]
+        new_document_call = next(
+            tool_call
+            for tool_call in tool_calls
+            if tool_call["tool_name"] == "app.open_and_safe_shortcut"
+        )
+        assert new_document_call["input_preview"] == {
             "app_name": "Microsoft Word",
             "action": "new_document",
         }
@@ -1017,7 +1039,7 @@ def test_send_message_executes_app_open_new_document_without_model(tmp_path, mon
         assert second["agent_task"]["summary"] == "当前窗口：Google Chrome: ChatGPT; Finder: Downloads。"
         assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.windows"
         assert second["agent_task"]["tool_calls"][-1]["input_preview"] == {}
-        assert windows_calls == ["", ""]
+        assert windows_calls == [""]
         assert second_run["status"] == "completed"
         assert "agent.desktop.intent_planned" in second_event_types
         assert "agent.tool.call" in second_event_types
@@ -2000,11 +2022,26 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert result["status"] == "completed"
         assert calls == [("focus", "WeChat"), ("shortcut", "find"), ("type", "张三")]
         assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（2 个字符）。"
-        assert [tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"][-2:]] == [
-            "app.focus_and_safe_shortcut",
-            "desktop.safe_type_text",
+        assert result["agent_task"]["summary"] == (
+            "已切换到 WeChat。 已打开查找。 已向前台输入文字（2 个字符）。 已提交前台搜索。"
+        )
+        tool_names = [
+            tool_call["tool_name"] for tool_call in result["agent_task"]["tool_calls"]
         ]
+        for tool_name in (
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ):
+            assert tool_name in tool_names
+        assert tool_names.index("app.focus") < tool_names.index("desktop.safe_shortcut")
+        assert tool_names.index("desktop.safe_shortcut") < tool_names.index(
+            "desktop.safe_type_text"
+        )
+        assert tool_names.index("desktop.safe_type_text") < tool_names.index(
+            "desktop.search_submit"
+        )
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert assistant is not None
@@ -2012,7 +2049,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert assistant.content == result["agent_task"]["summary"]
         assert latest_user.content == "搜索张三"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 6
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
@@ -2030,13 +2067,13 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert second["ok"] is True
         assert second["status"] == "completed"
         assert calls[-3:] == [
-            ("focus", "微信"),
+            ("focus", "WeChat"),
             ("shortcut", "find"),
             ("type", "文件传输助手"),
         ]
         assert second["agent_task"]["status"] == "completed"
         assert second["agent_task"]["summary"] == (
-            "已切换到微信。 已打开查找。 已向前台输入文字（6 个字符）。 已提交前台搜索。"
+            "已切换到 WeChat。 已打开查找。 已向前台输入文字（6 个字符）。 已提交前台搜索。"
         )
         second_tool_names = [
             tool_call["tool_name"] for tool_call in second["agent_task"]["tool_calls"]
@@ -2428,6 +2465,19 @@ def test_daily_desktop_app_followup_clause_stays_conservative():
     assert ChatAPI._daily_desktop_app_followup_clause("复制") == "复制"
     assert ChatAPI._daily_desktop_app_followup_clause("打开微信") == ""
     assert ChatAPI._daily_desktop_app_followup_clause("这是为什么？") == ""
+
+
+def test_daily_desktop_app_followup_uses_runtime_planner_context_for_arbitrary_apps(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        runtime.chat_session.add_user_message("在 Keynote 新建一个演示文稿")
+
+        assert ChatAPI._message_daily_desktop_app_context_name(
+            "在 Keynote 新建一个演示文稿"
+        ) == "Keynote"
+        assert api._daily_desktop_app_followup_goal_text("输入标题") == "切到Keynote，输入标题"
+    finally:
+        store.close()
 
 
 def test_daily_desktop_browser_followup_candidate_stays_conservative():

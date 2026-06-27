@@ -596,6 +596,31 @@ class ChatAPI:
     ) -> dict[str, Any]:
         return daily_desktop_user_metadata(requests)
 
+    @staticmethod
+    def _planner_first_daily_desktop_requests(
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        allowed = allowed_tools or daily_desktop_allowed_tools()
+        try:
+            planner_requests = planner_tool_requests(
+                text,
+                allowed,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.debug("Chat runtime planner context candidates unavailable", exc_info=True)
+            planner_requests = []
+        if planner_requests:
+            return planner_requests
+        return daily_desktop_entrypoint_requests(
+            text,
+            metadata=metadata,
+            allowed_tools=allowed,
+        )
+
     def _idempotent_message_response(self, client_message_id: str) -> Dict[str, Any] | None:
         if not client_message_id:
             return None
@@ -754,7 +779,7 @@ class ChatAPI:
         query = self._daily_desktop_music_followup_query(text)
         if not query:
             return text
-        if daily_desktop_entrypoint_requests(text):
+        if self._planner_first_daily_desktop_requests(text):
             return text
         if not self._has_recent_daily_desktop_music_context():
             return text
@@ -766,7 +791,7 @@ class ChatAPI:
             return ""
         if not self._recent_daily_desktop_browser_context_is_latest():
             return ""
-        requests = daily_desktop_entrypoint_requests(candidate)
+        requests = self._planner_first_daily_desktop_requests(candidate)
         if not requests:
             return ""
         if not all(
@@ -854,7 +879,7 @@ class ChatAPI:
         if not app_name:
             return ""
         candidate = f"切到{app_name}，{clause}"
-        requests = daily_desktop_entrypoint_requests(candidate)
+        requests = self._planner_first_daily_desktop_requests(candidate)
         if not requests:
             return ""
         if not self._daily_desktop_requests_target_app_context(requests, app_name):
@@ -913,7 +938,7 @@ class ChatAPI:
 
     @staticmethod
     def _message_daily_desktop_app_context_name(content: str) -> str:
-        requests = daily_desktop_entrypoint_requests(
+        requests = ChatAPI._planner_first_daily_desktop_requests(
             ChatAPI._main_model_goal_text(content),
         )
         for request in reversed(requests):
@@ -928,7 +953,7 @@ class ChatAPI:
 
     @staticmethod
     def _message_has_daily_desktop_browser_context(content: str) -> bool:
-        requests = daily_desktop_entrypoint_requests(
+        requests = ChatAPI._planner_first_daily_desktop_requests(
             ChatAPI._main_model_goal_text(content),
         )
         for request in requests:
@@ -1019,7 +1044,7 @@ class ChatAPI:
 
     @staticmethod
     def _message_has_daily_desktop_music_intent(content: str) -> bool:
-        requests = daily_desktop_entrypoint_requests(
+        requests = ChatAPI._planner_first_daily_desktop_requests(
             ChatAPI._main_model_goal_text(content),
         )
         for request in requests:

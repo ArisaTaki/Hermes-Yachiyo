@@ -509,7 +509,7 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "微信"},
+            "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }
@@ -636,7 +636,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "微信", "action": "select_all"},
+            "input": {"app_name": "WeChat", "action": "select_all"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         },
@@ -676,7 +676,7 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Chrome", "action": "toggle_full_screen"},
+            "input": {"app_name": "Google Chrome", "action": "toggle_full_screen"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_desktop_operation",
         }
