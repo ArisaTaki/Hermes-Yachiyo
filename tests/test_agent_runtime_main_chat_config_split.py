@@ -87,6 +87,8 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "media.apple_music_play" in config["instructions"]
     assert "media.apple_music_open_and_play" in config["instructions"]
     assert "media.apple_music_control" in config["instructions"]
+    assert "媒体播放也按可发现桌面应用处理" in config["instructions"]
+    assert "media.apple_music_* 只是兼容 fallback，不是默认规划模型" in config["instructions"]
     assert "screen.capture" in config["instructions"]
     assert "desktop.permissions" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]

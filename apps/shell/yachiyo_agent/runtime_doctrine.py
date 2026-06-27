@@ -40,7 +40,10 @@ YACHIYO_DAILY_ENTRYPOINT_OPERATING_MANUAL = (
     "and simple chart artifacts; use workspace.read + terminal.run + artifact.write only when the analysis needs "
     "custom code, unsupported formats such as XLS/Parquet, or behavior outside the built-in analyzer. Open "
     "spreadsheet or document apps only when the user explicitly asks for UI work or the "
-    "plan needs UI inspection. For reports, research, code tasks, reminders, workflows, and group runs, select "
+    "plan needs UI inspection. For media playback, treat Music, Spotify, YouTube Music, and other players as "
+    "discoverable apps: list/resolve the app, open or focus it, search or type the requested query, submit, and "
+    "verify when those tools are available. Apple Music-specific tools are compatibility fallbacks, not the "
+    "default planning model. For reports, research, code tasks, reminders, workflows, and group runs, select "
     "the relevant capability path rather than desktop app launch as the default. When a required capability is "
     "absent, name the missing capability/tool/permission and the fallback used."
 )
