@@ -4502,6 +4502,47 @@ def test_capability_registry_exposes_workflow_and_group_run_tools() -> None:
     assert by_id["group.multi_agent"].available_tools == ["group.run"]
 
 
+def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
+    snapshots = capability_snapshots()
+    by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
+    expected_tools_by_capability = {
+        "file.workspace_read": ["workspace.list", "workspace.read"],
+        "terminal.execution": ["terminal.run"],
+        "data.analysis": ["data.analyze", "workspace.read", "artifact.write"],
+        "artifact.write": ["artifact.write"],
+        "browser.research": ["browser.open_url", "browser.current_page", "browser.click"],
+        "desktop.app_discovery": [
+            "desktop.list_apps",
+            "desktop.windows",
+            "desktop.ui_elements",
+        ],
+        "desktop.app_control": ["app.open", "app.focus", "app.quit"],
+        "desktop.ui_operation": [
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.safe_shortcut",
+        ],
+        "clipboard.read_write": ["clipboard.read", "clipboard.write"],
+        "schedule.reminder": ["reminders.create", "calendar.create_event", "future_task.schedule"],
+        "workflow.orchestration": ["workflow.run"],
+        "group.multi_agent": ["group.run"],
+    }
+
+    assert expected_tools_by_capability.keys() <= by_id.keys()
+    for capability_id, required_tools in expected_tools_by_capability.items():
+        snapshot = by_id[capability_id]
+        assert set(required_tools) <= set(snapshot.tools)
+        assert set(required_tools) <= set(snapshot.available_tools)
+
+    assert "list_windows" in by_id["desktop.app_discovery"].discovery_actions
+    assert "read_ui" in by_id["desktop.app_discovery"].discovery_actions
+    assert "open_app" in by_id["desktop.app_control"].execution_actions
+    assert "focus_app" in by_id["desktop.app_control"].execution_actions
+    assert {"click", "type", "shortcut", "verify"} <= set(
+        by_id["desktop.ui_operation"].execution_actions
+    )
+
+
 def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:
     snapshots = capability_snapshots(
         allowed_tools=["workspace.write_patch"],
