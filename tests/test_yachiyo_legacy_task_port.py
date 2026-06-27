@@ -329,6 +329,40 @@ def test_planner_first_direct_selection_owns_current_page_link_copy_without_lega
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_screenshot_shortcuts_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    cases = (
+        ("截取选区", "screenshot_selection"),
+        ("capture selected area", "screenshot_selection"),
+        ("打开截图工具", "screenshot_toolbar"),
+        ("打开截图面板", "screenshot_toolbar"),
+        ("open screenshot toolbar", "screenshot_toolbar"),
+        ("打开录屏工具", "screenshot_toolbar"),
+        ("screen recording toolbar", "screenshot_toolbar"),
+    )
+
+    for prompt, action in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            ["desktop.running_apps", "app.open", "desktop.safe_shortcut", "desktop.ui_elements"],
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_dynamic_context_ui_transfer_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     allowed = [
@@ -685,6 +719,11 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
         allowed,
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    observe_window_selection = planner_first_direct_tool_selection(
+        "看看当前窗口",
+        allowed,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
     frontmost_selection = planner_first_direct_tool_selection(
         "现在前台是什么",
         allowed,
@@ -733,6 +772,9 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
             "planning_reason": "planner_fallback_desktop_operation",
         }
     ]
+    assert observe_window_selection.selected_source == "runtime_planner"
+    assert observe_window_selection.event_payload["legacy_request_count"] == 0
+    assert observe_window_selection.requests == active_window_selection.requests
     assert frontmost_selection.selected_source == "runtime_planner"
     assert frontmost_selection.event_payload["legacy_request_count"] == 0
     assert frontmost_selection.requests == active_window_selection.requests

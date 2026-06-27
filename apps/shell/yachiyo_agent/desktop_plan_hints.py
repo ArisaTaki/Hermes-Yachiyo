@@ -184,7 +184,10 @@ def submit_action_hint(text: str) -> str:
 
 def window_list_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
+    lowered = value.lower()
     if not re.search(r"(?:窗口|windows?)", value, flags=re.IGNORECASE):
+        return None
+    if _looks_like_current_window_observation(value, lowered):
         return None
     patterns = (
         r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app_en>[^.!?]+)",
@@ -221,6 +224,31 @@ def window_list_hint(text: str) -> dict[str, str] | None:
     ):
         return {}
     return None
+
+
+def _looks_like_current_window_observation(value: str, lowered: str) -> bool:
+    if re.search(
+        r"(?:列表|清单|所有|全部|哪些|几个|多少|list|all|windows)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:查看|看看|看一下|看下|显示|读取)?\s*"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)"
+            r"\s*(?:是什么|是啥|哪个|什么|标题|名称|名字)?"
+            r"(?:一下|下|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:show|read|inspect|look\s+at|check)\s+"
+            r"(?:the\s+)?(?:current|active|foreground|frontmost|this)\s+window\b",
+            lowered,
+        )
+    )
 
 
 def focus_window_hint(text: str) -> dict[str, str] | None:
@@ -1465,6 +1493,9 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         normalized,
     ):
         return "copy_current_page_link"
+    screenshot_action = _screenshot_safe_shortcut_action(normalized)
+    if screenshot_action:
+        return screenshot_action
     mapping = {
         "复制": "copy",
         "复制这个": "copy",
@@ -1805,10 +1836,77 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     return _finder_safe_shortcut_action(normalized, mode="exact")
 
 
+def _screenshot_safe_shortcut_action(normalized: str) -> str:
+    if normalized in {
+        "选区截图",
+        "截图选区",
+        "截取选区",
+        "区域截图",
+        "选择区域截图",
+        "选取区域截图",
+        "框选截图",
+        "screenshotselection",
+        "screenshotselectedarea",
+        "selectedareascreenshot",
+        "regionscreenshot",
+        "captureselectedarea",
+        "capturearegion",
+        "capturearea",
+    }:
+        return "screenshot_selection"
+    if normalized in {
+        "截图工具",
+        "打开截图工具",
+        "显示截图工具",
+        "启动截图工具",
+        "截图面板",
+        "打开截图面板",
+        "显示截图面板",
+        "启动截图面板",
+        "屏幕截图工具",
+        "打开屏幕截图工具",
+        "屏幕截图面板",
+        "打开屏幕截图面板",
+        "录屏",
+        "屏幕录制",
+        "录屏工具",
+        "打开录屏工具",
+        "录屏面板",
+        "打开录屏面板",
+        "开始录屏",
+        "screenshottoolbar",
+        "openscreenshottoolbar",
+        "showscreenshottoolbar",
+        "launchscreenshottoolbar",
+        "screenshottool",
+        "openscreenshottool",
+        "screenshotpanel",
+        "openscreenshotpanel",
+        "screencapturetoolbar",
+        "openscreencapturetoolbar",
+        "screencapturetool",
+        "openscreencapturetool",
+        "screencapturepanel",
+        "openscreencapturepanel",
+        "screenrecording",
+        "screenrecordingtoolbar",
+        "openscreenrecordingtoolbar",
+        "screenrecordingtool",
+        "openscreenrecordingtool",
+        "screenrecordingpanel",
+        "openscreenrecordingpanel",
+    }:
+        return "screenshot_toolbar"
+    return ""
+
+
 def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
     normalized = re.sub(r"[\s._·-]+", "", clean(value).lower())
     if not normalized:
         return ""
+    screenshot_action = _screenshot_safe_shortcut_action(normalized)
+    if screenshot_action:
+        return screenshot_action
     if contains_any(normalized, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
         return ""
     finder_action = _finder_safe_shortcut_action(normalized, mode="suffix")

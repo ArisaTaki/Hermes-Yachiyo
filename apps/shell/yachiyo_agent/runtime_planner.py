@@ -212,6 +212,11 @@ class TaskIntentRouter:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
+        if str((safe_shortcut or {}).get("action") or "").strip() in {
+            "screenshot_selection",
+            "screenshot_toolbar",
+        }:
+            screen_capture = None
         finder_special_location = _finder_special_location_hint(text)
         app_scoped_safe_operation = finder_special_location or _app_scoped_safe_operation_hint(text)
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
@@ -1324,6 +1329,11 @@ class RuntimePlanner:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
+        if str((safe_shortcut or {}).get("action") or "").strip() in {
+            "screenshot_selection",
+            "screenshot_toolbar",
+        }:
+            screen_capture = None
         app_scoped_safe_operation = _finder_special_location_hint(
             intent.user_goal
         ) or _app_scoped_safe_operation_hint(intent.user_goal)
@@ -4220,6 +4230,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
     ):
         score += 0.24
+    desktop_discovery = intent.inputs.get("desktop_discovery_hint")
+    if (
+        intent.kind == "desktop_operation"
+        and isinstance(desktop_discovery, Mapping)
+        and str(desktop_discovery.get("action") or "").strip() == "read_active_window"
+    ):
+        score += 0.32
     if (
         intent.kind == "desktop_operation"
         and str(
@@ -5577,6 +5594,8 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "open_devtools",
         "focus_address_bar",
         "copy_current_page_link",
+        "screenshot_selection",
+        "screenshot_toolbar",
         "paste",
     }
 
@@ -5684,6 +5703,21 @@ def _safe_shortcut_has_explicit_app_scope(text: str, app_name_hint: str) -> bool
         "当前网页开发者工具",
         "当前网页的开发者工具",
         "地址栏",
+        "截图工具",
+        "截图面板",
+        "屏幕截图工具",
+        "屏幕截图面板",
+        "录屏工具",
+        "录屏面板",
+        "screenshottool",
+        "screenshottoolbar",
+        "screenshotpanel",
+        "screencapturetool",
+        "screencapturetoolbar",
+        "screencapturepanel",
+        "screenrecordingtool",
+        "screenrecordingtoolbar",
+        "screenrecordingpanel",
     }
     if normalized in generic_targets:
         return False
@@ -7786,6 +7820,7 @@ def _looks_like_active_window_request(value: str, lowered: str) -> bool:
         return False
     return bool(
         re.search(r"(?:当前|现在|前台).{0,8}(?:窗口|应用|app).{0,8}(?:是什么|是哪个|是不是)", value, flags=re.IGNORECASE)
+        or _looks_like_current_window_observation_request(value, lowered)
         or re.search(r"(?:(?:当前|现在)\s*)?前台\s*(?:窗口|应用|app)?\s*(?:是什么|是啥|哪个|什么)", value, flags=re.IGNORECASE)
         or re.search(r"(?:当前|现在)?前台是不是\s*.+", value, flags=re.IGNORECASE)
         or re.search(r"现在是不是在\s*.+", value, flags=re.IGNORECASE)
@@ -7795,6 +7830,31 @@ def _looks_like_active_window_request(value: str, lowered: str) -> bool:
         or re.search(r"\bwhich\s+(?:app|application)\s+is\s+(?:frontmost|active|foreground)\b", lowered)
         or re.search(r"\bis\s+.+\s+(?:frontmost|the\s+active\s+app|the\s+active\s+application)\b", lowered)
         or re.search(r"\bis\s+(?:the\s+)?(?:active|frontmost|foreground)\s+(?:app|application)\s+.+", lowered)
+    )
+
+
+def _looks_like_current_window_observation_request(value: str, lowered: str) -> bool:
+    if re.search(
+        r"(?:列表|清单|所有|全部|哪些|几个|多少|list|all|windows)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:查看|看看|看一下|看下|显示|读取)?\s*"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)"
+            r"\s*(?:是什么|是啥|哪个|什么|标题|名称|名字)?"
+            r"(?:一下|下|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:show|read|inspect|look\s+at|check)\s+"
+            r"(?:the\s+)?(?:current|active|foreground|frontmost|this)\s+window\b",
+            lowered,
+        )
     )
 
 

@@ -16136,6 +16136,8 @@ def _is_active_window_request(text: str) -> bool:
         return False
     if re.search(r"(?:哪些|几个|多少).{0,4}(?:窗口|windows?)", text, flags=re.IGNORECASE):
         return False
+    if _is_current_window_observation_request(text):
+        return True
     if re.search(
         r"(?:列出|列一下|列下|显示|查看|看看|看一下|看下|读取).{0,12}(?:窗口|windows?)|"
         r"(?:窗口|windows?).{0,8}(?:列表|清单|列出|列一下|列下)",
@@ -16176,6 +16178,32 @@ def _is_active_window_request(text: str) -> bool:
         or re.search(r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:active|foreground|frontmost)\s+(?:app|application)\b", lowered)
         or re.search(r"\b(?:what|which)\s+window\s+is\s+(?:active|current|foreground)\b", lowered)
         or _is_active_window_app_check_request(text)
+    )
+
+
+def _is_current_window_observation_request(text: str) -> bool:
+    if re.search(
+        r"(?:列表|清单|所有|全部|哪些|几个|多少|list|all|windows)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:查看|看看|看一下|看下|显示|读取)?\s*"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)"
+            r"\s*(?:是什么|是啥|哪个|什么|标题|名称|名字)?"
+            r"(?:一下|下|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:show|read|inspect|look\s+at|check)\s+"
+            r"(?:the\s+)?(?:current|active|foreground|frontmost|this)\s+window\b",
+            lowered,
+        )
     )
 
 

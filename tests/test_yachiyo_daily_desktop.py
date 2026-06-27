@@ -703,6 +703,13 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
             "input": {},
         }
     ]
+    assert daily_desktop_entrypoint_requests("看看当前窗口") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+        }
+    ]
     assert daily_desktop_entrypoint_requests("现在前台是什么") == [
         {
             "protocol": "json_fallback",

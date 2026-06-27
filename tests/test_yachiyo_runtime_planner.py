@@ -1411,6 +1411,40 @@ def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
     }
 
 
+def test_runtime_planner_routes_current_window_observation_to_active_window() -> None:
+    allowed_tools = ["desktop.active_window", "desktop.windows", "browser.open_url"]
+    for prompt in ("看看当前窗口", "查看当前窗口", "读取当前窗口", "show current window"):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["operation_hint"] == "read_active_window"
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "read_active_window"
+        }
+        assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+            "desktop.active_window"
+        ]
+        assert planner_direct_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+    assert planner_direct_tool_requests("显示当前窗口列表", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+
+
 def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
     decision = RuntimePlanner().decision(
         "切到 Slack 的 general 窗口",
@@ -2179,6 +2213,55 @@ def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     assert copy_operation.tool_name == "desktop.safe_shortcut"
     assert copy_operation.input_preview == {"action": "copy"}
     assert copy_operation.approval_required is False
+
+
+def test_runtime_planner_routes_screenshot_shortcuts_without_opening_fake_apps() -> None:
+    cases = (
+        ("截取选区", "screenshot_selection"),
+        ("capture selected area", "screenshot_selection"),
+        ("打开截图工具", "screenshot_toolbar"),
+        ("打开截图面板", "screenshot_toolbar"),
+        ("open screenshot toolbar", "screenshot_toolbar"),
+        ("打开录屏工具", "screenshot_toolbar"),
+        ("screen recording toolbar", "screenshot_toolbar"),
+    )
+
+    for prompt, action in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.running_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["operation_hint"] == "safe_shortcut"
+        assert decision.selected_intent.inputs["safe_shortcut_hint"] == {"action": action}
+        assert "screen_capture_hint" not in decision.selected_intent.inputs
+        operation = _step_by_id(decision, "operate-foreground-ui")
+        assert operation.tool_name == "desktop.safe_shortcut"
+        assert operation.input_preview == {"action": action}
+        assert all(
+            step.tool_name != "app.open"
+            for step in decision.plan.tool_plan.steps
+        )
+
+    assert planner_direct_tool_requests(
+        "打开截图工具",
+        ["desktop.running_apps", "app.open", "desktop.safe_shortcut", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "screenshot_toolbar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
 
 
 def test_runtime_planner_routes_foreground_browser_safe_shortcuts() -> None:
@@ -5619,6 +5702,15 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
         }
     ]
     assert planner_tool_requests("当前窗口是什么", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_desktop_operation",
+        }
+    ]
+    assert planner_tool_requests("看看当前窗口", allowed_tools) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.active_window",
