@@ -170,6 +170,28 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
     }
 
 
+def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "分析当前选中的数据并生成报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["context_source"] == "selection"
+    assert decision.selected_intent.missing_inputs == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-data-context",
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "run-analysis").approval_required is True
+    assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md"],
+        "body_source": "selection",
+    }
+
+
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
     decision = RuntimePlanner().decision(
         "请分析 metrics.parquet 并输出报告",
@@ -5141,6 +5163,53 @@ def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> Non
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
         }
+    ]
+
+
+def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> None:
+    selection_requests = planner_tool_requests(
+        "分析当前选中的数据并生成报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+    clipboard_requests = planner_tool_requests(
+        "分析剪贴板里的表格并输出 csv",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
+    report_requests = planner_tool_requests(
+        "把选中的内容做成报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
+    )
+
+    assert selection_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        },
+    ]
+    assert clipboard_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert [request["planning_reason"] for request in report_requests] == [
+        "planner_prefetch_report_context",
+        "planner_prefetch_report_context",
     ]
 
 

@@ -146,11 +146,24 @@ class TaskIntentRouter:
             ],
         )
         source_hint = data_source_hint(text, metadata)
-        has_source = bool(source_hint)
+        context_source = context_source_hint(text)
+        has_source = bool(source_hint or context_source)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
+        if (
+            score <= 0
+            and context_source in {"selection", "clipboard"}
+            and _contains_any(text, ["分析", "统计", "汇总", "可视化", "数据", "表格", "data", "table"])
+        ):
+            score = 0.22
         if score <= 0:
             return _empty_intent("data_analysis", text)
+        inputs = {
+            "data_source_hint": source_hint,
+            "data_source_kind": data_source_kind_hint(source_hint, text),
+        }
+        if context_source:
+            inputs["context_source"] = context_source
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "data_analysis", text),
             kind="data_analysis",
@@ -158,10 +171,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.95, 0.48 + score),
             description="Analyze structured data and produce a report or artifact.",
-            inputs={
-                "data_source_hint": source_hint,
-                "data_source_kind": data_source_kind_hint(source_hint, text),
-            },
+            inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
             required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
             preferred_capabilities=["data.analysis", "desktop.app_control"],
@@ -1044,6 +1054,47 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
+        context_source = str(intent.inputs.get("context_source") or "").strip()
+        if context_source and not source_hint:
+            context_steps = _context_source_steps(
+                intent,
+                allowed,
+                context_source,
+                step_prefix="data",
+                capability_id="data.analysis",
+            )
+            depends_on = [step.step_id for step in context_steps]
+            return [
+                *context_steps,
+                _step(
+                    intent,
+                    "run-analysis",
+                    "Run reproducible data analysis",
+                    "data.analysis",
+                    _first_allowed(("terminal.run",), allowed),
+                    input_preview={"command": "python - <<'PY'\n# analyze captured tabular data\nPY"},
+                    risk_level="high",
+                    approval_required=True,
+                    depends_on=depends_on,
+                    reason="Analyze the captured selection or clipboard data after inspecting it.",
+                ),
+                _step(
+                    intent,
+                    "write-analysis-artifact",
+                    "Write analysis artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={
+                        "paths": data_analysis_artifacts_expected(
+                            intent.expected_outputs,
+                            intent.user_goal,
+                        ),
+                        "body_source": context_source,
+                    },
+                    depends_on=["run-analysis"],
+                    reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
+                ),
+            ]
         if _can_use_builtin_data_analysis(intent, allowed):
             artifact_paths = data_analysis_artifacts_expected(
                 intent.expected_outputs,
@@ -3579,6 +3630,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.28
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
+    if (
+        intent.kind == "data_analysis"
+        and str(intent.inputs.get("context_source") or "").strip()
+        and _contains_any(text, ["数据", "表格", "data", "table", "csv", "统计", "分析"])
+    ):
+        score += 0.38
     if (
         intent.kind == "web_research"
         and _contains_any(text, _UI_CONTROL_TERMS)

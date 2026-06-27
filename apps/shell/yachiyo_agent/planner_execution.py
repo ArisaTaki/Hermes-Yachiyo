@@ -354,6 +354,14 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             ]
 
     inputs = decision.selected_intent.inputs
+    context_source = str(inputs.get("context_source") or "").strip()
+    if context_source in {"selection", "clipboard"}:
+        return _context_source_tool_requests(
+            decision,
+            allowed,
+            step_ids=("copy-selected-data-context", "read-data-context"),
+            planning_reason="planner_prefetch_data_source",
+        )
     if "workspace.read" not in allowed:
         return []
     source_hint = str(inputs.get("data_source_hint") or "").strip()
