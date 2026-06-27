@@ -371,6 +371,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "app.open",
         "app.focus",
         "app.focus_window",
+        "app.status",
         "app.show",
         "app.hide",
         "app.minimize",
@@ -430,7 +431,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return False
     if tool_name in {"app.open", "app.focus", "app.focus_window"}:
         return True
-    if tool_name in {"app.show", "app.hide", "app.minimize", "app.quit"}:
+    if tool_name in {"app.status", "app.show", "app.hide", "app.minimize", "app.quit"}:
         return True
     if tool_name in {"desktop.search_submit"}:
         return True

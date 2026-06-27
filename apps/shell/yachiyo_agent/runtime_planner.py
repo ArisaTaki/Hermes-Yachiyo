@@ -539,6 +539,7 @@ class TaskIntentRouter:
                 "show_app",
                 "hide_app",
                 "minimize_app",
+                "status_app",
                 "minimize_window",
                 "safe_shortcut",
                 "safe_key",
@@ -1690,6 +1691,7 @@ class RuntimePlanner:
         if app_management:
             action = str(app_management.get("action") or "").strip()
             tool_name = {
+                "status": "app.status",
                 "show": "app.show",
                 "hide": "app.hide",
                 "minimize": "app.minimize",
@@ -3571,6 +3573,8 @@ def _app_management_action(tool_name: str | None) -> str:
     clean_tool = str(tool_name or "")
     if clean_tool == "app.show":
         return "show_app"
+    if clean_tool == "app.status":
+        return "status_app"
     if clean_tool == "app.hide":
         return "hide_app"
     if clean_tool == "app.minimize":
@@ -3898,6 +3902,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
         score += 0.08
+    if intent.kind == "desktop_operation" and intent.inputs.get("app_management_hint"):
+        score += -0.18 if _looks_like_generic_media_control_request(text) else 0.24
     if (
         intent.kind == "desktop_operation"
         and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
@@ -3963,6 +3969,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() != "type_text"
     ):
         score -= 0.24
+    if (
+        intent.kind == "web_research"
+        and app_management_hint(text)
+        and not _looks_like_generic_media_control_request(text)
+    ):
+        score -= 0.32
     if (
         intent.kind == "web_research"
         and not str(intent.inputs.get("url_hint") or "").strip()
@@ -6628,6 +6640,19 @@ def _looks_like_media_search_play_request(text: str) -> bool:
             str(hint.get("app_name") or "").strip()
             or _contains_any(text, ("apple music", "spotify", "网易云", "qq music", "QQ 音乐"))
         )
+    )
+
+
+def _looks_like_generic_media_control_request(text: str) -> bool:
+    hint = media_playback_hint(text)
+    action = str(hint.get("action") or "").strip()
+    if action not in {"pause", "next", "previous", "status"}:
+        return False
+    if str(hint.get("control_only") or "").strip().lower() == "true":
+        return True
+    return bool(
+        not str(hint.get("app_name") or "").strip()
+        and _contains_any(text, ("music", "song", "songs", "音乐", "歌曲"))
     )
 
 

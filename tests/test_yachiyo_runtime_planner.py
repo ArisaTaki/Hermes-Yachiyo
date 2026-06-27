@@ -1808,6 +1808,41 @@ def test_runtime_planner_routes_named_app_management_to_app_control() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["manage-app"]
 
 
+def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
+    cases = [
+        ("Chrome 开着吗", "Chrome"),
+        ("Google Chrome 在运行吗", "Google Chrome"),
+        ("检查一下 Slack 是否运行", "Slack"),
+        ("Finder 是否运行", "Finder"),
+    ]
+
+    for prompt, app_name in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.status", "desktop.running_apps"],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.risk_level == "low"
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert decision.selected_intent.inputs["operation_hint"] == "status_app"
+        assert decision.selected_intent.inputs["app_management_hint"] == {
+            "action": "status",
+            "app_name": app_name,
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "manage-app",
+            "verify-desktop-result",
+        ]
+        manage = _step_by_id(decision, "manage-app")
+        assert manage.tool_name == "app.status"
+        assert manage.action == "status_app"
+        assert manage.input_preview == {"app_name": app_name}
+        assert manage.approval_required is False
+        assert _step_by_id(decision, "verify-desktop-result").depends_on == ["manage-app"]
+
+
 def test_runtime_planner_sequences_app_open_or_focus_before_app_management() -> None:
     cases = [
         ("打开 Slack 然后隐藏", "open", "app.open", "app.hide", False),

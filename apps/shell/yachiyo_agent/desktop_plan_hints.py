@@ -280,6 +280,26 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         return None
     patterns: tuple[tuple[str, str], ...] = (
         (
+            "status",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:检查一下|检查|看看|看一下|查看|确认)?\s*"
+            r"(?P<app_status>[^。！？!?，,]+?)\s*(?:是否)?"
+            r"(?:在运行|运行中|运行|开着|开没开)"
+            r"(?:吗|嘛|呢|吧|么|\?|？)?$",
+        ),
+        (
+            "status",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:检查一下|检查|看看|看一下|查看|确认)?\s*"
+            r"(?P<app_status_open>[^。！？!?，,]+?)\s*(?:是否)?"
+            r"(?:打开了|开了|打开|开启)(?:吗|嘛|呢|吧|么|\?|？)$",
+        ),
+        (
+            "status",
+            r"(?:is|check\s+if|see\s+if)\s+(?P<app_status_en>[^.!?]+?)\s+"
+            r"(?:is\s+)?(?:running|open)(?:\s+please)?$",
+        ),
+        (
             "show",
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:显示|显示一下|显示出来|调出来|叫出来|还原|恢复|取消隐藏|show|restore|unhide)\s*"
@@ -287,7 +307,13 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         ),
         (
             "show",
-            r"(?P<app2>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏|show|restore|unhide)$",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:把|将)?\s*"
+            r"(?P<app_front>[^。！？!?，,]+?)\s*(?:打开|启动|开启|拉起)?\s*"
+            r"(?:到前台|切到前台|置前|前台|叫出来)$",
+        ),
+        (
+            "show",
+            r"(?P<app2>[^。！？!?，,]+?)\s*(?:显示出来|还原|恢复|取消隐藏|叫出来|show|restore|unhide)$",
         ),
         (
             "hide",
@@ -326,6 +352,12 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         if not match:
             continue
         if action == "quit" and re.search(r"(?:窗口|window)", value, flags=re.IGNORECASE):
+            continue
+        if action == "show" and re.search(
+            r"(?:切到|聚焦|focus|switch\s+to|activate)",
+            value,
+            flags=re.IGNORECASE,
+        ):
             continue
         raw_app = next(
             (
@@ -1210,9 +1242,10 @@ def _clean_management_app_name_hint(value: str) -> str:
     )
     app = re.sub(
         r"\s*(?:一下|下|起来|掉|显示出来|还原|恢复|取消隐藏|隐藏|藏起来|收起|收起来|"
-        r"打开|启动|开启|运行|拉起|切到|聚焦|open|launch|start|focus|activate|"
+        r"打开|启动|开启|运行|拉起|切到|聚焦|到前台|切到前台|置前|前台|叫出来|"
+        r"open|launch|start|focus|activate|bring|"
         r"最小化|退出|关闭|关掉|结束|终止|show|restore|unhide|hide|minimi[sz]e|"
-        r"quit|close|exit|terminate)$",
+        r"quit|close|exit|terminate|please|pls|吗|嘛|呢|吧|么|\?|？)$",
         "",
         app,
         flags=re.IGNORECASE,

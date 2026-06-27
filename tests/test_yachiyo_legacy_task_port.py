@@ -668,6 +668,51 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_app_management_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.show",
+        "app.minimize",
+        "app.quit",
+        "app.status",
+        "desktop.running_apps",
+        "browser.open_url",
+    ]
+    cases = [
+        ("你能帮我显示Finder吗", "app.show", {"app_name": "Finder"}),
+        ("你能帮我还原微信吗", "app.show", {"app_name": "WeChat"}),
+        ("打开微信到前台", "app.show", {"app_name": "WeChat"}),
+        ("把Chrome叫出来", "app.show", {"app_name": "Google Chrome"}),
+        ("Could you quit Slack please?", "app.quit", {"app_name": "Slack"}),
+        ("Could you minimize Chrome please?", "app.minimize", {"app_name": "Google Chrome"}),
+        ("Chrome 开着吗", "app.status", {"app_name": "Google Chrome"}),
+        ("Google Chrome 在运行吗", "app.status", {"app_name": "Google Chrome"}),
+        ("检查一下 Slack 是否运行", "app.status", {"app_name": "Slack"}),
+        ("Finder 是否运行", "app.status", {"app_name": "Finder"}),
+    ]
+
+    for prompt, tool_name, tool_input in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
 
