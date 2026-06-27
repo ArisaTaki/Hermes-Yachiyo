@@ -3661,6 +3661,38 @@ def test_runtime_planner_routes_finder_scoped_safe_shortcuts() -> None:
         assert operate.input_preview == {"app_name": "Finder", "action": expected_action}
         assert operate.approval_required is False
 
+    special_location_cases = (
+        ("打开隔空投送", "app.open_and_safe_shortcut", "finder_airdrop", "open"),
+        ("打开 AirDrop", "app.open_and_safe_shortcut", "finder_airdrop", "open"),
+        ("Finder 打开隔空投送", "app.focus_and_safe_shortcut", "finder_airdrop", "focus"),
+        ("打开网络位置", "app.open_and_safe_shortcut", "finder_network", "open"),
+        ("打开 Finder 网络", "app.open_and_safe_shortcut", "finder_network", "open"),
+        ("Finder 打开网络", "app.focus_and_safe_shortcut", "finder_network", "focus"),
+        ("打开最近使用", "app.open_and_safe_shortcut", "finder_recents", "open"),
+        ("Finder 打开最近使用", "app.focus_and_safe_shortcut", "finder_recents", "focus"),
+    )
+    for prompt, expected_tool, expected_action, expected_mode in special_location_cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": "Finder",
+            "operation_hint": "safe_shortcut",
+            "safe_shortcut_hint": {"action": expected_action},
+            "operation_mode_hint": expected_mode,
+        }
+        operate = _step_by_id(decision, "operate-foreground-ui")
+        assert operate.tool_name == expected_tool
+        assert operate.input_preview == {"app_name": "Finder", "action": expected_action}
+        assert operate.approval_required is False
+
+    network_settings = RuntimePlanner().decision(
+        "打开网络",
+        allowed_tools=["system.settings_open", *allowed_tools],
+    )
+    assert network_settings.selected_intent.kind == "system_control"
+    assert _step_by_id(network_settings, "open-system-settings").tool_name == "system.settings_open"
+
     chrome = RuntimePlanner().decision(
         "Chrome 新建文件夹",
         allowed_tools=allowed_tools,

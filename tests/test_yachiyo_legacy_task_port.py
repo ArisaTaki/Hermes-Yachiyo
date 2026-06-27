@@ -371,6 +371,57 @@ def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_lega
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_owns_finder_special_locations_without_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    cases = (
+        ("打开隔空投送", "app.open_and_safe_shortcut", "finder_airdrop"),
+        ("打开 AirDrop", "app.open_and_safe_shortcut", "finder_airdrop"),
+        ("Finder 打开隔空投送", "app.focus_and_safe_shortcut", "finder_airdrop"),
+        ("打开网络位置", "app.open_and_safe_shortcut", "finder_network"),
+        ("打开 Finder 网络", "app.open_and_safe_shortcut", "finder_network"),
+        ("Finder 打开网络", "app.focus_and_safe_shortcut", "finder_network"),
+        ("打开最近使用", "app.open_and_safe_shortcut", "finder_recents"),
+        ("Finder 打开最近使用", "app.focus_and_safe_shortcut", "finder_recents"),
+    )
+
+    for prompt, tool_name, action in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            ["app.open_and_safe_shortcut", "app.focus_and_safe_shortcut", "system.settings_open"],
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": {"app_name": "Finder", "action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_desktop_operation",
+            }
+        ]
+
+    network_settings = planner_first_direct_tool_selection(
+        "打开网络",
+        ["app.open_and_safe_shortcut", "app.focus_and_safe_shortcut", "system.settings_open"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    assert network_settings.selected_source == "runtime_planner"
+    assert network_settings.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.settings_open",
+            "input": {"target": "网络"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        }
+    ]
+
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_context_prefetch_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     data_selection = planner_first_direct_tool_selection(

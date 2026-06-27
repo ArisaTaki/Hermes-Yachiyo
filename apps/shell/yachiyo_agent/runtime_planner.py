@@ -212,7 +212,8 @@ class TaskIntentRouter:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
-        app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
+        finder_special_location = _finder_special_location_hint(text)
+        app_scoped_safe_operation = finder_special_location or _app_scoped_safe_operation_hint(text)
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
@@ -519,6 +520,8 @@ class TaskIntentRouter:
             inputs["safe_click_hint"] = safe_click
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
+        if finder_special_location.get("mode"):
+            inputs["operation_mode_hint"] = str(finder_special_location.get("mode") or "")
         if foreground_compose_text:
             inputs["foreground_compose_text_hint"] = foreground_compose_text
         if foreground_paste:
@@ -612,6 +615,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if metadata.get("desktop_permission_recovery") and metadata.get("recovery_tool"):
+            return _empty_intent("system_control", text)
+        if _finder_special_location_hint(text):
             return _empty_intent("system_control", text)
         if _browser_internal_page_hint(text) or _app_preferences_hint(text):
             return _empty_intent("system_control", text)
@@ -1258,12 +1263,17 @@ class RuntimePlanner:
         app_management = app_management_hint(intent.user_goal)
         foreground_management = foreground_management_hint(intent.user_goal)
         safe_shortcut = safe_shortcut_hint(intent.user_goal)
+        intent_safe_shortcut = intent.inputs.get("safe_shortcut_hint")
+        if isinstance(intent_safe_shortcut, Mapping):
+            safe_shortcut = dict(intent_safe_shortcut)
         safe_shortcut_sequence = safe_shortcut_sequence_hint(intent.user_goal)
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
-        app_scoped_safe_operation = _app_scoped_safe_operation_hint(intent.user_goal)
+        app_scoped_safe_operation = _finder_special_location_hint(
+            intent.user_goal
+        ) or _app_scoped_safe_operation_hint(intent.user_goal)
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
@@ -1356,6 +1366,9 @@ class RuntimePlanner:
             ["打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "],
         ):
             mode = "focus"
+        operation_mode_hint = str(intent.inputs.get("operation_mode_hint") or "").strip()
+        if operation_mode_hint in {"open", "focus"}:
+            mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
         hotkey = hotkey_hint(intent.user_goal)
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
@@ -4385,6 +4398,9 @@ def _safe_shortcut_requires_finder_scope(hint: Mapping[str, Any] | None) -> bool
     return str((hint or {}).get("action") or "").strip() in {
         "finder_quick_look",
         "finder_get_info",
+        "finder_airdrop",
+        "finder_network",
+        "finder_recents",
         "new_folder",
         "rename_selected",
         "parent_folder",
@@ -5523,6 +5539,60 @@ def _looks_like_non_app_operation_fragment(app_name: str) -> bool:
             "browser search",
         ),
     )
+
+
+def _finder_special_location_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    normalized = re.sub(r"[\s._·-]+", "", value.lower())
+    finder_explicit = bool(
+        re.search(r"(?:^|\b)finder(?:\b|$)", value, flags=re.IGNORECASE)
+        or "访达" in value
+    )
+    action = ""
+    if "隔空投送" in value or "airdrop" in normalized:
+        action = "finder_airdrop"
+    elif (
+        "网络位置" in value
+        or "networklocation" in normalized
+        or (finder_explicit and ("网络" in value or "network" in normalized))
+    ):
+        action = "finder_network"
+    elif (
+        "最近使用" in value
+        or "最近项目" in value
+        or "最近使用项目" in value
+        or any(marker in normalized for marker in ("recents", "recentitems", "recentfiles"))
+    ):
+        action = "finder_recents"
+    if not action:
+        return {}
+    focus_prefix = bool(
+        re.match(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:在|用|通过)?\s*(?:Finder|访达)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or any(
+            normalized.startswith(prefix)
+            for prefix in (
+                "finder",
+                "infinder",
+                "usingfinder",
+                "withfinder",
+                "访达",
+                "在访达",
+                "用访达",
+                "通过访达",
+            )
+        )
+    )
+    return {
+        "app_name": "Finder",
+        "mode": "focus" if focus_prefix else "open",
+        "safe_shortcut": {"action": action},
+    }
 
 
 def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
