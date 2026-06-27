@@ -1741,12 +1741,27 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "新幻灯片": "new_document",
         "新建ppt": "new_document",
         "新ppt": "new_document",
+        "新建项目": "new_document",
+        "新建一个项目": "new_document",
+        "创建项目": "new_document",
+        "创建一个项目": "new_document",
+        "新项目": "new_document",
+        "新建工作区": "new_document",
+        "新建一个工作区": "new_document",
+        "创建工作区": "new_document",
+        "创建一个工作区": "new_document",
+        "新建workspace": "new_document",
+        "创建workspace": "new_document",
+        "创建新workspace": "new_document",
+        "新workspace": "new_document",
         "newdocument": "new_document",
         "newfile": "new_document",
         "newworkbook": "new_document",
         "newspreadsheet": "new_document",
         "newpresentation": "new_document",
         "newslide": "new_document",
+        "newproject": "new_document",
+        "newworkspace": "new_document",
         "makeanewdocument": "new_document",
         "createanewdocument": "new_document",
         "makenewdocument": "new_document",
@@ -1767,6 +1782,14 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "createanewpresentation": "new_document",
         "makenewpresentation": "new_document",
         "createnewpresentation": "new_document",
+        "makeanewproject": "new_document",
+        "createanewproject": "new_document",
+        "makenewproject": "new_document",
+        "createnewproject": "new_document",
+        "makeanewworkspace": "new_document",
+        "createanewworkspace": "new_document",
+        "makenewworkspace": "new_document",
+        "createnewworkspace": "new_document",
         "新建无痕窗口": "new_private_window",
         "打开无痕窗口": "new_private_window",
         "新建隐身窗口": "new_private_window",
@@ -1964,9 +1987,6 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         return screenshot_action
     if contains_any(normalized, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
         return ""
-    finder_action = _finder_safe_shortcut_action(normalized, mode="suffix")
-    if finder_action:
-        return finder_action
     full_screen_suffixes = (
         "窗口最大化",
         "当前窗口最大化",
@@ -2005,12 +2025,26 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         "新建幻灯片",
         "新建一个幻灯片",
         "新建ppt",
+        "新建项目",
+        "新建一个项目",
+        "创建项目",
+        "创建一个项目",
+        "新建工作区",
+        "新建一个工作区",
+        "创建工作区",
+        "创建一个工作区",
+        "新建workspace",
+        "创建workspace",
+        "创建新workspace",
+        "新workspace",
         "newdocument",
         "newfile",
         "newworkbook",
         "newspreadsheet",
         "newpresentation",
         "newslide",
+        "newproject",
+        "newworkspace",
         "makeanewdocument",
         "createanewdocument",
         "makeanewfile",
@@ -2021,8 +2055,17 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         "createanewspreadsheet",
         "makeanewpresentation",
         "createanewpresentation",
+        "makeanewproject",
+        "createanewproject",
+        "makeanewworkspace",
+        "createanewworkspace",
     )
-    return "new_document" if any(normalized.endswith(suffix) for suffix in new_document_suffixes) else ""
+    if any(normalized.endswith(suffix) for suffix in new_document_suffixes):
+        return "new_document"
+    finder_action = _finder_safe_shortcut_action(normalized, mode="suffix")
+    if finder_action:
+        return finder_action
+    return ""
 
 
 def _finder_safe_shortcut_action(normalized: str, *, mode: str) -> str:
