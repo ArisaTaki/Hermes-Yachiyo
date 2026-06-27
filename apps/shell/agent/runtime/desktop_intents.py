@@ -16,6 +16,7 @@ from apps.shell.agent.runtime.app_aliases import (
     BROWSER_INTERNAL_PAGE_SCHEMES as _BROWSER_INTERNAL_PAGE_SCHEMES,
     COMMUNICATION_APP_NAMES as _COMMUNICATION_APP_NAMES,
     EMAIL_APP_NAMES as _EMAIL_APP_NAMES,
+    compact_app_alias as _compact_app_alias,
     known_app_followup_aliases as _shared_known_app_followup_aliases,
 )
 from apps.shell.agent.runtime.hotkeys import parse_hotkey_combo
@@ -11982,10 +11983,6 @@ def _typed_text_has_submit_followup(raw_text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
-
-
-def _compact_app_alias(value: str) -> str:
-    return re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
 
 
 def _app_focus_name(text: str) -> str:
