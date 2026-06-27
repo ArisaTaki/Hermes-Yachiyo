@@ -7812,6 +7812,8 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
 def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
 
+    assert '@router.get("/studio/agents")' in source
+    assert '@router.post("/studio/agents")' in source
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
     assert '@router.get("/studio/tools")' in source
     assert '@router.post("/studio/planner")' in source
@@ -7843,6 +7845,8 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/future-tasks")' in source
     assert '@router.post("/studio/future-tasks/trigger-due")' in source
     assert '@router.post("/studio/future-tasks/{future_task_id}/cancel")' in source
+    assert '@router.get("/studio/groups")' in source
+    assert '@router.post("/studio/groups")' in source
     assert '@router.get("/studio/groups/{group_id}")' in source
     assert '@router.patch("/studio/groups/{group_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
@@ -7856,6 +7860,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/reject")' in source
     assert '@router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")' in source
+    assert '@router.get("/studio/runs/{run_id}/events")' in source
+    assert '@router.get("/studio/workflows")' in source
+    assert '@router.post("/studio/workflows")' in source
     assert '@router.get("/studio/workflows/{workflow_id}")' in source
     assert '@router.patch("/studio/workflows/{workflow_id}")' in source
     assert '@router.delete("/studio/workflows/{workflow_id}")' in source
