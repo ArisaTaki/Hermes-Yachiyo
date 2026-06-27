@@ -119,10 +119,6 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
     tools = _request_tools(requests)
     if _runtime_planner_model_followup_owns_selection(requests):
         return False
-    if _prompt_contains_shortcut_or_window_followup(prompt) and (
-        "media.system_control" in _request_tool_set(requests)
-    ):
-        return True
     if _runtime_planner_media_playback_owns_selection(requests):
         return False
     if _prompt_contains_foreground_paste(prompt) and "clipboard.read" in _request_tool_set(requests):
@@ -143,10 +139,6 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
         return False
     if _runtime_planner_desktop_operation_owns_selection(requests):
         return False
-    if _prompt_contains_shortcut_or_window_followup(prompt) and (
-        _request_tool_set(requests) & _RUNTIME_PLANNER_SYSTEM_CONTROL_TOOLS
-    ):
-        return True
     if _runtime_planner_system_control_owns_selection(requests):
         return False
     if _runtime_planner_file_access_owns_selection(requests):
