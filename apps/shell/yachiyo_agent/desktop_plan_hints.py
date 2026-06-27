@@ -913,9 +913,16 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:读取|阅读|读一下|读下|读一读|读|查看|看看|识别|提取|抓取|获取)"
+            r"(?:读取|阅读|读一下|读下|读一读|读|查看|看看|观察|识别|提取|抓取|获取)"
             r".{0,8}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
             r".{0,8}(?:文字|文本|内容|正文)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:读取|阅读|读一下|读下|读一读|读|查看|观察|识别|获取)"
+            r".{0,40}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
+            r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
             value,
             flags=re.IGNORECASE,
         )
@@ -988,11 +995,15 @@ def _ui_inspection_app_name_hint(value: str) -> str:
         r"\b(?:list|show|read|inspect)\s+(?P<app_en4>[^.!?]+?)\s+"
         r"(?:ui\s+elements|buttons|text\s+fields|controls)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|观察|识别)\s*"
+        r"(?P<app_surface>[^。！？!?，,]+?)\s*(?:的)?\s*"
+        r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|观察|识别)\s*"
         r"(?P<app>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
         r".{0,6}(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:列出|查看|看看|看一下|看下|显示|读取|识别)\s*"
+        r"(?:列出|查看|看看|看一下|看下|显示|读取|观察|识别)\s*"
         r"(?P<app2>[^。！？!?，,]+?)\s*(?:的)?\s*(?:控件|按钮|输入框|文本框|元素|ui|可点击|可操作)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<app3>[^。！？!?，,]+?)\s*(?:有哪些|有什么|有啥|有哪个|有哪几个)"
@@ -1019,7 +1030,7 @@ def _ui_inspection_app_name_hint(value: str) -> str:
 def _clean_ui_app_name_hint(value: str) -> str:
     app = clean(value)
     app = re.sub(
-        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|识别|"
+        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|列出|查看|看看|看一下|看下|显示|读取|观察|识别|"
         r"list|show|read|inspect|the)\s*",
         "",
         app,
@@ -1033,7 +1044,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     app = re.split(
-        r"(?:看看|看一下|看下|查看|读取|识别|有哪些|有什么|有啥|"
+        r"(?:看看|看一下|看下|查看|读取|观察|识别|有哪些|有什么|有啥|"
         r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
         app,
         maxsplit=1,

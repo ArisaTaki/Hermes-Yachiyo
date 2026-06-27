@@ -1521,6 +1521,47 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     ]
 
 
+def test_runtime_planner_focuses_arbitrary_app_before_surface_inspection() -> None:
+    for prompt in (
+        "读取 Acme Studio 当前界面",
+        "观察 Acme Studio 当前界面",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.ui_elements",
+                "desktop.active_window",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == "Acme Studio"
+        assert decision.selected_intent.inputs["operation_hint"] == "read_ui"
+        assert decision.selected_intent.inputs["ui_inspection_hint"] == {
+            "role_filter": "",
+            "limit": 80,
+            "app_name": "Acme Studio",
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "open-or-focus-app",
+            "read-foreground-ui",
+        ]
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": "Acme Studio",
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": "Acme Studio",
+        }
+        assert _step_by_id(decision, "read-foreground-ui").input_preview == {"limit": 80}
+        assert _step_by_id(decision, "read-foreground-ui").depends_on == [
+            "open-or-focus-app"
+        ]
+
+
 def test_runtime_planner_cleans_prefixed_app_ui_inspection() -> None:
     decision = RuntimePlanner().decision(
         "打开微信看看有什么按钮",
