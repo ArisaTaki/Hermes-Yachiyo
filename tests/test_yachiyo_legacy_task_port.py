@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_allowed_tools
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
     LegacyRuntimePort as CompatLegacyRuntimePort,
@@ -450,6 +451,42 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         assert selection.event_payload["legacy_request_count"] == 0
         assert selection.event_payload["selected_tools"] == expected_tools
 
+    assert legacy_calls == []
+
+
+def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    prompts = (
+        "微信关闭窗口",
+        "在 VS Code 里执行命令 Format Document",
+        "把当前网页链接粘贴到 Slack",
+        "在 Slack 粘贴当前网页链接",
+        "复制当前网页内容",
+        "把选中的内容填到当前输入框",
+        "把当前网页链接输入到地址栏",
+        "把当前页面内容输入到搜索框",
+        "把当前网页链接输入到 Slack 搜索框",
+        "把当前页面内容输入到 Slack 搜索框",
+        "打开 Slack 搜索框输入选中的内容",
+        "Finder look for Downloads",
+        "微信打开搜索",
+        "Chrome 点登录",
+        "把当前网页链接加入提醒事项",
+        "把当前网页链接加入日历",
+        "创建备忘录",
+    )
+
+    remaining_legacy_prompts: list[str] = []
+    for prompt in prompts:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            daily_desktop_allowed_tools(),
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+        if selection.selected_source != "runtime_planner":
+            remaining_legacy_prompts.append(prompt)
+
+    assert remaining_legacy_prompts == []
     assert legacy_calls == []
 
 
