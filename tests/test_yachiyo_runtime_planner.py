@@ -1029,6 +1029,21 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert summary_step.action == "extract_text"
     assert summary.plan.tool_plan.artifacts_expected == []
 
+    report = RuntimePlanner().decision(
+        "把当前网页总结成一份报告",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+
+    assert report.selected_intent.kind == "web_research"
+    assert [step.step_id for step in report.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(report, "write-research-artifact").input_preview == {
+        "path": "research-summary.md"
+    }
+    assert report.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+
     english_summary = RuntimePlanner().decision(
         "what is this page about",
         allowed_tools=["browser.current_page", "browser.extract_text"],
@@ -1476,6 +1491,47 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         allowed_tools=["clipboard.read", "artifact.write"],
     )
     assert read_only.selected_intent.kind == "clipboard_operation"
+
+
+def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan() -> None:
+    decision = RuntimePlanner().decision(
+        "查找 Downloads 里的 PDF 并生成摘要报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs == {
+        "file_context_hint": {
+            "location": "Downloads",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+        }
+    }
+    assert decision.selected_intent.required_capabilities == [
+        "file.workspace_read",
+        "terminal.execution",
+        "artifact.write",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-report-file-scope",
+        "extract-report-file-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(decision, "inspect-report-file-scope").tool_name == "workspace.list"
+    extract_step = _step_by_id(decision, "extract-report-file-context")
+    assert extract_step.tool_name == "terminal.run"
+    assert extract_step.approval_required is True
+    assert extract_step.input_preview == {
+        "path": "Downloads",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+        "operation": "extract_text_for_report",
+    }
+    assert _step_by_id(decision, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "local_file_context",
+    }
+    assert decision.plan.tool_plan.artifacts_expected == ["report.md"]
 
 
 def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> None:
@@ -8664,6 +8720,39 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "planning_reason": "planner_prefetch_report_context",
             "continue_to_model": True,
         },
+    ]
+
+    current_page_report_requests = planner_tool_requests(
+        "把当前网页总结成一份报告",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+
+    assert current_page_report_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+            "continue_to_model": True,
+        }
+    ]
+
+    local_file_report_requests = planner_tool_requests(
+        "查找 Downloads 里的 PDF 并生成摘要报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert local_file_report_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
     ]
 
 

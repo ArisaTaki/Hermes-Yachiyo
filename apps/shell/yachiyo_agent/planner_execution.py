@@ -122,7 +122,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _context_prefetch_tool_requests(
             decision,
             allowed,
-            step_ids=("gather-context",),
+            step_ids=("inspect-report-file-scope", "gather-context"),
             planning_reason="planner_prefetch_report_context",
         )
     if decision.selected_intent.kind == "code_task":
@@ -856,7 +856,16 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
     if presentation:
         request["presentation"] = presentation
-    if not browser_action and _web_request_needs_model_followup(decision.selected_intent.user_goal):
+    if (
+        _web_request_needs_model_followup(decision.selected_intent.user_goal)
+        and (
+            not browser_action
+            or any(
+                str(getattr(item, "tool_name", "") or "").strip() == "artifact.write"
+                for item in decision.plan.tool_plan.steps
+            )
+        )
+    ):
         request["continue_to_model"] = True
     return [request]
 

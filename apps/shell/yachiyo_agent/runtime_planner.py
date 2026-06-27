@@ -797,10 +797,48 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
-        score = _score_terms(text, ["report", "write up", "summary", "deck", "报告", "总结", "汇报", "文档"])
+        shortcut = safe_shortcut_hint(text)
+        shortcut_action = str((shortcut or {}).get("action") or "").strip()
+        if (
+            _looks_like_file_organization_request(text)
+            or shortcut_action == "new_document"
+            or _looks_like_schedule_request(text)
+        ):
+            return _empty_intent("report_generation", text)
+        score = _score_terms(
+            text,
+            [
+                "report",
+                "write up",
+                "summary",
+                "brief",
+                "deck",
+                "报告",
+                "总结",
+                "摘要",
+                "汇报",
+                "文档",
+            ],
+        )
+        file_context = _report_file_context_hint(text)
+        if score <= 0 and file_context and _contains_any(
+            text,
+            ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],
+        ):
+            score = 0.16
         if score <= 0:
             return _empty_intent("report_generation", text)
         context_source = context_source_hint(text)
+        inputs: dict[str, Any] = {}
+        if context_source:
+            inputs["context_source"] = context_source
+        if file_context:
+            inputs["file_context_hint"] = file_context
+        file_context_capabilities = (
+            ["file.workspace_read", "terminal.execution", "artifact.write"]
+            if file_context
+            else ["artifact.write"]
+        )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "report_generation", text),
             kind="report_generation",
@@ -808,14 +846,14 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.85, 0.34 + score),
             description="Produce a written artifact from available context or gathered inputs.",
-            inputs={"context_source": context_source} if context_source else {},
+            inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["report"]),
-            required_capabilities=["artifact.write"],
+            required_capabilities=file_context_capabilities,
             preferred_capabilities=[
                 *(
                     ["clipboard.read_write", "desktop.ui_operation"]
                     if context_source
-                    else ["file.workspace_read", "browser.research", "data.analysis"]
+                    else ["file.workspace_read", "browser.research", "data.analysis", "terminal.execution"]
                 ),
                 "artifact.write",
             ],
@@ -2762,9 +2800,23 @@ class RuntimePlanner:
                         reason="Click the requested search result only after opening the planned search URL.",
                     ),
                 ]
-            return [
-                main_step
-            ]
+            steps = [main_step]
+            if _web_research_artifact_requested(intent) and (
+                allowed is None or "artifact.write" in allowed
+            ):
+                steps.append(
+                    _step(
+                        intent,
+                        "write-research-artifact",
+                        "Write research artifact",
+                        "artifact.write",
+                        _first_allowed(("artifact.write",), allowed),
+                        input_preview={"path": "research-summary.md"},
+                        depends_on=[main_step.step_id],
+                        reason="Persist the requested browser-derived report as a replayable artifact.",
+                    )
+                )
+            return steps
         if context_source and not url:
             context_steps = _context_source_steps(
                 intent,
@@ -2838,6 +2890,65 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         context_source = str(intent.inputs.get("context_source") or "").strip()
+        file_context = intent.inputs.get("file_context_hint")
+        if isinstance(file_context, Mapping) and file_context:
+            location = str(file_context.get("location") or "").strip()
+            file_type = str(file_context.get("file_type") or "").strip()
+            pattern = str(file_context.get("pattern") or "").strip()
+            list_preview = {
+                key: value
+                for key, value in {
+                    "path": location,
+                    "file_type": file_type,
+                    "pattern": pattern,
+                }.items()
+                if value
+            }
+            return [
+                _step(
+                    intent,
+                    "inspect-report-file-scope",
+                    "Inspect report file scope",
+                    "file.workspace_read",
+                    _first_allowed(("workspace.list", "workspace.read"), allowed),
+                    input_preview=list_preview,
+                    reason="Discover candidate local files before extracting or summarizing them.",
+                ),
+                _step(
+                    intent,
+                    "extract-report-file-context",
+                    "Extract report file context",
+                    "terminal.execution",
+                    _first_allowed(("terminal.run",), allowed),
+                    input_preview={
+                        key: value
+                        for key, value in {
+                            "path": location,
+                            "file_type": file_type,
+                            "pattern": pattern,
+                            "operation": "extract_text_for_report",
+                        }.items()
+                        if value
+                    },
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=["inspect-report-file-scope"],
+                    reason="Use an approved local extraction step for non-tabular report sources such as PDFs.",
+                ),
+                _step(
+                    intent,
+                    "write-report-artifact",
+                    "Write report artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={
+                        "path": "report.md",
+                        "body_source": "local_file_context",
+                    },
+                    depends_on=["extract-report-file-context"],
+                    reason="Produce the requested durable output from the inspected local files.",
+                ),
+            ]
         if context_source:
             context_steps = _context_source_steps(
                 intent,
@@ -4318,6 +4429,8 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
         if browser_action in {"screenshot", "open_url_screenshot"}:
             return ["browser/current-page.png"]
+        if browser_action and any(step.tool_name == "artifact.write" for step in steps):
+            return ["research-summary.md"]
         if browser_action:
             return []
     if not any(step.tool_name == "artifact.write" for step in steps):
@@ -4640,6 +4753,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score -= 0.18
+    if (
+        intent.kind == "web_research"
+        and _report_file_context_hint(text)
+        and not _contains_any(text, ["http://", "https://", "网页", "网站", "url", "link"])
+    ):
+        score -= 0.28
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
@@ -4647,6 +4766,27 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             score -= 0.24
         if str(intent.inputs.get("context_source") or "").strip():
             score += 0.34
+        file_context = intent.inputs.get("file_context_hint")
+        if isinstance(file_context, Mapping):
+            score += 0.3 if str(file_context.get("file_type") or "").strip() else 0.08
+            if _contains_any(
+                text,
+                [
+                    "data",
+                    "dataset",
+                    "csv",
+                    "xlsx",
+                    "excel",
+                    "spreadsheet",
+                    "数据",
+                    "数据集",
+                    "表格",
+                    "销售数据",
+                    "分析",
+                    "统计",
+                ],
+            ):
+                score -= 0.32
         if _contains_any(text, ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索"]):
             score -= 0.04
     if intent.kind == "data_analysis" and (
@@ -4660,6 +4800,31 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     ):
         score += 0.08
     return max(score, 0.0)
+
+
+def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
+    outputs = {
+        str(item or "").strip()
+        for item in intent.expected_outputs
+        if str(item or "").strip()
+    }
+    if "report" in outputs:
+        return True
+    return _contains_any(
+        intent.user_goal,
+        [
+            "write up",
+            "write a report",
+            "report",
+            "document",
+            "artifact",
+            "报告",
+            "文档",
+            "产物",
+            "生成报告",
+            "输出报告",
+        ],
+    )
 
 
 def _score_terms(text: str, terms: Iterable[str]) -> float:
@@ -4717,6 +4882,72 @@ def _file_location_hint(text: str) -> str:
         if marker in lowered:
             return location
     return ""
+
+
+def _report_file_context_hint(text: str) -> dict[str, str]:
+    if not _contains_any(
+        text,
+        [
+            "file",
+            "files",
+            "folder",
+            "directory",
+            "pdf",
+            "docx",
+            "downloads",
+            "文件",
+            "文件夹",
+            "目录",
+            "下载",
+        ],
+    ):
+        return {}
+    location = _file_location_hint(text)
+    if location == "Documents" and not _contains_any(
+        text,
+        ["documents", "document folder", "documents folder", "文档文件夹", "文档目录"],
+    ):
+        location = ""
+    file_type = _report_file_type_hint(text)
+    if not location and not file_type:
+        return {}
+    hint: dict[str, str] = {}
+    if location:
+        hint["location"] = location
+    if file_type:
+        hint["file_type"] = file_type
+        pattern = _report_file_pattern(file_type)
+        if pattern:
+            hint["pattern"] = pattern
+    return hint
+
+
+def _report_file_type_hint(text: str) -> str:
+    lowered = text.lower()
+    file_types = (
+        ("pdf", "pdf"),
+        ("docx", "docx"),
+        ("word", "docx"),
+        ("markdown", "markdown"),
+        ("md", "markdown"),
+        ("txt", "text"),
+        ("text", "text"),
+        ("文本文档", "text"),
+        ("文本", "text"),
+    )
+    for marker, file_type in file_types:
+        if marker in lowered:
+            return file_type
+    return ""
+
+
+def _report_file_pattern(file_type: str) -> str:
+    return {
+        "pdf": "*.pdf",
+        "docx": "*.docx",
+        "markdown": "*.md",
+        "text": "*.txt",
+    }.get(file_type, "")
 
 
 def _looks_like_file_organization_request(text: str) -> bool:
