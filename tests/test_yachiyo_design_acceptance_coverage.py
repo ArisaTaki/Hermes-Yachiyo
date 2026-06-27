@@ -433,6 +433,34 @@ def test_runtime_planner_hotkeys_are_behind_discovery_compatibility_boundary() -
     assert "apps.shell.agent.runtime.hotkeys" not in desktop_hints
 
 
+def test_runtime_planner_legacy_rule_imports_stay_at_explicit_boundaries() -> None:
+    legacy_rule_imports = (
+        "from apps.shell.agent.runtime.app_aliases import",
+        "from apps.shell.agent.runtime.media_apps import",
+        "from apps.shell.agent.runtime.web_destinations import",
+        "from apps.shell.agent.runtime.path_aliases import",
+        "from apps.shell.agent.runtime.hotkeys import",
+        "from apps.shell.agent.runtime.desktop_intents import",
+    )
+    allowed_files = {
+        "apps/shell/yachiyo_agent/app_name_hints.py",
+        "apps/shell/yachiyo_agent/web_destination_hints.py",
+        "apps/shell/yachiyo_agent/path_alias_hints.py",
+        "apps/shell/yachiyo_agent/hotkey_hints.py",
+        "apps/shell/yachiyo_agent/daily_desktop.py",
+    }
+    offenders: list[str] = []
+    for path in (ROOT / "apps/shell/yachiyo_agent").glob("*.py"):
+        relative_path = path.relative_to(ROOT).as_posix()
+        if relative_path in allowed_files:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if any(legacy_import in text for legacy_import in legacy_rule_imports):
+            offenders.append(relative_path)
+
+    assert offenders == []
+
+
 def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
     ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
     requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
