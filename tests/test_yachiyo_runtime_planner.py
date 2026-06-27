@@ -9705,6 +9705,7 @@ def test_planner_tool_requests_prefetches_dynamic_schedule_sources_for_model_loo
 def test_planner_direct_tool_requests_routes_schedule_context_to_app_item() -> None:
     allowed = [
         "desktop.safe_shortcut",
+        "app.open",
         "app.open_and_safe_shortcut",
         "browser.current_page",
         "reminders.create",
@@ -9724,24 +9725,56 @@ def test_planner_direct_tool_requests_routes_schedule_context_to_app_item() -> N
         "source": "runtime_planner",
         "planning_reason": "planner_fallback_schedule_context_app_item",
     }
+    new_reminder = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_reminder"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule_context_app_item",
+    }
+    new_event = {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_event"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_fallback_schedule_context_app_item",
+    }
 
     assert planner_direct_tool_requests("把当前网页链接加入提醒事项", allowed) == [
         current_page_link_copy,
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Reminders", "action": "new_reminder"},
+            "tool": "app.open",
+            "input": {"app_name": "Reminders"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule_context_app_item",
         },
+        new_reminder,
         paste,
     ]
     assert planner_direct_tool_requests("把当前网页链接加入日历", allowed) == [
         current_page_link_copy,
         {
             "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Calendar"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule_context_app_item",
+        },
+        new_event,
+        paste,
+    ]
+    fallback_allowed = [
+        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
+        "browser.current_page",
+    ]
+    assert planner_direct_tool_requests("把当前网页链接加入提醒事项", fallback_allowed) == [
+        current_page_link_copy,
+        {
+            "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Calendar", "action": "new_event"},
+            "input": {"app_name": "Reminders", "action": "new_reminder"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule_context_app_item",
         },

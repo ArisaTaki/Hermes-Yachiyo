@@ -1081,8 +1081,10 @@ def _direct_schedule_context_app_item_tool_requests(
     )
     if not app_name or not shortcut_action:
         return []
-    app_tool = _first_allowed(("app.open_and_safe_shortcut",), allowed)
-    if not app_tool or "desktop.safe_shortcut" not in allowed:
+    app_tool = _first_allowed(("app.open",), allowed)
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    app_shortcut_tool = _first_allowed(("app.open_and_safe_shortcut",), allowed)
+    if not shortcut_tool or not (app_tool or app_shortcut_tool):
         return []
     planning_reason = "planner_fallback_schedule_context_app_item"
     source_requests = _direct_context_clipboard_copy_requests(
@@ -1092,15 +1094,34 @@ def _direct_schedule_context_app_item_tool_requests(
     )
     if source_requests is None:
         return []
+    if app_tool:
+        return [
+            *source_requests,
+            _request(
+                app_tool,
+                {"app_name": app_name},
+                planning_reason=planning_reason,
+            ),
+            _request(
+                shortcut_tool,
+                {"action": shortcut_action},
+                planning_reason=planning_reason,
+            ),
+            _request(
+                shortcut_tool,
+                {"action": "paste"},
+                planning_reason=planning_reason,
+            ),
+        ]
     return [
         *source_requests,
         _request(
-            app_tool,
+            app_shortcut_tool,
             {"app_name": app_name, "action": shortcut_action},
             planning_reason=planning_reason,
         ),
         _request(
-            "desktop.safe_shortcut",
+            shortcut_tool,
             {"action": "paste"},
             planning_reason=planning_reason,
         ),

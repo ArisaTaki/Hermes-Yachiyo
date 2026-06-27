@@ -575,6 +575,7 @@ def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_w
     legacy_calls: list[dict[str, Any]] = []
     allowed = [
         "desktop.safe_shortcut",
+        "app.open",
         "app.open_and_safe_shortcut",
         "browser.current_page",
         "reminders.create",
@@ -583,11 +584,11 @@ def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_w
     cases = (
         (
             "把当前网页链接加入提醒事项",
-            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+            ["desktop.safe_shortcut", "app.open", "desktop.safe_shortcut", "desktop.safe_shortcut"],
         ),
         (
             "把当前网页链接加入日历",
-            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
+            ["desktop.safe_shortcut", "app.open", "desktop.safe_shortcut", "desktop.safe_shortcut"],
         ),
         ("创建备忘录", ["desktop.safe_shortcut"]),
     )
