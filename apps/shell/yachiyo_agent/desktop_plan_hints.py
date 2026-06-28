@@ -274,8 +274,9 @@ def window_list_hint(text: str) -> dict[str, str] | None:
         r"(?:list|show|read)\s+(?:open\s+)?windows\s+(?:in|for|of)\s+(?P<app_en>[^.!?]+)",
         r"(?:what|which)\s+(?:open\s+)?windows\s+(?:are\s+)?(?:open\s+)?"
         r"(?:in|for|of)\s+(?P<app_en_question>[^.!?]+)",
+        r"(?P<app_en_prefix>[^.!?]+?)\s+(?:list|show|read)\s+(?:open\s+)?windows",
         r"(?:list|show|read)\s+(?P<app_en2>[^.!?]+?)\s+windows",
-        r"(?P<app_en3>[^.!?]+?)\s+windows\?",
+        r"(?P<app_en3>[^.!?]+?)\s+(?:open\s+)?windows(?:\?|$)",
         r"(?P<app>[^。！？!?，,]+?)\s*(?:的)?\s*(?:窗口|windows?)\s*(?:列表|清单|list)$",
         r"(?P<app_question>[^。！？!?，,]+?)\s*(?:有|打开了|开了|正在显示)?"
         r"(?:哪些|什么|几个|多少).{0,4}(?:窗口|window)",
@@ -1309,6 +1310,17 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
             lowered,
         )
         or re.search(
+            r"\b(?:read|inspect|show|view|check)\s+(?:the\s+)?"
+            r"[a-z][a-z0-9 ._-]{1,40}?\s+(?:ui|interface|app|application|window)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b[a-z][a-z0-9 ._-]{1,40}?\s+"
+            r"(?:read|inspect|show|view|check)\s+"
+            r"(?:ui|interface|app|application|window|ui elements|buttons|text fields|controls)\b",
+            lowered,
+        )
+        or re.search(
             r"\b(?:list|show|read|inspect)\b.{0,24}\b(?:ui elements|buttons|text fields|controls)\b",
             lowered,
         )
@@ -1362,6 +1374,11 @@ def _ui_inspection_app_name_hint(value: str) -> str:
         r"\bwhat\s+can\s+i\s+(?:click|press|use)\s+(?:in|on)\s+(?P<app_en3>[^.!?]+)",
         r"\b(?:list|show|read|inspect)\s+(?P<app_en4>[^.!?]+?)\s+"
         r"(?:ui\s+elements|buttons|text\s+fields|controls)",
+        r"\b(?:read|inspect|show|view|check)\s+(?:the\s+)?"
+        r"(?P<app_en_ui>[^.!?]+?)\s+(?:ui|interface|app|application|window)\b",
+        r"\b(?P<app_en_post_ui>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:read|inspect|show|view|check)\s+"
+        r"(?:ui|interface|app|application|window|ui\s+elements|buttons|text\s+fields|controls)\b",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:列出|查看|看看|看一下|看下|显示|读取|观察|识别)\s*"
         r"(?P<app_surface>[^。！？!?，,]+?)\s*(?:的)?\s*"
@@ -1564,6 +1581,15 @@ def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
         or "take a screenshot" in lowered
         or "capture the screen" in lowered
         or "screen capture" in lowered
+        or re.search(
+            r"\b(?:capture|screenshot|grab)\s+(?:the\s+)?"
+            r"[a-z][a-z0-9 ._-]{1,40}?\s+(?:screen|window|interface|ui)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b[a-z][a-z0-9 ._-]{1,40}?\s+(?:screen|window|interface|ui)?\s*screenshot\b",
+            lowered,
+        )
         or re.search(r"\bscreenshot\s+(?:my|the|this|current)?\s*(?:screen|desktop)?\b", lowered)
         or re.search(
             r"\b(?:look at|inspect|view|read|show me|show)\s+"
@@ -1596,6 +1622,11 @@ def _screen_capture_app_name_hint(value: str) -> str:
         r"(?:消息|聊天|未读|新消息|cpu|CPU)",
         r"\b(?:open|launch|start|focus)\s+(?P<app_messages_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:and|then)\s+(?:read|check|view|look\s+at)\s+(?:messages?|cpu)\b",
+        r"\b(?:capture|screenshot|grab)\s+(?:the\s+)?"
+        r"(?P<app_capture_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:screen|window|interface|ui)\b",
+        r"\b(?P<app_screenshot_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:screen|window|interface|ui)?\s*screenshot\b",
         r"\b(?:look at|inspect|view|show me|show)\s+(?P<app_en>.+?)\s+"
         r"(?:screen|interface|ui)\b",
     )

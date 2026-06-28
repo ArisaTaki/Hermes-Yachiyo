@@ -2367,6 +2367,25 @@ def test_runtime_planner_routes_window_list_to_desktop_windows() -> None:
         "app_name": "微信",
     }
 
+    for prompt in ("PixelForge list windows", "PixelForge windows", "list windows for PixelForge"):
+        english_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "desktop.windows"],
+        )
+
+        assert english_decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+        assert english_decision.selected_intent.inputs["operation_hint"] == "list_windows"
+        assert english_decision.selected_intent.inputs["window_list_hint"] == {
+            "app_name": "PixelForge",
+        }
+        assert _step_by_id(english_decision, "discover-desktop-state").input_preview == {
+            "query": "PixelForge",
+            "limit": 20,
+        }
+        assert _step_by_id(english_decision, "list-app-windows").input_preview == {
+            "app_name": "PixelForge",
+        }
+
 
 def test_runtime_planner_routes_current_window_observation_to_active_window() -> None:
     allowed_tools = ["desktop.active_window", "desktop.windows", "browser.open_url"]
@@ -2569,6 +2588,34 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert _step_by_id(current_interface, "read-foreground-ui").depends_on == [
         "open-or-focus-app"
     ]
+
+    for prompt, role_filter in (
+        ("read PixelForge UI", ""),
+        ("PixelForge read UI", ""),
+        ("PixelForge show buttons", "button"),
+    ):
+        english_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+        )
+
+        assert english_decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+        assert english_decision.selected_intent.inputs["operation_hint"] == "read_ui"
+        expected_hint = {"role_filter": role_filter, "limit": 80, "app_name": "PixelForge"}
+        assert english_decision.selected_intent.inputs["ui_inspection_hint"] == expected_hint
+        assert _step_by_id(english_decision, "discover-desktop-state").input_preview == {
+            "query": "PixelForge",
+            "limit": 20,
+        }
+        assert _step_by_id(english_decision, "open-or-focus-app").input_preview == {
+            "app_name": "PixelForge"
+        }
+        expected_read_preview = {"limit": 80}
+        if role_filter:
+            expected_read_preview["role_filter"] = role_filter
+        assert _step_by_id(english_decision, "read-foreground-ui").input_preview == (
+            expected_read_preview
+        )
 
     named_unknown_app_no_comma = RuntimePlanner().decision(
         "打开一个叫 PixelForge 的应用并看看有哪些按钮",
@@ -2820,6 +2867,29 @@ def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
     assert [step.step_id for step in current_window_decision.plan.tool_plan.steps] == [
         "capture-screen"
     ]
+
+    for prompt in ("capture PixelForge screen", "PixelForge screenshot"):
+        english_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+        )
+
+        assert english_decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+        assert english_decision.selected_intent.inputs["operation_hint"] == "capture_screen"
+        assert english_decision.selected_intent.inputs["screen_capture_hint"] == {
+            "reason": "user asked to capture the screen",
+            "app_name": "PixelForge",
+        }
+        assert _step_by_id(english_decision, "discover-desktop-state").input_preview == {
+            "query": "PixelForge",
+            "limit": 20,
+        }
+        assert _step_by_id(english_decision, "open-or-focus-app").input_preview == {
+            "app_name": "PixelForge"
+        }
+        assert _step_by_id(english_decision, "capture-screen").depends_on == [
+            "open-or-focus-app"
+        ]
 
     open_decision = RuntimePlanner().decision(
         "打开 Slack 然后截图",
@@ -9013,6 +9083,33 @@ def test_planner_desktop_tool_requests_maps_app_scoped_ui_inspection() -> None:
         },
     ]
 
+    assert planner_desktop_tool_requests(
+        "PixelForge read UI",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_planner_desktop_tool_requests_maps_app_scoped_screen_capture() -> None:
     requests = planner_desktop_tool_requests(
@@ -9032,6 +9129,33 @@ def test_planner_desktop_tool_requests_maps_app_scoped_screen_capture() -> None:
             "protocol": "json_fallback",
             "tool": "app.focus",
             "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    assert planner_desktop_tool_requests(
+        "capture PixelForge screen",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "PixelForge"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
