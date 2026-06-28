@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .app_name_hints import legacy_app_name_hint, legacy_app_name_is_known
+from .app_name_hints import legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
@@ -324,7 +324,7 @@ def _keep_direct_discovery_step(step: Any, tool_name: str) -> bool:
     input_preview = getattr(step, "input_preview", None)
     payload = input_preview if isinstance(input_preview, Mapping) else {}
     query = str(payload.get("query") or "").strip()
-    return bool(query and not legacy_app_name_is_known(query))
+    return bool(query)
 
 
 _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX = {

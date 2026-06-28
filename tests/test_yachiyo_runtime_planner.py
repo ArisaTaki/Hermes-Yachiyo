@@ -54,6 +54,16 @@ def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
     return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
 
 
+def _app_discovery_request(query: str) -> dict[str, Any]:
+    return {
+        "protocol": "json_fallback",
+        "tool": "desktop.list_apps",
+        "input": {"query": query, "limit": 20},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
+
+
 def _data_analysis_preview(
     path: str,
     source_kind: str,
@@ -3405,6 +3415,7 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Visual Studio Code"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -3658,6 +3669,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "desktop.open_path",
         ],
     ) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -3706,6 +3718,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "desktop.open_path",
         ],
     ) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -3753,6 +3766,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
                 "desktop.ui_elements",
             ],
         ) == [
+            _app_discovery_request("Chrome"),
             {
                 "protocol": "json_fallback",
                 "tool": app_tool,
@@ -3800,6 +3814,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "system.settings_open",
         ],
     ) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -3832,6 +3847,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -3951,6 +3967,7 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
             "system.settings_open",
         ],
     ) == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -3984,6 +4001,7 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
             "system.settings_open",
         ],
     ) == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -4224,6 +4242,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     assert close_step.tool_name == "desktop.close_window"
     assert close_step.approval_required is True
     assert planner_direct_tool_requests("微信关闭窗口", allowed) == [
+        _app_discovery_request("WeChat"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -4248,6 +4267,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     ]
 
     assert planner_direct_tool_requests("在 VS Code 里执行命令 Format Document", allowed) == [
+        _app_discovery_request("Visual Studio Code"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -4285,6 +4305,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         },
     ]
     assert planner_direct_tool_requests("Finder look for Downloads", allowed) == [
+        _app_discovery_request("Finder"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -4322,6 +4343,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         },
     ]
     assert planner_direct_tool_requests("微信打开搜索", allowed) == [
+        _app_discovery_request("WeChat"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -4345,6 +4367,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         },
     ]
     assert planner_direct_tool_requests("Chrome 点登录", allowed) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_click_ui_element",
@@ -4671,6 +4694,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_key",
@@ -4695,6 +4719,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_scroll",
@@ -4719,6 +4744,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Chrome"),
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_key",
@@ -4735,24 +4761,28 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
         },
     ]
 
-    for prompt, tool_name, payload in (
+    for prompt, discover_query, tool_name, payload in (
         (
             "切到 Chrome 后退一下",
+            "Chrome",
             "app.focus_and_safe_shortcut",
             {"app_name": "Google Chrome", "action": "browser_back"},
         ),
         (
             "打开 Slack 并复制",
+            "Slack",
             "app.open_and_safe_shortcut",
             {"app_name": "Slack", "action": "copy"},
         ),
         (
             "打开 Chrome 开发者工具",
+            "Chrome",
             "app.open_and_safe_shortcut",
             {"app_name": "Google Chrome", "action": "open_devtools"},
         ),
         (
             "Chrome 新建标签页",
+            "Chrome",
             "app.focus_and_safe_shortcut",
             {"app_name": "Google Chrome", "action": "new_tab"},
         ),
@@ -4766,6 +4796,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
                 "desktop.ui_elements",
             ],
         ) == [
+            _app_discovery_request(discover_query),
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
@@ -5060,6 +5091,7 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         },
     ]
     assert generic_open_app == [
+        _app_discovery_request("Obsidian"),
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_type_text",
@@ -5076,6 +5108,7 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         },
     ]
     assert generic_focus_app == [
+        _app_discovery_request("Notes"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_type_text",
@@ -6931,6 +6964,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
     )
 
     assert requests == [
+        _app_discovery_request("Spotify"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -6980,6 +7014,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "browser.open_url",
         ],
     ) == [
+        _app_discovery_request("WeChat"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7030,6 +7065,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         ],
     )
     assert first_result_requests == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7088,6 +7124,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "clipboard.read",
         ],
     ) == [
+        _app_discovery_request("Raycast"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7144,6 +7181,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         ],
     )
     assert chinese_alias_requests == [
+        _app_discovery_request("WeChat"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7187,6 +7225,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         ],
     )
     assert command_palette_requests == [
+        _app_discovery_request("Obsidian"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7234,6 +7273,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
             "desktop.ui_elements",
         ],
     ) == [
+        _app_discovery_request("Obsidian"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -7271,6 +7311,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         ],
     )
     assert command_palette_key_requests == [
+        _app_discovery_request("Visual Studio Code"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -7966,6 +8007,7 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
     assert app_selection.selected_source == "runtime_planner"
     assert app_selection.event_payload["intent_kind"] == "desktop_operation"
     assert app_selection.requests == [
+        _app_discovery_request("Notion"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -8398,6 +8440,7 @@ def test_planner_direct_tool_requests_maps_app_management_sequence() -> None:
     )
 
     assert requests == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -10729,6 +10772,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
     assert app_ui.selected_source == "runtime_planner"
     assert app_ui.event_payload["legacy_request_count"] == 0
     assert app_ui.requests == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -10747,6 +10791,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
     assert app_capture.selected_source == "runtime_planner"
     assert app_capture.event_payload["legacy_request_count"] == 0
     assert app_capture.requests == [
+        _app_discovery_request("Slack"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -10775,12 +10820,12 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "desktop.click_ui_element",
                 "desktop.ui_elements",
             ],
-            ["app.focus_and_click_ui_element", "desktop.ui_elements"],
+            ["desktop.list_apps", "app.focus_and_click_ui_element", "desktop.ui_elements"],
         ),
         (
             "打开 Slack 点击坐标 120, 240",
             ["desktop.list_apps", "app.open_and_safe_click", "desktop.safe_click"],
-            ["app.open_and_safe_click"],
+            ["desktop.list_apps", "app.open_and_safe_click"],
         ),
         (
             "打开 Obsidian 写 hello",
@@ -10790,7 +10835,7 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "desktop.safe_type_text",
                 "desktop.ui_elements",
             ],
-            ["app.open_and_safe_type_text", "desktop.ui_elements"],
+            ["desktop.list_apps", "app.open_and_safe_type_text", "desktop.ui_elements"],
         ),
         (
             "在 Notes 输入 hello",
@@ -10800,37 +10845,37 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
                 "app.open_and_safe_type_text",
                 "desktop.safe_type_text",
             ],
-            ["app.focus_and_safe_type_text"],
+            ["desktop.list_apps", "app.focus_and_safe_type_text"],
         ),
         (
             "在 Slack 的消息框输入 hello",
             ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
-            ["app.focus_and_type_into_ui_element"],
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
         ),
         (
             "在微信里的搜索框输入文件传输助手",
             ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
-            ["app.focus_and_type_into_ui_element"],
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
         ),
         (
             "在 Linear 上的搜索框输入 ticket",
             ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
-            ["app.focus_and_type_into_ui_element"],
+            ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
         ),
         (
             "Slack 回车发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["app.focus", "desktop.submit_foreground"],
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
         ),
         (
             "在 Slack 里发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["app.focus", "desktop.submit_foreground"],
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
         ),
         (
             "在微信里确认发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["app.focus", "desktop.submit_foreground"],
+            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
         ),
     )
 
@@ -10853,22 +10898,22 @@ def test_planner_first_owns_app_window_and_management_over_legacy() -> None:
         (
             "切到 Slack 的主窗口",
             ["desktop.list_apps", "desktop.windows", "app.focus_window", "app.focus"],
-            ["app.focus_window", "desktop.windows"],
+            ["desktop.list_apps", "app.focus_window", "desktop.windows"],
         ),
         (
             "最小化 Safari",
             ["desktop.list_apps", "app.minimize", "desktop.running_apps"],
-            ["app.minimize", "desktop.running_apps"],
+            ["desktop.list_apps", "app.minimize", "desktop.running_apps"],
         ),
         (
             "隐藏 Slack",
             ["desktop.list_apps", "app.hide", "desktop.running_apps"],
-            ["app.hide", "desktop.running_apps"],
+            ["desktop.list_apps", "app.hide", "desktop.running_apps"],
         ),
         (
             "退出 Slack",
             ["desktop.list_apps", "app.quit", "desktop.running_apps"],
-            ["app.quit", "desktop.running_apps"],
+            ["desktop.list_apps", "app.quit", "desktop.running_apps"],
         ),
     )
 
