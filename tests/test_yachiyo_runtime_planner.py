@@ -1499,6 +1499,16 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "把当前网页总结成一份报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
     )
+    markdown_file = RuntimePlanner().decision(
+        "把当前网页总结成 markdown 文件",
+        allowed_tools=[
+            "browser.current_page",
+            "browser.extract_text",
+            "workspace.list",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
     research_report = RuntimePlanner().decision(
         "根据当前网页写一份竞品调研报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
@@ -1517,6 +1527,21 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "path": "research-summary.md"
     }
     assert report.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+    assert markdown_file.selected_intent.kind == "web_research"
+    assert [step.step_id for step in markdown_file.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(markdown_file, "extract-current-page-text").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(markdown_file, "write-research-artifact").input_preview == {
+        "path": "research-summary.md"
+    }
+    assert not any(
+        step.tool_name in {"workspace.list", "terminal.run"}
+        for step in markdown_file.plan.tool_plan.steps
+    )
     assert research_report.selected_intent.kind == "web_research"
     assert research_report.selected_intent.inputs == {
         "url_hint": "",
@@ -2086,6 +2111,15 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "把当前选中的内容整理成周报",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
     )
+    selected_markdown = RuntimePlanner().decision(
+        "把当前选中的内容整理成 Markdown 文档",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "clipboard.read",
+            "artifact.write",
+            "workspace.list",
+        ],
+    )
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
@@ -2114,6 +2148,21 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "path": "report.md",
         "body_source": "selection",
     }
+    assert selected_markdown.selected_intent.kind == "report_generation"
+    assert selected_markdown.selected_intent.inputs == {"context_source": "selection"}
+    assert [step.step_id for step in selected_markdown.plan.tool_plan.steps] == [
+        "copy-selected-report-context",
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(selected_markdown, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "selection",
+    }
+    assert not any(
+        step.tool_name == "workspace.list"
+        for step in selected_markdown.plan.tool_plan.steps
+    )
 
     read_only = RuntimePlanner().decision(
         "读取剪贴板",
@@ -10904,6 +10953,15 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         "把当前选中的内容整理成周报",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
     )
+    selected_markdown_requests = planner_tool_requests(
+        "把当前选中的内容整理成 Markdown 文档",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "clipboard.read",
+            "artifact.write",
+            "workspace.list",
+        ],
+    )
 
     assert selection_requests == [
         {
@@ -10939,13 +10997,51 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "continue_to_model": True,
         },
     ]
+    assert selected_markdown_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        },
+    ]
 
     current_page_report_requests = planner_tool_requests(
         "把当前网页总结成一份报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
     )
+    current_page_markdown_requests = planner_tool_requests(
+        "把当前网页总结成 markdown 文件",
+        allowed_tools=[
+            "browser.current_page",
+            "browser.extract_text",
+            "workspace.list",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
 
     assert current_page_report_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+            "continue_to_model": True,
+        }
+    ]
+    assert current_page_markdown_requests == [
         {
             "protocol": "json_fallback",
             "tool": "browser.extract_text",

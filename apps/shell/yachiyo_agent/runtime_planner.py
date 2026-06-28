@@ -942,7 +942,10 @@ class TaskIntentRouter:
         shortcut = safe_shortcut_hint(text)
         shortcut_action = str((shortcut or {}).get("action") or "").strip()
         if (
-            _looks_like_file_organization_request(text)
+            (
+                _looks_like_file_organization_request(text)
+                and not _looks_like_context_artifact_request(text)
+            )
             or shortcut_action == "new_document"
             or _looks_like_schedule_request(text)
         ):
@@ -969,7 +972,13 @@ class TaskIntentRouter:
                 "复盘",
             ],
         )
-        file_context = _report_file_context_hint(text)
+        artifact_context_source = _context_artifact_source_hint(text)
+        context_source = (
+            ""
+            if artifact_context_source == "current_page_content"
+            else artifact_context_source
+        )
+        file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and file_context and _contains_any(
             text,
             ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],
@@ -977,7 +986,6 @@ class TaskIntentRouter:
             score = 0.16
         if score <= 0:
             return _empty_intent("report_generation", text)
-        context_source = context_source_hint(text)
         inputs: dict[str, Any] = {}
         if context_source:
             inputs["context_source"] = context_source
@@ -1069,6 +1077,8 @@ class TaskIntentRouter:
     def _file_organization_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         scoped_operation = _app_scoped_safe_operation_hint(text)
         if scoped_operation and not _file_duplicate_hint(text):
+            return _empty_intent("file_organization", text)
+        if _looks_like_context_artifact_request(text):
             return _empty_intent("file_organization", text)
         score = _score_terms(
             text,
@@ -5654,10 +5664,13 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "write a report",
             "report",
             "table",
+            "markdown",
+            "md file",
             "document",
             "artifact",
             "报告",
             "文档",
+            "文件",
             "产物",
             "生成报告",
             "输出报告",
@@ -5681,6 +5694,97 @@ def _score_terms(text: str, terms: Iterable[str]) -> float:
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = text.lower()
     return any(str(term).lower() in lowered for term in terms)
+
+
+def _context_artifact_source_hint(text: str) -> str:
+    source = context_source_hint(text)
+    if source:
+        return source
+    if _looks_like_current_page_artifact_source(text):
+        return "current_page_content"
+    return ""
+
+
+def _looks_like_current_page_artifact_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        [
+            "current page link",
+            "current url",
+            "当前网页链接",
+            "当前页面链接",
+            "当前链接",
+            "当前页地址",
+        ],
+    ):
+        return False
+    return _contains_any(
+        value,
+        [
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+            "当前网页",
+            "当前页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+            "这页",
+        ],
+    ) and _contains_any(
+        value,
+        [
+            "summarize",
+            "summary",
+            "write",
+            "report",
+            "document",
+            "markdown",
+            "md",
+            "总结",
+            "摘要",
+            "整理",
+            "报告",
+            "文档",
+            "文件",
+            "产物",
+        ],
+    )
+
+
+def _looks_like_context_artifact_request(text: str) -> bool:
+    source = _context_artifact_source_hint(text)
+    if not source:
+        return False
+    return _contains_any(
+        text,
+        [
+            "summarize",
+            "summary",
+            "write",
+            "report",
+            "document",
+            "artifact",
+            "markdown",
+            "md",
+            "整理成",
+            "整理为",
+            "整理",
+            "总结",
+            "摘要",
+            "报告",
+            "文档",
+            "文件",
+            "产物",
+            "周报",
+            "日报",
+            "简报",
+        ],
+    )
 
 
 def _looks_like_local_observation_or_control_request(text: str) -> bool:
