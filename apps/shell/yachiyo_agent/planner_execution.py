@@ -793,6 +793,12 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 request_input,
                 planning_reason="planner_builtin_data_analysis",
             )
+            if _data_analysis_requires_model_followup(decision):
+                analyze_request["continue_to_model"] = True
+                return [
+                    *app_requests,
+                    analyze_request,
+                ]
             return [
                 *app_requests,
                 analyze_request,
@@ -846,6 +852,18 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         planning_reason="planner_prefetch_data_source",
     )
     return _append_model_followup_requests(context_requests, app_requests)
+
+
+def _data_analysis_requires_model_followup(decision: Any) -> bool:
+    followup_step_ids = {
+        "draft-analysis-communication",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    }
+    return any(
+        str(getattr(step, "step_id", "") or "").strip() in followup_step_ids
+        for step in decision.plan.tool_plan.steps
+    )
 
 
 def _data_analysis_spreadsheet_app_requests(

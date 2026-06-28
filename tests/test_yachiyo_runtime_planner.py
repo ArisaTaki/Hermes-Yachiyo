@@ -608,6 +608,163 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     }
 
 
+def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> None:
+    allowed_tools = [
+        "data.analyze",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "terminal.run",
+        "artifact.write",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并把报告发给文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["communication_target_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "文件传输助手",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "content_transform_hint": "report",
+    }
+    assert decision.plan.tool_plan.required_capabilities == [
+        "data.analysis",
+        "desktop.app_control",
+        "communication.compose",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    ]
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "WeChat"
+    }
+    assert _step_by_id(decision, "focus-communication-recipient-search").depends_on == [
+        "open-or-focus-app"
+    ]
+    assert _step_by_id(decision, "type-communication-recipient").input_preview == {
+        "text": "文件传输助手"
+    }
+    assert _step_by_id(decision, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "transform": "report",
+    }
+    send_step = _step_by_id(decision, "send-analysis-communication-message")
+    assert send_step.approval_required is True
+    assert send_step.risk_level == "high"
+
+    slack_decision = RuntimePlanner().decision(
+        "把 data/metrics.xlsx 分析成图表报告，然后发给 Slack 的 yachiyo",
+        allowed_tools=allowed_tools,
+    )
+
+    assert slack_decision.selected_intent.kind == "data_analysis"
+    assert slack_decision.selected_intent.inputs["communication_target_hint"] == {
+        "app_name": "Slack",
+        "recipient": "yachiyo",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "content_transform_hint": "report",
+    }
+    assert slack_decision.plan.tool_plan.artifacts_expected == [
+        "analysis-report.md",
+        "analysis-chart.png",
+    ]
+    assert _step_by_id(slack_decision, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "transform": "report",
+    }
+
+
+def test_runtime_planner_routes_context_data_analysis_to_communication() -> None:
+    allowed_tools = [
+        "browser.extract_text",
+        "clipboard.read",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "terminal.run",
+        "artifact.write",
+    ]
+    current_page = RuntimePlanner().decision(
+        "把当前网页表格分析成 csv 和图表，然后发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+    clipboard = RuntimePlanner().decision(
+        "分析剪贴板里的表格并把报告发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+
+    assert current_page.selected_intent.kind == "data_analysis"
+    assert current_page.selected_intent.inputs["context_source"] == "current_page_content"
+    assert current_page.selected_intent.inputs["communication_target_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "文件传输助手",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+    }
+    assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    ]
+    assert _step_by_id(current_page, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-summary.csv",
+    }
+    assert _step_by_id(current_page, "send-analysis-communication-message").approval_required is True
+
+    assert clipboard.selected_intent.kind == "data_analysis"
+    assert clipboard.selected_intent.inputs["context_source"] == "clipboard"
+    assert _step_by_id(clipboard, "read-data-context").tool_name == "clipboard.read"
+    assert _step_by_id(clipboard, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "transform": "report",
+    }
+
+
+def test_runtime_planner_does_not_treat_plain_csv_send_as_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "把 sales.csv 发给 Alice",
+        allowed_tools=[
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind != "data_analysis"
+
+
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
     decision = RuntimePlanner().decision(
         "请分析 metrics.parquet 并输出报告",
@@ -10852,6 +11009,33 @@ def test_planner_tool_requests_passes_builtin_data_analysis_artifact_paths() -> 
             ),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+
+
+def test_planner_tool_requests_continues_after_builtin_data_analysis_for_communication() -> None:
+    requests = planner_tool_requests(
+        "请分析 sales.csv 并把报告发给文件传输助手",
+        allowed_tools=[
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview("sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
         }
     ]
 

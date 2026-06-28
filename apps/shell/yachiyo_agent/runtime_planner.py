@@ -173,6 +173,8 @@ class TaskIntentRouter:
             and _contains_any(text, ["分析", "统计", "汇总", "可视化", "数据", "表格", "data", "table"])
         ):
             score = 0.22
+        if _looks_like_data_delivery_without_analysis(text):
+            return _empty_intent("data_analysis", text)
         if score <= 0:
             return _empty_intent("data_analysis", text)
         spreadsheet_app_hint = _spreadsheet_ui_app_hint(text)
@@ -186,6 +188,18 @@ class TaskIntentRouter:
             inputs["context_source"] = context_source
         if source_scope and not source_hint:
             inputs["data_source_scope_hint"] = source_scope
+        communication_target = _data_analysis_communication_target_hint(text)
+        if communication_target:
+            inputs["communication_target_hint"] = communication_target
+        preferred_capabilities = [
+            "data.analysis",
+            *(["desktop.app_control"] if spreadsheet_app_hint else []),
+        ]
+        if communication_target:
+            if str(communication_target.get("app_name") or "").strip():
+                preferred_capabilities.append("desktop.app_control")
+            preferred_capabilities.append("communication.compose")
+        preferred_capabilities = list(dict.fromkeys(preferred_capabilities))
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "data_analysis", text),
             kind="data_analysis",
@@ -196,10 +210,7 @@ class TaskIntentRouter:
             inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
             required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
-            preferred_capabilities=[
-                "data.analysis",
-                *(["desktop.app_control"] if spreadsheet_app_hint else []),
-            ],
+            preferred_capabilities=preferred_capabilities,
             missing_inputs=[] if has_source else ["data_source"],
             risk_level="medium",
         )
@@ -1560,7 +1571,7 @@ class RuntimePlanner:
                     reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
                 ),
             ]
-            return _append_artifact_reveal_step(
+            return _append_data_analysis_followup_steps(
                 intent,
                 allowed,
                 steps,
@@ -1607,7 +1618,7 @@ class RuntimePlanner:
                     ),
                 )
             ]
-            return _append_artifact_reveal_step(
+            return _append_data_analysis_followup_steps(
                 intent,
                 allowed,
                 steps,
@@ -1671,7 +1682,7 @@ class RuntimePlanner:
                 reason="Return a durable report artifact that Studio and Chat can replay.",
             ),
         ]
-        return _append_artifact_reveal_step(
+        return _append_data_analysis_followup_steps(
             intent,
             allowed,
             steps,
@@ -5439,10 +5450,9 @@ def _required_capabilities_for_plan(
             "desktop.app_control" not in required
         ):
             required.insert(0, "desktop.app_control")
-        if any(step.step_id == "reveal-artifact-in-finder" for step in steps) and (
-            "file.desktop_access" not in required
-        ):
-            required.append("file.desktop_access")
+        for capability_id in _step_required_capabilities(steps):
+            if capability_id not in required:
+                required.append(capability_id)
         return required
     return _step_required_capabilities(steps) or list(intent.required_capabilities)
 
@@ -5544,6 +5554,183 @@ def _append_artifact_reveal_step(
     ]
 
 
+def _append_data_analysis_followup_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_paths: Iterable[str],
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    paths = [str(path or "").strip() for path in artifact_paths if str(path or "").strip()]
+    followup_steps = _append_artifact_reveal_step(
+        intent,
+        allowed,
+        steps,
+        artifact_paths=paths,
+        depends_on=depends_on,
+    )
+    return _append_analysis_communication_steps(
+        intent,
+        allowed,
+        followup_steps,
+        artifact_paths=paths,
+        depends_on=depends_on,
+    )
+
+
+def _append_analysis_communication_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_paths: Iterable[str],
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target = intent.inputs.get("communication_target_hint")
+    if not isinstance(target, Mapping):
+        return steps
+    recipient = str(target.get("recipient") or "").strip()
+    if not recipient:
+        return steps
+    artifact_path = _analysis_communication_artifact_path(intent.user_goal, artifact_paths)
+    if not artifact_path:
+        return steps
+    app_name = str(target.get("app_name") or "").strip()
+    transform = str(target.get("content_transform_hint") or "").strip()
+    mode = str(target.get("mode") or "focus").strip() or "focus"
+    if not app_name:
+        draft_input = {
+            "recipient": recipient,
+            "body_source": "analysis_artifact",
+            "artifact_path": artifact_path,
+        }
+        if transform:
+            draft_input["transform"] = transform
+        return [
+            *steps,
+            _step(
+                intent,
+                "draft-analysis-communication",
+                "Draft analysis communication",
+                "communication.compose",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview=draft_input,
+                approval_required=True,
+                risk_level="medium",
+                depends_on=[depends_on],
+                action="draft_message",
+                reason=(
+                    "Create a reviewable communication draft from the analysis artifact when the target app "
+                    "cannot be resolved deterministically."
+                ),
+            ),
+        ]
+
+    app_shortcut_tool = _first_allowed(
+        app_foreground_tool_candidates(mode, "safe_shortcut"),
+        allowed,
+    )
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
+    communication_steps: list[ToolPlanStepSnapshot] = []
+    focus_depends_on = [depends_on]
+    if app_tool and shortcut_tool:
+        communication_steps.append(
+            _step(
+                intent,
+                "open-or-focus-app",
+                "Open or focus app",
+                "desktop.app_control",
+                app_tool,
+                input_preview={"app_name": app_name},
+                depends_on=focus_depends_on,
+                reason="Prepare the requested communication app after the analysis artifact is available.",
+            )
+        )
+        focus_depends_on = ["open-or-focus-app"]
+        focus_tool = shortcut_tool
+        focus_input = {"action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open foreground recipient search with a generic safe shortcut."
+    else:
+        focus_tool = app_shortcut_tool
+        focus_input = {"app_name": app_name, "action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open the app's recipient search after the analysis artifact is available."
+
+    draft_input = {
+        "body_source": "analysis_artifact",
+        "artifact_path": artifact_path,
+    }
+    if transform:
+        draft_input["transform"] = transform
+    communication_steps.extend(
+        [
+            _step(
+                intent,
+                "focus-communication-recipient-search",
+                "Focus communication recipient search",
+                focus_capability,
+                focus_tool,
+                input_preview=focus_input,
+                action="resolve_recipient",
+                depends_on=focus_depends_on,
+                reason=focus_reason,
+            ),
+            _step(
+                intent,
+                "type-communication-recipient",
+                "Type communication recipient",
+                "communication.compose",
+                type_tool,
+                input_preview={"text": recipient},
+                depends_on=["focus-communication-recipient-search"],
+                action="type",
+                reason="Type only the explicit recipient from the user prompt.",
+            ),
+            _step(
+                intent,
+                "submit-communication-recipient-search",
+                "Submit communication recipient search",
+                "communication.compose",
+                search_submit_tool,
+                input_preview={},
+                depends_on=["type-communication-recipient"],
+                action="submit_search",
+                reason="Select or search the recipient with the dedicated safe search submit tool.",
+            ),
+            _step(
+                intent,
+                "draft-analysis-communication-message",
+                "Draft analysis communication message",
+                "communication.compose",
+                type_tool,
+                input_preview=draft_input,
+                depends_on=["submit-communication-recipient-search"],
+                action="draft_message",
+                reason="Draft the message from the generated analysis artifact before the approval-gated send step.",
+            ),
+            _step(
+                intent,
+                "send-analysis-communication-message",
+                "Send analysis communication message",
+                "communication.compose",
+                send_tool,
+                input_preview={"action": "send"},
+                risk_level="high",
+                approval_required=True,
+                depends_on=["draft-analysis-communication-message"],
+                action="send_message",
+                reason="Final message sending remains approval-gated.",
+            ),
+        ]
+    )
+    return [*steps, *communication_steps]
+
+
 def _artifact_reveal_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -5585,6 +5772,42 @@ def _artifact_reveal_path(text: str, artifact_paths: Iterable[str]) -> str:
         report_path = _first_path_with_suffix(paths, (".md", ".html", ".pdf", ".docx"))
         if report_path:
             return report_path
+    return paths[0]
+
+
+def _analysis_communication_artifact_path(text: str, artifact_paths: Iterable[str]) -> str:
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    if not paths:
+        return ""
+    value = _clean_prompt(text)
+    if _contains_any(value, ("报告", "report", "markdown", "md", "html", "文档", "document")):
+        report_path = _first_path_with_suffix(paths, (".md", ".html", ".pdf", ".docx"))
+        if report_path:
+            return report_path
+    if _contains_any(
+        value,
+        (
+            "csv",
+            "表格",
+            "汇总表",
+            "table",
+            "spreadsheet",
+            "导出",
+            "输出表格",
+            "整理成表格",
+        ),
+    ):
+        table_path = _first_path_with_suffix(paths, (".csv", ".tsv", ".xlsx"))
+        if table_path:
+            return table_path
+    if _contains_any(value, ("图表", "趋势图", "chart", "plot", "graph", "可视化")):
+        chart_path = _first_path_with_suffix(paths, (".png", ".jpg", ".jpeg", ".svg"))
+        if chart_path:
+            return chart_path
     return paths[0]
 
 
@@ -5934,6 +6157,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.26
     if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
         score += 0.18
+    if intent.kind == "communication" and _looks_like_data_analysis_delivery_request(text):
+        score -= 0.32
     if intent.kind == "schedule" and _looks_like_communication_task_request(text):
         score -= 0.18
     if intent.kind == "schedule" and _looks_like_schedule_request(text):
@@ -5960,6 +6185,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _contains_any(text, ["数据", "表格", "data", "table", "csv", "统计", "分析"])
     ):
         score += 0.38
+    if (
+        intent.kind == "data_analysis"
+        and isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+    ):
+        score += 0.34
     if intent.kind == "data_analysis" and external_info_lookup:
         score -= 0.36
     if (
@@ -6162,6 +6392,145 @@ def _communication_content_transform_hint(text: str) -> str:
         return "report"
     if _contains_any(value, ("摘要", "总结", "概括", "summary", "summarize")):
         return "summary"
+    return ""
+
+
+def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not _looks_like_data_analysis_delivery_request(value):
+        return {}
+    target = _data_analysis_delivery_target_text(value)
+    if not target:
+        return {}
+    app_name, recipient = _split_communication_surface_and_recipient(target)
+    if not recipient:
+        recipient = _clean_communication_recipient_text(target)
+        if recipient and not app_name:
+            app_name = _communication_surface_for_recipient_hint(recipient)
+    if not recipient:
+        return {}
+    hint: dict[str, str] = {
+        "recipient": recipient,
+        "body_source": "analysis_artifact",
+        "mode": _communication_app_mode(value),
+        "send_action": "send",
+    }
+    if app_name:
+        hint["app_name"] = app_name
+    transform = _communication_content_transform_hint(value)
+    if transform:
+        hint["content_transform_hint"] = transform
+    return hint
+
+
+def _looks_like_data_analysis_delivery_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _data_delivery_send_requested(value):
+        return False
+    return _data_source_or_output_mentioned(value) and _data_analysis_action_requested(value)
+
+
+def _looks_like_data_delivery_without_analysis(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not _data_delivery_send_requested(value):
+        return False
+    if _data_analysis_action_requested(value):
+        return False
+    return _data_source_or_output_mentioned(value)
+
+
+def _data_delivery_send_requested(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "发给",
+            "发到",
+            "发送给",
+            "发送到",
+            "分享给",
+            "转发给",
+            "send ",
+            "share ",
+        ),
+    )
+
+
+def _data_source_or_output_mentioned(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "数据",
+            "数据集",
+            "表格",
+            "csv",
+            "tsv",
+            "xlsx",
+            "xls",
+            "json",
+            "parquet",
+            "dataset",
+            "table",
+            "spreadsheet",
+        ),
+    )
+
+
+def _data_analysis_action_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    return _contains_any(
+        value,
+        (
+            "分析",
+            "数据分析",
+            "统计",
+            "汇总",
+            "趋势",
+            "可视化",
+            "图表",
+            "报告",
+            "分析成",
+            "分析为",
+            "chart",
+            "plot",
+            "graph",
+            "analyze",
+            "analyse",
+            "analysis",
+            "summary",
+            "summarize",
+            "trend",
+            "report",
+        ),
+    )
+
+
+def _data_analysis_delivery_target_text(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:然后|并|再|之后|后|同时)?\s*(?:把|将)?"
+        r"(?:生成的|这份|这个|分析的|分析)?"
+        r"(?:数据分析)?(?:报告|结果|图表报告|图表|csv|CSV|汇总|分析结果|产物|文件)?"
+        r"\s*(?:发给|发送给|发到|发送到|分享给|转发给)\s*"
+        r"(?P<target>[^，,。；;！!？?\n]+)",
+        r"(?:send|share)\s+(?:the\s+)?"
+        r"(?:(?:analysis|data)\s+)?(?:report|result|results|artifact|chart|csv|table|summary)?"
+        r"\s*(?:to|with)\s+(?P<target>[^.!?,;\n]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _clean_communication_hint_text(match.group("target") or "")
+        target = re.sub(
+            r"\s*(?:并|然后|再|之后|后)\s*(?:发送|发出|send)?$",
+            "",
+            target,
+            flags=re.IGNORECASE,
+        ).strip()
+        if target:
+            return target
     return ""
 
 
@@ -12058,6 +12427,10 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
             "输出 csv",
             "生成 csv",
             "做成 csv",
+            "分析成 csv",
+            "分析为 csv",
+            "转成 csv",
+            "转换成 csv",
             "导出 csv",
             "导出成 csv",
             "导出为 csv",
