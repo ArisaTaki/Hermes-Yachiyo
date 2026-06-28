@@ -2300,6 +2300,25 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
         "open-or-focus-app"
     ]
 
+    named_unknown_app_no_comma = RuntimePlanner().decision(
+        "打开一个叫 PixelForge 的应用并看看有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    assert named_unknown_app_no_comma.selected_intent.kind == "desktop_operation"
+    assert named_unknown_app_no_comma.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert named_unknown_app_no_comma.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "PixelForge",
+    }
+    assert _step_by_id(named_unknown_app_no_comma, "discover-desktop-state").input_preview == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
+    assert _step_by_id(named_unknown_app_no_comma, "open-or-focus-app").input_preview == {
+        "app_name": "PixelForge",
+    }
+
 
 def test_runtime_planner_focuses_arbitrary_app_before_surface_inspection() -> None:
     for prompt in (
@@ -4468,6 +4487,18 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
             "AtlasLab",
             "new_document",
             "app.open_and_safe_shortcut",
+        ),
+        (
+            "打开 Linear 创建一个 bug ticket",
+            "Linear",
+            "new_document",
+            "app.open_and_safe_shortcut",
+        ),
+        (
+            "Linear create a new issue",
+            "Linear",
+            "new_document",
+            "app.focus_and_safe_shortcut",
         ),
         ("打开备忘录新建备忘录", "Notes", "new_note", "app.open_and_safe_shortcut"),
         ("备忘录新建", "Notes", "new_note", "app.focus_and_safe_shortcut"),
@@ -8308,6 +8339,15 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
         "在 Linear 上的创建按钮点击",
         allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
     )
+    foreground_click_requests = planner_desktop_tool_requests(
+        "读取当前窗口的按钮然后点击导出",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "app.focus_and_click_ui_element",
+        ],
+    )
     assert bare_point_requests == [
         {
             "protocol": "json_fallback",
@@ -8319,6 +8359,34 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
                 "limit": 80,
                 "click_count": 1,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert foreground_click_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

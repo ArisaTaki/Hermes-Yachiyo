@@ -969,6 +969,8 @@ class TaskIntentRouter:
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _app_command_palette_hint(text):
             return _empty_intent("code_task", text)
+        if _looks_like_app_scoped_ticket_or_creation_request(text):
+            return _empty_intent("code_task", text)
         terminal_hint = terminal_command_hint(text)
         if terminal_hint:
             return TaskIntentSnapshot(
@@ -5790,7 +5792,11 @@ def _app_name_hint(text: str) -> str:
             "",
         )
         app = _clean_app_name_hint(raw_app)
-        if app and not _invalid_app_scoped_followup_app(app):
+        if (
+            app
+            and not _invalid_app_scoped_followup_app(app)
+            and not _is_generic_foreground_app_label(app)
+        ):
             return app
     return ""
 
@@ -5802,6 +5808,7 @@ def _clean_app_name_hint(value: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
+    app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE).strip()
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
     called_app_match = re.match(
         r"^(?:一个|一款|这个|那个)?(?:叫|名叫|名称是|名字是)\s*(?P<app>.+?)\s*(?:的)?(?:应用(?:程序)?|软件)$",
@@ -7532,6 +7539,26 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
     )
 
 
+def _looks_like_app_scoped_ticket_or_creation_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _app_name_hint(value):
+        return False
+    if not re.search(
+        r"(?:ticket|issue|bug|task|card|工单|事项|任务|卡片|项目|workspace)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:打开|启动|开启|运行|拉起|在|用|通过|open|launch|start|in|inside|within|using|with)"
+            r".{0,80}(?:创建|新建|新增|添加|create|new|add)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_non_app_operation_fragment(app_name: str) -> bool:
     value = _clean_prompt(app_name)
     lowered = value.lower()
@@ -7722,6 +7749,9 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"新建日程|新建日历事件|新建事件|新建会议|新日程|新事件|新会议|创建日程|创建事件|"
         r"新建备忘录|新建笔记|新笔记|新备忘录|创建备忘录|创建笔记|"
         r"新建项目|新建一个项目|创建项目|创建一个项目|新项目|"
+        r"新建工单|创建工单|新建任务|创建任务|新建卡片|创建卡片|"
+        r"新建\s*(?:ticket|issue|bug|bug\s*ticket)|"
+        r"创建(?:一个|一条|一张)?\s*(?:ticket|issue|bug|bug\s*ticket)|"
         r"新建工作区|新建一个工作区|创建工作区|创建一个工作区|"
         r"新建\s*workspace|创建\s*workspace|创建新\s*workspace|新\s*workspace|"
         r"新建消息|新消息|创建消息|写消息|撰写消息|新建聊天|新聊天|创建聊天|新建会话|新会话|"
@@ -7733,6 +7763,8 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e|"
         r"new\s+note|new\s+reminder|new\s+event|new\s+meeting|compose(?:\s+(?:note|reminder|event|meeting))?|"
         r"new\s+project|create\s+(?:a\s+)?new\s+project|create\s+project|"
+        r"new\s+(?:ticket|issue|task|card|bug|bug\s*ticket)|"
+        r"create\s+(?:a\s+)?(?:new\s+)?(?:ticket|issue|task|card|bug|bug\s*ticket)|"
         r"new\s+workspace|create\s+(?:a\s+)?new\s+workspace|create\s+workspace|"
         r"new\s+message|new\s+chat|new\s+conversation|compose\s+message|compose\s+email|"
         r"new\s+email|new\s+mail|write\s+email|write\s+mail|"
