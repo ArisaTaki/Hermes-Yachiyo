@@ -488,10 +488,13 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
     )
 
     assert "selected intent=code_task" in system_prompt
-    assert "workspace.list -> terminal.run -> artifact.write" in system_prompt
+    assert "workspace.list -> artifact.write" in system_prompt
     assert "route to Studio=yes" in system_prompt
-    assert "2. Run code command: terminal.run" in system_prompt
-    assert "risk=high; approval required" in system_prompt
+    assert "inspect the workspace before shell execution" in system_prompt
+    assert "only when the plan contains a concrete command" in system_prompt
+    assert "1. Inspect workspace: workspace.list" in system_prompt
+    assert "2. Write result artifact: artifact.write" in system_prompt
+    assert "Run code command: terminal.run" not in system_prompt
     assert "approval gates still apply" in system_prompt
 
 
@@ -10828,28 +10831,21 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                 "tool": "desktop.list_apps",
                 "input": {"query": "Notes", "limit": 20},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             },
             {
                 "protocol": "json_fallback",
                 "tool": "app.open_and_safe_type_text",
                 "input": {"app_name": "Notes", "text": "hello"},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             },
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.safe_shortcut",
                 "input": {"action": "copy"},
                 "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.ui_elements",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_fallback_desktop_operation",
+                "planning_reason": "planner_desktop_operation",
             },
         ]
     ]
@@ -10860,10 +10856,8 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
-        "desktop.ui_elements",
     ]
     assert [event["source"] for event in planned_events] == [
-        "runtime_planner",
         "runtime_planner",
         "runtime_planner",
         "runtime_planner",
@@ -10872,7 +10866,7 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
     assert selection_events[0]["selection_source"] == "runtime_planner"
-    assert selection_events[0]["selection_reason"] == "runtime_planner_full_plan"
+    assert selection_events[0]["selection_reason"] == "runtime_planner_full_plan_execution"
     assert selection_events[0]["plan_tools"] == [
         "desktop.list_apps",
         "app.open_and_safe_type_text",
@@ -10883,7 +10877,6 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
-        "desktop.ui_elements",
     ]
     assert selection_events[0]["plan_step_count"] == 4
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
@@ -10892,7 +10885,6 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
-        "desktop.ui_elements",
     ]
     assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
@@ -11010,14 +11002,13 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
     )
 
     assert result == "已打开 Notes。"
-    assert tool_runs == [direct_tool_requests]
+    assert tool_runs == [direct_tool_requests[:2]]
     planned_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     ]
     assert [event["detail"] for event in planned_events] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
     ]
     assert not [event for event in timeline if event["event"] == "agent.plan.selection"]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
@@ -11025,7 +11016,6 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
     assert completed[-1]["tools"] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
     ]
 
 
@@ -11360,7 +11350,6 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
-        "desktop.ui_elements",
     ]
     assert {request["source"] for request in tool_runs[0]} == {"runtime_planner"}
     planned_events = [
@@ -11370,7 +11359,6 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
-        "desktop.ui_elements",
     ]
     completed_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_completed"
@@ -11380,7 +11368,6 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
-        "desktop.ui_elements",
     ]
     assert [step["tool"] for step in completed_event["steps"]] == completed_event["tools"]
     assert completed_event["planning_reason"] == "planner_fallback_media_playback"
@@ -14136,6 +14123,8 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
             "protocol": "json_fallback",
             "tool": "desktop.hotkey",
             "input": {"key": "p", "modifiers": ["command", "option"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
         }
     ]
     assert tool_runs[0]["allowed_tools"] == ["desktop.hotkey"]
@@ -14150,8 +14139,8 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
         "detail": "desktop.hotkey",
         "tool": "desktop.hotkey",
         "status": "planned",
-        "source": "daily_desktop_intent",
-        "planning_reason": "clear_daily_desktop_intent",
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_hotkey",
         "input_preview": {"key": "p", "modifiers": ["command", "option"]},
     }
 
@@ -14251,7 +14240,8 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
         "event_type": "agent.desktop.intent_completed",
         "payload": {
             "tool": "desktop.hotkey",
-            "source": "daily_desktop_intent",
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
             "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "result": {
                 "ok": True,

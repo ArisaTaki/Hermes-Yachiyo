@@ -81,6 +81,8 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
         "CSV summaries, HTML reports, and simple chart artifacts"
         in config["instructions"]
     )
+    assert "For code tasks, inspect the workspace before shell execution" in config["instructions"]
+    assert "only when the plan contains a concrete command" in config["instructions"]
     assert "select the relevant capability path rather than desktop app launch as the default" in config[
         "instructions"
     ]
