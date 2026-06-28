@@ -23,6 +23,7 @@ from .daily_desktop import (
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
+from .app_name_hints import is_legacy_app_name_hint
 from .desktop_permissions import desktop_permission_missing_by_capability
 from .desktop_plan_hints import hotkey_hint
 from .desk import LocalAgentDeskStore
@@ -1424,6 +1425,8 @@ def _coalesce_legacy_direct_app_shortcut_requests(
         {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"} & allowed
     ):
         return requests
+    if _has_discovered_runtime_planner_verification_chain(requests):
+        return requests
     if not (
         _explicit_open_prompt(prompt)
         or _search_field_prompt(prompt)
@@ -1496,9 +1499,40 @@ def _coalesce_legacy_direct_app_shortcut_requests(
             }
         )
         index = shortcut_index + 1
-        if index < len(requests) and _legacy_direct_verify_request(requests[index]):
-            index += 1
     return coalesced
+
+
+def _has_discovered_runtime_planner_verification_chain(
+    requests: list[dict[str, Any]],
+) -> bool:
+    if not any(str(request.get("source") or "").strip() == "runtime_planner" for request in requests):
+        return False
+    if not _has_unknown_discovered_app_query(requests):
+        return False
+    has_app_shortcut_pair = False
+    for index, request in enumerate(requests[:-1]):
+        if str(request.get("tool") or "").strip() not in {"app.open", "app.focus"}:
+            continue
+        for later_request in requests[index + 1 :]:
+            if str(later_request.get("tool") or "").strip() == "desktop.safe_shortcut":
+                has_app_shortcut_pair = True
+                break
+        if has_app_shortcut_pair:
+            break
+    if not has_app_shortcut_pair:
+        return False
+    return any(_legacy_direct_verify_request(request) for request in requests)
+
+
+def _has_unknown_discovered_app_query(requests: list[dict[str, Any]]) -> bool:
+    for request in requests:
+        if str(request.get("tool") or "").strip() != "desktop.list_apps":
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        query = str(payload.get("query") or "").strip()
+        if query and not is_legacy_app_name_hint(query):
+            return True
+    return False
 
 
 def _has_non_search_app_shortcut_pair(requests: list[dict[str, Any]]) -> bool:

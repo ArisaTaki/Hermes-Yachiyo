@@ -51,6 +51,13 @@ def legacy_app_name_hint(value: str) -> str:
     return APP_ALIASES.get(compact, app_name)
 
 
+def is_legacy_app_name_hint(value: str) -> bool:
+    app_name = str(value or "").strip()
+    if not app_name:
+        return False
+    return _legacy_app_name_compact(app_name) in APP_ALIASES
+
+
 def compact_app_name_hint(value: str) -> str:
     return compact_app_alias(value)
 

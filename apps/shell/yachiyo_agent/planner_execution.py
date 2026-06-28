@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .app_name_hints import legacy_app_name_hint
+from .app_name_hints import is_legacy_app_name_hint, legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
@@ -55,7 +55,8 @@ def planner_execution_tool_requests(
     normalized_requests = [dict(request) for request in requests if isinstance(request, Mapping)]
     if not normalized_requests:
         return []
-    normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
+    if not _has_discovered_app_foreground_verification_chain(normalized_requests):
+        normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
 
@@ -406,6 +407,44 @@ def _has_later_search_submit(
 ) -> bool:
     for later_request in requests[operation_index + 1 :]:
         if str(later_request.get("tool") or "").strip() == "desktop.search_submit":
+            return True
+    return False
+
+
+def _has_discovered_app_foreground_verification_chain(
+    requests: list[dict[str, Any]],
+) -> bool:
+    if not any(str(request.get("source") or "").strip() == "runtime_planner" for request in requests):
+        return False
+    if not _has_unknown_discovered_app_query(requests):
+        return False
+    if not any(str(request.get("tool") or "").strip() == "desktop.list_apps" for request in requests):
+        return False
+    has_foreground_operation = False
+    for index, request in enumerate(requests[:-1]):
+        if str(request.get("tool") or "").strip() not in {"app.open", "app.focus"}:
+            continue
+        for later_request in requests[index + 1 :]:
+            if str(later_request.get("tool") or "").strip() in _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX:
+                has_foreground_operation = True
+                break
+        if has_foreground_operation:
+            break
+    if not has_foreground_operation:
+        return False
+    return any(
+        str(request.get("tool") or "").strip() in _EXECUTION_VERIFICATION_TOOLS
+        for request in requests
+    )
+
+
+def _has_unknown_discovered_app_query(requests: list[dict[str, Any]]) -> bool:
+    for request in requests:
+        if str(request.get("tool") or "").strip() != "desktop.list_apps":
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        query = str(payload.get("query") or "").strip()
+        if query and not is_legacy_app_name_hint(query):
             return True
     return False
 

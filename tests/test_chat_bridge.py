@@ -1734,6 +1734,202 @@ def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        calls.append(("list_apps", query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found PixelForge Studio for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "PixelForge Studio",
+                        "bundle_id": "com.example.pixelforge",
+                        "path": "/Applications/PixelForge Studio.app",
+                        "match_score": 96,
+                    }
+                ],
+            },
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action, None))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict:
+        calls.append(("key", action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": f"Pressed {action}",
+            "data": {"key_action": action, "repeat_count": repeat_count},
+        }
+
+    def fake_safe_scroll(direction: str, *, pages: int = 1) -> dict:
+        calls.append(("scroll", direction, pages))
+        return {
+            "ok": True,
+            "action": "desktop.safe_scroll",
+            "summary": f"Scrolled foreground desktop {direction}",
+            "data": {"direction": direction, "pages": pages},
+        }
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read PixelForge Studio controls",
+            "data": {"app_name": "PixelForge Studio", "title": "Canvas", "elements": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+
+    cases = (
+        (
+            "PixelForge press command n",
+            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("shortcut", "new_window", None), ("ui", "", 80)],
+            [
+                ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+                (
+                    "app.focus",
+                    {
+                        "app_name": "PixelForge Studio",
+                        "app_resolution_source": "desktop.list_apps",
+                        "requested_app_name": "PixelForge",
+                        "resolved_app_name": "PixelForge Studio",
+                    },
+                ),
+                ("desktop.safe_shortcut", {"action": "new_window"}),
+                ("desktop.ui_elements", {}),
+            ],
+            ["app.focus", "desktop.safe_shortcut"],
+            {"action": "new_window"},
+        ),
+        (
+            "refresh PixelForge",
+            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("shortcut", "refresh", None), ("ui", "", 80)],
+            [
+                ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+                (
+                    "app.focus",
+                    {
+                        "app_name": "PixelForge Studio",
+                        "app_resolution_source": "desktop.list_apps",
+                        "requested_app_name": "PixelForge",
+                        "resolved_app_name": "PixelForge Studio",
+                    },
+                ),
+                ("desktop.safe_shortcut", {"action": "refresh"}),
+                ("desktop.ui_elements", {}),
+            ],
+            ["app.focus", "desktop.safe_shortcut"],
+            {"action": "refresh"},
+        ),
+        (
+            "press escape in PixelForge",
+            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("key", "escape", 1), ("ui", "", 80)],
+            [
+                ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+                (
+                    "app.focus_and_safe_key",
+                    {
+                        "app_name": "PixelForge Studio",
+                        "app_resolution_source": "desktop.list_apps",
+                        "requested_app_name": "PixelForge",
+                        "resolved_app_name": "PixelForge Studio",
+                        "action": "escape",
+                        "repeat_count": 1,
+                    },
+                ),
+                ("desktop.ui_elements", {}),
+            ],
+            ["app.focus_and_safe_key"],
+            {"app_name": "PixelForge Studio", "action": "escape", "repeat_count": 1},
+        ),
+        (
+            "PixelForge scroll down",
+            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("scroll", "down", 1), ("ui", "", 80)],
+            [
+                ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+                (
+                    "app.focus_and_safe_scroll",
+                    {
+                        "app_name": "PixelForge Studio",
+                        "app_resolution_source": "desktop.list_apps",
+                        "requested_app_name": "PixelForge",
+                        "resolved_app_name": "PixelForge Studio",
+                        "direction": "down",
+                        "pages": 1,
+                    },
+                ),
+                ("desktop.ui_elements", {}),
+            ],
+            ["app.focus_and_safe_scroll"],
+            {"app_name": "PixelForge Studio", "direction": "down", "pages": 1},
+        ),
+    )
+
+    for prompt, expected_calls, expected_event_tool_calls, expected_card_tools, final_input_preview in cases:
+        calls.clear()
+        result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+            tmp_path,
+            monkeypatch,
+            prompt,
+        )
+
+        assert result["ok"] is True
+        assert calls == expected_calls
+        assert agent_task["status"] == "completed"
+        assert agent_task["needs_user_action"] is False
+        assert agent_task["pending_approvals"] == []
+        assert [call["tool_name"] for call in agent_task["tool_calls"][-len(expected_card_tools) :]] == expected_card_tools
+        card_input_preview = agent_task["tool_calls"][-1]["input_preview"]
+        assert isinstance(card_input_preview, dict)
+        assert final_input_preview.items() <= card_input_preview.items()
+        event_tool_calls = [
+            (event["payload"]["tool"], event["payload"]["input_preview"])
+            for event in result["_events"]
+            if event["event_type"] == "agent.tool.call"
+        ]
+        assert event_tool_calls == expected_event_tool_calls
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.input_resolved" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_focus(
     tmp_path,
     monkeypatch,

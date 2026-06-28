@@ -5051,6 +5051,32 @@ def test_planner_execution_keeps_ui_verification_after_ui_operations() -> None:
     ]
 
 
+def test_planner_execution_preserves_discovered_app_safe_shortcut_verification_chain() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    requests = planner_tool_requests(
+        "PixelForge press command n",
+        allowed_tools=allowed_tools,
+    )
+
+    expected = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert [request["tool"] for request in requests] == expected
+    assert [
+        request["tool"]
+        for request in planner_execution_tool_requests(requests, allowed_tools)
+    ] == expected
+
+
 def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> None:
     key_decision = RuntimePlanner().decision(
         "按下一页键",
