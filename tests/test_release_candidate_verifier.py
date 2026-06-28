@@ -365,6 +365,19 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "app_scoped_click",
         "app_scoped_type",
     }
+    assert report["approval_policy_gate_smoke"]["status"] == "passed"
+    assert report["approval_policy_gate_smoke"]["evidence"]["ok"] is True
+    assert report["approval_policy_gate_smoke"]["evidence"]["planner_case_count"] == 5
+    assert {
+        case["id"]
+        for case in report["approval_policy_gate_smoke"]["evidence"]["planner_cases"]
+    } == {
+        "low_risk_app_open",
+        "low_risk_current_page_report",
+        "medium_risk_app_click",
+        "medium_risk_app_type",
+        "medium_risk_browser_click",
+    }
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -618,6 +631,73 @@ def test_release_candidate_verifier_fails_when_desktop_planner_discovery_smoke_f
         {
             "path": str(tmp_path / "scripts/smoke_desktop_planner_discovery.py"),
             "message": "Notion click routed to browser",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_approval_policy_gate_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "approval policy gate smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["approval_policy_gate_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "approval_policy_gate_smoke"
+    case_by_id = {case["id"]: case for case in section["evidence"]["planner_cases"]}
+    assert case_by_id["low_risk_app_open"]["approvals_required"] == []
+    assert case_by_id["medium_risk_app_click"]["approvals_required"] == [
+        "operate-foreground-ui"
+    ]
+    assert section["evidence"]["runtime_policy"]["compiled"]["approval_required"][
+        "terminal.run"
+    ] is True
+    assert "browser.click" in section["evidence"]["group_policy"]["approval_required_tools"]
+
+
+def test_release_candidate_verifier_fails_when_approval_policy_gate_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_approval_policy_gate_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "approval_policy_gate_smoke",
+            "error": "browser click was not marked for approval",
+            "planner_cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "approval policy gate smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["approval_policy_gate_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "browser click was not marked for approval"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_approval_policy_gate.py"),
+            "message": "browser click was not marked for approval",
         }
     ]
 

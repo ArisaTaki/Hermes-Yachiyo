@@ -28,6 +28,9 @@ from scripts.run_electron_ui_smokes import (
     electron_ui_smoke_scripts as release_ui_smoke_scripts,
     run_electron_ui_smoke_report,
 )
+from scripts.smoke_approval_policy_gate import (
+    run_smoke as run_approval_policy_gate_smoke,
+)
 from scripts.smoke_browser_planner_artifacts import (
     run_smoke as run_browser_planner_artifact_smoke,
 )
@@ -1820,6 +1823,43 @@ def verify_desktop_planner_discovery_smoke(root: Path) -> tuple[list[Finding], d
     return [
         Finding(
             root / "scripts/smoke_desktop_planner_discovery.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_approval_policy_gate_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_approval_policy_gate_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_approval_policy_gate.py",
+                f"approval policy gate smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "approval_policy_gate_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_approval_policy_gate.py",
+                "approval policy gate smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "approval_policy_gate_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "approval policy gate smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_approval_policy_gate.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3811,6 +3851,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "approval_policy_gate_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -4088,6 +4134,18 @@ def verify_release_candidate(
         "status": "failed" if desktop_smoke_findings else "passed",
         "evidence": desktop_smoke_evidence,
         "findings": _finding_report(desktop_smoke_findings),
+        "run_requested": True,
+    }
+
+    approval_policy_smoke_findings, approval_policy_smoke_evidence = (
+        verify_approval_policy_gate_smoke(root)
+    )
+    _print_findings("approval policy gate smoke", approval_policy_smoke_findings)
+    failed = failed or bool(approval_policy_smoke_findings)
+    report["approval_policy_gate_smoke"] = {
+        "status": "failed" if approval_policy_smoke_findings else "passed",
+        "evidence": approval_policy_smoke_evidence,
+        "findings": _finding_report(approval_policy_smoke_findings),
         "run_requested": True,
     }
 

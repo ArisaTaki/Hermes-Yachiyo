@@ -1357,6 +1357,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must run the desktop discovery planner smoke helper",
     ),
     (
+        '"approval_policy_gate_smoke"',
+        "release candidate verifier must archive approval and policy gate smoke evidence",
+    ),
+    (
+        "verify_approval_policy_gate_smoke",
+        "release candidate verifier must expose approval and policy gate smoke verification",
+    ),
+    (
+        "run_approval_policy_gate_smoke",
+        "release candidate verifier must run the approval and policy gate smoke helper",
+    ),
+    (
         '"bridge_statuses"',
         "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
     ),

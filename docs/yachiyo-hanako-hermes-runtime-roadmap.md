@@ -80,6 +80,13 @@ Current desktop discovery/operate planner evidence is reproducible with
 names and app-scoped click/type requests plan through `desktop.list_apps`,
 app foreground tools, verification steps, and Studio-routable events.
 
+Current approval/policy source evidence is reproducible with
+`python scripts/smoke_approval_policy_gate.py`; this proves planner-facing
+low-risk app/browser reads stay unblocked while medium-risk desktop/browser
+interaction and high-risk runtime tools remain marked for approval by the
+planner, group policy, and legacy runtime policy compiler. Real approve/resume
+replay remains a later Run Timeline and UI smoke requirement.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,
