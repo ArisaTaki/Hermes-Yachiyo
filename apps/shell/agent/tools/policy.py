@@ -487,6 +487,9 @@ class ToolDescriptor:
             "app.open_and_type_into_ui_element",
             "app.focus_and_type_into_ui_element",
         }:
+            if self.name == "desktop.ui_elements" and "app_name" in payload:
+                if not isinstance(payload.get("app_name"), str):
+                    raise AgentRuntimeError("desktop.ui_elements 参数 app_name 必须是字符串")
             if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
                 raise AgentRuntimeError(f"{self.name} 参数 role_filter 必须是字符串")
             if "limit" in payload:
@@ -1142,11 +1145,16 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "desktop.ui_elements": ToolDescriptor(
         name="desktop.ui_elements",
         description=(
-            "Read visible Accessibility UI elements from the current foreground window, "
-            "including role, label, frame, and center coordinates. Low-risk observable "
-            "desktop state for planning later foreground actions."
+            "Read visible Accessibility UI elements from the current foreground window "
+            "or a named running app, including role, label, frame, and center "
+            "coordinates. Low-risk observable desktop state for planning later "
+            "foreground actions."
         ),
         properties={
+            "app_name": {
+                "type": "string",
+                "description": "Optional running application name to inspect instead of the foreground app.",
+            },
             "role_filter": {
                 "type": "string",
                 "description": "Optional case-insensitive role/name/description filter, such as button or text.",

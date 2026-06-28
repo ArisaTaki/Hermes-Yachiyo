@@ -95,6 +95,14 @@ the smoke. The RC verifier keeps this evidence skipped by default and only runs
 it with `--run-real-desktop-app-open-smoke`, so source gates do not open user
 apps unless explicitly requested.
 
+Current opt-in real desktop UI inspection evidence is reproducible with
+`python scripts/smoke_real_desktop_ui_inspection.py`; on macOS this runs the
+real `desktop.running_apps`, `desktop.windows`, `app.focus`,
+`desktop.active_window`, and named-app `desktop.ui_elements(app_name=...)`
+path. The evidence records whether focus was actually verified and how many
+menu-level or control-like UI roles were observed, so current environment
+limits remain visible instead of being hidden behind a passing smoke.
+
 Current planner/runtime tool parity evidence is reproducible with
 `python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder

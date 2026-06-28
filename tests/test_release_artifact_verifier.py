@@ -913,6 +913,11 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC DMG mount gate" in messages
     assert "release packaging docs must document the opt-in real desktop app open smoke" in messages
+    assert "release packaging docs must document the opt-in real desktop UI inspection smoke" in messages
+    assert (
+        "release packaging docs must document real desktop UI inspection smoke evidence fields"
+        in messages
+    )
     assert "release packaging docs must document real desktop app open smoke side effects" in messages
     assert "release packaging docs must document the local RC packaged app startup smoke" in messages
     assert "release packaging docs must document the local RC packaged screen recording smoke" in messages

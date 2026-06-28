@@ -707,7 +707,13 @@ def test_desktop_windows_schema_accepts_optional_app_name() -> None:
 def test_desktop_ui_elements_schema_accepts_optional_filter_and_limit() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {})
     ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"role_filter": "button", "limit": 20})
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.ui_elements",
+        {"app_name": "Google Chrome", "role_filter": "button", "limit": 20},
+    )
 
+    with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 app_name 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"app_name": 123})
     with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 role_filter 必须是字符串"):
         ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"role_filter": 123})
     with pytest.raises(AgentRuntimeError, match="desktop.ui_elements 参数 limit 必须是 1-200 的整数"):
@@ -1616,8 +1622,10 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(
         broker,
         "desktop_ui_elements",
-        lambda role_filter="", limit=80: calls.append(("ui_elements", role_filter, limit))
-        or {"ok": True, "role_filter": role_filter, "limit": limit},
+        lambda role_filter="", limit=80, app_name="": calls.append(
+            ("ui_elements", role_filter, limit, app_name)
+        )
+        or {"ok": True, "role_filter": role_filter, "limit": limit, "app_name": app_name},
     )
     monkeypatch.setattr(
         broker,
@@ -1978,8 +1986,8 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     assert dispatch_tool_call(
         broker,
         "desktop.ui_elements",
-        {"role_filter": "button", "limit": 20},
-    ) == {"ok": True, "role_filter": "button", "limit": 20}
+        {"app_name": "Google Chrome", "role_filter": "button", "limit": 20},
+    ) == {"ok": True, "role_filter": "button", "limit": 20, "app_name": "Google Chrome"}
     assert dispatch_tool_call(
         broker,
         "app.status",
@@ -2030,7 +2038,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("running",),
         ("list_apps", "Word", 10),
         ("windows", "Google Chrome"),
-        ("ui_elements", "button", 20),
+        ("ui_elements", "button", 20, "Google Chrome"),
         ("status", "Google Chrome"),
     ]
 
@@ -4156,7 +4164,45 @@ def test_desktop_ui_elements_returns_foreground_accessibility_controls(monkeypat
         "role_filter": "button",
         "limit": 20,
     }
-    assert osascript_args == [["20", "2"]]
+    assert osascript_args == [["20", "2", ""]]
+
+
+def test_desktop_ui_elements_can_read_named_running_app(monkeypatch) -> None:
+    osascript_args = []
+
+    def fake_osascript(_script, args=None):
+        osascript_args.append(args)
+        return {
+            "ok": True,
+            "stdout": (
+                "META\tGoogle Chrome\t202\tChatGPT\n"
+                "0\tAXButton\t\tSend\tSend message\t\ttrue\t100\t220\t40\t40"
+            ),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_resolve_installed_app_name",
+        lambda app_name: "Google Chrome",
+    )
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.ui_elements(
+        app_name="Chrome",
+        role_filter="button",
+        limit=20,
+    )
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["data"]["app_name"] == "Google Chrome"
+    assert result["data"]["requested_app_name"] == "Chrome"
+    assert result["data"]["resolved_app_name"] == "Google Chrome"
+    assert result["data"]["app_resolution"] == "installed_app_bundle"
+    assert result["data"]["elements"][0]["name"] == "Send"
+    assert osascript_args == [["20", "2", "Google Chrome"]]
 
 
 def test_desktop_ui_elements_permission_failure_returns_recovery_targets(monkeypatch) -> None:

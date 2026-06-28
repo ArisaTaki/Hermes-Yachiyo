@@ -779,10 +779,17 @@ def active_window() -> dict[str, Any]:
     }
 
 
-def ui_elements(role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
+def ui_elements(
+    role_filter: str = "",
+    limit: Any = 80,
+    app_name: str = "",
+) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.ui_elements")
     clean_filter = str(role_filter or "").strip()
+    clean_app = str(app_name or "").strip()
+    resolved_app = _resolve_installed_app_name(clean_app) if clean_app else ""
+    app_filter = resolved_app or clean_app
     try:
         clean_limit = max(1, min(200, int(limit or 80)))
     except (TypeError, ValueError):
@@ -829,85 +836,106 @@ def ui_elements(role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
         set yText to ""
         set widthText to ""
         set heightText to ""
-        try
-            set roleText to my cleanText(role of targetElement)
-        end try
-        try
-            set subroleText to my cleanText(subrole of targetElement)
-        end try
-        try
-            set nameText to my cleanText(name of targetElement)
-        end try
-        try
-            set descriptionText to my cleanText(description of targetElement)
-        end try
-        try
-            set valueText to my cleanText(value of targetElement)
-        end try
-        try
-            set enabledText to my cleanText(enabled of targetElement)
-        end try
-        try
-            set positionValue to position of targetElement
-            set xText to item 1 of positionValue as text
-            set yText to item 2 of positionValue as text
-        end try
-        try
-            set sizeValue to size of targetElement
-            set widthText to item 1 of sizeValue as text
-            set heightText to item 2 of sizeValue as text
-        end try
+        tell application "System Events"
+            try
+                set roleText to my cleanText(role of targetElement)
+            end try
+            try
+                set subroleText to my cleanText(subrole of targetElement)
+            end try
+            try
+                set nameText to my cleanText(name of targetElement)
+            end try
+            try
+                set descriptionText to my cleanText(description of targetElement)
+            end try
+            try
+                set valueText to my cleanText(value of targetElement)
+            end try
+            try
+                set enabledText to my cleanText(enabled of targetElement)
+            end try
+            try
+                set positionValue to position of targetElement
+                set xText to item 1 of positionValue as text
+                set yText to item 2 of positionValue as text
+            end try
+            try
+                set sizeValue to size of targetElement
+                set widthText to item 1 of sizeValue as text
+                set heightText to item 2 of sizeValue as text
+            end try
+        end tell
         return (depthValue as text) & tab & roleText & tab & subroleText & tab & nameText & tab & descriptionText & tab & valueText & tab & enabledText & tab & xText & tab & yText & tab & widthText & tab & heightText
     end elementRow
 
     on collectElements(containerElement, depthValue, maxDepth, maxItems)
-        set rows to {}
-        if depthValue > maxDepth then return rows
+        set elementRows to {}
+        if depthValue > maxDepth then return elementRows
         try
-            set childElements to UI elements of containerElement
+            tell application "System Events"
+                set childElements to every UI element of containerElement
+            end tell
         on error
-            return rows
+            return elementRows
         end try
         repeat with childElement in childElements
-            if (count of rows) >= maxItems then exit repeat
-            set end of rows to my elementRow(childElement, depthValue)
+            if (count of elementRows) >= maxItems then exit repeat
+            set end of elementRows to my elementRow(childElement, depthValue)
             if depthValue < maxDepth then
-                set childRows to my collectElements(childElement, depthValue + 1, maxDepth, maxItems - (count of rows))
+                set childRows to my collectElements(childElement, depthValue + 1, maxDepth, maxItems - (count of elementRows))
                 repeat with childRow in childRows
-                    if (count of rows) >= maxItems then exit repeat
-                    set end of rows to childRow as text
+                    if (count of elementRows) >= maxItems then exit repeat
+                    set end of elementRows to childRow as text
                 end repeat
             end if
         end repeat
-        return rows
+        return elementRows
     end collectElements
 
     on run argv
         set maxItems to item 1 of argv as integer
         set maxDepth to item 2 of argv as integer
+        set appFilter to item 3 of argv
         tell application "System Events"
-            set frontApp to first application process whose frontmost is true
-            set appName to my cleanText(name of frontApp)
-            set appPID to unix id of frontApp
+            if appFilter is "" then
+                set targetApp to first application process whose frontmost is true
+            else
+                set matchingApps to application processes whose name is appFilter
+                if (count of matchingApps) is 0 then
+                    return "META" & tab & appFilter & tab & "" & tab & ""
+                end if
+                set targetApp to item 1 of matchingApps
+            end if
+            set appName to my cleanText(name of targetApp)
+            set appPID to unix id of targetApp
             try
-                set frontWindow to front window of frontApp
-                set windowTitle to my cleanText(name of frontWindow)
-                set rows to my collectElements(frontWindow, 0, maxDepth, maxItems)
+                set targetWindow to front window of targetApp
+                set windowTitle to my cleanText(name of targetWindow)
+                set elementRows to my collectElements(targetWindow, 0, maxDepth, maxItems)
             on error
                 set windowTitle to ""
-                set rows to my collectElements(frontApp, 0, maxDepth, maxItems)
+                set elementRows to my collectElements(targetApp, 0, maxDepth, maxItems)
             end try
             set header to "META" & tab & appName & tab & (appPID as text) & tab & windowTitle
-            if (count of rows) is 0 then return header
-            return header & linefeed & my joinRows(rows)
+            if (count of elementRows) is 0 then return header
+            return header & linefeed & my joinRows(elementRows)
         end tell
     end run
     """
-    result = _run_osascript(script, [str(clean_limit), "2"])
+    result = _run_osascript(script, [str(clean_limit), "2", app_filter])
     if not result["ok"]:
         return _with_permission_metadata(
             "desktop.ui_elements",
-            {**result, "action": "desktop.ui_elements", "summary": "desktop.ui_elements failed"},
+            {
+                **result,
+                "action": "desktop.ui_elements",
+                "summary": "desktop.ui_elements failed",
+                "data": {
+                    "app_name": app_filter,
+                    **_app_resolution_metadata(clean_app, app_filter),
+                },
+            },
         )
     parsed = _parse_ui_elements_output(result.get("stdout"), clean_filter, clean_limit)
     return {
@@ -918,9 +946,10 @@ def ui_elements(role_filter: str = "", limit: Any = 80) -> dict[str, Any]:
             **parsed,
             "role_filter": clean_filter,
             "limit": clean_limit,
+            **_app_resolution_metadata(clean_app, app_filter),
         },
         "permission_error": False,
-        "fallback_used": False,
+        "fallback_used": bool(clean_app and app_filter != clean_app),
     }
 
 
@@ -1212,15 +1241,19 @@ def running_apps() -> dict[str, Any]:
         return _unsupported("desktop.running_apps")
     script = """
     tell application "System Events"
-        set rows to {}
-        repeat with proc in (application processes whose background only is false)
-            set appName to name of proc
-            set appPID to unix id of proc
-            set appFront to frontmost of proc
-            set end of rows to appName & "|" & appPID & "|" & appFront
+        set appNames to name of (application processes whose background only is false)
+        set frontName to ""
+        try
+            set frontName to name of first application process whose frontmost is true
+        end try
+        set appRows to {}
+        repeat with appNameRef in appNames
+            set appName to appNameRef as text
+            set appFront to appName is frontName
+            set end of appRows to appName & "||" & appFront
         end repeat
         set AppleScript's text item delimiters to linefeed
-        set output to rows as text
+        set output to appRows as text
         set AppleScript's text item delimiters to ""
         return output
     end tell
@@ -1314,7 +1347,7 @@ def windows(app_name: str = "") -> dict[str, Any]:
     on run argv
         set appFilter to item 1 of argv
         tell application "System Events"
-            set rows to {}
+            set windowRows to {}
             repeat with proc in (application processes whose background only is false)
                 set appName to name of proc
                 if appFilter is "" or appName is appFilter then
@@ -1331,12 +1364,12 @@ def windows(app_name: str = "") -> dict[str, Any]:
                         on error
                             set winTitle to ""
                         end try
-                        set end of rows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
+                        set end of windowRows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
                     end repeat
                 end if
             end repeat
             set AppleScript's text item delimiters to linefeed
-            set output to rows as text
+            set output to windowRows as text
             set AppleScript's text item delimiters to ""
             return output
         end tell

@@ -176,6 +176,7 @@ def _desktop_ui_elements(broker: Any, payload: dict[str, Any], _approved: bool) 
     return broker.desktop_ui_elements(
         role_filter=str(payload.get("role_filter") or ""),
         limit=payload.get("limit", 80),
+        app_name=str(payload.get("app_name") or ""),
     )
 
 

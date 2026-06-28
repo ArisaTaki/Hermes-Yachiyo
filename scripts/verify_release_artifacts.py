@@ -727,7 +727,15 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the opt-in real desktop app open smoke",
     ),
     (
-        "它会真实打开本机系统 app",
+        "python scripts/verify_release_candidate.py --source-only --run-real-desktop-ui-inspection-smoke",
+        "release packaging docs must document the opt-in real desktop UI inspection smoke",
+    ),
+    (
+        "`focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`",
+        "release packaging docs must document real desktop UI inspection smoke evidence fields",
+    ),
+    (
+        "会真实打开本机系统 app",
         "release packaging docs must document real desktop app open smoke side effects",
     ),
     (
@@ -1391,6 +1399,22 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--run-real-desktop-app-open-smoke",
         "release candidate verifier CLI must expose opt-in real desktop app open smoke",
+    ),
+    (
+        '"real_desktop_ui_inspection_smoke"',
+        "release candidate verifier must archive opt-in real desktop UI inspection smoke evidence",
+    ),
+    (
+        "verify_real_desktop_ui_inspection_smoke",
+        "release candidate verifier must expose opt-in real desktop UI inspection smoke verification",
+    ),
+    (
+        "run_real_desktop_ui_inspection_smoke",
+        "release candidate verifier must run the opt-in real desktop UI inspection smoke helper",
+    ),
+    (
+        "--run-real-desktop-ui-inspection-smoke",
+        "release candidate verifier CLI must expose opt-in real desktop UI inspection smoke",
     ),
     (
         '"planner_runtime_tool_parity_smoke"',
