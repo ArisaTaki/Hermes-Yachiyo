@@ -146,6 +146,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
         ("调研 https://example.com 的最新信息", "web_research", ["browser.research"]),
         ("整理 Downloads 里的 PDF 文件", "file_organization", ["file.organization"]),
+        ("删除 Downloads 里的重复文件", "file_organization", ["file.organization"]),
         ("整理 Downloads 里的发票文件", "file_organization", ["file.organization"]),
         ("给 Alice 发消息说会议改到三点", "communication", ["communication.compose"]),
         ("给 Alice 写一封邮件说明会议延期", "communication", ["communication.compose"]),
@@ -938,6 +939,80 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "operation_hint": "organize",
     }
     assert _step_by_id(invoice_decision, "apply-file-organization").approval_required is True
+
+
+def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:
+    allowed_tools = ["workspace.list", "artifact.write", "terminal.run"]
+    decision = RuntimePlanner().decision(
+        "删除 Downloads 里的重复文件",
+        allowed_tools=allowed_tools,
+    )
+    english = RuntimePlanner().decision(
+        "delete duplicate files in Downloads",
+        allowed_tools=allowed_tools,
+    )
+    trash = RuntimePlanner().decision(
+        "move duplicate files from Downloads to Trash",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "delete_duplicates",
+    }
+    assert decision.selected_intent.risk_level == "high"
+    assert decision.plan.tool_plan.approvals_required == ["apply-file-organization"]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+        "apply-file-organization",
+    ]
+    apply_step = _step_by_id(decision, "apply-file-organization")
+    assert apply_step.action == "apply_file_changes"
+    assert apply_step.input_preview == {
+        "path": "Downloads",
+        "operation": "delete_duplicates",
+    }
+    assert apply_step.approval_required is True
+    assert apply_step.risk_level == "high"
+    assert english.selected_intent.kind == "file_organization"
+    assert english.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "delete_duplicates",
+    }
+    assert trash.selected_intent.kind == "file_organization"
+    assert trash.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "delete_duplicates",
+    }
+
+
+def test_runtime_planner_routes_duplicate_file_inventory_without_apply() -> None:
+    decision = RuntimePlanner().decision(
+        "找出 Downloads 里的重复文件",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "duplicate_inventory",
+    }
+    assert decision.selected_intent.risk_level == "low"
+    assert decision.selected_intent.expected_outputs == ["duplicate_file_report", "report"]
+    assert decision.plan.tool_plan.artifacts_expected == ["duplicate-file-report.md"]
+    assert decision.plan.tool_plan.approvals_required == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+    ]
+    assert _step_by_id(decision, "write-file-organization-plan").input_preview == {
+        "path": "duplicate-file-report.md",
+    }
+    assert "apply-file-organization" not in [
+        step.step_id for step in decision.plan.tool_plan.steps
+    ]
 
 
 def test_runtime_planner_routes_file_inventory_without_apply_approval() -> None:
@@ -10269,6 +10344,14 @@ def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
         "整理出 Downloads 里的文件清单",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    duplicate_delete_requests = planner_tool_requests(
+        "删除 Downloads 里的重复文件",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+    duplicate_inventory_requests = planner_tool_requests(
+        "找出 Downloads 里的重复文件",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
 
     assert requests == [
         {
@@ -10281,6 +10364,26 @@ def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
         }
     ]
     assert inventory_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+    assert duplicate_delete_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+    assert duplicate_inventory_requests == [
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",

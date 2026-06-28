@@ -1031,6 +1031,9 @@ class TaskIntentRouter:
         )
 
     def _file_organization_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        scoped_operation = _app_scoped_safe_operation_hint(text)
+        if scoped_operation and not _file_duplicate_hint(text):
+            return _empty_intent("file_organization", text)
         score = _score_terms(
             text,
             [
@@ -1041,11 +1044,16 @@ class TaskIntentRouter:
                 "archive files",
                 "clean up files",
                 "delete files",
+                "duplicate files",
+                "duplicates",
+                "deduplicate",
                 "file inventory",
                 "file list",
                 "整理文件",
                 "整理文件夹",
                 "文件整理",
+                "重复文件",
+                "重复项",
                 "文件清单",
                 "文件列表",
                 "列出文件",
@@ -1063,7 +1071,12 @@ class TaskIntentRouter:
         if score <= 0:
             return _empty_intent("file_organization", text)
         operation_hint = _file_operation_hint(text)
-        destructive = _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"])
+        inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
+        destructive = operation_hint in {
+            "delete",
+            "delete_duplicates",
+            "deduplicate",
+        } or _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空", "废纸篓"])
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "file_organization", text),
             kind="file_organization",
@@ -1073,14 +1086,16 @@ class TaskIntentRouter:
             description="Inspect files, produce a file organization plan, and apply explicit changes only after approval.",
             inputs={"location_hint": _file_location_hint(text), "operation_hint": operation_hint},
             expected_outputs=(
-                ["file_inventory", "report"]
-                if operation_hint == "inventory"
+                ["duplicate_file_report", "report"]
+                if operation_hint == "duplicate_inventory"
+                else ["file_inventory", "report"]
+                if inventory_only
                 else ["file_plan", "report"]
             ),
             required_capabilities=["file.organization"],
             preferred_capabilities=["file.workspace_read", "artifact.write", "desktop.app_control"],
             missing_inputs=[] if _file_location_hint(text) else ["file_location"],
-            risk_level="low" if operation_hint == "inventory" else ("high" if destructive else "medium"),
+            risk_level="low" if inventory_only else ("high" if destructive else "medium"),
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
@@ -3431,15 +3446,24 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         location_hint = str(intent.inputs.get("location_hint") or "").strip()
         operation_hint = str(intent.inputs.get("operation_hint") or "").strip()
-        inventory_only = operation_hint == "inventory"
-        artifact_path = (
-            "file-inventory.md" if inventory_only else "file-organization-plan.md"
-        )
+        inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
+        duplicate_inventory = operation_hint == "duplicate_inventory"
+        artifact_path = "file-organization-plan.md"
+        if duplicate_inventory:
+            artifact_path = "duplicate-file-report.md"
+        elif inventory_only:
+            artifact_path = "file-inventory.md"
         plan_title = (
-            "Write file inventory" if inventory_only else "Write file organization plan"
+            "Write duplicate file report"
+            if duplicate_inventory
+            else "Write file inventory"
+            if inventory_only
+            else "Write file organization plan"
         )
         plan_reason = (
-            "Create a replayable file inventory artifact without changing files."
+            "Create a replayable duplicate-file report without changing files."
+            if duplicate_inventory
+            else "Create a replayable file inventory artifact without changing files."
             if inventory_only
             else "Create a reviewable plan before moving, renaming, archiving, or deleting files."
         )
@@ -3474,6 +3498,8 @@ class RuntimePlanner:
                 "Apply file organization",
                 "file.organization",
                 _first_allowed(("terminal.run",), allowed),
+                input_preview=_file_apply_input_preview(location_hint, operation_hint),
+                action="apply_file_changes",
                 risk_level="high",
                 approval_required=True,
                 depends_on=["write-file-organization-plan"],
@@ -4359,6 +4385,15 @@ def _dynamic_context_ui_transfer_steps(
     return steps
 
 
+def _file_apply_input_preview(location_hint: str, operation_hint: str) -> dict[str, str]:
+    preview: dict[str, str] = {}
+    if location_hint:
+        preview["path"] = location_hint
+    if operation_hint:
+        preview["operation"] = operation_hint
+    return preview
+
+
 def _context_source_capability_id(source: str, tool_name: str | None, fallback: str) -> str:
     clean_tool = str(tool_name or "").strip()
     if source in {"selection", "clipboard"}:
@@ -5064,7 +5099,10 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
     if intent.kind == "code_task":
         return ["code-task-summary.md"]
     if intent.kind == "file_organization":
-        if str(intent.inputs.get("operation_hint") or "").strip() == "inventory":
+        operation_hint = str(intent.inputs.get("operation_hint") or "").strip()
+        if operation_hint == "duplicate_inventory":
+            return ["duplicate-file-report.md"]
+        if operation_hint == "inventory":
             return ["file-inventory.md"]
         return ["file-organization-plan.md"]
     if intent.kind == "information_capture":
@@ -5597,17 +5635,7 @@ def _report_file_pattern(file_type: str) -> str:
 
 
 def _looks_like_file_organization_request(text: str) -> bool:
-    return _contains_any(
-        text,
-        [
-            "organize",
-            "sort",
-            "clean up",
-            "整理",
-            "分类",
-            "清理",
-        ],
-    ) and _contains_any(
+    file_scope = _contains_any(
         text,
         [
             "file",
@@ -5624,6 +5652,51 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "下载",
             "桌面",
             "文档",
+        ],
+    )
+    if not file_scope:
+        return False
+    file_operation = _contains_any(
+        text,
+        [
+            "organize",
+            "sort",
+            "clean up",
+            "delete",
+            "remove",
+            "trash",
+            "move",
+            "rename",
+            "archive",
+            "deduplicate",
+            "整理",
+            "分类",
+            "清理",
+            "删除",
+            "移除",
+            "移动",
+            "重命名",
+            "归档",
+            "废纸篓",
+        ],
+    )
+    return file_operation or _file_duplicate_hint(text)
+
+
+def _file_duplicate_hint(text: str) -> bool:
+    return _contains_any(
+        text,
+        [
+            "duplicate",
+            "duplicates",
+            "duplicated",
+            "deduplicate",
+            "same file",
+            "same files",
+            "重复文件",
+            "重复项",
+            "重复的文件",
+            "相同文件",
         ],
     )
 
@@ -5762,7 +5835,18 @@ def _clean_orchestration_target_hint(
 
 
 def _file_operation_hint(text: str) -> str:
-    if _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空"]):
+    duplicate = _file_duplicate_hint(text)
+    destructive = _contains_any(text, ["delete", "remove", "trash", "删除", "移除", "清空", "废纸篓"])
+    if duplicate and destructive:
+        return "delete_duplicates"
+    if duplicate and _contains_any(
+        text,
+        ["find", "list", "show", "inspect", "找出", "查找", "列出", "盘点", "识别"],
+    ):
+        return "duplicate_inventory"
+    if duplicate and _contains_any(text, ["clean up", "deduplicate", "清理", "整理"]):
+        return "deduplicate"
+    if destructive:
         return "delete"
     if _contains_any(text, ["rename", "重命名", "改名"]):
         return "rename"
