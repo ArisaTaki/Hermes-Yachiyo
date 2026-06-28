@@ -70,6 +70,7 @@ from .web_destination_hints import (
     legacy_known_web_destination_search_url,
     legacy_known_web_destination_url_hint,
 )
+from packages.security import contains_sensitive_text
 
 
 class TaskIntentRouter:
@@ -1145,9 +1146,16 @@ class TaskIntentRouter:
 
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
+        known_target_hint = _known_orchestration_target_hint(
+            text,
+            metadata,
+            keys=("available_workflows", "workflow_names", "known_workflows"),
+        )
+        if score <= 0 and known_target_hint:
+            score = 0.24
         if score <= 0 and metadata.get("runnable_kind") != "workflow":
             return _empty_intent("workflow_orchestration", text)
-        target_hint = _workflow_target_hint(text)
+        target_hint = _workflow_target_hint(text) or known_target_hint
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "workflow_orchestration", text),
             kind="workflow_orchestration",
@@ -1162,13 +1170,26 @@ class TaskIntentRouter:
         )
 
     def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        explicit_multi_agent = _looks_like_multi_agent_request(text)
+        known_target_hint = _known_orchestration_target_hint(
+            text,
+            metadata,
+            keys=(
+                "available_agent_groups",
+                "available_groups",
+                "agent_group_names",
+                "group_names",
+                "known_agent_groups",
+            ),
+        )
+        explicit_multi_agent = _looks_like_multi_agent_request(text) or bool(known_target_hint)
         if not explicit_multi_agent and metadata.get("runnable_kind") != "group":
             return _empty_intent("multi_agent", text)
         score = _score_terms(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
+        if score <= 0 and known_target_hint:
+            score = 0.24
         if score <= 0 and explicit_multi_agent:
             score = 0.24
-        target_hint = _group_target_hint(text)
+        target_hint = _group_target_hint(text) or known_target_hint
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "multi_agent", text),
             kind="multi_agent",
@@ -5432,6 +5453,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "multi_agent" and (
         _contains_any(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
         or _looks_like_multi_agent_request(text)
+        or bool(intent.inputs.get("target_name_hint"))
     ):
         score += 0.28
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
@@ -5762,7 +5784,7 @@ def _looks_like_multi_agent_request(text: str) -> bool:
     value = _clean_prompt(text)
     lowered = value.lower()
     if re.search(
-        r"(?:group|群组|小组)",
+        r"(?:group|群组|小组|团队)",
         value,
         flags=re.IGNORECASE,
     ) and re.search(
@@ -5816,6 +5838,85 @@ def _workflow_target_hint(text: str) -> str:
             "run ",
         ),
     )
+
+
+def _known_orchestration_target_hint(
+    text: str,
+    metadata: Mapping[str, Any],
+    *,
+    keys: tuple[str, ...],
+) -> str:
+    value = _clean_prompt(text)
+    if not value or not isinstance(metadata, Mapping):
+        return ""
+    matches = [
+        target
+        for target in _metadata_orchestration_targets(metadata, keys=keys)
+        if _text_mentions_orchestration_target(value, target)
+    ]
+    if not matches:
+        return ""
+    return max(matches, key=len)[:80]
+
+
+def _metadata_orchestration_targets(
+    metadata: Mapping[str, Any],
+    *,
+    keys: tuple[str, ...],
+) -> list[str]:
+    targets: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        values = metadata.get(key)
+        if values is None:
+            continue
+        for value in _iter_orchestration_target_values(values):
+            target = _clean_known_orchestration_target(value)
+            if not target:
+                continue
+            target_key = target.casefold()
+            if target_key in seen:
+                continue
+            seen.add(target_key)
+            targets.append(target)
+    return targets
+
+
+def _iter_orchestration_target_values(value: Any) -> Iterable[Any]:
+    if isinstance(value, Mapping):
+        for key in ("name", "title", "nickname", "workflow_id", "group_id", "agent_group_id", "id"):
+            if value.get(key):
+                yield value.get(key)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _iter_orchestration_target_values(item)
+        return
+    yield value
+
+
+def _clean_known_orchestration_target(value: Any) -> str:
+    target = " ".join(str(value or "").strip().split())
+    target = target.strip(" \t\r\n:：,，.。;；\"'“”‘’「」『』")
+    if len(target) < 2 or contains_sensitive_text(target):
+        return ""
+    lowered = target.casefold()
+    if lowered in {"workflow", "flow", "group", "team", "agent", "agents", "工作流", "流程", "群组", "小组", "团队"}:
+        return ""
+    return target[:120]
+
+
+def _text_mentions_orchestration_target(text: str, target: str) -> bool:
+    target_text = _clean_known_orchestration_target(target)
+    if not target_text:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", target_text):
+        return target_text in text
+    return re.search(
+        rf"(?<![A-Za-z0-9_]){re.escape(target_text)}(?![A-Za-z0-9_])",
+        text,
+        flags=re.IGNORECASE,
+    ) is not None
 
 
 def _group_target_hint(text: str) -> str:

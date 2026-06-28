@@ -1229,6 +1229,47 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
     assert planner_orchestration_requests("介绍一下 multi-agent 架构") == []
 
 
+def test_planner_orchestration_requests_use_discovered_targets_without_keywords() -> None:
+    metadata = {
+        "available_agent_groups": [
+            {"group_id": "group_research", "name": "Research Team"},
+            {"group_id": "group_cn", "name": "研究小组"},
+        ],
+        "available_workflows": [
+            {"workflow_id": "workflow_daily", "name": "Daily Summary"},
+        ],
+    }
+
+    workflow_request = planner_orchestration_requests("运行 Daily Summary", metadata=metadata)
+    assert len(workflow_request) == 1
+    assert workflow_request[0]["orchestration_kind"] == "workflow"
+    assert workflow_request[0]["input"]["target_name"] == "Daily Summary"
+
+    group_request = planner_orchestration_requests(
+        "用 Research Team 调研 Hanako",
+        metadata=metadata,
+    )
+    assert len(group_request) == 1
+    assert group_request[0]["orchestration_kind"] == "group_run"
+    assert group_request[0]["intent_kind"] == "multi_agent"
+    assert group_request[0]["input"]["target_name"] == "Research Team"
+
+    chinese_group_request = planner_orchestration_requests(
+        "用研究小组分析这份数据",
+        metadata=metadata,
+    )
+    assert len(chinese_group_request) == 1
+    assert chinese_group_request[0]["orchestration_kind"] == "group_run"
+    assert chinese_group_request[0]["input"]["target_name"] == "研究小组"
+
+    team_coordination_request = planner_orchestration_requests(
+        "让设计团队和开发团队分别评审这个方案并汇总"
+    )
+    assert len(team_coordination_request) == 1
+    assert team_coordination_request[0]["orchestration_kind"] == "group_run"
+    assert team_coordination_request[0]["input"]["target_name"] == ""
+
+
 def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:
     decision = RuntimePlanner().decision(
         "打开终端运行 ls",

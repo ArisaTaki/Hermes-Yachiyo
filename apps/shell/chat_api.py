@@ -750,17 +750,97 @@ class ChatAPI:
             logger.debug("主聊天日常桌面任务直接执行失败: %s", task_id, exc_info=True)
             return None
 
-    @staticmethod
     def _planner_orchestration_entrypoint_requests(
+        self,
         text: str,
         *,
         metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         try:
-            return planner_orchestration_requests(text, metadata=metadata)
+            return planner_orchestration_requests(
+                text,
+                metadata=self._planner_orchestration_runtime_metadata(metadata),
+            )
         except Exception:
             logger.debug("Chat runtime planner orchestration candidates unavailable", exc_info=True)
             return []
+
+    def _planner_orchestration_runtime_metadata(
+        self,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        discovered = self._planner_orchestration_discovered_targets()
+        if not discovered:
+            return metadata
+        next_metadata = dict(metadata or {})
+        for key, value in discovered.items():
+            if value and key not in next_metadata:
+                next_metadata[key] = value
+        return next_metadata
+
+    def _planner_orchestration_discovered_targets(self) -> dict[str, list[dict[str, str]]]:
+        try:
+            service = self._agent_runtime_service()
+        except Exception:
+            logger.debug("Planner orchestration target discovery unavailable", exc_info=True)
+            return {}
+        return {
+            "available_agent_groups": self._planner_orchestration_target_items(
+                service,
+                method_name="list_agent_groups",
+                payload_key="groups",
+                id_keys=("group_id", "agent_group_id", "id"),
+                name_keys=("name", "title", "nickname"),
+            ),
+            "available_workflows": self._planner_orchestration_target_items(
+                service,
+                method_name="list_workflows",
+                payload_key="workflows",
+                id_keys=("workflow_id", "id"),
+                name_keys=("name", "title", "nickname"),
+            ),
+        }
+
+    def _planner_orchestration_target_items(
+        self,
+        service: Any,
+        *,
+        method_name: str,
+        payload_key: str,
+        id_keys: tuple[str, ...],
+        name_keys: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        method = getattr(service, method_name, None)
+        if not callable(method):
+            return []
+        try:
+            payload = method()
+        except Exception:
+            logger.debug("Planner orchestration target list failed: %s", method_name, exc_info=True)
+            return []
+        items = payload.get(payload_key) if isinstance(payload, dict) else payload
+        if not isinstance(items, (list, tuple)):
+            return []
+        result: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in items:
+            snapshot = self._snapshot_payload(item)
+            if not snapshot or snapshot.get("enabled") is False:
+                continue
+            entry: dict[str, str] = {}
+            for key in (*id_keys, *name_keys):
+                value = " ".join(str(snapshot.get(key) or "").split()).strip()
+                if not value or contains_sensitive_text(value):
+                    continue
+                entry[key] = value[:120]
+            if not entry:
+                continue
+            dedupe_key = "|".join(entry.values()).casefold()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            result.append(entry)
+        return result[:50]
 
     def _execute_planner_orchestration_runnable(
         self,

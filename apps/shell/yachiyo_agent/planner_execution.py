@@ -71,12 +71,14 @@ def planner_orchestration_requests(
         metadata=metadata,
     )
     intent_kind = str(decision.selected_intent.kind or "").strip()
+    intent_inputs = decision.selected_intent.inputs if isinstance(decision.selected_intent.inputs, Mapping) else {}
+    target_name = str(intent_inputs.get("target_name_hint") or "").strip()
     if intent_kind == "workflow_orchestration":
-        if not _looks_like_orchestration_action(prompt, "workflow"):
+        if not target_name and not _looks_like_orchestration_action(prompt, "workflow"):
             return []
         return [_orchestration_request(decision, "workflow")]
     if intent_kind == "multi_agent":
-        if not _looks_like_orchestration_action(prompt, "group_run"):
+        if not target_name and not _looks_like_orchestration_action(prompt, "group_run"):
             return []
         return [_orchestration_request(decision, "group_run")]
     return []
@@ -272,7 +274,7 @@ def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bo
         )
     return bool(
         re.search(
-            r"(?:multi-agent|group|agents?|群组|多\s*agent|多Agent|协作|智能体|代理)",
+            r"(?:multi-agent|group|agents?|群组|小组|团队|多\s*agent|多Agent|协作|智能体|代理)",
             text,
             flags=re.IGNORECASE,
         )

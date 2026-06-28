@@ -595,6 +595,60 @@ def test_send_message_routes_named_workflow_planner_request_without_at_mention(t
         store.close()
 
 
+def test_send_message_routes_discovered_workflow_without_workflow_keyword(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeWorkflowService:
+        def __init__(self) -> None:
+            self.run_calls: list[dict[str, str]] = []
+
+        def _workflow(self) -> dict[str, str | bool]:
+            return {
+                "id": "workflow_daily",
+                "workflow_id": "workflow_daily",
+                "name": "Daily Summary",
+                "kind": "workflow",
+                "enabled": True,
+            }
+
+        def list_workflows(self):
+            return {"ok": True, "workflows": [self._workflow()]}
+
+        def resolve_runnable(self, *, runnable_id: str = "", name: str = ""):
+            if runnable_id == "workflow_daily" or name == "Daily Summary":
+                return self._workflow()
+            return None
+
+        def create_run_for_runnable_async(self, **kwargs):
+            self.run_calls.append(dict(kwargs))
+            return {
+                "run_id": "workflow-run-1",
+                "run_group_id": "run-group-1",
+                "runnable": self._workflow(),
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": "Daily Summary"},
+                ],
+            }
+
+    service = FakeWorkflowService()
+    runtime.agent_runtime_service = service
+    try:
+        result = api.send_message("运行 Daily Summary")
+        user = runtime.chat_session.get_messages()[0]
+        assistant = runtime.chat_session.get_messages()[1]
+
+        assert result["ok"] is True
+        assert result["runnable_command"] is True
+        assert result["workflow_run_id"] == "workflow-run-1"
+        assert service.run_calls[0]["runnable_id"] == "workflow_daily"
+        assert user.metadata["yachiyo_runtime_planner"] is True
+        assert user.metadata["yachiyo_orchestration_kind"] == "workflow"
+        assert user.metadata["yachiyo_orchestration_target"] == "Daily Summary"
+        assert assistant.metadata["workflow_run_id"] == "workflow-run-1"
+    finally:
+        store.close()
+
+
 def test_send_message_starts_named_agent_group_planner_request_without_at_mention(tmp_path):
     api, runtime, store = _make_api(tmp_path)
 
@@ -656,6 +710,63 @@ def test_send_message_starts_named_agent_group_planner_request_without_at_mentio
         assert assistant.metadata["planner_orchestration_started"] is True
         assert assistant.metadata["planner_orchestration_kind"] == "group_run"
         assert assistant.metadata["group_id"] == "group_research"
+        assert assistant.metadata["group_run_id"] == "group-run-1"
+    finally:
+        store.close()
+
+
+def test_send_message_starts_discovered_agent_group_without_group_keyword(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeGroupService:
+        def __init__(self) -> None:
+            self.start_calls: list[dict[str, object]] = []
+
+        def list_agent_groups(self):
+            return {
+                "ok": True,
+                "groups": [
+                    {
+                        "group_id": "group_research",
+                        "name": "Research Team",
+                        "description": "Research agents",
+                        "members": [],
+                        "enabled": True,
+                    }
+                ],
+            }
+
+        def start_agent_group_run(self, request):
+            self.start_calls.append(dict(request))
+            return {
+                "group_run_id": "group-run-1",
+                "run_group_id": "run-group-1",
+                "group_id": request["group_id"],
+                "title": request.get("title") or "Research Team",
+                "status": "running",
+                "objective": request.get("objective") or "",
+                "runs": [],
+                "events": [],
+            }
+
+    service = FakeGroupService()
+    runtime.agent_runtime_service = service
+    try:
+        result = api.send_message("用 Research Team 调研 Hanako")
+        user = runtime.chat_session.get_messages()[0]
+        assistant = runtime.chat_session.get_messages()[1]
+
+        assert result["ok"] is True
+        assert result["status"] == "processing"
+        assert result["planner_orchestration"] is True
+        assert result["group_id"] == "group_research"
+        assert result["group_run_id"] == "group-run-1"
+        assert service.start_calls[0]["group_id"] == "group_research"
+        assert service.start_calls[0]["objective"] == "用 Research Team 调研 Hanako"
+        assert user.metadata["yachiyo_runtime_planner"] is True
+        assert user.metadata["yachiyo_orchestration_kind"] == "group_run"
+        assert user.metadata["yachiyo_orchestration_target"] == "Research Team"
+        assert assistant.metadata["planner_orchestration_started"] is True
         assert assistant.metadata["group_run_id"] == "group-run-1"
     finally:
         store.close()
