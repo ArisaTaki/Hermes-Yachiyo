@@ -5284,13 +5284,7 @@ def _affected_tools_for_missing_permissions(
             )
             continue
         if capability_id == "media_control":
-            tools.extend(
-                (
-                    "media.apple_music_play",
-                    "media.apple_music_open_and_play",
-                    "media.apple_music_control",
-                )
-            )
+            tools.extend(_PERMISSION_CAPABILITY_TOOLS.get(capability_id, ()))
             continue
         tools.extend(_PERMISSION_CAPABILITY_TOOLS.get(capability_id, ()))
     return _ordered_unique(tools)
