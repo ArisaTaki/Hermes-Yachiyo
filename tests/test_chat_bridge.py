@@ -495,7 +495,7 @@ def test_chat_bridge_quick_message_prefers_runtime_planner_before_legacy_candida
     )
     monkeypatch.setattr(
         chat_bridge_mod,
-        "_daily_desktop_candidates_for_quick_message",
+        "daily_desktop_entrypoint_requests",
         lambda _text, **_kwargs: [
             {
                 "protocol": "json_fallback",

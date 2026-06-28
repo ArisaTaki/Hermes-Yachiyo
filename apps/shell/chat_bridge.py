@@ -225,19 +225,6 @@ def _runtime_agent_service(runtime: "AppRuntime") -> Any | None:
     return None
 
 
-def _daily_desktop_candidates_for_quick_message(
-    text: str,
-    *,
-    metadata: dict[str, Any] | None = None,
-    allowed_tools: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    return daily_desktop_entrypoint_requests(
-        text,
-        metadata=metadata,
-        allowed_tools=allowed_tools,
-    )
-
-
 def _runtime_planner_candidates_for_quick_message(
     text: str,
     *,
@@ -276,7 +263,7 @@ def _desktop_candidates_for_quick_message(
     )
     if planner_candidates:
         return planner_candidates
-    return _daily_desktop_candidates_for_quick_message(
+    return daily_desktop_entrypoint_requests(
         text,
         metadata=metadata,
         allowed_tools=allowed_tools,
