@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Smoke-test Runtime Planner tool choices against executable runtime tools."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from apps.shell.agent.tools.policy import (
+    KNOWN_AGENT_TOOLS,
+    RuntimePolicyCompiler,
+    ToolDescriptorRegistry,
+    TOOL_NAME_ALIASES,
+)
+from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY
+from apps.shell.yachiyo_agent import RuntimePlanner
+from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+
+PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "generic_app_open",
+        "category": "orchestrator",
+        "prompt": "打开 PixelForge",
+        "expected_intent": "desktop_operation",
+        "expected_plan_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        "expected_request_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        "approval_required": [],
+    },
+    {
+        "id": "app_scoped_ui_click",
+        "category": "orchestrator",
+        "prompt": "在 Notion 点击 New Page",
+        "expected_intent": "desktop_operation",
+        "expected_plan_tools": [
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        "approval_required": ["desktop.click_ui_element"],
+    },
+    {
+        "id": "builtin_data_analysis",
+        "category": "orchestrator",
+        "prompt": "请分析 data/sales.csv 并输出报告",
+        "expected_intent": "data_analysis",
+        "expected_plan_tools": ["data.analyze"],
+        "expected_request_tools": ["data.analyze"],
+        "approval_required": [],
+    },
+    {
+        "id": "current_page_report",
+        "category": "orchestrator",
+        "prompt": "把当前网页总结成一份报告",
+        "expected_intent": "web_research",
+        "expected_plan_tools": ["browser.extract_text", "artifact.write"],
+        "expected_request_tools": ["browser.extract_text"],
+        "approval_required": [],
+    },
+    {
+        "id": "generic_media_playback",
+        "category": "orchestrator",
+        "prompt": "播放超时空辉夜姬",
+        "expected_intent": "media_playback",
+        "expected_plan_tools": ["media.apple_music_play", "desktop.ui_elements"],
+        "expected_request_tools": ["media.apple_music_play", "desktop.ui_elements"],
+        "approval_required": [],
+    },
+    {
+        "id": "explicit_terminal_command",
+        "category": "coding",
+        "prompt": "run ls -la in terminal",
+        "expected_intent": "code_task",
+        "expected_plan_tools": ["terminal.run"],
+        "expected_request_tools": ["terminal.run"],
+        "approval_required": ["terminal.run"],
+    },
+    {
+        "id": "reminder_creation",
+        "category": "orchestrator",
+        "prompt": "提醒我明天九点开会",
+        "expected_intent": "schedule",
+        "expected_plan_tools": ["reminders.create"],
+        "expected_request_tools": ["reminders.create"],
+        "approval_required": [],
+    },
+)
+
+
+def _compiled_policy(category: str) -> dict[str, Any]:
+    return RuntimePolicyCompiler().compile_tool_policy(
+        category,
+        RuntimePolicyCompiler.default_tool_policy(category),
+    )
+
+
+def _descriptor_tools(tools: list[str]) -> list[str]:
+    schemas = ToolDescriptorRegistry.model_tool_schemas(tools)
+    return [
+        TOOL_NAME_ALIASES.get(
+            str(schema.get("function", {}).get("name") or "").strip(),
+            str(schema.get("function", {}).get("name") or "").strip(),
+        )
+        for schema in schemas
+        if isinstance(schema, dict)
+    ]
+
+
+def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
+    category = str(case["category"])
+    policy = _compiled_policy(category)
+    allowed_tools = [str(tool) for tool in policy.get("allowed_tools") or []]
+    prompt = str(case["prompt"])
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+    plan_tools = [
+        str(getattr(step, "tool_name", "") or "").strip()
+        for step in decision.plan.tool_plan.steps
+        if str(getattr(step, "tool_name", "") or "").strip()
+    ]
+    request_tools = [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if str(request.get("tool") or "").strip()
+    ]
+    expected_plan_tools = [str(tool) for tool in case["expected_plan_tools"]]
+    expected_request_tools = [str(tool) for tool in case["expected_request_tools"]]
+    expected_approval_tools = [str(tool) for tool in case["approval_required"]]
+    descriptor_tools = _descriptor_tools(sorted(set(plan_tools + request_tools)))
+    approval_required = policy.get("approval_required")
+    if not isinstance(approval_required, dict):
+        approval_required = {}
+    checks = {
+        "intent_matches": decision.selected_intent.kind == str(case["expected_intent"]),
+        "plan_tools_match": plan_tools == expected_plan_tools,
+        "request_tools_match": request_tools == expected_request_tools,
+        "plan_tools_registered": all(tool in KNOWN_AGENT_TOOLS for tool in plan_tools),
+        "request_tools_dispatched": all(tool in TOOL_DISPATCH_REGISTRY for tool in request_tools),
+        "tools_have_model_descriptors": set(plan_tools + request_tools).issubset(
+            set(descriptor_tools)
+        ),
+        "request_tools_allowed_by_policy": all(tool in allowed_tools for tool in request_tools),
+        "approval_required_matches": all(
+            bool(approval_required.get(tool)) for tool in expected_approval_tools
+        )
+        and all(
+            not bool(approval_required.get(tool))
+            for tool in request_tools
+            if tool not in expected_approval_tools
+        ),
+    }
+    return {
+        "id": str(case["id"]),
+        "ok": all(checks.values()),
+        "category": category,
+        "prompt": prompt,
+        "intent_kind": decision.selected_intent.kind,
+        "plan_tools": plan_tools,
+        "request_tools": request_tools,
+        "descriptor_tools": descriptor_tools,
+        "approval_required_tools": [
+            tool for tool in request_tools if bool(approval_required.get(tool))
+        ],
+        "checks": checks,
+    }
+
+
+def run_smoke() -> dict[str, Any]:
+    cases = [_case_evidence(case) for case in PLANNER_TOOL_PARITY_CASES]
+    return {
+        "ok": all(case["ok"] for case in cases),
+        "mode": "planner_runtime_tool_parity_smoke",
+        "case_count": len(cases),
+        "cases": cases,
+    }
+
+
+def _parser() -> argparse.ArgumentParser:
+    return argparse.ArgumentParser(description=__doc__)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    _parser().parse_args(argv)
+    evidence = run_smoke()
+    print(json.dumps(evidence, ensure_ascii=False, indent=2))
+    return 0 if evidence.get("ok") is True else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

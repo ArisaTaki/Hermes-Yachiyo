@@ -1357,6 +1357,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must run the desktop discovery planner smoke helper",
     ),
     (
+        '"planner_runtime_tool_parity_smoke"',
+        "release candidate verifier must archive planner-runtime tool parity smoke evidence",
+    ),
+    (
+        "verify_planner_runtime_tool_parity_smoke",
+        "release candidate verifier must expose planner-runtime tool parity smoke verification",
+    ),
+    (
+        "run_planner_runtime_tool_parity_smoke",
+        "release candidate verifier must run the planner-runtime tool parity smoke helper",
+    ),
+    (
         '"approval_policy_gate_smoke"',
         "release candidate verifier must archive approval and policy gate smoke evidence",
     ),

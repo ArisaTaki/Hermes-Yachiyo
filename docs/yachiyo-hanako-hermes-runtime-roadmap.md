@@ -80,6 +80,13 @@ Current desktop discovery/operate planner evidence is reproducible with
 names and app-scoped click/type requests plan through `desktop.list_apps`,
 app foreground tools, verification steps, and Studio-routable events.
 
+Current planner/runtime tool parity evidence is reproducible with
+`python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
+planner-selected desktop, data-analysis, browser, media, terminal, and reminder
+tools are present in the runtime tool registry, dispatch table, main Chat
+policy, model descriptors, and approval map. It does not replace packaged-app
+or OS-permission execution smoke evidence.
+
 Current approval/policy source evidence is reproducible with
 `python scripts/smoke_approval_policy_gate.py`; this proves planner-facing
 low-risk app/browser reads stay unblocked while medium-risk desktop/browser

@@ -43,6 +43,9 @@ from scripts.smoke_data_analysis_artifacts import (
 from scripts.smoke_desktop_planner_discovery import (
     run_smoke as run_desktop_planner_discovery_smoke,
 )
+from scripts.smoke_planner_runtime_tool_parity import (
+    run_smoke as run_planner_runtime_tool_parity_smoke,
+)
 from scripts.smoke_runtime_approval_resume import (
     run_smoke as run_runtime_approval_resume_smoke,
 )
@@ -1832,6 +1835,43 @@ def verify_desktop_planner_discovery_smoke(root: Path) -> tuple[list[Finding], d
     return [
         Finding(
             root / "scripts/smoke_desktop_planner_discovery.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_planner_runtime_tool_parity_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_planner_runtime_tool_parity_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_planner_runtime_tool_parity.py",
+                f"planner runtime tool parity smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "planner_runtime_tool_parity_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_planner_runtime_tool_parity.py",
+                "planner runtime tool parity smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "planner_runtime_tool_parity_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "planner runtime tool parity smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_planner_runtime_tool_parity.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3971,6 +4011,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "planner_runtime_tool_parity_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "approval_policy_gate_smoke": {
             "status": "pending",
             "evidence": {},
@@ -4147,6 +4193,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         }
+        report["planner_runtime_tool_parity_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
         report["yachiyo_route_approval_smoke"] = {
             "status": "skipped",
             "evidence": {},
@@ -4278,6 +4330,18 @@ def verify_release_candidate(
         "status": "failed" if desktop_smoke_findings else "passed",
         "evidence": desktop_smoke_evidence,
         "findings": _finding_report(desktop_smoke_findings),
+        "run_requested": True,
+    }
+
+    tool_parity_smoke_findings, tool_parity_smoke_evidence = (
+        verify_planner_runtime_tool_parity_smoke(root)
+    )
+    _print_findings("planner runtime tool parity smoke", tool_parity_smoke_findings)
+    failed = failed or bool(tool_parity_smoke_findings)
+    report["planner_runtime_tool_parity_smoke"] = {
+        "status": "failed" if tool_parity_smoke_findings else "passed",
+        "evidence": tool_parity_smoke_evidence,
+        "findings": _finding_report(tool_parity_smoke_findings),
         "run_requested": True,
     }
 

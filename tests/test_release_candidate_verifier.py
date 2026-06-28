@@ -365,6 +365,21 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "app_scoped_click",
         "app_scoped_type",
     }
+    assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
+    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
+    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 7
+    assert {
+        case["id"]
+        for case in report["planner_runtime_tool_parity_smoke"]["evidence"]["cases"]
+    } == {
+        "generic_app_open",
+        "app_scoped_ui_click",
+        "builtin_data_analysis",
+        "current_page_report",
+        "generic_media_playback",
+        "explicit_terminal_command",
+        "reminder_creation",
+    }
     assert report["approval_policy_gate_smoke"]["status"] == "passed"
     assert report["approval_policy_gate_smoke"]["evidence"]["ok"] is True
     assert report["approval_policy_gate_smoke"]["evidence"]["planner_case_count"] == 5
@@ -665,6 +680,75 @@ def test_release_candidate_verifier_fails_when_desktop_planner_discovery_smoke_f
         {
             "path": str(tmp_path / "scripts/smoke_desktop_planner_discovery.py"),
             "message": "Notion click routed to browser",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "planner runtime tool parity smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["planner_runtime_tool_parity_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "planner_runtime_tool_parity_smoke"
+    case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
+    assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
+        "desktop.click_ui_element"
+    ]
+    assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
+        "terminal.run"
+    ]
+    assert all(
+        case["checks"]["request_tools_dispatched"]
+        for case in section["evidence"]["cases"]
+    )
+
+
+def test_release_candidate_verifier_fails_when_planner_runtime_tool_parity_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_planner_runtime_tool_parity_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "planner_runtime_tool_parity_smoke",
+            "error": "planner selected an unregistered tool",
+            "cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "planner runtime tool parity smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["planner_runtime_tool_parity_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "planner selected an unregistered tool"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_planner_runtime_tool_parity.py"),
+            "message": "planner selected an unregistered tool",
         }
     ]
 
