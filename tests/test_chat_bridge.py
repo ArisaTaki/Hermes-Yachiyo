@@ -482,7 +482,7 @@ def test_chat_bridge_quick_message_prefers_runtime_planner_before_legacy_candida
     )
     monkeypatch.setattr(
         chat_bridge_mod,
-        "_runtime_planner_candidates_for_quick_message",
+        "planner_first_daily_desktop_entrypoint_requests",
         lambda _text, **_kwargs: [
             {
                 "protocol": "json_fallback",
@@ -490,19 +490,6 @@ def test_chat_bridge_quick_message_prefers_runtime_planner_before_legacy_candida
                 "input": {},
                 "source": "runtime_planner",
                 "planning_reason": "planner_fallback_system_control",
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        chat_bridge_mod,
-        "daily_desktop_entrypoint_requests",
-        lambda _text, **_kwargs: [
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open",
-                "input": {"app_name": "Screen Saver"},
-                "source": "daily_desktop_intent",
-                "planning_reason": "clear_daily_desktop_intent",
             }
         ],
     )

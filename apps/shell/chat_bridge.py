@@ -25,9 +25,9 @@ from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
-    daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
     main_chat_entrypoint_allowed_tools,
+    planner_first_daily_desktop_entrypoint_requests,
 )
 from apps.shell.yachiyo_agent.web_destination_hints import legacy_known_web_destination_url_hint
 from apps.shell.yachiyo_agent.planner_execution import planner_decision_and_tool_requests
@@ -225,25 +225,6 @@ def _runtime_agent_service(runtime: "AppRuntime") -> Any | None:
     return None
 
 
-def _runtime_planner_candidates_for_quick_message(
-    text: str,
-    *,
-    metadata: dict[str, Any] | None = None,
-    allowed_tools: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    try:
-        from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
-
-        return planner_tool_requests(
-            text,
-            allowed_tools or daily_desktop_allowed_tools(),
-            metadata=metadata,
-        )
-    except Exception:
-        logger.debug("Launcher runtime planner quick-message candidates unavailable", exc_info=True)
-    return []
-
-
 def _desktop_candidates_for_quick_message(
     text: str,
     *,
@@ -256,14 +237,7 @@ def _desktop_candidates_for_quick_message(
     cannot project. Full task execution still records its planner/legacy
     selection event inside LegacyChatTaskStarter.
     """
-    planner_candidates = _runtime_planner_candidates_for_quick_message(
-        text,
-        metadata=metadata,
-        allowed_tools=allowed_tools,
-    )
-    if planner_candidates:
-        return planner_candidates
-    return daily_desktop_entrypoint_requests(
+    return planner_first_daily_desktop_entrypoint_requests(
         text,
         metadata=metadata,
         allowed_tools=allowed_tools,
