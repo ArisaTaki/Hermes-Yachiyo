@@ -49,6 +49,9 @@ from scripts.smoke_planner_runtime_tool_parity import (
 from scripts.smoke_real_desktop_discovery import (
     run_smoke as run_real_desktop_discovery_smoke,
 )
+from scripts.smoke_real_desktop_app_open import (
+    run_smoke as run_real_desktop_app_open_smoke,
+)
 from scripts.smoke_runtime_approval_resume import (
     run_smoke as run_runtime_approval_resume_smoke,
 )
@@ -1912,6 +1915,43 @@ def verify_real_desktop_discovery_smoke(root: Path) -> tuple[list[Finding], dict
     return [
         Finding(
             root / "scripts/smoke_real_desktop_discovery.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_real_desktop_app_open_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_real_desktop_app_open_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_real_desktop_app_open.py",
+                f"real desktop app open smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "real_desktop_app_open_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_real_desktop_app_open.py",
+                "real desktop app open smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "real_desktop_app_open_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "real desktop app open smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_real_desktop_app_open.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4001,6 +4041,7 @@ def verify_release_candidate(
     run_dmg_chat_native_file_smoke: bool = False,
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
+    run_real_desktop_app_open_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: ManualChecksJsonInput = None,
     manual_checks_markdown: Path | None = None,
@@ -4056,6 +4097,12 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": True,
+        },
+        "real_desktop_app_open_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_app_open_smoke,
         },
         "planner_runtime_tool_parity_smoke": {
             "status": "pending",
@@ -4245,6 +4292,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         }
+        report["real_desktop_app_open_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_app_open_smoke,
+        }
         report["planner_runtime_tool_parity_smoke"] = {
             "status": "skipped",
             "evidence": {},
@@ -4396,6 +4449,30 @@ def verify_release_candidate(
         "findings": _finding_report(real_desktop_findings),
         "run_requested": True,
     }
+
+    if run_real_desktop_app_open_smoke:
+        real_app_open_findings, real_app_open_evidence = (
+            verify_real_desktop_app_open_smoke(root)
+        )
+        _print_findings("real desktop app open smoke", real_app_open_findings)
+        failed = failed or bool(real_app_open_findings)
+        report["real_desktop_app_open_smoke"] = {
+            "status": "failed" if real_app_open_findings else "passed",
+            "evidence": real_app_open_evidence,
+            "findings": _finding_report(real_app_open_findings),
+            "run_requested": run_real_desktop_app_open_smoke,
+        }
+    else:
+        print(
+            "real desktop app open smoke: skipped; pass "
+            "--run-real-desktop-app-open-smoke to open and verify a real app"
+        )
+        report["real_desktop_app_open_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_app_open_smoke,
+        }
 
     tool_parity_smoke_findings, tool_parity_smoke_evidence = (
         verify_planner_runtime_tool_parity_smoke(root)
@@ -5052,6 +5129,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run opt-in real provider streaming, tool-call, native Agent, and advanced Workflow smoke using OHA_YACHIYO_SMOKE_* credentials.",
     )
     parser.add_argument(
+        "--run-real-desktop-app-open-smoke",
+        action="store_true",
+        help="Run opt-in real macOS desktop app discovery -> app.open -> app.status smoke.",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
@@ -5210,6 +5292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dmg_chat_native_file_smoke=args.run_dmg_chat_native_file_smoke,
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
+        run_real_desktop_app_open_smoke=args.run_real_desktop_app_open_smoke,
         manual_checks_json=args.manual_checks_json,
         manual_checks_markdown=args.manual_checks_markdown,
         require_manual_checks_complete=args.require_manual_checks_complete,

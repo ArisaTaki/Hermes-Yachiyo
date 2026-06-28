@@ -723,6 +723,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC DMG mount gate",
     ),
     (
+        "python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-open-smoke",
+        "release packaging docs must document the opt-in real desktop app open smoke",
+    ),
+    (
+        "它会真实打开本机系统 app",
+        "release packaging docs must document real desktop app open smoke side effects",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --check-gatekeeper-readiness",
         "release packaging docs must document the local RC Gatekeeper readiness gate",
     ),
@@ -1367,6 +1375,22 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "run_real_desktop_discovery_smoke",
         "release candidate verifier must run the real desktop discovery smoke helper",
+    ),
+    (
+        '"real_desktop_app_open_smoke"',
+        "release candidate verifier must archive opt-in real desktop app open smoke evidence",
+    ),
+    (
+        "verify_real_desktop_app_open_smoke",
+        "release candidate verifier must expose opt-in real desktop app open smoke verification",
+    ),
+    (
+        "run_real_desktop_app_open_smoke",
+        "release candidate verifier must run the opt-in real desktop app open smoke helper",
+    ),
+    (
+        "--run-real-desktop-app-open-smoke",
+        "release candidate verifier CLI must expose opt-in real desktop app open smoke",
     ),
     (
         '"planner_runtime_tool_parity_smoke"',

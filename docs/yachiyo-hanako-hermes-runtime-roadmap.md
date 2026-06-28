@@ -87,6 +87,14 @@ opening them, and archives permission preflight diagnostics. On non-macOS
 source checks it records skipped evidence instead of pretending desktop
 execution was exercised.
 
+Current opt-in real desktop app open evidence is reproducible with
+`python scripts/smoke_real_desktop_app_open.py`; on macOS this runs the real
+`desktop.list_apps -> app.open -> app.status` chain against Calculator by
+default, then attempts cleanup only if the app was not already running before
+the smoke. The RC verifier keeps this evidence skipped by default and only runs
+it with `--run-real-desktop-app-open-smoke`, so source gates do not open user
+apps unless explicitly requested.
+
 Current planner/runtime tool parity evidence is reproducible with
 `python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder
