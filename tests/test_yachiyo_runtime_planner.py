@@ -8674,6 +8674,18 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
         "在 Linear 上的创建按钮点击",
         allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
     )
+    app_first_postposed_click_requests = planner_desktop_tool_requests(
+        "PixelForge 导出按钮点一下",
+        allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
+    )
+    app_first_english_click_requests = planner_desktop_tool_requests(
+        "PixelForge export button click",
+        allowed_tools=["app.focus_and_click_ui_element", "app.open_and_click_ui_element"],
+    )
+    target_first_click_decision = RuntimePlanner().decision(
+        "Export button click",
+        allowed_tools=["desktop.list_apps", "app.focus_and_click_ui_element"],
+    )
     foreground_click_requests = planner_desktop_tool_requests(
         "读取当前窗口的按钮然后点击导出",
         allowed_tools=[
@@ -8741,6 +8753,37 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
             "planning_reason": "planner_desktop_operation",
         },
     ]
+    assert app_first_postposed_click_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "导出",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert app_first_english_click_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "export",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert target_first_click_decision.selected_intent.kind != "desktop_operation"
 
 
 def test_planner_desktop_tool_requests_prefers_generic_foreground_sequence() -> None:

@@ -145,6 +145,60 @@ def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_
         assert requests[1]["input"] == {"app_name": app_name}
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_targets() -> None:
+    cases = (
+        ("PixelForge 导出按钮点一下", "导出"),
+        ("PixelForge export button click", "export"),
+    )
+
+    for prompt, target in cases:
+        requests = planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.click_ui_element",
+                "input": {
+                    "target": target,
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {"role_filter": "button", "limit": 80},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",
