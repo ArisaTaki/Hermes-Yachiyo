@@ -28,6 +28,9 @@ from scripts.run_electron_ui_smokes import (
     electron_ui_smoke_scripts as release_ui_smoke_scripts,
     run_electron_ui_smoke_report,
 )
+from scripts.smoke_data_analysis_artifacts import (
+    run_smoke as run_data_analysis_artifact_smoke,
+)
 from scripts.summarize_native_agent_capabilities import summarize_capabilities
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
@@ -65,6 +68,7 @@ PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
 PROVIDER_SMOKE_SCRIPT = Path("scripts/smoke_openai_compatible_stream.py")
 NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT = Path("scripts/smoke_native_agent_full_chain.py")
 NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT = Path("scripts/smoke_native_workflow_full_chain.py")
+DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR = Path("tmp/data-analysis-artifact-smoke")
 PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, Path, tuple[str, ...]], ...] = (
     (
         "text_stream",
@@ -1699,6 +1703,46 @@ def _auto_apply_release_candidate_check_evidence(
 
 def existing_artifact_paths(root: Path) -> tuple[Path, ...]:
     return tuple(path for path in DEFAULT_ARTIFACT_PATHS if (root / path).exists())
+
+
+def verify_data_analysis_artifact_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    workdir = root / DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR
+    try:
+        raw_evidence = run_data_analysis_artifact_smoke(workdir)
+    except Exception as exc:
+        return [
+            Finding(
+                DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR,
+                f"data analysis artifact smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "data_analysis_artifact_smoke",
+            "workspace": str(workdir),
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR,
+                "data analysis artifact smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "data_analysis_artifact_smoke",
+            "workspace": str(workdir),
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "data analysis artifact smoke did not pass")
+    return [
+        Finding(
+            DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR,
+            redact_api_error_text(message),
+        )
+    ], evidence
 
 
 def _print_findings(title: str, findings: Sequence[Finding]) -> None:
@@ -3669,6 +3713,12 @@ def verify_release_candidate(
         "ok": False,
         "source_revision": _source_revision(root),
         "source_release_guards": {"status": "pending", "findings": []},
+        "data_analysis_artifact_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -3803,6 +3853,12 @@ def verify_release_candidate(
             "status": "skipped",
             "findings": [],
         }
+        report["data_analysis_artifact_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
         report["built_artifact_guards"] = {
             "status": "failed",
             "artifact_paths": [],
@@ -3897,6 +3953,16 @@ def verify_release_candidate(
     report["source_release_guards"] = {
         "status": "failed" if source_findings else "passed",
         "findings": _finding_report(source_findings),
+    }
+
+    data_smoke_findings, data_smoke_evidence = verify_data_analysis_artifact_smoke(root)
+    _print_findings("data analysis artifact smoke", data_smoke_findings)
+    failed = failed or bool(data_smoke_findings)
+    report["data_analysis_artifact_smoke"] = {
+        "status": "failed" if data_smoke_findings else "passed",
+        "evidence": data_smoke_evidence,
+        "findings": _finding_report(data_smoke_findings),
+        "run_requested": True,
     }
 
     selected_artifacts = (

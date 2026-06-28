@@ -329,6 +329,18 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["ok"] is True
     assert report["source_release_guards"]["status"] == "passed"
+    assert report["data_analysis_artifact_smoke"]["status"] == "passed"
+    assert report["data_analysis_artifact_smoke"]["evidence"]["ok"] is True
+    assert report["data_analysis_artifact_smoke"]["evidence"]["result"]["artifact_paths"] == [
+        "reports/sales.md",
+        "reports/sales-summary.csv",
+        "reports/sales.html",
+        "reports/sales-chart.png",
+    ]
+    assert all(
+        item["matched"]
+        for item in report["data_analysis_artifact_smoke"]["evidence"]["readback"]
+    )
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -374,6 +386,76 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "failed_check_ids": [],
         "automated_evidence_check_ids": [],
     }
+
+
+def test_release_candidate_verifier_reports_data_analysis_artifact_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "data analysis artifact smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["data_analysis_artifact_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "data_analysis_artifact_smoke"
+    assert section["evidence"]["result"]["source_kind"] == "csv"
+    assert section["evidence"]["result"]["rows"] == 3
+    assert section["evidence"]["result"]["artifact_manifest"][-1] == {
+        "path": "reports/sales-chart.png",
+        "kind": "chart",
+        "actual_kind": "image",
+    }
+
+
+def test_release_candidate_verifier_fails_when_data_analysis_artifact_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_run_data_analysis_artifact_smoke(workdir):
+        assert workdir == tmp_path / rc.DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR
+        return {
+            "ok": False,
+            "mode": "data_analysis_artifact_smoke",
+            "workspace": str(workdir),
+            "error": "markdown artifact was not readable",
+            "readback": [{"path": "reports/sales.md", "matched": False}],
+        }
+
+    monkeypatch.setattr(
+        rc,
+        "run_data_analysis_artifact_smoke",
+        fake_run_data_analysis_artifact_smoke,
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "data analysis artifact smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["data_analysis_artifact_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "markdown artifact was not readable"
+    assert section["findings"] == [
+        {
+            "path": "tmp/data-analysis-artifact-smoke",
+            "message": "markdown artifact was not readable",
+        }
+    ]
 
 
 def test_release_candidate_verifier_merges_manual_check_evidence(

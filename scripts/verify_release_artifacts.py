@@ -1321,6 +1321,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must write source revision metadata to the RC report",
     ),
     (
+        '"data_analysis_artifact_smoke"',
+        "release candidate verifier must archive data analysis artifact readback evidence",
+    ),
+    (
+        "verify_data_analysis_artifact_smoke",
+        "release candidate verifier must expose data analysis artifact smoke verification",
+    ),
+    (
+        "run_data_analysis_artifact_smoke",
+        "release candidate verifier must run the data analysis artifact smoke helper",
+    ),
+    (
         '"bridge_statuses"',
         "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
     ),
