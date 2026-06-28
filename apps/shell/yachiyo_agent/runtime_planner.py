@@ -3371,17 +3371,6 @@ class RuntimePlanner:
             ),
             _step(
                 intent,
-                "run-code-command",
-                "Run code command",
-                "terminal.execution",
-                _first_allowed(("terminal.run",), allowed),
-                risk_level="high",
-                approval_required=True,
-                depends_on=["inspect-workspace"],
-                reason="Use terminal only when the task needs tests, builds, or scripts.",
-            ),
-            _step(
-                intent,
                 "write-code-report",
                 "Write result artifact",
                 "artifact.write",

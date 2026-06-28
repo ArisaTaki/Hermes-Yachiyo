@@ -1012,6 +1012,27 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
     ]
 
 
+def test_runtime_planner_keeps_generic_code_task_plan_non_executable_until_inspected() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我写一个 Python 脚本处理日志",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    assert decision.plan.tool_plan.required_capabilities == [
+        "file.workspace_read",
+        "artifact.write",
+    ]
+    assert decision.plan.tool_plan.approvals_required == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-workspace",
+        "write-code-report",
+    ]
+    assert _step_by_id(decision, "inspect-workspace").tool_name == "workspace.list"
+    assert _step_by_id(decision, "write-code-report").tool_name == "artifact.write"
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
 def test_runtime_planner_routes_local_file_access_to_desktop_file_tools() -> None:
     open_decision = RuntimePlanner().decision(
         "打开当前选中的 Finder 文件",
