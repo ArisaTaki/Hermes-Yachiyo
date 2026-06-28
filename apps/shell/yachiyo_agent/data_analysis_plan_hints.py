@@ -73,9 +73,47 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     for endings, kind in suffixes:
         if lowered_source.endswith(endings):
             return kind
+    context_kind = _context_data_source_kind_hint(lowered_text)
+    if context_kind:
+        return context_kind
     if any(marker in lowered_text for marker in ("表格", "table", "tabular")):
         return "text_table"
     return "unknown"
+
+
+def _context_data_source_kind_hint(lowered_text: str) -> str:
+    context_en = r"(?:clipboard|selected(?:\s+text)?|selection|current\s+(?:page|window|selection))"
+    context_zh = r"(?:剪贴板|粘贴板|选中(?:的)?|当前选中(?:的)?|当前网页|当前页面|当前窗口)"
+    format_map = (
+        ("jsonl", "jsonl"),
+        ("json", "json"),
+        ("csv", "csv"),
+        ("tsv", "tsv"),
+        ("xlsx", "xlsx"),
+        ("xls", "xls"),
+    )
+    for token, kind in format_map:
+        if re.search(
+            rf"{context_en}(?:\s+(?:contents?|data|text|table))?\s+{token}\b",
+            lowered_text,
+            flags=re.IGNORECASE,
+        ) or re.search(
+            rf"\b{token}\b\s+(?:data\s+)?(?:in|from|on|inside)\s+(?:the\s+)?{context_en}",
+            lowered_text,
+            flags=re.IGNORECASE,
+        ):
+            return kind
+        if re.search(
+            rf"{context_zh}(?:里|里的|中|中的|内容|数据|表格)?\s*(?:的)?\s*{token}",
+            lowered_text,
+            flags=re.IGNORECASE,
+        ) or re.search(
+            rf"{token}\s*(?:数据|内容|表格)?\s*(?:在|来自)?\s*{context_zh}",
+            lowered_text,
+            flags=re.IGNORECASE,
+        ):
+            return kind
+    return ""
 
 
 def data_analysis_artifacts_expected(

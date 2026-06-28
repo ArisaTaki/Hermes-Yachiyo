@@ -402,6 +402,54 @@ def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
     ]
 
 
+def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
+    clipboard_csv = RuntimePlanner().decision(
+        "分析剪贴板里的 CSV 并输出图表报告",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
+    selected_json = RuntimePlanner().decision(
+        "分析当前选中的 JSON 并输出报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+    clipboard_table_csv_output = RuntimePlanner().decision(
+        "分析剪贴板里的表格并输出 csv",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
+
+    assert clipboard_csv.selected_intent.kind == "data_analysis"
+    assert clipboard_csv.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "csv",
+        "context_source": "clipboard",
+    }
+    assert clipboard_csv.selected_intent.expected_outputs == ["chart", "report"]
+    assert _step_by_id(clipboard_csv, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png"],
+        "body_source": "clipboard",
+    }
+    assert selected_json.selected_intent.kind == "data_analysis"
+    assert selected_json.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "json",
+        "context_source": "selection",
+    }
+    assert [step.step_id for step in selected_json.plan.tool_plan.steps][:2] == [
+        "copy-selected-data-context",
+        "read-data-context",
+    ]
+    assert clipboard_table_csv_output.selected_intent.kind == "data_analysis"
+    assert clipboard_table_csv_output.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "clipboard",
+    }
+    assert clipboard_table_csv_output.selected_intent.expected_outputs == ["table"]
+    assert _step_by_id(clipboard_table_csv_output, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-summary.csv"],
+        "body_source": "clipboard",
+    }
+
+
 def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     decision = RuntimePlanner().decision(
         "把当前窗口里的表格复制出来，分析并输出报告",
@@ -409,6 +457,15 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     )
     current_page_table = RuntimePlanner().decision(
         "把当前页面里的表格复制出来，分析趋势并写报告",
+        allowed_tools=[
+            "browser.extract_text",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    natural_current_page_table = RuntimePlanner().decision(
+        "用当前网页表格输出一份数据分析报告",
         allowed_tools=[
             "browser.extract_text",
             "browser.current_page",
@@ -468,6 +525,21 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "write-analysis-artifact",
     ]
     assert _step_by_id(current_page_table, "read-data-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert natural_current_page_table.selected_intent.kind == "data_analysis"
+    assert natural_current_page_table.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "current_page_content",
+    }
+    assert natural_current_page_table.selected_intent.missing_inputs == []
+    assert [step.step_id for step in natural_current_page_table.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(natural_current_page_table, "read-data-context").tool_name == (
         "browser.extract_text"
     )
     assert [step.step_id for step in current_page_table_with_clipboard.plan.tool_plan.steps] == [
@@ -9221,9 +9293,21 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "分析剪贴板里的表格并输出 csv",
         allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
     )
+    clipboard_csv_requests = planner_tool_requests(
+        "分析剪贴板里的 CSV 并输出图表报告",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
+    selected_json_requests = planner_tool_requests(
+        "分析当前选中的 JSON 并输出报告",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
     current_window_requests = planner_tool_requests(
         "把当前窗口里的表格复制出来，分析并输出报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
+    )
+    current_page_table_requests = planner_tool_requests(
+        "用当前网页表格输出一份数据分析报告",
+        allowed_tools=["browser.extract_text", "browser.current_page", "terminal.run", "artifact.write"],
     )
     report_requests = planner_tool_requests(
         "把选中的内容做成报告",
@@ -9257,6 +9341,33 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
             "continue_to_model": True,
         }
     ]
+    assert clipboard_csv_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert selected_json_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        },
+    ]
     assert current_window_requests == [
         {
             "protocol": "json_fallback",
@@ -9280,6 +9391,16 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
         },
+    ]
+    assert current_page_table_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
     ]
     assert [request["planning_reason"] for request in report_requests] == [
         "planner_prefetch_report_context",
