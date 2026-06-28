@@ -164,7 +164,7 @@ def daily_desktop_planned_timeline(
 ) -> list[dict[str, Any]]:
     planned_requests = list(requests or ())
     if not planned_requests:
-        planned_requests = daily_desktop_entrypoint_requests(
+        planned_requests = planner_first_daily_desktop_entrypoint_requests(
             prompt,
             metadata=metadata,
             allowed_tools=allowed_tools,

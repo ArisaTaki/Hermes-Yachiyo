@@ -45,6 +45,23 @@ def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline(
     ]
 
 
+def test_daily_desktop_planned_timeline_uses_planner_first_default() -> None:
+    assert daily_desktop_planned_timeline(
+        "当前窗口是什么",
+        allowed_tools=["desktop.active_window"],
+    ) == [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.active_window",
+            "tool": "desktop.active_window",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "input_preview": {},
+        }
+    ]
+
+
 def test_daily_desktop_planned_timeline_keeps_each_runtime_planner_request() -> None:
     requests = [
         {
