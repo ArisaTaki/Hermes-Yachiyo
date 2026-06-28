@@ -1011,6 +1011,8 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     if not isinstance(direct_hint, Mapping):
         return []
     body_source = str(direct_hint.get("body_source") or "").strip()
+    if _direct_communication_requires_model_body(direct_hint):
+        return []
     steps_by_id = {
         str(getattr(step, "step_id", "") or "").strip(): step
         for step in decision.plan.tool_plan.steps
@@ -1073,6 +1075,14 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
             )
         )
     return requests
+
+
+def _direct_communication_requires_model_body(direct_hint: Mapping[str, Any]) -> bool:
+    body_source = str(direct_hint.get("body_source") or "").strip()
+    transform = str(direct_hint.get("content_transform_hint") or "").strip()
+    if transform and body_source:
+        return True
+    return body_source in {"current_page_content", "visible_text"}
 
 
 def _direct_communication_context_tool_requests(

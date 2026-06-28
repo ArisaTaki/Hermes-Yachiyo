@@ -1261,14 +1261,19 @@ class TaskIntentRouter:
             return _empty_intent("communication", text)
         if _foreground_submit_action_hint(text) and not direct_hint:
             return _empty_intent("communication", text)
-        source = context_source_hint(text)
+        source = _communication_context_source_hint(text)
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
             score = 0.24
         if score <= 0:
             return _empty_intent("communication", text)
         inputs = {"context_source": source} if source else {}
+        transform = _communication_content_transform_hint(text)
+        if transform:
+            inputs["content_transform_hint"] = transform
         if direct_hint:
+            if transform:
+                direct_hint = {**direct_hint, "content_transform_hint": transform}
             inputs["direct_message_hint"] = direct_hint
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "communication", text),
@@ -3987,6 +3992,10 @@ class RuntimePlanner:
                 capability_id="communication.compose",
             )
             depends_on = [step.step_id for step in context_steps]
+            draft_input = {"body_source": context_source}
+            transform = str(intent.inputs.get("content_transform_hint") or "").strip()
+            if transform:
+                draft_input["transform"] = transform
             return [
                 *context_steps,
                 _step(
@@ -3995,7 +4004,7 @@ class RuntimePlanner:
                     "Draft communication from captured context",
                     "communication.compose",
                     compose_tool,
-                    input_preview={"body_source": context_source},
+                    input_preview=draft_input,
                     risk_level="medium",
                     approval_required=True,
                     depends_on=depends_on,
@@ -4754,11 +4763,22 @@ def _direct_communication_steps(
     recipient = str(direct_message.get("recipient") or "").strip()
     body = str(direct_message.get("body") or "").strip()
     body_source = str(direct_message.get("body_source") or "").strip()
+    transform = str(direct_message.get("content_transform_hint") or "").strip()
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
     if (
         not app_name
         or not recipient
-        or (not body and body_source not in {"clipboard", "selection", "current_page_link"})
+        or (
+            not body
+            and body_source
+            not in {
+                "clipboard",
+                "selection",
+                "current_page_link",
+                "current_page_content",
+                "visible_text",
+            }
+        )
     ):
         return []
     app_shortcut_tool = _first_allowed(
@@ -4771,7 +4791,19 @@ def _direct_communication_steps(
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     steps: list[ToolPlanStepSnapshot] = []
     source_step_id = ""
-    if body_source == "selection":
+    generated_body = _direct_message_requires_generated_body(direct_message)
+    if generated_body and body_source:
+        context_steps = _context_source_steps(
+            intent,
+            allowed,
+            body_source,
+            step_prefix="communication",
+            capability_id="communication.compose",
+        )
+        steps.extend(context_steps)
+        if context_steps:
+            source_step_id = context_steps[-1].step_id
+    elif body_source == "selection":
         source_step_id = "copy-communication-body-source"
         steps.append(
             _step(
@@ -4861,7 +4893,7 @@ def _direct_communication_steps(
             ),
         ]
     )
-    if body_source in {"clipboard", "selection", "current_page_link"}:
+    if body_source in {"clipboard", "selection", "current_page_link"} and not generated_body:
         steps.append(
             _step(
                 intent,
@@ -4877,6 +4909,9 @@ def _direct_communication_steps(
         )
         send_depends_on = ["paste-communication-message"]
     else:
+        draft_input = {"text": body} if body else {"body_source": body_source}
+        if transform:
+            draft_input["transform"] = transform
         steps.append(
             _step(
                 intent,
@@ -4884,10 +4919,14 @@ def _direct_communication_steps(
                 "Draft communication message",
                 "communication.compose",
                 type_tool,
-                input_preview={"text": body},
+                input_preview=draft_input,
                 depends_on=["submit-communication-recipient-search"],
                 action="draft_message",
-                reason="Type only the explicit message body before the approval-gated send step.",
+                reason=(
+                    "Draft the generated message body from inspected context before the approval-gated send step."
+                    if generated_body
+                    else "Type only the explicit message body before the approval-gated send step."
+                ),
             )
         )
         send_depends_on = ["draft-communication-message"]
@@ -4912,11 +4951,19 @@ def _direct_communication_steps(
 
 def _communication_draft_input_preview(direct_message: Mapping[str, Any]) -> dict[str, Any]:
     preview: dict[str, Any] = {}
-    for key in ("app_name", "recipient", "body", "body_source", "channel"):
+    for key in ("app_name", "recipient", "body", "body_source", "content_transform_hint", "channel"):
         value = str(direct_message.get(key) or "").strip()
         if value:
             preview[key] = value
     return preview
+
+
+def _direct_message_requires_generated_body(direct_message: Mapping[str, Any]) -> bool:
+    body_source = str(direct_message.get("body_source") or "").strip()
+    transform = str(direct_message.get("content_transform_hint") or "").strip()
+    if transform and body_source:
+        return True
+    return body_source in {"current_page_content", "visible_text"}
 
 
 def _current_page_find_steps(
@@ -6093,6 +6140,28 @@ def _context_artifact_source_hint(text: str) -> str:
         return source
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
+    return ""
+
+
+def _communication_context_source_hint(text: str) -> str:
+    if _looks_like_visible_text_artifact_source(text):
+        return "visible_text"
+    source = _task_context_source_hint(text)
+    if source:
+        return source
+    if _looks_like_current_page_artifact_source(text):
+        return "current_page_content"
+    return ""
+
+
+def _communication_content_transform_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    if _contains_any(value, ("报告", "report", "文档", "document", "markdown", "md")):
+        return "report"
+    if _contains_any(value, ("摘要", "总结", "概括", "summary", "summarize")):
+        return "summary"
     return ""
 
 
@@ -8648,7 +8717,7 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
 
 
 def _direct_communication_candidate_hint(text: str) -> dict[str, str]:
-    source = context_source_hint(text)
+    source = _communication_context_source_hint(text)
     if source:
         direct_context_hint = _direct_context_communication_hint(text, source)
         if direct_context_hint:
@@ -8871,7 +8940,13 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
 
 
 def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]:
-    if source not in {"clipboard", "selection", "current_page_link"}:
+    if source not in {
+        "clipboard",
+        "selection",
+        "current_page_link",
+        "current_page_content",
+        "visible_text",
+    }:
         return {}
     value = _clean_prompt(text)
     source_pattern = {
@@ -8882,12 +8957,24 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
             r"selected\s+text|selected\s+content|selection)"
         ),
         "current_page_link": r"(?:当前网页链接|当前页面链接|当前链接|current\s+page\s+link|current\s+url)",
+        "current_page_content": (
+            r"(?:当前网页|当前页面|当前页|这个网页|这个页面|"
+            r"current\s+page|current\s+webpage|this\s+page|this\s+webpage)"
+            r"(?:的|里的)?(?:内容|正文|文本|文字|摘要|总结|报告|content|text|summary|report)?"
+        ),
+        "visible_text": (
+            r"(?:当前窗口|当前应用|当前界面|当前屏幕|前台窗口|前台应用|"
+            r"current\s+window|current\s+app|foreground\s+window|foreground\s+app)"
+            r"(?:的|里的)?(?:内容|文本|文字|摘要|总结|报告|content|text|summary|report)?"
+        ),
     }[source]
     patterns = (
         rf"^(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
         rf"(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
         rf"(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
         rf"(?:发送|发|发消息)\s*{source_pattern}$",
+        rf"^(?:把|将)?\s*{source_pattern}.{{0,50}}?"
+        rf"(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
         rf"^(?:把|将)?\s*{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:给|发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",

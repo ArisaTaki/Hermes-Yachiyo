@@ -7826,20 +7826,124 @@ def test_runtime_planner_tracks_context_communication_source_without_body() -> N
     )
 
     assert decision.selected_intent.kind == "communication"
-    assert decision.selected_intent.inputs == {"context_source": "current_page_content"}
+    assert decision.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body_source": "current_page_content",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "read-communication-context",
-        "draft-communication-from-context",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
     ]
     read_step = _step_by_id(decision, "read-communication-context")
     assert read_step.capability_id == "browser.research"
     assert read_step.tool_name == "browser.extract_text"
     assert read_step.action == "extract_text"
-    draft_step = _step_by_id(decision, "draft-communication-from-context")
-    assert draft_step.tool_name == "artifact.write"
+    draft_step = _step_by_id(decision, "draft-communication-message")
     assert draft_step.input_preview == {"body_source": "current_page_content"}
-    assert draft_step.depends_on == ["read-communication-context"]
-    assert draft_step.approval_required is True
+    assert draft_step.depends_on == ["submit-communication-recipient-search"]
+    assert _step_by_id(decision, "send-communication-message").approval_required is True
+
+
+def test_runtime_planner_routes_generated_context_to_direct_communication() -> None:
+    allowed_tools = [
+        "browser.extract_text",
+        "desktop.ui_elements",
+        "clipboard.read",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    current_page = RuntimePlanner().decision(
+        "把当前网页摘要发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+    current_window = RuntimePlanner().decision(
+        "把当前窗口内容整理成报告，然后发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+    clipboard_summary = RuntimePlanner().decision(
+        "把剪贴板内容总结后发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+
+    assert current_page.selected_intent.kind == "communication"
+    assert current_page.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "content_transform_hint": "summary",
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body_source": "current_page_content",
+            "mode": "focus",
+            "send_action": "send",
+            "content_transform_hint": "summary",
+        },
+    }
+    assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(current_page, "read-communication-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(current_page, "draft-communication-message").input_preview == {
+        "body_source": "current_page_content",
+        "transform": "summary",
+    }
+    assert _step_by_id(current_page, "send-communication-message").risk_level == "high"
+    assert _step_by_id(current_page, "send-communication-message").approval_required is True
+
+    assert current_window.selected_intent.kind == "communication"
+    assert current_window.selected_intent.inputs["context_source"] == "visible_text"
+    assert current_window.selected_intent.inputs["content_transform_hint"] == "report"
+    assert _step_by_id(current_window, "read-communication-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(current_window, "read-communication-context").input_preview == {
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(current_window, "draft-communication-message").input_preview == {
+        "body_source": "visible_text",
+        "transform": "report",
+    }
+
+    assert clipboard_summary.selected_intent.kind == "communication"
+    assert clipboard_summary.selected_intent.inputs["context_source"] == "clipboard"
+    assert clipboard_summary.selected_intent.inputs["content_transform_hint"] == "summary"
+    assert [step.step_id for step in clipboard_summary.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(clipboard_summary, "read-communication-context").tool_name == (
+        "clipboard.read"
+    )
+    assert _step_by_id(clipboard_summary, "draft-communication-message").input_preview == {
+        "body_source": "clipboard",
+        "transform": "summary",
+    }
 
 
 def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
@@ -11891,6 +11995,46 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
             "protocol": "json_fallback",
             "tool": "browser.extract_text",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把当前网页摘要发给微信文件传输助手",
+        allowed_tools=[
+            "browser.extract_text",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把当前窗口内容整理成报告，然后发给微信文件传输助手",
+        allowed_tools=[
+            "desktop.ui_elements",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,
