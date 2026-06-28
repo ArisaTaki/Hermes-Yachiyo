@@ -415,6 +415,17 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
             "artifact.write",
         ],
     )
+    current_page_table_with_clipboard = RuntimePlanner().decision(
+        "把当前页面里的表格复制出来，分析趋势并写报告",
+        allowed_tools=[
+            "browser.extract_text",
+            "browser.current_page",
+            "desktop.safe_shortcut",
+            "clipboard.read",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["context_source"] == "current_page_content"
@@ -456,6 +467,14 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "write-analysis-artifact",
     ]
     assert _step_by_id(current_page_table, "read-data-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert [step.step_id for step in current_page_table_with_clipboard.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(current_page_table_with_clipboard, "read-data-context").tool_name == (
         "browser.extract_text"
     )
     assert current_page_table.plan.tool_plan.required_capabilities == [
@@ -1246,6 +1265,14 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "把当前网页总结成一份报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
     )
+    research_report = RuntimePlanner().decision(
+        "根据当前网页写一份竞品调研报告",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+    english_report = RuntimePlanner().decision(
+        "research current page and write a report",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
 
     assert report.selected_intent.kind == "web_research"
     assert [step.step_id for step in report.plan.tool_plan.steps] == [
@@ -1256,6 +1283,23 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "path": "research-summary.md"
     }
     assert report.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+    assert research_report.selected_intent.kind == "web_research"
+    assert research_report.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+    }
+    assert [step.step_id for step in research_report.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert english_report.selected_intent.kind == "web_research"
+    assert english_report.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+    }
+    assert _step_by_id(english_report, "extract-current-page-text").tool_name == (
+        "browser.extract_text"
+    )
 
     english_summary = RuntimePlanner().decision(
         "what is this page about",
@@ -9459,6 +9503,24 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+        }
+    ]
+    assert planner_tool_requests("根据当前网页写一份竞品调研报告", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("research current page and write a report", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
         }
     ]
     assert planner_tool_requests("what is this page about", allowed_tools=allowed) == [

@@ -4053,6 +4053,15 @@ def _data_analysis_context_source_steps(
             ("表格", "数据", "table", "tabular", "spreadsheet", "data", "csv"),
         )
     ):
+        browser_context_tool = _first_allowed(("browser.extract_text", "browser.current_page"), allowed)
+        if browser_context_tool:
+            return _context_source_steps(
+                intent,
+                allowed,
+                source,
+                step_prefix="data",
+                capability_id="data.analysis",
+            )
         shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
         read_tool = _first_allowed(("clipboard.read",), allowed)
         if shortcut_tool and read_tool:
@@ -9866,6 +9875,18 @@ def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
         or re.search(
             r"\bwhat(?:'s|\s+is)\s+(?:this|the\s+current|current)"
             r"\s+(?:web\s*)?page\s+about\b",
+            lowered,
+        )
+        or re.search(
+            r"(?:根据|基于|用|使用).{0,6}(?:当前|这个|本页).{0,8}"
+            r"(?:网页|页面|标签页|页).{0,16}(?:写|生成|输出|整理|做|制作|总结|调研|分析)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:research|analy[sz]e|write|create|generate|produce|summari[sz]e)"
+            r".{0,24}\b(?:from|based\s+on|using)?\s*(?:the\s+)?(?:current|this)"
+            r"\s+(?:web\s*)?page\b",
             lowered,
         )
         or re.search(r"\bextract\s+(?:the\s+)?(?:current|this)\s+page\s+text\b", lowered)
