@@ -298,6 +298,7 @@ class TaskIntentRouter:
         if hotkey and not _contains_any(text, ("发送", "提交", "send", "submit")):
             foreground_submit_action = ""
         foreground_search_submit = _foreground_search_submit_hint(text)
+        foreground_app_search = _foreground_app_search_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
         app_preferences = _app_preferences_hint(text)
@@ -387,6 +388,7 @@ class TaskIntentRouter:
             or foreground_submit_action
             or foreground_compose_text
             or foreground_paste
+            or foreground_app_search
         ):
             score = 0.18
         if score <= 0 and (app_scoped_desktop_operation or command_palette):
@@ -429,6 +431,7 @@ class TaskIntentRouter:
             and desktop_discovery is None
             and not foreground_search_submit
             and not foreground_submit_action
+            and not foreground_app_search
             and not command_palette
             and not browser_internal_page
             and not app_preferences
@@ -524,14 +527,15 @@ class TaskIntentRouter:
             app_name_hint,
             app_management,
         )
-        app_search = (
-            {}
-            if (
-                app_click_scope
-                or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
-            )
-            else _app_search_hint(text, app_name_hint)
-        )
+        app_search: Mapping[str, str] = {}
+        if foreground_app_search:
+            app_name_hint = ""
+            app_search = foreground_app_search
+        elif not (
+            app_click_scope
+            or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
+        ):
+            app_search = _app_search_hint(text, app_name_hint)
         app_search_app_name = str(app_search.get("app_name") or "").strip()
         if app_search_app_name and (
             not app_name_hint
@@ -575,6 +579,7 @@ class TaskIntentRouter:
             and not foreground_compose_text
             and not foreground_paste
             and not app_search
+            and not foreground_app_search
             and not spotlight_search_query
             and not spotlight_open
             and not foreground_search_submit
@@ -597,6 +602,7 @@ class TaskIntentRouter:
             and safe_click is None
             and not hotkey
             and not app_search
+            and not foreground_app_search
             and not command_palette
             and not dynamic_context_transfer
         ):
@@ -803,6 +809,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if _explicit_hotkey_request(text):
+            return _empty_intent("web_research", text)
+        if _foreground_app_search_hint(text):
             return _empty_intent("web_research", text)
         if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
             return _empty_intent("web_research", text)
@@ -1146,6 +1154,8 @@ class TaskIntentRouter:
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
+            return _empty_intent("file_access", text)
+        if _looks_like_scoped_data_analysis_request(text):
             return _empty_intent("file_access", text)
         if _finder_search_then_ui_action_hint(text):
             return _empty_intent("file_access", text)
@@ -5787,6 +5797,48 @@ def _looks_like_context_artifact_request(text: str) -> bool:
     )
 
 
+def _looks_like_scoped_data_analysis_request(text: str) -> bool:
+    if not data_source_scope_hint(text, {}):
+        return False
+    return _contains_any(
+        text,
+        [
+            "csv",
+            "tsv",
+            "xlsx",
+            "xls",
+            "json",
+            "parquet",
+            "数据",
+            "数据集",
+            "表格",
+            "电子表格",
+        ],
+    ) and _contains_any(
+        text,
+        [
+            "analyze",
+            "analyse",
+            "analysis",
+            "summarize",
+            "summary",
+            "trend",
+            "report",
+            "chart",
+            "plot",
+            "分析",
+            "统计",
+            "汇总",
+            "总结",
+            "摘要",
+            "趋势",
+            "报告",
+            "图表",
+            "可视化",
+        ],
+    )
+
+
 def _looks_like_local_observation_or_control_request(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -6311,6 +6363,8 @@ def _app_name_hint(text: str) -> str:
         flags=re.IGNORECASE,
     ):
         return ""
+    if _foreground_app_search_hint(text):
+        return ""
     app_click_scope = _app_first_click_scope_hint(text)
     if app_click_scope:
         return str(app_click_scope.get("app_name") or "").strip()
@@ -6599,6 +6653,22 @@ def _clean_app_name_hint(value: str) -> str:
     )[0]
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE).strip()
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    scoped_called_app_match = re.match(
+        r"^(?:一个|一款|这个|那个)?"
+        r"(?:(?:我(?:的)?(?:电脑|mac|机器|系统)?|本机|本地)(?:上|里|中|内)?(?:的)?\s*)?"
+        r"(?:叫|名叫|名称是|名字是)\s*(?P<app>.+?)\s*(?:的)?(?:应用(?:程序)?|软件)?$",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if scoped_called_app_match:
+        app = scoped_called_app_match.group("app")
+    app = re.sub(
+        r"^(?:我(?:的)?(?:电脑|mac|机器|系统)(?:上|里|中|内)?(?:的)?|"
+        r"本机(?:上|里|中|内)?(?:的)?|本地(?:的)?)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     called_app_match = re.match(
         r"^(?:一个|一款|这个|那个)?(?:叫|名叫|名称是|名字是)\s*(?P<app>.+?)\s*(?:的)?(?:应用(?:程序)?|软件)$",
         app,
@@ -9041,6 +9111,42 @@ def _command_palette_should_submit(value: str, verb: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+def _foreground_app_search_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
+        r"(?:在|用|通过)?\s*(?:当前|现在|前台|这个|该)\s*"
+        r"(?:应用|app|application|窗口|界面|ui)"
+        r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
+        r"(?P<query>.+)$",
+        r"^(?:search|find)\s+(?P<query_en>.+?)\s+"
+        r"(?:in|inside|within)\s+(?:the\s+)?(?:current|active|foreground)\s+"
+        r"(?:app|application|window|ui)$",
+        r"^(?:in|inside|within)\s+(?:the\s+)?(?:current|active|foreground)\s+"
+        r"(?:app|application|window|ui)\s+(?:search|find)\s+(?P<query_en2>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = clean_followup_text(
+            match.groupdict().get("query")
+            or match.groupdict().get("query_en")
+            or match.groupdict().get("query_en2")
+            or ""
+        ).strip(" .，,。?？!！")
+        if not query:
+            continue
+        return {
+            "query": query,
+            "target": "搜索" if _contains_any(value, ("搜索", "查找", "检索", "找")) else "Search",
+            "scope": "foreground",
+        }
+    return {}
 
 
 def _app_search_hint(text: str, app_name: str) -> dict[str, str]:

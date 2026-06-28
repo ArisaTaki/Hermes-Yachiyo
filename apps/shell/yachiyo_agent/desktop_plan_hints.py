@@ -129,6 +129,8 @@ def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
 
 
 def click_target_hint(text: str) -> dict[str, Any] | None:
+    if _looks_like_ui_click_advice_request(str(text or "")):
+        return None
     if re.search(
         r"\b(?:press|hit|tap)\s+(?:command|cmd|control|ctrl|option|alt|shift)\b",
         str(text or ""),
@@ -1269,7 +1271,8 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
     if _looks_like_foreground_mutation(value, lowered):
         return False
     return bool(
-        re.search(
+        _looks_like_ui_click_advice_request(value)
+        or re.search(
             r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
             r".{0,8}(?:文字|文本|内容|正文)"
             r".{0,8}(?:是什么|是啥|有哪些|有什么|读取|读一下|查看|看看|识别)?",
@@ -1341,6 +1344,8 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
 def _looks_like_foreground_mutation(value: str, lowered: str) -> bool:
     if re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered):
         return False
+    if _looks_like_ui_click_advice_request(value):
+        return False
     return bool(
         re.search(
             r"(?:双击|点击|点一下|点按|单击|按一下|按下|输入|键入|填写|填入|写入|发送|提交)",
@@ -1348,6 +1353,32 @@ def _looks_like_foreground_mutation(value: str, lowered: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(r"\b(?:double\s+click|click|press|tap|type|enter|fill|send|submit)\b", lowered)
+    )
+
+
+def _looks_like_ui_click_advice_request(value: str) -> bool:
+    text = clean(value)
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui).{0,40}"
+            r"(?:下一步|接下来|然后|现在|我|用户)?(?:该|应该|可以|能|需要).{0,8}"
+            r"(?:点|点击|点按|按|操作|做)(?:哪里|哪个|什么)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:读一下|读取|查看|看看|观察|识别).{0,40}"
+            r"(?:下一步|接下来|然后|现在|我|用户)?(?:该|应该|可以|能|需要).{0,8}"
+            r"(?:点|点击|点按|按|操作|做)(?:哪里|哪个|什么)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:what|where)\s+(?:can|should)\s+i\s+"
+            r"(?:click|press|tap|do|use)\b",
+            lowered,
+        )
     )
 
 

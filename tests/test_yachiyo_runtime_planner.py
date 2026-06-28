@@ -2578,6 +2578,30 @@ def test_runtime_planner_routes_current_window_observation_to_active_window() ->
         }
     ]
 
+    advice = RuntimePlanner().decision(
+        "读一下当前窗口，告诉我下一步该点哪里",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+        ],
+    )
+    assert advice.selected_intent.kind == "desktop_operation"
+    assert advice.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert advice.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "",
+        "limit": 80,
+    }
+    assert [step.step_id for step in advice.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+    ]
+    assert _step_by_id(advice, "read-foreground-ui").tool_name == "desktop.ui_elements"
+    assert not any(
+        step.tool_name == "desktop.click_ui_element"
+        for step in advice.plan.tool_plan.steps
+    )
+
 
 def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
     decision = RuntimePlanner().decision(
@@ -3937,6 +3961,37 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "target": "搜索",
     }
     assert _step_by_id(focused_search, "open-or-focus-app").tool_name == "app.focus"
+
+    foreground_search = RuntimePlanner().decision(
+        "帮我在当前应用里搜索 open hanako",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "browser.open_url",
+        ],
+    )
+    assert foreground_search.selected_intent.kind == "desktop_operation"
+    assert foreground_search.selected_intent.inputs["app_name_hint"] == ""
+    assert foreground_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "open hanako",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in foreground_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+    ]
+    assert _step_by_id(foreground_search, "focus-app-search-field").tool_name == (
+        "desktop.safe_shortcut"
+    )
+    assert _step_by_id(foreground_search, "type-app-search-query").input_preview == {
+        "text": "open hanako"
+    }
 
     selected_context_search = RuntimePlanner().decision(
         "在微信里查找选中的内容",
@@ -5692,6 +5747,8 @@ def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
         ("launch SuperData Studio application", "SuperData Studio"),
         ("打开微信应用", "微信"),
         ("启动 Obsidian 软件", "Obsidian"),
+        ("打开我电脑上的 Obsidian 并新建一篇今天的日志", "Obsidian"),
+        ("打开一个我电脑上叫 Raycast 的应用", "Raycast"),
         ("帮我打开 Pixelmator", "Pixelmator"),
         ("打开一个我没提过的应用叫 Raycast", "Raycast"),
         ("打开一个叫 Linear 的应用", "Linear"),
@@ -10002,8 +10059,22 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         "分析数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    latest_csv_requests = planner_tool_requests(
+        "找一下 Downloads 里最新的 csv，分析趋势并输出 markdown 报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert scoped_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert latest_csv_requests == [
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
