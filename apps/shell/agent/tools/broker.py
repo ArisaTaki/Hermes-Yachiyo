@@ -1176,6 +1176,21 @@ class ToolBroker:
             result = step()
             step_results[step_name] = result
             fallback_used = fallback_used or bool(result.get("fallback_used"))
+            if _foreground_focus_not_verified(step_name, result):
+                result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                data = dict(result_data)
+                if clean_app_name:
+                    data["app_name"] = clean_app_name
+                return {
+                    **result,
+                    "ok": False,
+                    "action": tool_name,
+                    "summary": "Could not verify app focus before foreground action",
+                    "error": "app_focus_not_verified",
+                    "data": data,
+                    "fallback_used": fallback_used,
+                    "fallback_result": dict(step_results),
+                }
             if not result.get("ok"):
                 result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 data = dict(result_data)
@@ -1423,3 +1438,10 @@ class ToolBroker:
             return result
         finally:
             lease.release()
+
+
+def _foreground_focus_not_verified(step_name: str, result: dict[str, Any]) -> bool:
+    if step_name != "focus":
+        return False
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return data.get("focus_verified") is False

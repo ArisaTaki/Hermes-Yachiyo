@@ -2367,15 +2367,34 @@ def app_focus(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.focus")
     clean_name = _clean_required(app_name, "app_name")
+    resolved_name = _resolve_installed_app_name(clean_name) or clean_name
     result = _run_osascript(
         """
         on run argv
             set appName to item 1 of argv
             tell application appName to activate
-            return "focused|" & appName
+            delay 0.2
+            set targetFrontmost to false
+            set frontName to ""
+            tell application "System Events"
+                try
+                    set targetProc to first application process whose name is appName
+                    try
+                        set frontmost of targetProc to true
+                        delay 0.1
+                    end try
+                    try
+                        set targetFrontmost to frontmost of targetProc
+                    end try
+                end try
+                try
+                    set frontName to name of first application process whose frontmost is true
+                end try
+            end tell
+            return "focused|" & appName & "|" & (targetFrontmost as text) & "|" & frontName
         end run
         """,
-        [clean_name],
+        [resolved_name],
     )
     if not result["ok"]:
         fallback = app_open(clean_name)
@@ -2388,7 +2407,10 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 "data": {
                     "app_name": clean_name,
                     **fallback_data,
+                    **_app_resolution_metadata(clean_name, str(fallback_data.get("app_name") or resolved_name)),
                     "focus_fallback": "app.open",
+                    "focus_verified": fallback_data.get("launch_verified"),
+                    "focus_status": "open_fallback",
                 },
                 "permission_error": False,
                 "fallback_used": True,
@@ -2401,13 +2423,34 @@ def app_focus(app_name: str) -> dict[str, Any]:
         payload["fallback_used"] = bool(fallback.get("ok"))
         payload["fallback_result"] = fallback
         return payload
+    focus_data = _parse_app_focus_output(result.get("stdout"), resolved_name)
+    focus_verified = focus_data.get("focus_verified") is True
+    data = {
+        **focus_data,
+        **_app_resolution_metadata(clean_name, resolved_name),
+    }
+    if focus_verified:
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {resolved_name}",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": resolved_name != clean_name,
+        }
     return {
-        "ok": True,
+        "ok": False,
         "action": "app.focus",
-        "summary": f"Focused {clean_name}",
-        "data": {"app_name": clean_name},
+        "summary": f"Could not verify {resolved_name} is foreground",
+        "error": "app_focus_not_verified",
+        "data": {
+            **data,
+            "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
+        },
+        "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
+        "recovery_actions": _app_focus_recovery_actions(resolved_name),
         "permission_error": False,
-        "fallback_used": False,
+        "fallback_used": resolved_name != clean_name,
     }
 
 
@@ -4645,6 +4688,51 @@ def _app_running_verification(app_name: str) -> dict[str, Any]:
         "launch_status": "unknown",
         "launch_verification_error": str(result.get("error") or result.get("stderr") or ""),
     }
+
+
+def _parse_app_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any]:
+    parts = str(value or "").strip().split("|", 3)
+    app_name = parts[1] if len(parts) > 1 and parts[1] else fallback_app_name
+    frontmost_text = parts[2] if len(parts) > 2 else ""
+    frontmost_app = parts[3] if len(parts) > 3 else ""
+    focus_verified = frontmost_text.strip().lower() == "true" or (
+        bool(app_name)
+        and bool(frontmost_app)
+        and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
+    )
+    return {
+        "app_name": app_name,
+        "focus_verified": focus_verified,
+        "focus_status": "frontmost" if focus_verified else "not_frontmost",
+        "frontmost_app": frontmost_app,
+    }
+
+
+def _app_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
+    clean_name = str(app_name or "").strip()
+    return [
+        {
+            "label": f"重新打开{clean_name}",
+            "tool": "app.open",
+            "input": {"app_name": clean_name},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "查看前台窗口",
+            "tool": "desktop.active_window",
+            "input": {},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "截图确认前台",
+            "tool": "screen.capture",
+            "input": {"reason": "verify foreground app after focus failure"},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+    ]
 
 
 def _looks_like_app_not_found(value: Any) -> bool:

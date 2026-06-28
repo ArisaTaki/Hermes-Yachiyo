@@ -2454,6 +2454,51 @@ def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
     assert list(result["fallback_result"]) == ["focus", "safe_shortcut"]
 
 
+def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Could not verify {app_name} is foreground",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": False,
+                "focus_status": "not_frontmost",
+                "frontmost_app": "Codex",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_safe_shortcut",
+        lambda action: calls.append(("shortcut", action)) or {"ok": True},
+    )
+
+    result = broker.app_focus_and_safe_shortcut("Slack", "paste")
+
+    assert calls == [("focus", "Slack")]
+    assert result["ok"] is False
+    assert result["action"] == "app.focus_and_safe_shortcut"
+    assert result["error"] == "app_focus_not_verified"
+    assert result["summary"] == "Could not verify app focus before foreground action"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "focus_verified": False,
+        "focus_status": "not_frontmost",
+        "frontmost_app": "Codex",
+    }
+    assert list(result["fallback_result"]) == ["focus"]
+
+
 def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> None:
     broker = _broker(tmp_path)
     calls = []
@@ -3431,9 +3476,89 @@ def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) ->
         "launch_verified": True,
         "launch_status": "running",
         "focus_fallback": "app.open",
+        "focus_verified": True,
+        "focus_status": "open_fallback",
     }
     assert open_calls[0][0] == ["open", "-a", "Slack"]
     assert osascript_calls == [["Slack"], ["Slack"]]
+
+
+def test_app_focus_verifies_frontmost_process(monkeypatch) -> None:
+    osascript_calls = []
+
+    def fake_osascript(script, args=None):
+        osascript_calls.append(args)
+        return {"ok": True, "stdout": "focused|Slack|true|Slack", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_focus("Slack")
+
+    assert result["ok"] is True
+    assert result["action"] == "app.focus"
+    assert result["summary"] == "Focused Slack"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "focus_verified": True,
+        "focus_status": "frontmost",
+        "frontmost_app": "Slack",
+    }
+    assert osascript_calls == [["Slack"]]
+
+
+def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Slack|false|Codex",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Slack")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.focus"
+    assert result["error"] == "app_focus_not_verified"
+    assert result["data"]["app_name"] == "Slack"
+    assert result["data"]["focus_verified"] is False
+    assert result["data"]["focus_status"] == "not_frontmost"
+    assert result["data"]["frontmost_app"] == "Codex"
+    assert result["data"]["recommended_tools"] == [
+        "desktop.running_apps",
+        "desktop.active_window",
+        "screen.capture",
+    ]
+    assert result["recommended_tools"] == ["app.open", "desktop.active_window", "screen.capture"]
+    assert result["recovery_actions"] == [
+        {
+            "label": "重新打开Slack",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "查看前台窗口",
+            "tool": "desktop.active_window",
+            "input": {},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "截图确认前台",
+            "tool": "screen.capture",
+            "input": {"reason": "verify foreground app after focus failure"},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+    ]
 
 
 def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None:
