@@ -813,6 +813,10 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析 Downloads 里的销售数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    desktop_scoped_decision = RuntimePlanner().decision(
+        "分析桌面上的销售数据并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     generic_decision = RuntimePlanner().decision(
         "分析数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -828,6 +832,11 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     assert _step_by_id(scoped_decision, "inspect-data-source").tool_name == "workspace.list"
     assert _step_by_id(scoped_decision, "inspect-data-source").input_preview == {
         "path": "Downloads"
+    }
+    assert desktop_scoped_decision.selected_intent.kind == "data_analysis"
+    assert desktop_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
+    assert _step_by_id(desktop_scoped_decision, "inspect-data-source").input_preview == {
+        "path": "Desktop"
     }
     assert generic_decision.selected_intent.kind == "data_analysis"
     assert generic_decision.selected_intent.missing_inputs == ["data_source"]
@@ -1006,6 +1015,15 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         allowed_tools=["browser.open_url", "artifact.write"],
     )
     assert single_agent_research.selected_intent.kind == "web_research"
+
+    desktop_agent_product_research = RuntimePlanner().decision(
+        "调研 Hanako 和 Hermes 的桌面 agent 能力并汇总",
+        allowed_tools=["browser.open_url", "artifact.write", "group.run"],
+    )
+    assert desktop_agent_product_research.selected_intent.kind == "web_research"
+    assert desktop_agent_product_research.selected_intent.inputs["query"] == (
+        "Hanako 和 Hermes 的桌面 agent 能力"
+    )
 
 
 def test_planner_orchestration_requests_project_workflow_and_group_handoffs() -> None:

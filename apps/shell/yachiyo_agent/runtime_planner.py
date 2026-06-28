@@ -1117,11 +1117,12 @@ class TaskIntentRouter:
         )
 
     def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        score = _score_terms(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
-        if score <= 0 and _looks_like_multi_agent_request(text):
-            score = 0.24
-        if score <= 0 and metadata.get("runnable_kind") != "group":
+        explicit_multi_agent = _looks_like_multi_agent_request(text)
+        if not explicit_multi_agent and metadata.get("runnable_kind") != "group":
             return _empty_intent("multi_agent", text)
+        score = _score_terms(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
+        if score <= 0 and explicit_multi_agent:
+            score = 0.24
         target_hint = _group_target_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "multi_agent", text),
@@ -5599,6 +5600,17 @@ def _looks_like_multi_agent_request(text: str) -> bool:
     value = _clean_prompt(text)
     lowered = value.lower()
     if re.search(
+        r"(?:group|群组|小组)",
+        value,
+        flags=re.IGNORECASE,
+    ) and re.search(
+        r"(?:让|安排|派发|派活|委派|分配|指派|运行|启动|执行|协作|"
+        r"coordinate|delegate|dispatch|assign|run|start|execute)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
         r"(?:two|three|multiple|several)\s+(?:agents?|ai\s+agents?)",
         lowered,
         flags=re.IGNORECASE,
@@ -5612,7 +5624,7 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         return True
     return bool(
         re.search(r"(?:agent|Agent|智能体|代理)", value, flags=re.IGNORECASE)
-        and _contains_any(value, ("分别", "各自", "并行", "协作", "汇总", "对比", "分工"))
+        and _contains_any(value, ("分别", "各自", "并行", "协作", "分工", "委派", "分配", "指派", "派发"))
     )
 
 

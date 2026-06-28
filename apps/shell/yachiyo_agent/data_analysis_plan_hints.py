@@ -31,13 +31,22 @@ def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None)
     if path_match:
         return path_match.group(1).rstrip("。.,")
     lowered = str(text or "").lower()
+    if re.search(
+        r"(?:桌面(?:上|里|中|内|文件夹|目录)|桌面\s*(?:的)?(?:文件|数据|表格))",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:desktop\s+(?:folder|directory|files?|data|dataset|table)|"
+        r"(?:on|in|from)\s+(?:the\s+)?desktop)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "Desktop"
     known_locations = (
         ("downloads", "Downloads"),
         ("download folder", "Downloads"),
         ("下载文件夹", "Downloads"),
         ("下载目录", "Downloads"),
-        ("desktop", "Desktop"),
-        ("桌面", "Desktop"),
         ("documents", "Documents"),
         ("文档", "Documents"),
     )
