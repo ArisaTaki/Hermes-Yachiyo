@@ -321,6 +321,31 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
     assert step.input_preview == _data_analysis_preview("logs/events.jsonl", "jsonl")
 
 
+def test_runtime_planner_prefers_builtin_data_analysis_for_json_and_text_tables() -> None:
+    cases = [
+        ("请分析 data/events.json 并输出报告", "data/events.json", "json"),
+        ("请分析 data/table.txt 里的表格并输出报告", "data/table.txt", "text"),
+    ]
+
+    for prompt, path, source_kind in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["data.analyze", "workspace.read", "terminal.run", "artifact.write"],
+        )
+
+        assert decision.selected_intent.kind == "data_analysis"
+        assert decision.selected_intent.inputs["data_source_hint"] == path
+        assert decision.selected_intent.inputs["data_source_kind"] == source_kind
+        assert "desktop.app_control" not in decision.plan.tool_plan.required_capabilities
+        assert decision.plan.tool_plan.approvals_required == []
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "analyze-data-file"
+        ]
+        step = _step_by_id(decision, "analyze-data-file")
+        assert step.tool_name == "data.analyze"
+        assert step.input_preview == _data_analysis_preview(path, source_kind)
+
+
 def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
     decision = RuntimePlanner().decision(
         "分析当前选中的数据并生成报告",
