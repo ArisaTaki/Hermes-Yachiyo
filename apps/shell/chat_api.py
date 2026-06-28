@@ -1069,13 +1069,6 @@ class ChatAPI:
         except Exception:
             logger.debug("刷新桌面执行权限缓存失败", exc_info=True)
 
-    def _daily_desktop_runnable_policy_overlay_requests(
-        self,
-        text: str,
-        metadata: dict[str, Any] | None,
-    ) -> list[dict[str, Any]]:
-        return self._daily_desktop_entrypoint_requests(text, metadata=metadata)
-
     def _daily_desktop_entrypoint_requests(
         self,
         text: str,
@@ -1969,9 +1962,9 @@ class ChatAPI:
                 or keep_manual_group
             )
         ):
-            runnable_daily_desktop_requests = self._daily_desktop_runnable_policy_overlay_requests(
+            runnable_daily_desktop_requests = self._daily_desktop_entrypoint_requests(
                 user_goal,
-                user_metadata,
+                metadata=user_metadata,
             )
             if runnable_daily_desktop_requests:
                 self._warm_daily_desktop_permission_cache(runnable_daily_desktop_requests)
