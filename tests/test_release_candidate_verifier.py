@@ -341,6 +341,18 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         item["matched"]
         for item in report["data_analysis_artifact_smoke"]["evidence"]["readback"]
     )
+    assert report["browser_planner_artifact_smoke"]["status"] == "passed"
+    assert report["browser_planner_artifact_smoke"]["evidence"]["ok"] is True
+    assert report["browser_planner_artifact_smoke"]["evidence"]["case_count"] == 4
+    assert {
+        case["id"]
+        for case in report["browser_planner_artifact_smoke"]["evidence"]["cases"]
+    } == {
+        "current_page_report",
+        "explicit_url_report",
+        "current_page_screenshot",
+        "search_report",
+    }
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -454,6 +466,72 @@ def test_release_candidate_verifier_fails_when_data_analysis_artifact_smoke_fail
         {
             "path": "tmp/data-analysis-artifact-smoke",
             "message": "markdown artifact was not readable",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_browser_planner_artifact_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "browser planner artifact smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["browser_planner_artifact_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "browser_planner_artifact_smoke"
+    case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
+    assert case_by_id["current_page_report"]["requests"][0]["tool"] == "browser.extract_text"
+    assert case_by_id["explicit_url_report"]["requests"][0]["tool"] == (
+        "browser.open_url_and_extract_text"
+    )
+    assert case_by_id["current_page_screenshot"]["artifacts_expected"] == [
+        "browser/current-page.png"
+    ]
+
+
+def test_release_candidate_verifier_fails_when_browser_planner_artifact_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_browser_planner_artifact_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "browser_planner_artifact_smoke",
+            "error": "search report did not use a browser tool",
+            "cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "browser planner artifact smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["browser_planner_artifact_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "search report did not use a browser tool"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_browser_planner_artifacts.py"),
+            "message": "search report did not use a browser tool",
         }
     ]
 

@@ -28,6 +28,9 @@ from scripts.run_electron_ui_smokes import (
     electron_ui_smoke_scripts as release_ui_smoke_scripts,
     run_electron_ui_smoke_report,
 )
+from scripts.smoke_browser_planner_artifacts import (
+    run_smoke as run_browser_planner_artifact_smoke,
+)
 from scripts.smoke_data_analysis_artifacts import (
     run_smoke as run_data_analysis_artifact_smoke,
 )
@@ -1740,6 +1743,43 @@ def verify_data_analysis_artifact_smoke(root: Path) -> tuple[list[Finding], dict
     return [
         Finding(
             DATA_ANALYSIS_ARTIFACT_SMOKE_WORKDIR,
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_browser_planner_artifact_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_browser_planner_artifact_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_browser_planner_artifacts.py",
+                f"browser planner artifact smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "browser_planner_artifact_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_browser_planner_artifacts.py",
+                "browser planner artifact smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "browser_planner_artifact_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "browser planner artifact smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_browser_planner_artifacts.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3719,6 +3759,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "browser_planner_artifact_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -3859,6 +3905,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         }
+        report["browser_planner_artifact_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
         report["built_artifact_guards"] = {
             "status": "failed",
             "artifact_paths": [],
@@ -3962,6 +4014,16 @@ def verify_release_candidate(
         "status": "failed" if data_smoke_findings else "passed",
         "evidence": data_smoke_evidence,
         "findings": _finding_report(data_smoke_findings),
+        "run_requested": True,
+    }
+
+    browser_smoke_findings, browser_smoke_evidence = verify_browser_planner_artifact_smoke(root)
+    _print_findings("browser planner artifact smoke", browser_smoke_findings)
+    failed = failed or bool(browser_smoke_findings)
+    report["browser_planner_artifact_smoke"] = {
+        "status": "failed" if browser_smoke_findings else "passed",
+        "evidence": browser_smoke_evidence,
+        "findings": _finding_report(browser_smoke_findings),
         "run_requested": True,
     }
 

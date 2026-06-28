@@ -70,6 +70,11 @@ project can claim release parity.
 | Groups and Workflow | GroupRun and Workflow share the planner/runtime event vocabulary and remain first-class Studio surfaces. | Group/Workflow service tests and UI smoke scripts. |
 | Release packaging | A user can install, grant permissions, run first task, collect diagnostics, and understand rollback/update steps. | Packaging docs, first-run smoke, release checklist, and signed/unsigned artifact proof. |
 
+Current Browser/Web planner artifact evidence is reproducible with
+`python scripts/smoke_browser_planner_artifacts.py`; this proves the planner
+selects browser tools and expected artifacts, while real browser/CDP execution
+remains covered by later UI or opt-in integration smoke evidence.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,
