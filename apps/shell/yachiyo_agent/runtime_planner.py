@@ -804,7 +804,7 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         if _explicit_hotkey_request(text):
             return _empty_intent("web_research", text)
-        if _foreground_find_query_hint(text):
+        if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
             return _empty_intent("web_research", text)
         if _desktop_window_text_context_hint(text):
             return _empty_intent("web_research", text)
@@ -822,7 +822,11 @@ class TaskIntentRouter:
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
-        if _app_scoped_desktop_operation_hint(text) and not web_search and not browser_interaction:
+        app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
+        app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        if app_scoped_safe_operation and not _looks_like_external_info_lookup(text) and not browser_interaction:
+            return _empty_intent("web_research", text)
+        if app_scoped_desktop_operation and not web_search and not browser_interaction:
             return _empty_intent("web_research", text)
         browser_action = (
             web_search
@@ -842,6 +846,8 @@ class TaskIntentRouter:
                 "search",
                 "latest",
                 "news",
+                "pricing",
+                "price",
                 "website",
                 "url",
                 "link",
@@ -853,6 +859,12 @@ class TaskIntentRouter:
                 "网址",
                 "搜索",
                 "查找",
+                "查询",
+                "检索",
+                "最新",
+                "价格",
+                "定价",
+                "报价",
                 "调研",
                 "研究",
                 "新闻",
@@ -1892,6 +1904,18 @@ class RuntimePlanner:
             and not any((type_target, safe_type_text, app_search))
         ):
             submit_action = ""
+        browser_search_url_after_shortcut = ""
+        if (
+            app_name
+            and _is_browser_or_search_app_name(app_name)
+            and str((primary_safe_shortcut or {}).get("action") or "").strip() == "new_tab"
+        ):
+            browser_search_query = _web_search_query(intent.user_goal)
+            if browser_search_query and (allowed is None or "browser.open_url" in allowed):
+                browser_search_url_after_shortcut = _web_search_url(
+                    _web_search_engine_hint(intent.user_goal),
+                    browser_search_query,
+                )
         operation_safe_type_text = "" if click_target and safe_type_text else safe_type_text
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
@@ -2590,6 +2614,7 @@ class RuntimePlanner:
                 safe_key,
                 safe_scroll,
                 safe_click,
+                browser_search_url_after_shortcut,
             )
             if item
         )
@@ -2857,6 +2882,25 @@ class RuntimePlanner:
                     reason="Use observable UI operations after discovery, then verify.",
                 )
             )
+        if (
+            browser_search_url_after_shortcut
+            and any(step.step_id == "operate-foreground-ui" for step in steps)
+        ):
+            steps.append(
+                _step(
+                    intent,
+                    "open-browser-search-url",
+                    "Open browser search URL",
+                    "browser.research",
+                    _first_allowed(("browser.open_url",), allowed),
+                    input_preview={"url": browser_search_url_after_shortcut},
+                    depends_on=["operate-foreground-ui"],
+                    risk_level="low",
+                    approval_required=False,
+                    reason="Open the planned browser search URL after creating the requested browser tab.",
+                )
+            )
+            return steps
         followup_safe_shortcuts = []
         if followup_safe_shortcut:
             followup_safe_shortcuts.append(dict(followup_safe_shortcut))
@@ -5348,6 +5392,7 @@ _BROWSER_TEXT_INPUT_SELECTOR = (
 
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
+    external_info_lookup = _looks_like_external_info_lookup(text)
     if intent.kind == "desktop_operation" and _looks_like_file_organization_request(text):
         score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_recipient_message_request(text):
@@ -5365,6 +5410,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
         score += 0.08
+    if intent.kind == "desktop_operation" and external_info_lookup:
+        score -= 0.42
     if intent.kind == "desktop_operation" and intent.inputs.get("foreground_submit_action_hint"):
         score += 0.28 if intent.inputs.get("app_name_hint") else 0.14
     if intent.kind == "desktop_operation" and intent.inputs.get("app_management_hint"):
@@ -5462,10 +5509,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.18
     if (
         intent.kind == "data_analysis"
+        and not external_info_lookup
         and str(intent.inputs.get("context_source") or "").strip()
         and _contains_any(text, ["数据", "表格", "data", "table", "csv", "统计", "分析"])
     ):
         score += 0.38
+    if intent.kind == "data_analysis" and external_info_lookup:
+        score -= 0.36
     if (
         intent.kind == "web_research"
         and _contains_any(text, _UI_CONTROL_TERMS)
@@ -5509,9 +5559,33 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.42
     if intent.kind == "web_research" and _contains_any(
         text,
-        ["http://", "https://", "research", "search", "latest", "news", "调研", "研究", "新闻", "搜索", "网页", "网站"],
+        [
+            "http://",
+            "https://",
+            "research",
+            "search",
+            "latest",
+            "news",
+            "pricing",
+            "price",
+            "调研",
+            "研究",
+            "新闻",
+            "搜索",
+            "查找",
+            "查询",
+            "检索",
+            "最新",
+            "价格",
+            "定价",
+            "报价",
+            "网页",
+            "网站",
+        ],
     ):
         score += 0.14
+    if intent.kind == "web_research" and external_info_lookup:
+        score += 0.34
     if intent.kind == "web_research" and _looks_like_schedule_request(text):
         score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
@@ -5556,7 +5630,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         data_source_hint(text)
         or _contains_any(text, ["data analysis", "analyze data", "数据分析", "分析数据", "csv", "xlsx", "表格"])
     ):
-        score += 0.08
+        score += 0.08 if not external_info_lookup else 0.0
     if intent.kind == "code_task" and _contains_any(
         text,
         ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"],
@@ -5571,7 +5645,7 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
         for item in intent.expected_outputs
         if str(item or "").strip()
     }
-    if "report" in outputs:
+    if outputs.intersection({"report", "table"}):
         return True
     return _contains_any(
         intent.user_goal,
@@ -5579,6 +5653,7 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "write up",
             "write a report",
             "report",
+            "table",
             "document",
             "artifact",
             "报告",
@@ -5586,6 +5661,10 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "产物",
             "生成报告",
             "输出报告",
+            "整理成表格",
+            "整理为表格",
+            "输出表格",
+            "生成表格",
         ],
     )
 
@@ -5602,6 +5681,92 @@ def _score_terms(text: str, terms: Iterable[str]) -> float:
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = text.lower()
     return any(str(term).lower() in lowered for term in terms)
+
+
+def _looks_like_local_observation_or_control_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _finder_special_location_hint(value) or screen_capture_hint(value):
+        return True
+    media_hint = media_playback_hint(value)
+    if str(media_hint.get("action") or "").strip() == "status":
+        return True
+    if _contains_any(
+        value,
+        [
+            "屏幕",
+            "界面",
+            "窗口",
+            "当前播放",
+            "播放状态",
+            "播放进度",
+            "在播状态",
+            "screen",
+            "my screen",
+            "window",
+            "interface",
+            "currently playing",
+            "playback status",
+        ],
+    ) and not _contains_any(
+        value,
+        ["网页", "页面", "网站", "浏览器", "webpage", "web page", "page", "browser", "website"],
+    ):
+        return True
+    return False
+
+
+def _looks_like_external_info_lookup(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _looks_like_local_observation_or_control_request(value):
+        return False
+    if context_source_hint(value) or data_source_hint(value) or data_source_scope_hint(value):
+        return False
+    lookup_action = re.search(
+        r"(?:research|search|look\s+up|find\s+out|find|查找|查询|检索|搜索|调研|研究|了解|找一下|找下|查一下|查查|查(?!看)|看一下|看看)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    external_subject = _contains_any(
+        value,
+        [
+            "latest",
+            "current",
+            "recent",
+            "news",
+            "pricing",
+            "price",
+            "cost",
+            "release",
+            "version",
+            "official",
+            "website",
+            "web",
+            "最新",
+            "当前",
+            "现在",
+            "最近",
+            "新闻",
+            "价格",
+            "定价",
+            "报价",
+            "费用",
+            "官网",
+            "网站",
+            "网页",
+            "发布",
+            "版本",
+        ],
+    )
+    if lookup_action and external_subject:
+        return True
+    return bool(
+        _contains_any(value, ["latest", "最新", "最近", "news", "新闻"])
+        and _contains_any(value, ["pricing", "price", "价格", "定价", "报价", "release", "版本"])
+    )
 
 
 def _spreadsheet_ui_app_hint(text: str) -> str:
@@ -6409,6 +6574,10 @@ def _clean_app_name_hint(value: str) -> str:
         "页面",
         "网页",
         "标签页",
+        "新标签",
+        "新标签页",
+        "打开新标签",
+        "打开新标签页",
         "当前页面",
         "当前网页",
         "这个页面",
@@ -6434,6 +6603,7 @@ def _clean_app_name_hint(value: str) -> str:
         "current interface",
         "active interface",
         "foreground interface",
+        "new tab",
         "button",
         "buttons",
         "control",
@@ -9596,6 +9766,13 @@ def _web_search_query(text: str) -> str:
     direct_engine_query = _direct_web_search_query(text)
     if direct_engine_query:
         return direct_engine_query
+    if _looks_like_local_observation_or_control_request(text):
+        return ""
+    if (
+        (data_source_hint(text) or data_source_scope_hint(text) or context_source_hint(text))
+        and not _looks_like_external_info_lookup(text)
+    ):
+        return ""
     search_surface = _web_search_surface_hint(text)
     if search_surface and not _is_browser_or_search_app_name(search_surface):
         return ""
@@ -9621,7 +9798,8 @@ def _web_search_query(text: str) -> str:
 
     chinese_patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:研究|调研|了解|查)(?:一下|下|查)?\s*(.+)$",
+        r"(?:研究|调研|了解|查找|查询|检索|搜索|找一下|找下|查一下|查查|查(?!看)|看一下|看看)"
+        r"(?:一下|下|查)?\s*(.+)$",
         r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
         r"(?:搜索|查找|检索)\s*(.+)$",
     )
@@ -9865,7 +10043,7 @@ def _looks_like_generic_media_control_request(text: str) -> bool:
 def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(
-        r"\s+(?:and|then)\s+(?:write|create|generate|produce|summari[sz]e).*$",
+        r"\s+(?:and|then)\s+(?:write|create|generate|produce|make|format|organize|summari[sz]e).*$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -9914,14 +10092,14 @@ def _clean_web_search_query(query: str) -> str:
     ).strip()
     value = re.sub(
         r"(?:并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"[^。.,，；;！!？?]{0,8}(?:报告|总结|文档|结果)$",
+        r"[^。.,，；;！!？?]{0,8}(?:报告|总结|文档|结果|表格|清单|table)$",
         "",
         value,
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
         r"(?:并|然后|并且|再)?(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"(?:报告|总结|文档|结果)?$",
+        r"(?:报告|总结|文档|结果|表格|清单|table)?$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -9935,6 +10113,8 @@ def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     if not value:
+        return ""
+    if value.casefold() in {"一下", "下", "查", "找", "搜索", "查找", "查询"}:
         return ""
     if _contains_any(
         value,
@@ -10960,6 +11140,22 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
         outputs.append("chart")
     if _contains_any(text, ["report", "报告"]):
         outputs.append("report")
-    if _contains_any(text, ["output csv", "export csv", "csv 汇总", "输出 csv", "导出 csv", "表格汇总"]):
+    if _contains_any(
+        text,
+        [
+            "output csv",
+            "export csv",
+            "csv 汇总",
+            "输出 csv",
+            "导出 csv",
+            "表格汇总",
+            "整理成表格",
+            "整理为表格",
+            "输出表格",
+            "生成表格",
+            "make a table",
+            "as a table",
+        ],
+    ):
         outputs.append("table")
     return outputs or list(default)

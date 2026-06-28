@@ -1412,6 +1412,35 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert english_decision.selected_intent.kind == "web_research"
     assert english_decision.selected_intent.inputs["query"] == "openai latest news"
 
+    pricing_table = RuntimePlanner().decision(
+        "找一下最新的 OpenAI API 价格并整理成表格",
+        allowed_tools=["browser.open_url", "artifact.write", "workspace.list", "data.analyze"],
+    )
+    assert pricing_table.selected_intent.kind == "web_research"
+    assert pricing_table.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=%E6%9C%80%E6%96%B0%E7%9A%84+OpenAI+API+%E4%BB%B7%E6%A0%BC",
+        "browser_action": "open_search",
+        "query": "最新的 OpenAI API 价格",
+    }
+    assert pricing_table.selected_intent.expected_outputs == ["table"]
+    assert _step_by_id(pricing_table, "open-web-search").tool_name == "browser.open_url"
+    assert _step_by_id(pricing_table, "write-research-artifact").tool_name == "artifact.write"
+    assert pricing_table.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+    assert planner_tool_requests(
+        "找一下最新的 OpenAI API 价格并整理成表格",
+        ["browser.open_url", "artifact.write", "workspace.list", "data.analyze"],
+    )[0]["tool"] == "browser.open_url"
+
+    english_pricing_table = RuntimePlanner().decision(
+        "look up current Anthropic API pricing and make a table",
+        allowed_tools=["browser.open_url", "artifact.write", "workspace.list", "data.analyze"],
+    )
+    assert english_pricing_table.selected_intent.kind == "web_research"
+    assert english_pricing_table.selected_intent.inputs["query"] == (
+        "current anthropic api pricing"
+    )
+    assert english_pricing_table.selected_intent.expected_outputs == ["table"]
+
     competitive_report = RuntimePlanner().decision(
         "写一份关于 Hanako 和 Hermes 桌面 agent 的竞品分析报告",
         allowed_tools=["browser.open_url", "artifact.write", "workspace.list"],
@@ -1651,6 +1680,45 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "browser_action": "open_search",
         "query": "weather",
     }
+
+    new_tab_search = RuntimePlanner().decision(
+        "打开新标签并搜索 OpenAI",
+        allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],
+    )
+    assert new_tab_search.selected_intent.kind == "web_research"
+    assert new_tab_search.selected_intent.inputs["query"] == "OpenAI"
+    assert _step_by_id(new_tab_search, "open-web-search").input_preview == {
+        "url": "https://www.google.com/search?q=OpenAI"
+    }
+
+    chrome_new_tab_search = RuntimePlanner().decision(
+        "打开 Chrome 新建标签页然后搜索 OpenAI",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "browser.open_url",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert chrome_new_tab_search.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in chrome_new_tab_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "operate-foreground-ui",
+        "open-browser-search-url",
+    ]
+    assert _step_by_id(chrome_new_tab_search, "operate-foreground-ui").input_preview == {
+        "action": "new_tab"
+    }
+    assert _step_by_id(chrome_new_tab_search, "open-browser-search-url").input_preview == {
+        "url": "https://www.google.com/search?q=OpenAI"
+    }
+    assert not any(
+        step.approval_required for step in chrome_new_tab_search.plan.tool_plan.steps
+    )
 
     chinese = RuntimePlanner().decision(
         "搜索天气",
