@@ -4096,6 +4096,33 @@ def test_desktop_windows_resolves_installed_bundle_filter(monkeypatch, tmp_path)
     assert osascript_args == [["Microsoft Word"]]
 
 
+def test_desktop_windows_diagnoses_running_app_without_visible_windows(monkeypatch) -> None:
+    osascript_args = []
+
+    def fake_osascript(script, args=None):
+        osascript_args.append(args)
+        if "if application appName is running" in script:
+            return {"ok": True, "stdout": "running", "stderr": ""}
+        return {"ok": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda _app_name: "")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.windows("Notes")
+
+    assert result["ok"] is True
+    assert result["summary"] == "No windows found for Notes"
+    assert result["data"]["app_name"] == "Notes"
+    assert result["data"]["windows"] == []
+    assert result["data"]["count"] == 0
+    assert result["data"]["visibility_limited"] is True
+    assert result["data"]["window_visibility_status"] == "running_without_visible_windows"
+    assert result["data"]["launch_verified"] is True
+    assert result["data"]["launch_status"] == "running"
+    assert osascript_args == [["Notes"], ["Notes"]]
+
+
 def test_desktop_windows_permission_failure_returns_recovery_targets(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(
@@ -4163,8 +4190,47 @@ def test_desktop_ui_elements_returns_foreground_accessibility_controls(monkeypat
         "truncated": False,
         "role_filter": "button",
         "limit": 20,
+        "role_counts": {"AXButton": 1},
+        "unclassified_count": 0,
+        "menu_level_count": 0,
+        "control_like_count": 1,
+        "inspection_level": "control",
+        "menu_level_only": False,
+        "window_title_missing": False,
+        "visibility_limited": False,
+        "visibility_status": "control_accessible",
     }
     assert osascript_args == [["20", "2", ""]]
+
+
+def test_desktop_ui_elements_diagnoses_menu_level_only_visibility(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": (
+                "META\tOha-Yachiyo\t404\t\n"
+                "0\tAXMenuBar\t\t\t\t\ttrue\t0\t0\t1200\t24\n"
+                "1\tAXMenuBarItem\t\tFile\t\t\ttrue\t0\t0\t60\t24"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.ui_elements(app_name="Oha-Yachiyo", limit=20)
+
+    assert result["ok"] is True
+    assert result["data"]["role_counts"] == {"AXMenuBar": 1, "AXMenuBarItem": 1}
+    assert result["data"]["unclassified_count"] == 0
+    assert result["data"]["menu_level_count"] == 2
+    assert result["data"]["control_like_count"] == 0
+    assert result["data"]["inspection_level"] == "menu"
+    assert result["data"]["menu_level_only"] is True
+    assert result["data"]["window_title_missing"] is True
+    assert result["data"]["visibility_limited"] is True
+    assert result["data"]["visibility_status"] == "menu_level_only"
 
 
 def test_desktop_ui_elements_can_read_named_running_app(monkeypatch) -> None:

@@ -223,7 +223,7 @@ python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-
 python scripts/verify_release_candidate.py --source-only --run-real-desktop-ui-inspection-smoke --report-json tmp/source-only-real-desktop-ui-inspection.json
 ```
 
-`--run-real-desktop-ui-inspection-smoke` 会在 macOS 上执行真实 `desktop.running_apps`、`desktop.windows`、`app.focus`、`desktop.active_window` 和指定 app 的 `desktop.ui_elements(app_name=...)`。report 会记录 `focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`；当前环境如果只能读到菜单层或无法验证焦点，也会作为 evidence 保留，而不会宣称控件级 UI 操作已完全达标。该 gate 默认不运行，避免普通源码验收打开本机应用。
+`--run-real-desktop-ui-inspection-smoke` 会在 macOS 上执行真实 `desktop.running_apps`、`desktop.windows`、`app.focus`、`desktop.active_window` 和指定 app 的 `desktop.ui_elements(app_name=...)`。report 会记录 `focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`；当前环境如果只能读到菜单层或无法验证焦点，也会作为 evidence 保留，而不会宣称控件级 UI 操作已完全达标。新诊断字段 `ui_inspection_level`、`ui_unclassified_count`、`ui_visibility_limited` 和 `window_visibility_status` 用来区分控件级可读、仅菜单级可读、窗口列表不可见等状态。该 gate 默认不运行，避免普通源码验收打开本机应用。
 
 需要在 Gatekeeper 首次启动人工签核前归档 macOS 签名、spctl 和隔离属性诊断时运行：
 

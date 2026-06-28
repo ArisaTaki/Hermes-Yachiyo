@@ -131,6 +131,17 @@ _UNSAFE_OPEN_PATH_SUFFIXES = {
     ".applescript",
 }
 
+_UI_CONTROL_LIKE_ROLES = {
+    "AXButton",
+    "AXCheckBox",
+    "AXComboBox",
+    "AXPopUpButton",
+    "AXRadioButton",
+    "AXSlider",
+    "AXTextArea",
+    "AXTextField",
+}
+
 _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "copy": ("c", ("command",), "copy"),
     "copy_current_page_link": ("l", ("command",), "copy current page link"),
@@ -938,6 +949,11 @@ def ui_elements(
             },
         )
     parsed = _parse_ui_elements_output(result.get("stdout"), clean_filter, clean_limit)
+    inspection_metadata = _ui_inspection_metadata(
+        parsed.get("elements", []),
+        app_name=parsed.get("app_name", "") or app_filter,
+        title=parsed.get("title", ""),
+    )
     return {
         "ok": True,
         "action": "desktop.ui_elements",
@@ -946,6 +962,7 @@ def ui_elements(
             **parsed,
             "role_filter": clean_filter,
             "limit": clean_limit,
+            **inspection_metadata,
             **_app_resolution_metadata(clean_app, app_filter),
         },
         "permission_error": False,
@@ -1390,6 +1407,11 @@ def windows(app_name: str = "") -> dict[str, Any]:
             },
         )
     windows_payload = _parse_window_rows(result.get("stdout"))
+    visibility_metadata = (
+        _window_visibility_metadata(app_filter, windows_payload)
+        if not windows_payload
+        else {}
+    )
     return {
         "ok": True,
         "action": "desktop.windows",
@@ -1398,6 +1420,7 @@ def windows(app_name: str = "") -> dict[str, Any]:
             "app_name": app_filter,
             "windows": windows_payload,
             "count": len(windows_payload),
+            **visibility_metadata,
             **_app_resolution_metadata(clean_app, app_filter),
         },
         "permission_error": False,
@@ -5119,6 +5142,99 @@ def _parse_ui_elements_output(
         "elements": elements,
         "count": len(elements),
         "truncated": len(elements) >= limit,
+    }
+
+
+def _ui_role_counts(elements: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for element in elements:
+        role = str(element.get("role") or "").strip()
+        if not role:
+            continue
+        counts[role] = counts.get(role, 0) + 1
+    return counts
+
+
+def _ui_inspection_metadata(
+    elements: list[dict[str, Any]],
+    *,
+    app_name: str = "",
+    title: str = "",
+) -> dict[str, Any]:
+    role_counts = _ui_role_counts(elements)
+    role_bearing_count = sum(role_counts.values())
+    unclassified_count = max(0, len(elements) - role_bearing_count)
+    menu_level_count = sum(count for role, count in role_counts.items() if "Menu" in role)
+    control_like_count = sum(
+        count for role, count in role_counts.items() if role in _UI_CONTROL_LIKE_ROLES
+    )
+    has_elements = bool(elements)
+    menu_level_only = (
+        has_elements
+        and role_bearing_count > 0
+        and menu_level_count == role_bearing_count
+        and control_like_count == 0
+    )
+    if not has_elements:
+        inspection_level = "empty"
+    elif control_like_count > 0:
+        inspection_level = "control"
+    elif menu_level_only:
+        inspection_level = "menu"
+    else:
+        inspection_level = "structural"
+    window_title_missing = not str(title or "").strip()
+    visibility_limited = bool(app_name) and menu_level_only and window_title_missing
+    return {
+        "role_counts": role_counts,
+        "unclassified_count": unclassified_count,
+        "menu_level_count": menu_level_count,
+        "control_like_count": control_like_count,
+        "inspection_level": inspection_level,
+        "menu_level_only": menu_level_only,
+        "window_title_missing": window_title_missing,
+        "visibility_limited": visibility_limited,
+        "visibility_status": (
+            "menu_level_only"
+            if visibility_limited
+            else "control_accessible"
+            if control_like_count > 0
+            else "empty"
+            if not has_elements
+            else "structural_only"
+        ),
+    }
+
+
+def _window_visibility_metadata(
+    app_name: str,
+    windows_payload: list[dict[str, Any]],
+) -> dict[str, Any]:
+    clean_app = str(app_name or "").strip()
+    if windows_payload:
+        return {
+            "visibility_limited": False,
+            "window_visibility_status": "visible_windows",
+        }
+    if not clean_app:
+        return {
+            "visibility_limited": False,
+            "window_visibility_status": "no_visible_windows",
+        }
+    verification = _app_running_verification(clean_app)
+    is_running = verification.get("launch_verified") is True
+    return {
+        "visibility_limited": is_running,
+        "window_visibility_status": (
+            "running_without_visible_windows" if is_running else "not_running_or_unverified"
+        ),
+        "window_visibility_hint": (
+            "System Events returned no app windows even though the app is running; "
+            "fall back to ui_elements, screen capture, shortcuts, or permission diagnostics."
+            if is_running
+            else "System Events returned no app windows and the app could not be verified as running."
+        ),
+        **verification,
     }
 
 

@@ -74,7 +74,13 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
         lambda app_name="": {
             "ok": True,
             "action": "desktop.windows",
-            "data": {"app_name": app_name, "windows": [], "count": 0},
+            "data": {
+                "app_name": app_name,
+                "windows": [],
+                "count": 0,
+                "visibility_limited": True,
+                "window_visibility_status": "running_without_visible_windows",
+            },
         },
     )
     monkeypatch.setattr(
@@ -113,6 +119,13 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
                 "count": len(elements),
                 "role_filter": role_filter,
                 "limit": limit,
+                "role_counts": {"AXMenuBar": 1, "AXMenuBarItem": 1},
+                "unclassified_count": 0,
+                "menu_level_count": len(elements),
+                "control_like_count": 0,
+                "inspection_level": "menu",
+                "visibility_status": "menu_level_only",
+                "visibility_limited": True,
             },
         }
 
@@ -132,7 +145,13 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
     assert evidence["ok"] is True
     assert evidence["focus_verified"] is False
     assert evidence["window_count"] == 0
+    assert evidence["window_visibility_status"] == "running_without_visible_windows"
+    assert evidence["window_visibility_limited"] is True
     assert evidence["ui_element_count"] == 2
+    assert evidence["ui_unclassified_count"] == 0
+    assert evidence["ui_inspection_level"] == "menu"
+    assert evidence["ui_visibility_status"] == "menu_level_only"
+    assert evidence["ui_visibility_limited"] is True
     assert evidence["menu_level_count"] == 2
     assert evidence["control_like_count"] == 0
     assert evidence["checks"]["named_ui_elements_match_app"] is True

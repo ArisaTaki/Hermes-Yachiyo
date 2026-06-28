@@ -120,9 +120,32 @@ def run_smoke(
     running_names = _running_app_names(running_result)
     elements = _ui_elements(ui_result)
     menu_elements = _ui_elements(menu_result)
-    role_counts = _role_counts(elements)
+    ui_data = _data(ui_result)
+    windows_data = _data(windows_result)
+    raw_role_counts = ui_data.get("role_counts")
+    role_counts = raw_role_counts if isinstance(raw_role_counts, dict) else _role_counts(elements)
+    role_bearing_count = sum(
+        int(count)
+        for count in role_counts.values()
+        if isinstance(count, (int, float)) and not isinstance(count, bool)
+    )
+    unclassified_count = int(
+        ui_data.get("unclassified_count") or max(0, len(elements) - role_bearing_count)
+    )
     menu_role_count = sum(count for role, count in role_counts.items() if "Menu" in role)
-    control_like_count = _control_like_count(elements)
+    menu_level_count = int(ui_data.get("menu_level_count") or len(menu_elements) or menu_role_count)
+    control_like_count = int(ui_data.get("control_like_count") or _control_like_count(elements))
+    ui_inspection_level = str(ui_data.get("inspection_level") or "").strip()
+    if not ui_inspection_level:
+        ui_inspection_level = (
+            "control"
+            if control_like_count > 0
+            else "menu"
+            if menu_level_count > 0
+            else "empty"
+            if not elements
+            else "structural"
+        )
     ui_app_name = str(_data(ui_result).get("app_name") or "")
     checks = {
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
@@ -154,9 +177,15 @@ def run_smoke(
         "opened_app_name": opened_app_name,
         "focus_verified": active_app_name == opened_app_name,
         "window_count": int(_data(windows_result).get("count") or 0),
+        "window_visibility_status": str(windows_data.get("window_visibility_status") or ""),
+        "window_visibility_limited": windows_data.get("visibility_limited") is True,
         "ui_element_count": len(elements),
         "ui_role_counts": role_counts,
-        "menu_level_count": len(menu_elements) or menu_role_count,
+        "ui_unclassified_count": unclassified_count,
+        "ui_inspection_level": ui_inspection_level,
+        "ui_visibility_status": str(ui_data.get("visibility_status") or ""),
+        "ui_visibility_limited": ui_data.get("visibility_limited") is True,
+        "menu_level_count": menu_level_count,
         "control_like_count": control_like_count,
         "discovery": {"result": discovery, "names": discovered_names},
         "before_status": before_status,
