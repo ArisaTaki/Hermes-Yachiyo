@@ -9133,7 +9133,7 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        query = clean_followup_text(
+        query = _clean_app_search_query(
             match.groupdict().get("query")
             or match.groupdict().get("query_en")
             or match.groupdict().get("query_en2")

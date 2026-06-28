@@ -3993,6 +3993,39 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "text": "open hanako"
     }
 
+    foreground_search_first_result = RuntimePlanner().decision(
+        "在当前应用里搜索 open hanako 并打开第一个结果",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert foreground_search_first_result.selected_intent.kind == "desktop_operation"
+    assert foreground_search_first_result.selected_intent.inputs["app_search_hint"] == {
+        "query": "open hanako",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in foreground_search_first_result.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "select-app-search-result",
+    ]
+    assert _step_by_id(
+        foreground_search_first_result,
+        "type-app-search-query",
+    ).input_preview == {"text": "open hanako"}
+    assert _step_by_id(
+        foreground_search_first_result,
+        "select-app-search-result",
+    ).approval_required is True
+
     selected_context_search = RuntimePlanner().decision(
         "在微信里查找选中的内容",
         allowed_tools=[
