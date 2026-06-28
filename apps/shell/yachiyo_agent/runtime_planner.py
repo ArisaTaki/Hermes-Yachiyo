@@ -8279,7 +8279,10 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"显示简介|查看简介|快速查看|快速预览|预览|重命名|上一级目录|上一级|"
         r"打开开发者工具|显示开发者工具|开发者工具|"
         r"打开当前网页开发者工具|打开当前网页的开发者工具|"
-        r"copy|paste|select\s+all|undo|redo|find|refresh|back|forward|new|compose|"
+        r"(?:press|send|hit)\s+(?:the\s+)?[A-Za-z0-9 +_.-]+|"
+        r"(?:scroll|page)\s+(?:down|up|to\s+(?:the\s+)?(?:bottom|top)|(?:a\s+)?(?:little|bit))|"
+        r"go\s+(?:back|forward)|"
+        r"copy|paste|select\s+all|undo|redo|find|refresh|reload|back|forward|new|compose|"
         r"new\s+tab|new\s+window|close\s+tab|fullscreen|maximi[sz]e|"
         r"new\s+note|new\s+reminder|new\s+event|new\s+meeting|compose(?:\s+(?:note|reminder|event|meeting))?|"
         r"new\s+project|create\s+(?:a\s+)?new\s+project|create\s+project|"
@@ -8312,6 +8315,23 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
             r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|里面)?\s*"
             rf"{safe_followup}$",
             "focus",
+        ),
+        (
+            rf"^{safe_followup}\s+(?:in|inside|within|on)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})$",
+            "focus",
+        ),
+        (
+            r"^(?P<followup>refresh|reload)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})$",
+            "focus",
+        ),
+        (
+            r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:(?:and|then)\s+)?(?P<followup>.+?)(?:\s+please)?[.!?]?$",
+            "",
         ),
         (
             r"^(?P<mode>open|launch|start|focus|switch\s+to|activate)\s+"

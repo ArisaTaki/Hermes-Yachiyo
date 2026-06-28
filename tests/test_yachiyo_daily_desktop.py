@@ -351,6 +351,65 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_operations() -> None:
+    cases = (
+        (
+            "PixelForge press command n",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "new_window"},
+        ),
+        (
+            "refresh PixelForge",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "refresh"},
+        ),
+        (
+            "press escape in PixelForge",
+            "app.focus_and_safe_key",
+            {"app_name": "PixelForge", "action": "escape", "repeat_count": 1},
+        ),
+        (
+            "PixelForge scroll down",
+            "app.focus_and_safe_scroll",
+            {"app_name": "PixelForge", "direction": "down", "pages": 1},
+        ),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_safe_shortcut",
+                "app.focus_and_safe_key",
+                "app.focus_and_safe_scroll",
+                "desktop.ui_elements",
+            ],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",

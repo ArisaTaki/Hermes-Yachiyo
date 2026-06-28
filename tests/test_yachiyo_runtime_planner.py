@@ -5165,6 +5165,58 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
         "action": "browser_back",
     }
 
+    english_app_scoped_cases = (
+        (
+            "PixelForge press command n",
+            "safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "new_window"},
+        ),
+        (
+            "refresh PixelForge",
+            "safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "refresh"},
+        ),
+        (
+            "press escape in PixelForge",
+            "safe_key",
+            "app.focus_and_safe_key",
+            {"app_name": "PixelForge", "action": "escape", "repeat_count": 1},
+        ),
+        (
+            "PixelForge scroll down",
+            "safe_scroll",
+            "app.focus_and_safe_scroll",
+            {"app_name": "PixelForge", "direction": "down", "pages": 1},
+        ),
+        (
+            "page down in PixelForge",
+            "safe_scroll",
+            "app.focus_and_safe_scroll",
+            {"app_name": "PixelForge", "direction": "down", "pages": 1},
+        ),
+    )
+
+    for prompt, operation_hint, tool_name, input_preview in english_app_scoped_cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_safe_shortcut",
+                "app.focus_and_safe_key",
+                "app.focus_and_safe_scroll",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+        assert decision.selected_intent.inputs["operation_hint"] == operation_hint
+        operate = _step_by_id(decision, "operate-foreground-ui")
+        assert operate.tool_name == tool_name
+        assert operate.input_preview == input_preview
+        assert operate.approval_required is False
+
     click_step = _step_by_id(click_decision, "operate-foreground-ui")
     assert click_decision.selected_intent.inputs["operation_hint"] == "safe_click"
     assert click_decision.selected_intent.inputs["safe_click_hint"] == {
@@ -5367,6 +5419,55 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             ],
         ) == [
             _app_discovery_request(discover_query),
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": payload,
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+    for prompt, tool_name, payload in (
+        (
+            "PixelForge press command n",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "new_window"},
+        ),
+        (
+            "refresh PixelForge",
+            "app.focus_and_safe_shortcut",
+            {"app_name": "PixelForge", "action": "refresh"},
+        ),
+        (
+            "press escape in PixelForge",
+            "app.focus_and_safe_key",
+            {"app_name": "PixelForge", "action": "escape", "repeat_count": 1},
+        ),
+        (
+            "PixelForge scroll down",
+            "app.focus_and_safe_scroll",
+            {"app_name": "PixelForge", "direction": "down", "pages": 1},
+        ),
+    ):
+        assert planner_direct_tool_requests(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_safe_shortcut",
+                "app.focus_and_safe_key",
+                "app.focus_and_safe_scroll",
+                "desktop.ui_elements",
+            ],
+        ) == [
+            _app_discovery_request("PixelForge"),
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
