@@ -5340,7 +5340,21 @@ def _ui_element_not_found_recovery_actions(
 ) -> list[dict[str, Any]]:
     clean_target = str(target or "").strip()
     clean_filter = str(role_filter or "").strip()
-    retry_input: dict[str, Any] = {}
+    retry_input: dict[str, Any] = {"click_count": click_count}
+    retry_input_schema: dict[str, Any] = {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+            "x": {"type": "number", "minimum": 0},
+            "y": {"type": "number", "minimum": 0},
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "default": click_count,
+            },
+        },
+    }
     return [
         {
             "label": "截取屏幕重新定位控件",
@@ -5357,6 +5371,10 @@ def _ui_element_not_found_recovery_actions(
             "recovery_retry_tool": "desktop.click",
             "retry_input": retry_input,
             "recovery_retry_input": retry_input,
+            "retry_input_schema": retry_input_schema,
+            "recovery_retry_input_schema": retry_input_schema,
+            "required_retry_fields": ["x", "y"],
+            "recommended_tools": ["screen.capture", "desktop.click"],
             "retry_prompt": (
                 f"根据截图定位「{clean_target}」并用 desktop.click 点击坐标"
                 if clean_target

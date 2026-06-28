@@ -106,6 +106,9 @@ class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
     recovery_risk_level: DesktopExecutionRisk | str | None = None
     recovery_retry_tool: str | None = None
     recovery_retry_input: dict[str, Any] = Field(default_factory=dict)
+    recovery_retry_input_schema: dict[str, Any] = Field(default_factory=dict)
+    required_retry_fields: list[str] = Field(default_factory=list)
+    recommended_tools: list[str] = Field(default_factory=list)
     recovery_retry_prompt: str | None = None
     recovery_retry_source_event_type: str | None = None
     recovery_retry_source_tool_call_id: str | None = None

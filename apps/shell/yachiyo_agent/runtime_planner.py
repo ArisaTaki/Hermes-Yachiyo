@@ -750,6 +750,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _looks_like_desktop_permissions_request(text, text.lower()):
+            return _empty_intent("media_playback", text)
         score = _score_terms(
             text,
             [

@@ -1614,7 +1614,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         assert waiting_run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
         assert waiting_run["pending_approval"]["input_preview"] == {
             "app_name": "Google Chrome",
-            "target": "搜索",
+            "target": "搜索框",
             "text": "yachiyo",
             "role_filter": "text",
             "limit": 80,
@@ -1634,7 +1634,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "搜索", "yachiyo", "text", 80),
+            ("type_into_ui", "搜索框", "yachiyo", "text", 80),
         ]
 
         after_second = await yachiyo.approve_task(sent["task_id"], None, request)
@@ -1650,7 +1650,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "搜索", "yachiyo", "text", 80),
+            ("type_into_ui", "搜索框", "yachiyo", "text", 80),
             ("hotkey", "return", []),
         ]
         assert completed_task is not None
@@ -5274,7 +5274,7 @@ async def test_yachiyo_task_route_executes_ui_elements_without_model(
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    ui_calls: list[tuple[str, int]] = []
+    ui_calls: list[tuple[str, int, str]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -5289,8 +5289,12 @@ async def test_yachiyo_task_route_executes_ui_elements_without_model(
         ),
     )
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict[str, Any]:
-        ui_calls.append((role_filter, limit))
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: int = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        ui_calls.append((role_filter, limit, app_name))
         return {
             "ok": True,
             "action": "desktop.ui_elements",
@@ -5338,7 +5342,7 @@ async def test_yachiyo_task_route_executes_ui_elements_without_model(
             if message.role == "assistant"
         )
 
-        assert ui_calls == [("button", 80)]
+        assert ui_calls == [("button", 80, "")]
         assert started["status"] == "completed"
         assert started["summary"] == "当前 Google Chrome 界面控件：Button Send（120, 240）。"
         assert started["needs_user_action"] is False
@@ -6721,7 +6725,7 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "media_playback"
     assert metadata["yachiyo_plan_source"] == "runtime_planner"
-    assert metadata["yachiyo_plan_tools"] == ["media.apple_music_play"]
+    assert metadata["yachiyo_plan_tools"] == ["media.apple_music_play", "desktop.ui_elements"]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 

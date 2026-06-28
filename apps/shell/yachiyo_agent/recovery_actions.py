@@ -19,6 +19,9 @@ RECOVERY_ACTION_TASK_METADATA_KEYS = (
     "recovery_risk_level",
     "recovery_retry_tool",
     "recovery_retry_input",
+    "recovery_retry_input_schema",
+    "required_retry_fields",
+    "recommended_tools",
     "recovery_retry_prompt",
     "recovery_retry_source_event_type",
     "recovery_retry_source_tool_call_id",
@@ -39,6 +42,7 @@ def recovery_action_metadata_snapshot(
         return None
     recovery_input = metadata.get("recovery_input")
     retry_input = metadata.get("recovery_retry_input")
+    retry_input_schema = metadata.get("recovery_retry_input_schema")
     payload = {
         "daily_desktop_intent": bool(metadata.get("daily_desktop_intent", True)),
         "desktop_permission_recovery": True,
@@ -46,6 +50,11 @@ def recovery_action_metadata_snapshot(
         "recovery_input": dict(recovery_input) if isinstance(recovery_input, Mapping) else {},
         "recovery_permission_target": _metadata_text(metadata, "recovery_permission_target"),
         "recovery_retry_input": dict(retry_input) if isinstance(retry_input, Mapping) else {},
+        "recovery_retry_input_schema": (
+            dict(retry_input_schema) if isinstance(retry_input_schema, Mapping) else {}
+        ),
+        "required_retry_fields": _metadata_text_list(metadata, "required_retry_fields"),
+        "recommended_tools": _metadata_text_list(metadata, "recommended_tools"),
     }
     if metadata.get("desktop_permission_retry") is True:
         payload["desktop_permission_retry"] = True
@@ -85,6 +94,15 @@ def recovery_retry_context_payload(
         "retry_tool": retry_tool,
         "retry_input": dict(payload.get("recovery_retry_input") or {}),
     }
+    retry_input_schema = payload.get("recovery_retry_input_schema")
+    if isinstance(retry_input_schema, dict) and retry_input_schema:
+        context_payload["retry_input_schema"] = dict(retry_input_schema)
+    required_retry_fields = payload.get("required_retry_fields")
+    if isinstance(required_retry_fields, list) and required_retry_fields:
+        context_payload["required_retry_fields"] = list(required_retry_fields)
+    recommended_tools = payload.get("recommended_tools")
+    if isinstance(recommended_tools, list) and recommended_tools:
+        context_payload["recommended_tools"] = list(recommended_tools)
     for source_key, context_key in (
         ("desktop_permission_retry", "desktop_permission_retry"),
         ("recovery_action_kind", "recovery_action_kind"),
@@ -102,3 +120,10 @@ def recovery_retry_context_payload(
 
 def _metadata_text(metadata: Mapping[str, Any], key: str) -> str:
     return str(metadata.get(key) or "").strip()
+
+
+def _metadata_text_list(metadata: Mapping[str, Any], key: str) -> list[str]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]

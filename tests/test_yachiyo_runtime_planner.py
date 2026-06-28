@@ -6965,6 +6965,19 @@ def test_runtime_planner_verifies_simple_media_playback_when_available() -> None
     ]
 
 
+def test_runtime_planner_routes_media_permission_questions_to_permission_diagnostics() -> None:
+    decision = RuntimePlanner().decision(
+        "为什么不能播放 Apple Music？",
+        allowed_tools=["media.music_app_open_and_play", "desktop.permissions"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["operation_hint"] == "diagnose_permissions"
+    assert _step_by_id(decision, "diagnose_permissions-desktop-state").tool_name == (
+        "desktop.permissions"
+    )
+
+
 def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None:
     for prompt, query in (
         ("播放超时空辉夜姬", "超时空辉夜姬"),

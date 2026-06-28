@@ -2429,10 +2429,21 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             value = str(raw_action.get(text_key) or "").strip()
             if value:
                 action[text_key] = value
-        for dict_key in ("retry_input", "recovery_retry_input"):
+        for dict_key in (
+            "retry_input",
+            "recovery_retry_input",
+            "retry_input_schema",
+            "recovery_retry_input_schema",
+        ):
             value = raw_action.get(dict_key)
             if isinstance(value, dict):
                 action[dict_key] = dict(value)
+        for list_key in ("required_retry_fields", "recommended_tools"):
+            value = raw_action.get(list_key)
+            if isinstance(value, list):
+                normalized = [str(item).strip() for item in value if str(item or "").strip()]
+                if normalized:
+                    action[list_key] = normalized
         if raw_action.get("desktop_permission_retry") is True:
             action["desktop_permission_retry"] = True
         actions.append(action)

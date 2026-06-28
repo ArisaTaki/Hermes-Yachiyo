@@ -82,6 +82,14 @@ def test_run_event_redaction_preserves_recovery_action_input_shape() -> None:
                         "reason": "user asked to capture the screen",
                         "token": "sk-runtime-retry-secret123456",
                     },
+                    "retry_input_schema": {
+                        "type": "object",
+                        "required": ["x", "y"],
+                        "properties": {
+                            "x": {"type": "number"},
+                            "token": "sk-runtime-schema-secret123456",
+                        },
+                    },
                     "risk_level": "low",
                 }
             ]
@@ -97,8 +105,11 @@ def test_run_event_redaction_preserves_recovery_action_input_shape() -> None:
     assert action["retry_input"]["token"] == "[redacted]"
     assert action["recovery_retry_input"]["reason"] == "user asked to capture the screen"
     assert action["recovery_retry_input"]["token"] == "[redacted]"
+    assert action["retry_input_schema"]["required"] == ["x", "y"]
+    assert action["retry_input_schema"]["properties"]["token"] == "[redacted]"
     assert "sk-runtime-recovery-secret123456" not in json.dumps(redacted, ensure_ascii=False)
     assert "sk-runtime-retry-secret123456" not in json.dumps(redacted, ensure_ascii=False)
+    assert "sk-runtime-schema-secret123456" not in json.dumps(redacted, ensure_ascii=False)
 
 
 def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:

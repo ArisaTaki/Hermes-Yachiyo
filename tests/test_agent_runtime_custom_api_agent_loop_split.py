@@ -87,6 +87,58 @@ def _planner_selection_events(timeline: list[dict[str, Any]]) -> list[dict[str, 
     return [event for event in timeline if event.get("event") == "agent.plan.selection"]
 
 
+def test_recovery_actions_projects_retry_input_contract_fields() -> None:
+    retry_input_schema = {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+            "x": {"type": "number", "minimum": 0},
+            "y": {"type": "number", "minimum": 0},
+        },
+    }
+
+    actions = custom_api_agent_module._recovery_actions(
+        {
+            "recovery_actions": [
+                {
+                    "label": "截取屏幕重新定位控件",
+                    "tool": "screen.capture",
+                    "input": {"reason": "capture before coordinate click"},
+                    "permission_target": "screen_observation",
+                    "risk_level": "low",
+                    "retry_tool": "desktop.click",
+                    "recovery_retry_tool": "desktop.click",
+                    "retry_input": {"click_count": 1},
+                    "recovery_retry_input": {"click_count": 1},
+                    "retry_input_schema": retry_input_schema,
+                    "recovery_retry_input_schema": retry_input_schema,
+                    "required_retry_fields": ["x", "y"],
+                    "recommended_tools": ["screen.capture", "desktop.click"],
+                    "target": "Send",
+                }
+            ]
+        }
+    )
+
+    assert actions == [
+        {
+            "label": "截取屏幕重新定位控件",
+            "tool": "screen.capture",
+            "input": {"reason": "capture before coordinate click"},
+            "permission_target": "screen_observation",
+            "risk_level": "low",
+            "retry_tool": "desktop.click",
+            "recovery_retry_tool": "desktop.click",
+            "retry_input": {"click_count": 1},
+            "recovery_retry_input": {"click_count": 1},
+            "retry_input_schema": retry_input_schema,
+            "recovery_retry_input_schema": retry_input_schema,
+            "required_retry_fields": ["x", "y"],
+            "recommended_tools": ["screen.capture", "desktop.click"],
+        }
+    ]
+
+
 class RecordingDesktopBroker:
     def __init__(self, order: list[str]) -> None:
         self.order = order
