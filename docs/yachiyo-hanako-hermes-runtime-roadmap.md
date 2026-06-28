@@ -87,6 +87,13 @@ interaction and high-risk runtime tools remain marked for approval by the
 planner, group policy, and legacy runtime policy compiler. Real approve/resume
 replay remains a later Run Timeline and UI smoke requirement.
 
+Current source-level approval resume replay evidence is reproducible with
+`python scripts/smoke_approval_resume_timeline.py`; this proves Chat and Agent
+Studio public services can project the same fake-port lifecycle from pending
+approval to approved tool completion, including event-page replay, approval
+resolution, completed tool call, and artifact metadata. Packaged-app and real
+NativeRunEngine approval resume remain later smoke requirements.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,

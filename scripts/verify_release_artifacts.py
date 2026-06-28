@@ -1369,6 +1369,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must run the approval and policy gate smoke helper",
     ),
     (
+        '"approval_resume_timeline_smoke"',
+        "release candidate verifier must archive approval resume timeline smoke evidence",
+    ),
+    (
+        "verify_approval_resume_timeline_smoke",
+        "release candidate verifier must expose approval resume timeline smoke verification",
+    ),
+    (
+        "run_approval_resume_timeline_smoke",
+        "release candidate verifier must run the approval resume timeline smoke helper",
+    ),
+    (
         '"bridge_statuses"',
         "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
     ),

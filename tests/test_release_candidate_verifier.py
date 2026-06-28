@@ -378,6 +378,21 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "medium_risk_app_type",
         "medium_risk_browser_click",
     }
+    assert report["approval_resume_timeline_smoke"]["status"] == "passed"
+    assert report["approval_resume_timeline_smoke"]["evidence"]["ok"] is True
+    assert report["approval_resume_timeline_smoke"]["evidence"]["chat"]["after_timeline"][
+        "event_types"
+    ] == [
+        "agent.started",
+        "agent.tool.call",
+        "agent.tool.approval_required",
+        "agent.tool.approval_approved",
+        "agent.tool.completed",
+        "agent.completed",
+    ]
+    assert report["approval_resume_timeline_smoke"]["evidence"]["studio"][
+        "approved_timeline"
+    ]["tool_calls"][0]["status"] == "completed"
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -698,6 +713,73 @@ def test_release_candidate_verifier_fails_when_approval_policy_gate_smoke_fails(
         {
             "path": str(tmp_path / "scripts/smoke_approval_policy_gate.py"),
             "message": "browser click was not marked for approval",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_approval_resume_timeline_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "approval resume timeline smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["approval_resume_timeline_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "approval_resume_timeline_smoke"
+    assert section["evidence"]["chat"]["started"]["status"] == "waiting_approval"
+    assert section["evidence"]["chat"]["after_timeline"]["approvals"][0]["status"] == "approved"
+    assert section["evidence"]["studio"]["approved_timeline"]["pending_approval"] is None
+    assert section["evidence"]["studio"]["after_event_page"]["event_types"] == [
+        "agent.tool.approval_approved",
+        "agent.tool.completed",
+        "agent.completed",
+    ]
+
+
+def test_release_candidate_verifier_fails_when_approval_resume_timeline_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_approval_resume_timeline_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "approval_resume_timeline_smoke",
+            "error": "approved run did not replay completed tool event",
+            "chat": {},
+            "studio": {},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "approval resume timeline smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["approval_resume_timeline_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "approved run did not replay completed tool event"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_approval_resume_timeline.py"),
+            "message": "approved run did not replay completed tool event",
         }
     ]
 
