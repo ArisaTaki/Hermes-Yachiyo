@@ -94,6 +94,14 @@ approval to approved tool completion, including event-page replay, approval
 resolution, completed tool call, and artifact metadata. Packaged-app and real
 NativeRunEngine approval resume remain later smoke requirements.
 
+Current runtime-level approval resume evidence is reproducible with
+`python scripts/smoke_runtime_approval_resume.py`; this drives the real
+`RuntimeApprovalExecutionService` and `ApprovalResumeCoordinator` with fake
+callbacks to prove claim, running projection, approved tool execution,
+remaining-tool follow-up, continuation projection, duplicate-claim suppression,
+next-approval projection, and fatal tool failure projection. It does not
+replace real provider or packaged-app smoke evidence.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,

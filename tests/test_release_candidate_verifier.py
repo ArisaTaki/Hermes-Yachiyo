@@ -393,6 +393,17 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["approval_resume_timeline_smoke"]["evidence"]["studio"][
         "approved_timeline"
     ]["tool_calls"][0]["status"] == "completed"
+    assert report["runtime_approval_resume_smoke"]["status"] == "passed"
+    assert report["runtime_approval_resume_smoke"]["evidence"]["ok"] is True
+    assert report["runtime_approval_resume_smoke"]["evidence"]["completed"]["result"][
+        "status"
+    ] == "completed"
+    assert report["runtime_approval_resume_smoke"]["evidence"]["fatal"]["result"][
+        "status"
+    ] == "failed"
+    assert report["runtime_approval_resume_smoke"]["evidence"]["execution_gate"][
+        "call_order"
+    ] == ["get_run", "approve_once", "get_run", "get_run"]
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -780,6 +791,71 @@ def test_release_candidate_verifier_fails_when_approval_resume_timeline_smoke_fa
         {
             "path": str(tmp_path / "scripts/smoke_approval_resume_timeline.py"),
             "message": "approved run did not replay completed tool event",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_runtime_approval_resume_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "runtime approval resume smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["runtime_approval_resume_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "runtime_approval_resume_smoke"
+    assert section["evidence"]["completed"]["result"]["status"] == "completed"
+    assert section["evidence"]["required"]["result"]["status"] == "approval_required"
+    assert section["evidence"]["duplicate_claim"]["call_order"] == [
+        "claim_pending_approval",
+        "get_current_run",
+    ]
+    assert section["evidence"]["execution_gate"]["completed"]["status"] == "completed"
+
+
+def test_release_candidate_verifier_fails_when_runtime_approval_resume_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_runtime_approval_resume_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "runtime_approval_resume_smoke",
+            "error": "duplicate approval claim executed the tool twice",
+            "completed": {},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "runtime approval resume smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["runtime_approval_resume_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "duplicate approval claim executed the tool twice"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_runtime_approval_resume.py"),
+            "message": "duplicate approval claim executed the tool twice",
         }
     ]
 

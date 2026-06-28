@@ -43,6 +43,9 @@ from scripts.smoke_data_analysis_artifacts import (
 from scripts.smoke_desktop_planner_discovery import (
     run_smoke as run_desktop_planner_discovery_smoke,
 )
+from scripts.smoke_runtime_approval_resume import (
+    run_smoke as run_runtime_approval_resume_smoke,
+)
 from scripts.summarize_native_agent_capabilities import summarize_capabilities
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
@@ -1900,6 +1903,43 @@ def verify_approval_resume_timeline_smoke(root: Path) -> tuple[list[Finding], di
     return [
         Finding(
             root / "scripts/smoke_approval_resume_timeline.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_runtime_approval_resume_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_runtime_approval_resume_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_runtime_approval_resume.py",
+                f"runtime approval resume smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "runtime_approval_resume_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_runtime_approval_resume.py",
+                "runtime approval resume smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "runtime_approval_resume_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "runtime approval resume smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_runtime_approval_resume.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3903,6 +3943,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "runtime_approval_resume_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -4204,6 +4250,18 @@ def verify_release_candidate(
         "status": "failed" if approval_resume_smoke_findings else "passed",
         "evidence": approval_resume_smoke_evidence,
         "findings": _finding_report(approval_resume_smoke_findings),
+        "run_requested": True,
+    }
+
+    runtime_approval_resume_findings, runtime_approval_resume_evidence = (
+        verify_runtime_approval_resume_smoke(root)
+    )
+    _print_findings("runtime approval resume smoke", runtime_approval_resume_findings)
+    failed = failed or bool(runtime_approval_resume_findings)
+    report["runtime_approval_resume_smoke"] = {
+        "status": "failed" if runtime_approval_resume_findings else "passed",
+        "evidence": runtime_approval_resume_evidence,
+        "findings": _finding_report(runtime_approval_resume_findings),
         "run_requested": True,
     }
 
