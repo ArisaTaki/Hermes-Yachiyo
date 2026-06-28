@@ -158,6 +158,8 @@ class TaskIntentRouter:
         source_hint = data_source_hint(text, metadata)
         source_scope = data_source_scope_hint(text, metadata)
         context_source = context_source_hint(text)
+        if _looks_like_visible_data_context_source(text):
+            context_source = "visible_text"
         can_discover_source = _contains_any(
             text,
             ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
@@ -4259,14 +4261,28 @@ def _data_analysis_context_source_steps(
     source: str,
 ) -> list[ToolPlanStepSnapshot]:
     if (
-        source == "current_page_content"
+        source in {"current_page_content", "visible_text"}
         and _contains_any(
             intent.user_goal,
             ("表格", "数据", "table", "tabular", "spreadsheet", "data", "csv"),
         )
     ):
-        browser_context_tool = _first_allowed(("browser.extract_text", "browser.current_page"), allowed)
-        if browser_context_tool:
+        if source == "visible_text":
+            visible_context_tool = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
+            if visible_context_tool:
+                return _context_source_steps(
+                    intent,
+                    allowed,
+                    source,
+                    step_prefix="data",
+                    capability_id="data.analysis",
+                )
+        browser_context_tool = (
+            _first_allowed(("browser.extract_text", "browser.current_page"), allowed)
+            if source == "current_page_content"
+            else None
+        )
+        if source == "current_page_content" and browser_context_tool:
             return _context_source_steps(
                 intent,
                 allowed,
@@ -5745,6 +5761,61 @@ def _context_artifact_source_hint(text: str) -> str:
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
     return ""
+
+
+def _looks_like_visible_data_context_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        [
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+            "当前网页",
+            "当前页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+        ],
+    ):
+        return False
+    return _contains_any(
+        value,
+        [
+            "current window",
+            "current app",
+            "current application",
+            "current screen",
+            "foreground window",
+            "foreground app",
+            "当前窗口",
+            "当前应用",
+            "当前 app",
+            "当前App",
+            "当前软件",
+            "前台窗口",
+            "前台应用",
+            "当前界面",
+            "当前屏幕",
+        ],
+    ) and _contains_any(
+        value,
+        [
+            "table",
+            "tabular",
+            "spreadsheet",
+            "data",
+            "csv",
+            "xlsx",
+            "json",
+            "表格",
+            "数据",
+            "电子表格",
+        ],
+    )
 
 
 def _looks_like_visible_text_artifact_source(text: str) -> bool:
@@ -11446,7 +11517,7 @@ def _desktop_operation_tool_preview(
 
 def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
     outputs = []
-    if _contains_any(text, ["chart", "plot", "图表", "可视化"]):
+    if _contains_any(text, ["chart", "plot", "graph", "trend chart", "图表", "趋势图", "折线图", "可视化"]):
         outputs.append("chart")
     if _contains_any(text, ["report", "报告"]):
         outputs.append("report")
@@ -11455,9 +11526,18 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
         [
             "output csv",
             "export csv",
+            "export as csv",
+            "csv file",
             "csv 汇总",
             "输出 csv",
+            "生成 csv",
+            "做成 csv",
             "导出 csv",
+            "导出成 csv",
+            "导出为 csv",
+            "提取成 csv",
+            "提取为 csv",
+            "csv 文件",
             "表格汇总",
             "整理成表格",
             "整理为表格",

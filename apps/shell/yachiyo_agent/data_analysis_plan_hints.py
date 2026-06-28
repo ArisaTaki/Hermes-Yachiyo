@@ -125,7 +125,24 @@ def data_analysis_artifacts_expected(
     artifacts = ["analysis-report.md"]
     if "chart" in outputs:
         artifacts.append("analysis-chart.png")
-    if "table" in outputs or any(marker in lowered for marker in ("export csv", "导出 csv", "输出 csv")):
+    if "table" in outputs or any(
+        marker in lowered
+        for marker in (
+            "export csv",
+            "export as csv",
+            "output csv",
+            "csv file",
+            "导出 csv",
+            "导出成 csv",
+            "导出为 csv",
+            "输出 csv",
+            "生成 csv",
+            "做成 csv",
+            "提取成 csv",
+            "提取为 csv",
+            "csv 文件",
+        )
+    ):
         artifacts.append("analysis-summary.csv")
     if any(marker in lowered for marker in ("html", "网页报告", "web report")):
         artifacts.append("analysis-report.html")

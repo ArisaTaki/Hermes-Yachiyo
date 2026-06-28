@@ -415,6 +415,10 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
         "分析剪贴板里的表格并输出 csv",
         allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
     )
+    clipboard_table_csv_chart = RuntimePlanner().decision(
+        "把剪贴板里的表格做成 csv 和趋势图",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
 
     assert clipboard_csv.selected_intent.kind == "data_analysis"
     assert clipboard_csv.selected_intent.inputs == {
@@ -448,6 +452,12 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
         "paths": ["analysis-report.md", "analysis-summary.csv"],
         "body_source": "clipboard",
     }
+    assert clipboard_table_csv_chart.selected_intent.kind == "data_analysis"
+    assert clipboard_table_csv_chart.selected_intent.expected_outputs == ["chart", "table"]
+    assert _step_by_id(clipboard_table_csv_chart, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png", "analysis-summary.csv"],
+        "body_source": "clipboard",
+    }
 
 
 def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
@@ -455,8 +465,21 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "把当前窗口里的表格复制出来，分析并输出报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
     )
+    current_window_ui_table = RuntimePlanner().decision(
+        "把当前窗口里的表格导出成 csv 并生成趋势图",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
     current_page_table = RuntimePlanner().decision(
         "把当前页面里的表格复制出来，分析趋势并写报告",
+        allowed_tools=[
+            "browser.extract_text",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    current_page_csv_chart = RuntimePlanner().decision(
+        "把当前网页的表格导出成 csv 并做趋势图",
         allowed_tools=[
             "browser.extract_text",
             "browser.current_page",
@@ -486,7 +509,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     )
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs["context_source"] == "current_page_content"
+    assert decision.selected_intent.inputs["context_source"] == "visible_text"
     assert decision.selected_intent.missing_inputs == []
     assert decision.plan.tool_plan.required_capabilities == [
         "desktop.ui_operation",
@@ -515,7 +538,26 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     ]
     assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
         "paths": ["analysis-report.md"],
-        "body_source": "current_page_content",
+        "body_source": "visible_text",
+    }
+    assert current_window_ui_table.selected_intent.kind == "data_analysis"
+    assert current_window_ui_table.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "visible_text",
+    }
+    assert current_window_ui_table.selected_intent.expected_outputs == ["chart", "table"]
+    assert [step.step_id for step in current_window_ui_table.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(current_window_ui_table, "read-data-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(current_window_ui_table, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png", "analysis-summary.csv"],
+        "body_source": "visible_text",
     }
     assert current_page_table.selected_intent.kind == "data_analysis"
     assert current_page_table.selected_intent.inputs["context_source"] == "current_page_content"
@@ -555,6 +597,15 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "data.analysis",
         "artifact.write",
     ]
+    assert current_page_csv_chart.selected_intent.kind == "data_analysis"
+    assert current_page_csv_chart.selected_intent.expected_outputs == ["chart", "table"]
+    assert _step_by_id(current_page_csv_chart, "read-data-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(current_page_csv_chart, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png", "analysis-summary.csv"],
+        "body_source": "current_page_content",
+    }
 
 
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
@@ -10105,8 +10156,16 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "把当前窗口里的表格复制出来，分析并输出报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
     )
+    current_window_ui_requests = planner_tool_requests(
+        "把当前窗口里的表格导出成 csv 并生成趋势图",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
     current_page_table_requests = planner_tool_requests(
         "用当前网页表格输出一份数据分析报告",
+        allowed_tools=["browser.extract_text", "browser.current_page", "terminal.run", "artifact.write"],
+    )
+    current_page_csv_chart_requests = planner_tool_requests(
+        "把当前网页的表格导出成 csv 并做趋势图",
         allowed_tools=["browser.extract_text", "browser.current_page", "terminal.run", "artifact.write"],
     )
     report_requests = planner_tool_requests(
@@ -10192,7 +10251,27 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
             "continue_to_model": True,
         },
     ]
+    assert current_window_ui_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
     assert current_page_table_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert current_page_csv_chart_requests == [
         {
             "protocol": "json_fallback",
             "tool": "browser.extract_text",

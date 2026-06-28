@@ -807,7 +807,7 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             planning_reason="planner_prefetch_data_source",
         )
         return _append_model_followup_requests(context_requests, app_requests)
-    if context_source == "current_page_content":
+    if context_source in {"current_page_content", "visible_text"}:
         context_requests = _context_source_tool_requests(
             decision,
             allowed,
