@@ -268,7 +268,10 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
             event for event in events if event["event_type"] == "agent.plan.selection"
         )
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["selected_tools"] == [expected_tool]
+        assert selection_event["payload"]["selected_tools"] == [
+            expected_tool,
+            "desktop.ui_elements",
+        ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -882,7 +885,10 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
             event for event in events if event["event_type"] == "agent.plan.selection"
         )
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["selected_tools"] == [expected_tool]
+        assert selection_event["payload"]["selected_tools"] == [
+            expected_tool,
+            "desktop.ui_elements",
+        ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -6838,7 +6844,11 @@ def test_send_message_executes_structured_observation_recovery_actions_without_m
             },
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: int = 80,
+        app_name: str = "",
+    ) -> dict:
         ui_calls.append((role_filter, limit))
         return {
             "ok": True,
@@ -9057,7 +9067,11 @@ def test_send_message_reads_current_ui_elements_without_fake_app_focus(tmp_path,
         ),
     )
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: int = 80,
+        app_name: str = "",
+    ) -> dict:
         ui_calls.append((role_filter, limit))
         return {
             "ok": True,
@@ -9257,7 +9271,11 @@ def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
             "data": {"app_name": app_name},
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: int = 80,
+        app_name: str = "",
+    ) -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,

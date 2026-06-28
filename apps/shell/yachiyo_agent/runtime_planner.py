@@ -6136,6 +6136,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.28 if intent.inputs.get("app_name_hint") else 0.14
     if intent.kind == "desktop_operation" and intent.inputs.get("app_management_hint"):
         score += -0.18 if _looks_like_generic_media_control_request(text) else 0.24
+    if intent.kind == "desktop_operation" and _looks_like_generic_media_playback_request(text):
+        score -= 0.42
     if (
         intent.kind == "desktop_operation"
         and str(intent.inputs.get("operation_hint") or "").strip() == "play"
@@ -6195,6 +6197,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and not str(intent.inputs.get("query") or "").strip()
     ):
         score += 0.12
+    if intent.kind == "media_playback" and _looks_like_generic_media_playback_request(text):
+        score += 0.18
     if intent.kind == "information_capture" and _contains_any(
         text,
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
@@ -11367,6 +11371,15 @@ def _looks_like_media_search_play_request(text: str) -> bool:
             str(hint.get("app_name") or "").strip()
             or _contains_any(text, ("apple music", "spotify", "网易云", "qq music", "QQ 音乐"))
         )
+    )
+
+
+def _looks_like_generic_media_playback_request(text: str) -> bool:
+    hint = media_playback_hint(text)
+    return bool(
+        str(hint.get("action") or "").strip() == "play"
+        and not str(hint.get("query") or "").strip()
+        and _contains_any(text, ("music", "song", "songs", "音乐", "歌曲", "歌"))
     )
 
 

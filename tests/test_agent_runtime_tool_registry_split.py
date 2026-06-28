@@ -4375,6 +4375,9 @@ def test_desktop_click_ui_element_returns_candidates_without_blind_click(
         "data": {
             "app_name": "Notes",
             "title": "Draft",
+            "inspection_level": "control",
+            "visibility_status": "control_accessible",
+            "visibility_limited": False,
             "elements": [
                 {
                     "depth": 0,
@@ -4400,7 +4403,12 @@ def test_desktop_click_ui_element_returns_candidates_without_blind_click(
     assert result["ok"] is False
     assert result["action"] == "desktop.click_ui_element"
     assert result["error"] == "ui_element_not_found"
+    assert result["fallback"] == "screen.capture"
     assert result["data"]["target"] == "Send"
+    assert result["data"]["inspection_level"] == "control"
+    assert result["data"]["visibility_status"] == "control_accessible"
+    assert result["data"]["visibility_limited"] is False
+    assert result["data"]["recommended_tools"] == ["screen.capture", "desktop.click"]
     assert result["data"]["candidates"] == [
         {
             "role": "AXButton",
@@ -4409,6 +4417,30 @@ def test_desktop_click_ui_element_returns_candidates_without_blind_click(
             "center": {"x": 44, "y": 55},
         }
     ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "截取屏幕重新定位控件",
+            "tool": "screen.capture",
+            "input": {
+                "reason": (
+                    "desktop.click_ui_element could not find Send; "
+                    "capture screen before coordinate click"
+                )
+            },
+            "permission_target": "screen_observation",
+            "risk_level": "low",
+            "retry_tool": "desktop.click",
+            "recovery_retry_tool": "desktop.click",
+            "retry_input": {},
+            "recovery_retry_input": {},
+            "retry_prompt": "根据截图定位「Send」并用 desktop.click 点击坐标",
+            "recovery_retry_prompt": "根据截图定位「Send」并用 desktop.click 点击坐标",
+            "target": "Send",
+            "role_filter": "button",
+            "click_count": 1,
+        }
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
 
 
 def test_desktop_click_ui_element_permission_failure_returns_recovery_targets(

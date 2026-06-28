@@ -1002,11 +1002,17 @@ def click_ui_element(
     elements = observed_data.get("elements") if isinstance(observed_data.get("elements"), list) else []
     matches = _matching_ui_elements(elements, clean_target, clean_filter)
     if not matches:
+        recovery_actions = _ui_element_not_found_recovery_actions(
+            clean_target,
+            clean_filter,
+            clean_count,
+        )
         return {
             "ok": False,
             "action": "desktop.click_ui_element",
             "summary": f"No foreground UI element matched: {clean_target}",
             "error": "ui_element_not_found",
+            "fallback": "screen.capture",
             "data": {
                 "target": clean_target,
                 "role_filter": clean_filter,
@@ -1014,10 +1020,16 @@ def click_ui_element(
                 "app_name": str(observed_data.get("app_name") or ""),
                 "title": str(observed_data.get("title") or ""),
                 "observed_count": len(elements),
+                "inspection_level": str(observed_data.get("inspection_level") or ""),
+                "visibility_status": str(observed_data.get("visibility_status") or ""),
+                "visibility_limited": observed_data.get("visibility_limited") is True,
                 "candidates": _candidate_ui_element_previews(elements),
+                "recommended_tools": ["screen.capture", "desktop.click"],
+                "recovery_actions": recovery_actions,
             },
             "permission_error": False,
             "fallback_used": False,
+            "recovery_actions": recovery_actions,
             "fallback_result": {"observe": observed},
         }
 
@@ -5319,6 +5331,47 @@ def _candidate_ui_element_previews(elements: list[Any], limit: int = 8) -> list[
         if len(previews) >= limit:
             break
     return previews
+
+
+def _ui_element_not_found_recovery_actions(
+    target: str,
+    role_filter: str,
+    click_count: int,
+) -> list[dict[str, Any]]:
+    clean_target = str(target or "").strip()
+    clean_filter = str(role_filter or "").strip()
+    retry_input: dict[str, Any] = {}
+    return [
+        {
+            "label": "截取屏幕重新定位控件",
+            "tool": "screen.capture",
+            "input": {
+                "reason": (
+                    f"desktop.click_ui_element could not find {clean_target}; "
+                    "capture screen before coordinate click"
+                )
+            },
+            "permission_target": "screen_observation",
+            "risk_level": "low",
+            "retry_tool": "desktop.click",
+            "recovery_retry_tool": "desktop.click",
+            "retry_input": retry_input,
+            "recovery_retry_input": retry_input,
+            "retry_prompt": (
+                f"根据截图定位「{clean_target}」并用 desktop.click 点击坐标"
+                if clean_target
+                else "根据截图定位目标并用 desktop.click 点击坐标"
+            ),
+            "recovery_retry_prompt": (
+                f"根据截图定位「{clean_target}」并用 desktop.click 点击坐标"
+                if clean_target
+                else "根据截图定位目标并用 desktop.click 点击坐标"
+            ),
+            "target": clean_target,
+            "role_filter": clean_filter,
+            "click_count": click_count,
+        }
+    ]
 
 
 def _ui_element_display_label(element: dict[str, Any]) -> str:
