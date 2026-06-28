@@ -446,6 +446,99 @@ def test_send_message_executes_direct_data_analysis_task_and_records_artifact(
         store.close()
 
 
+def test_send_message_auto_analyzes_unique_discovered_data_file_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    workspace = Path(str(service._main_chat_workspace_policy()["default_workdir"]))
+    (workspace / "sales.csv").write_text(
+        "region,revenue\nEast,10\nWest,20\nEast,30\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unique discovered data analysis should not call model")
+        ),
+    )
+    try:
+        result = api.send_message("分析数据并输出报告")
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_events = [
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.call"
+        ]
+        artifact = service.read_run_artifact(run["run_id"], "analysis-report.md")
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["needs_user_action"] is False
+        assert result["agent_task"]["pending_approvals"] == []
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "data.analyze"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["path"] == "sales.csv"
+        assert [event["payload"]["tool"] for event in tool_events] == [
+            "workspace.list",
+            "data.analyze",
+        ]
+        assert "agent.tool.policy_decision" in event_types
+        assert "artifact.created" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert artifact["ok"] is True
+        assert "# Data Analysis Report" in artifact["content"]
+        assert "mean=20.0" in artifact["content"]
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_keeps_ambiguous_discovered_data_files_pending(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    workspace = Path(str(service._main_chat_workspace_policy()["default_workdir"]))
+    (workspace / "sales.csv").write_text("region,revenue\nEast,10\n", encoding="utf-8")
+    (workspace / "costs.csv").write_text("region,cost\nEast,7\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ambiguous data discovery should not synchronously call model")
+        ),
+    )
+    try:
+        result = api.send_message("分析数据并输出报告")
+
+        assert result["ok"] is True
+        assert result["status"] == "pending"
+        try:
+            service.get_task_run_link(result["task_id"])
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("ambiguous data discovery should not start a direct run")
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_routes_named_workflow_planner_request_without_at_mention(tmp_path):
     api, runtime, store = _make_api(tmp_path)
 

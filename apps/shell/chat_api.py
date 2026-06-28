@@ -320,6 +320,64 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
 )
 _CHAT_VISIBLE_ACTIVITY_PHASES = {"tool_start", "tool_complete"}
 _ACTIVE_RUN_STATUSES = {"pending", "processing", "running", "approval_required"}
+
+
+def _can_direct_execute_data_analysis_discovery(
+    requests: list[dict[str, Any]],
+    default_workdir: Path | None,
+) -> bool:
+    if len(requests) != 1:
+        return False
+    request = requests[0]
+    if not (
+        str(request.get("source") or "").strip() == "runtime_planner"
+        and str(request.get("tool") or "").strip() == "workspace.list"
+        and str(request.get("planning_reason") or "").strip() == "planner_prefetch_data_source"
+        and bool(request.get("continue_to_model"))
+    ):
+        return False
+    if default_workdir is None:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+    return _has_single_data_analysis_file(default_workdir, str(payload.get("path") or ""))
+
+
+def _has_single_data_analysis_file(default_workdir: Path, path: str) -> bool:
+    root = Path(default_workdir).expanduser().resolve()
+    clean_path = str(path or "").strip()
+    if Path(clean_path).is_absolute():
+        return False
+    target = (root / (clean_path or ".")).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return False
+    if not target.exists() or not target.is_dir():
+        return False
+    count = 0
+    for child in target.iterdir():
+        if child.is_file() and _data_analysis_file_kind(child.name):
+            count += 1
+            if count > 1:
+                return False
+    return count == 1
+
+
+def _data_analysis_file_kind(path: str) -> str:
+    lowered = str(path or "").strip().lower()
+    if lowered.endswith(".csv"):
+        return "csv"
+    if lowered.endswith(".tsv"):
+        return "tsv"
+    if lowered.endswith(".json"):
+        return "json"
+    if lowered.endswith(".jsonl"):
+        return "jsonl"
+    if lowered.endswith(".xlsx"):
+        return "xlsx"
+    return ""
+
+
 _MAIN_MODEL_ALIASES = (
     "native chat",
     "oha chat",
@@ -4062,11 +4120,26 @@ class ChatAPI:
         executor = getattr(runner, "executor", None)
         return bool(execution_capabilities(executor).get("model"))
 
-    @staticmethod
-    def _daily_desktop_requests_can_direct_execute(requests: list[dict[str, Any]]) -> bool:
+    def _daily_desktop_requests_can_direct_execute(self, requests: list[dict[str, Any]]) -> bool:
         if not requests:
             return False
+        if _can_direct_execute_data_analysis_discovery(
+            requests,
+            self._main_chat_default_workdir(),
+        ):
+            return True
         return not any(bool(request.get("continue_to_model")) for request in requests)
+
+    def _main_chat_default_workdir(self) -> Path | None:
+        try:
+            service = self._agent_runtime_service()
+            workspace_policy = service._main_chat_workspace_policy()
+        except Exception:
+            return None
+        if not isinstance(workspace_policy, dict):
+            return None
+        raw_path = str(workspace_policy.get("default_workdir") or "").strip()
+        return Path(raw_path) if raw_path else None
 
     @staticmethod
     def _should_attach_desktop_snapshot(text: str, saved_attachments: list[dict]) -> bool:

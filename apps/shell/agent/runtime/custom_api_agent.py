@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
 from typing import Any, Callable
 
@@ -324,6 +325,74 @@ class RuntimeCustomApiAgentLoop:
                     if isinstance(request, dict)
                 )
                 if continue_to_model:
+                    auto_followup_request = self._auto_data_analysis_request_from_discovery(
+                        planned_tool_requests,
+                        allowed_tools,
+                        timeline,
+                    )
+                    if auto_followup_request:
+                        auto_payload = {
+                            "tool": str(auto_followup_request.get("tool") or ""),
+                            "status": "planned",
+                            "source": str(auto_followup_request.get("source") or "runtime_planner"),
+                            "planning_reason": str(
+                                auto_followup_request.get("planning_reason")
+                                or "planner_builtin_data_analysis"
+                            ),
+                            "input_preview": (
+                                auto_followup_request.get("input")
+                                if isinstance(auto_followup_request.get("input"), dict)
+                                else {}
+                            ),
+                        }
+                        timeline.append(
+                            self._timeline(
+                                "agent.desktop.intent_planned",
+                                str(auto_followup_request.get("tool") or ""),
+                                **auto_payload,
+                            )
+                        )
+                        if run_id and self._append_run_event is not None:
+                            self._append_run_event(
+                                run_id,
+                                "agent.desktop.intent_planned",
+                                auto_payload,
+                            )
+                        self._record_desktop_tool_policy_decisions(
+                            [auto_followup_request],
+                            allowed_tools=allowed_tools,
+                            agent=agent,
+                            run_id=run_id,
+                        )
+                        self._run_tool_requests(
+                            [auto_followup_request],
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=start_iteration,
+                            run_id=run_id,
+                            budget=budget,
+                        )
+                        direct_result = self._direct_daily_desktop_result(
+                            agent,
+                            "data.analyze",
+                            (
+                                auto_followup_request.get("input")
+                                if isinstance(auto_followup_request.get("input"), dict)
+                                else {}
+                            ),
+                            timeline,
+                            run_id=run_id,
+                            source=str(auto_followup_request.get("source") or "runtime_planner"),
+                            planning_reason=str(
+                                auto_followup_request.get("planning_reason")
+                                or "planner_builtin_data_analysis"
+                            ),
+                        )
+                        if direct_result:
+                            return direct_result
                     direct_result = ""
                 elif len(execution_tool_requests) == 1:
                     planned_tool = str(execution_tool_requests[0].get("tool") or "")
@@ -477,6 +546,58 @@ class RuntimeCustomApiAgentLoop:
         ):
             return _drop_trailing_daily_desktop_verify_requests(requests) or requests
         return requests
+
+    @staticmethod
+    def _auto_data_analysis_request_from_discovery(
+        planned_tool_requests: list[dict[str, Any]],
+        allowed_tools: list[str],
+        timeline: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        allowed = {str(tool or "").strip() for tool in allowed_tools}
+        if "data.analyze" not in allowed:
+            return None
+        if not any(
+            str(request.get("planning_reason") or "").strip() == "planner_prefetch_data_source"
+            and bool(request.get("continue_to_model"))
+            for request in planned_tool_requests
+            if isinstance(request, dict)
+        ):
+            return None
+        latest_list = _latest_workspace_list_event(timeline)
+        if latest_list is None:
+            return None
+        result = latest_list.get("result") if isinstance(latest_list.get("result"), dict) else {}
+        if result.get("ok") is not True:
+            return None
+        entries = result.get("entries")
+        if not isinstance(entries, list):
+            return None
+        data_files = [
+            str(entry.get("name") or "").strip()
+            for entry in entries
+            if isinstance(entry, dict)
+            and str(entry.get("type") or "").strip() == "file"
+            and _data_analysis_file_kind(str(entry.get("name") or "")) != ""
+        ]
+        if len(data_files) != 1:
+            return None
+        list_input = latest_list.get("input_preview") if isinstance(latest_list.get("input_preview"), dict) else {}
+        base_path = str(list_input.get("path") or result.get("path") or "").strip()
+        path = _join_workspace_list_path(base_path, data_files[0])
+        artifact_paths = ["analysis-report.md"]
+        return {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": path,
+                "artifact_path": artifact_paths[0],
+                "source_kind": _data_analysis_file_kind(path),
+                "requested_outputs": ["report"],
+                "artifact_manifest": [{"path": artifact_paths[0], "kind": "markdown"}],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        }
 
     @staticmethod
     def _planned_request_for_tool(
@@ -3088,6 +3209,38 @@ def _is_requested_ui_readback(
             "system.settings_open",
         }
     )
+
+
+def _latest_workspace_list_event(timeline: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() == "workspace.list":
+            return event
+    return None
+
+
+def _data_analysis_file_kind(path: str) -> str:
+    lowered = str(path or "").strip().lower()
+    if lowered.endswith(".csv"):
+        return "csv"
+    if lowered.endswith(".tsv"):
+        return "tsv"
+    if lowered.endswith(".json"):
+        return "json"
+    if lowered.endswith(".jsonl"):
+        return "jsonl"
+    if lowered.endswith(".xlsx"):
+        return "xlsx"
+    return ""
+
+
+def _join_workspace_list_path(base_path: str, name: str) -> str:
+    clean_name = str(name or "").strip().strip("/")
+    clean_base = str(base_path or "").strip().strip("/")
+    if not clean_base or clean_base == ".":
+        return clean_name
+    return posixpath.normpath(posixpath.join(clean_base, clean_name))
 
 
 def _display_target_name(value: str, suffix: str = "") -> str:
