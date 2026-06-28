@@ -156,6 +156,8 @@ Exit evidence:
 
 - Data-source hints produce `workspace.read`/analysis/artifact plans.
 - Artifacts are observable and readable through existing task/run surfaces.
+- Sample dataset artifact readback is reproducible with
+  `python scripts/smoke_data_analysis_artifacts.py --workdir tmp/data-analysis-artifact-smoke`.
 
 ## Phase 7 - Prompt/Skill Runtime Doctrine
 
