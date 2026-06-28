@@ -1367,9 +1367,23 @@ class RuntimePlanner:
         if intent.kind == "clipboard_operation":
             return self._clipboard_steps(intent, allowed)
         if intent.kind == "workflow_orchestration":
-            return [_service_step(intent, "workflow.orchestration", "Select or start workflow")]
+            return [
+                _service_step(
+                    intent,
+                    "workflow.orchestration",
+                    "Select or start workflow",
+                    allowed,
+                )
+            ]
         if intent.kind == "multi_agent":
-            return [_service_step(intent, "group.multi_agent", "Select or start group run")]
+            return [
+                _service_step(
+                    intent,
+                    "group.multi_agent",
+                    "Select or start group run",
+                    allowed,
+                )
+            ]
         return self._report_steps(intent, allowed)
 
     def _data_analysis_steps(
@@ -3035,7 +3049,20 @@ class RuntimePlanner:
             app_mode = str(intent.inputs.get("app_mode") or "focus").strip() or "focus"
             prepare_step_id = ""
             prepare_step: ToolPlanStepSnapshot | None = None
+            discover_step: ToolPlanStepSnapshot | None = None
             if app_name and browser_action != "find_current_page":
+                discover_step = _step(
+                    intent,
+                    "discover-browser-app",
+                    "Discover browser app",
+                    "desktop.app_discovery",
+                    _first_allowed(
+                        ("desktop.list_apps", "desktop.running_apps", "desktop.active_window"),
+                        allowed,
+                    ),
+                    input_preview={"query": app_name, "limit": 20},
+                    reason="Resolve the requested browser app before opening or focusing it.",
+                )
                 prepare_step_id = "open-or-focus-browser"
                 prepare_step = _step(
                     intent,
@@ -3044,6 +3071,7 @@ class RuntimePlanner:
                     "desktop.app_control",
                     _first_allowed(app_control_tool_candidates(app_mode), allowed),
                     input_preview={"app_name": app_name},
+                    depends_on=["discover-browser-app"],
                     reason="Prepare the requested browser before running the browser tool.",
                 )
             tool_name = {
@@ -3133,6 +3161,7 @@ class RuntimePlanner:
                     "click_count": int(intent.inputs.get("click_count") or 1),
                 }
                 return [
+                    *([discover_step] if discover_step is not None else []),
                     *([prepare_step] if prepare_step is not None else []),
                     main_step,
                     _step(
@@ -3148,7 +3177,11 @@ class RuntimePlanner:
                         reason="Click the requested search result only after opening the planned search URL.",
                     ),
                 ]
-            steps = [*([prepare_step] if prepare_step is not None else []), main_step]
+            steps = [
+                *([discover_step] if discover_step is not None else []),
+                *([prepare_step] if prepare_step is not None else []),
+                main_step,
+            ]
             if _web_research_artifact_requested(intent) and (
                 allowed is None or "artifact.write" in allowed
             ):
@@ -3780,13 +3813,21 @@ def _service_step(
     intent: TaskIntentSnapshot,
     capability_id: str,
     title: str,
+    allowed: set[str] | None = None,
 ) -> ToolPlanStepSnapshot:
+    target_name = str(intent.inputs.get("target_name_hint") or "").strip()
+    tool_name = _first_allowed(_service_tool_candidates(capability_id), allowed)
     return ToolPlanStepSnapshot(
         step_id=capability_id.replace(".", "-"),
         title=title,
         capability_id=capability_id,
         action=_service_action(capability_id),
-        reason="Handled by Agent Studio service orchestration rather than a model-visible tool.",
+        tool_name=tool_name,
+        input_preview={"target_name": target_name} if target_name else {},
+        reason=(
+            "Use the shared Agent Studio service orchestration entrypoint when available; "
+            "otherwise keep this as an observable Studio-managed step."
+        ),
     )
 
 
@@ -4875,6 +4916,14 @@ def _service_action(capability_id: str) -> str:
     if capability_id == "group.multi_agent":
         return "start_group_run"
     return ""
+
+
+def _service_tool_candidates(capability_id: str) -> tuple[str, ...]:
+    if capability_id == "workflow.orchestration":
+        return ("workflow.start", "workflow.run", "workflow.list")
+    if capability_id == "group.multi_agent":
+        return ("group.start", "group.run", "group.list")
+    return ()
 
 
 def _desktop_discovery_action(tool_name: str | None) -> str:

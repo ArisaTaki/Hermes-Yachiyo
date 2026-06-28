@@ -255,14 +255,21 @@ class RuntimeCustomApiAgentLoop:
                             "agent.desktop.intent_planned",
                             planned_payload,
                         )
+                execution_tool_requests = planned_tool_requests
+                if self._has_approval_plan_tool(planned_tool_requests):
+                    execution_tool_requests = _visible_daily_desktop_completed_steps(
+                        planned_tool_requests
+                    )
+                    if not execution_tool_requests:
+                        execution_tool_requests = planned_tool_requests
                 self._record_desktop_permission_preflight(
-                    planned_tool_requests,
+                    execution_tool_requests,
                     broker,
                     timeline=timeline,
                     run_id=run_id,
                 )
                 self._record_desktop_tool_policy_decisions(
-                    planned_tool_requests,
+                    execution_tool_requests,
                     allowed_tools=allowed_tools,
                     agent=agent,
                     run_id=run_id,
@@ -270,7 +277,7 @@ class RuntimeCustomApiAgentLoop:
                 tool_timeline_start = len(timeline)
                 try:
                     self._run_tool_requests(
-                        planned_tool_requests,
+                        execution_tool_requests,
                         allowed_tools,
                         broker,
                         messages,
@@ -286,16 +293,16 @@ class RuntimeCustomApiAgentLoop:
                     )
                     planned_tool = str(
                         pending_approval.get("tool")
-                        or planned_tool_requests[0].get("tool")
+                        or execution_tool_requests[0].get("tool")
                         or ""
                     )
                     planned_input = (
                         pending_approval.get("input")
                         if isinstance(pending_approval.get("input"), dict)
-                        else planned_tool_requests[0].get("input") or {}
+                        else execution_tool_requests[0].get("input") or {}
                     )
                     approval_request = self._planned_request_for_tool(
-                        planned_tool_requests,
+                        execution_tool_requests,
                         planned_tool,
                     )
                     self._record_desktop_intent_approval_required(
@@ -318,10 +325,10 @@ class RuntimeCustomApiAgentLoop:
                 )
                 if continue_to_model:
                     direct_result = ""
-                elif len(planned_tool_requests) == 1:
-                    planned_tool = str(planned_tool_requests[0].get("tool") or "")
-                    planned_input = planned_tool_requests[0].get("input") or {}
-                    presentation = str(planned_tool_requests[0].get("presentation") or "").strip()
+                elif len(execution_tool_requests) == 1:
+                    planned_tool = str(execution_tool_requests[0].get("tool") or "")
+                    planned_input = execution_tool_requests[0].get("input") or {}
+                    presentation = str(execution_tool_requests[0].get("presentation") or "").strip()
                     direct_result = self._direct_daily_desktop_result(
                         agent,
                         planned_tool,
@@ -330,15 +337,15 @@ class RuntimeCustomApiAgentLoop:
                         run_id=run_id,
                         presentation=presentation,
                         source=str(
-                            planned_tool_requests[0].get("source") or "daily_desktop_intent"
+                            execution_tool_requests[0].get("source") or "daily_desktop_intent"
                         ),
                         planning_reason=str(
-                            planned_tool_requests[0].get("planning_reason") or ""
+                            execution_tool_requests[0].get("planning_reason") or ""
                         ),
                     )
                 else:
                     direct_result = self._direct_daily_desktop_sequence_result(
-                        planned_tool_requests,
+                        execution_tool_requests,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
                         run_id=run_id,
@@ -463,7 +470,13 @@ class RuntimeCustomApiAgentLoop:
             )
             if cleaned_request:
                 cleaned.append(cleaned_request)
-        return planner_execution_tool_requests(cleaned, allowed_tools)
+        requests = planner_execution_tool_requests(cleaned, allowed_tools)
+        if any(
+            str(request.get("planning_reason") or "").strip() == "explicit_full_plan"
+            for request in requests
+        ):
+            return _drop_trailing_daily_desktop_verify_requests(requests) or requests
+        return requests
 
     @staticmethod
     def _planned_request_for_tool(
@@ -567,6 +580,7 @@ class RuntimeCustomApiAgentLoop:
                     execution_requests,
                     allowed_tools,
                 )
+                execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
                 if execution_requests and not self._has_approval_plan_tool(execution_requests):
                     return (
                         selection.decision,
@@ -589,6 +603,7 @@ class RuntimeCustomApiAgentLoop:
                 execution_requests,
                 allowed_tools,
             )
+            execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
             event_payload = selection.event_payload
             if execution_requests != selection.requests:
                 execution_tools = [
@@ -1036,6 +1051,15 @@ class RuntimeCustomApiAgentLoop:
         if not summary:
             return ""
         last_step = visible_steps[-1]
+        completed_tools_steps = (
+            visible_steps
+            if any(
+                isinstance(event.get("result"), dict)
+                and event["result"].get("approval_required")
+                for event in tool_events
+            )
+            else completed_steps
+        )
         clean_source = str(
             (planned_tool_requests[0].get("source") if planned_tool_requests else "")
             or "daily_desktop_intent"
@@ -1047,7 +1071,7 @@ class RuntimeCustomApiAgentLoop:
         }
         event_payload = {
             "tool": str(last_step.get("tool") or ""),
-            "tools": [str(request.get("tool") or "") for request in planned_tool_requests],
+            "tools": [str(step.get("tool") or "") for step in completed_tools_steps],
             "input_preview": (
                 last_step.get("input_preview") if isinstance(last_step.get("input_preview"), dict) else {}
             ),
@@ -1499,8 +1523,11 @@ class RuntimeCustomApiAgentLoop:
         sequence = self._latest_uncompleted_daily_desktop_sequence(timeline)
         if sequence is None:
             return ""
+        requests = _visible_daily_desktop_completed_steps(sequence["requests"])
+        if not requests:
+            requests = sequence["requests"]
         return self._direct_daily_desktop_sequence_result(
-            sequence["requests"],
+            requests,
             timeline,
             tool_timeline_start=sequence["start_index"] + 1,
             run_id=run_id,
@@ -1965,8 +1992,22 @@ def _desktop_permissions_summary(result: dict[str, Any]) -> str:
             f"桌面执行权限还缺少：{target_text}{target_suffix}。",
             result,
         )
+    legacy_apple_music_tools = [
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    ]
     tool_text = ", ".join(affected_tools[:6])
     tool_suffix = " 等" if len(affected_tools) > 6 else ""
+    if all(tool in affected_tools for tool in legacy_apple_music_tools) and affected_tools != legacy_apple_music_tools:
+        legacy_tool_text = ", ".join(legacy_apple_music_tools)
+        return _append_recovery_action_summary(
+            (
+                f"桌面执行权限还缺少：{target_text}{target_suffix}。"
+                f"受影响工具：{legacy_tool_text}。完整受影响工具：{tool_text}{tool_suffix}。"
+            ),
+            result,
+        )
     return _append_recovery_action_summary(
         f"桌面执行权限还缺少：{target_text}{target_suffix}。受影响工具：{tool_text}{tool_suffix}。",
         result,
@@ -2002,6 +2043,16 @@ def _desktop_permission_recovery_event_payload(
             tool_name,
         ]
     )
+    legacy_apple_music_tools = [
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    ]
+    if (
+        {"music_app", "automation"}.issubset(set(permission_targets))
+        and set(legacy_apple_music_tools).issubset(set(affected_tools))
+    ):
+        affected_tools = _ordered_text_list([*legacy_apple_music_tools, tool_name])
     has_recovery_signal = (
         bool(permission_targets)
         or bool(recovery_hints)
@@ -2992,6 +3043,29 @@ def _visible_daily_desktop_completed_steps(
             continue
         visible_steps.append(step)
     return visible_steps or completed_steps
+
+
+def _drop_trailing_daily_desktop_verify_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(requests) <= 1:
+        return requests
+    last_primary = -1
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            tool_name not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+            and tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS
+        ):
+            last_primary = index
+    if last_primary < 0:
+        return requests
+    return [
+        request
+        for index, request in enumerate(requests)
+        if index <= last_primary
+        or str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
 
 
 def _is_requested_ui_readback(

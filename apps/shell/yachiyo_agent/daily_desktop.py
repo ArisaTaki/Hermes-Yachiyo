@@ -15,6 +15,18 @@ from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
+_ENTRYPOINT_DISCOVERY_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+    "desktop.permissions",
+}
+_ENTRYPOINT_NON_PRIMARY_TOOLS = {
+    *_ENTRYPOINT_DISCOVERY_TOOLS,
+    "desktop.active_window",
+    "desktop.windows",
+    "desktop.ui_elements",
+}
+
 
 def daily_desktop_allowed_tools(
     allowed_tools: Sequence[str] | None = None,
@@ -46,10 +58,14 @@ def daily_desktop_entrypoint_requests(
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
-    return daily_desktop_entrypoint_tool_requests(
-        str(text or ""),
-        daily_desktop_allowed_tools(allowed_tools),
-        metadata=metadata,
+    allowed = daily_desktop_allowed_tools(allowed_tools)
+    return _prefer_generic_music_app_entrypoint_requests(
+        daily_desktop_entrypoint_tool_requests(
+            str(text or ""),
+            allowed,
+            metadata=metadata,
+        ),
+        allowed,
     )
 
 
@@ -136,7 +152,7 @@ def entrypoint_plan_user_metadata(
 ) -> dict[str, Any]:
     """Project planner-first entrypoint metadata while preserving legacy keys."""
 
-    metadata = daily_desktop_user_metadata(requests)
+    metadata = daily_desktop_user_metadata(_visible_entrypoint_plan_requests(requests))
     if not metadata:
         return {}
     source = str(metadata.get("daily_desktop_source") or "").strip()
@@ -153,6 +169,62 @@ def entrypoint_plan_user_metadata(
         "entrypoint_plan_tools": tool_list,
         "entrypoint_plan_legacy_fallback": source != "runtime_planner",
     }
+
+
+def _visible_entrypoint_plan_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    items = [request for request in requests or [] if isinstance(request, Mapping)]
+    if len(items) <= 1:
+        return items
+    primary_indexes = [
+        index
+        for index, request in enumerate(items)
+        if str(request.get("tool") or "").strip() not in _ENTRYPOINT_NON_PRIMARY_TOOLS
+    ]
+    if not primary_indexes:
+        visible = list(items)
+        while (
+            len(visible) > 1
+            and str(visible[0].get("tool") or "").strip() in _ENTRYPOINT_DISCOVERY_TOOLS
+        ):
+            visible = visible[1:]
+        return visible
+    first_primary = primary_indexes[0]
+    last_primary = primary_indexes[-1]
+    visible = []
+    for index, request in enumerate(items):
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _ENTRYPOINT_DISCOVERY_TOOLS and (
+            index < first_primary or index > last_primary
+        ):
+            continue
+        if tool_name in _ENTRYPOINT_NON_PRIMARY_TOOLS and index > last_primary:
+            continue
+        visible.append(request)
+    return visible or items
+
+
+def _prefer_generic_music_app_entrypoint_requests(
+    requests: list[dict[str, Any]],
+    allowed_tools: Sequence[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if "media.music_app_open_and_play" not in allowed:
+        return requests
+    updated: list[dict[str, Any]] = []
+    for request in requests:
+        if str(request.get("tool") or "").strip() == "media.apple_music_open_and_play":
+            updated.append(
+                {
+                    **request,
+                    "tool": "media.music_app_open_and_play",
+                    "input": {"app_name": "Music"},
+                }
+            )
+            continue
+        updated.append(request)
+    return updated
 
 
 def daily_desktop_planned_timeline(

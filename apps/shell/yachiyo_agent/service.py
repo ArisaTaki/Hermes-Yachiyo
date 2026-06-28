@@ -28,6 +28,8 @@ from .ports import ChatTaskStarter, RuntimePort
 from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
+from .task_snapshots import _chat_task_tool_calls
+from .tool_call_snapshots import tool_call_snapshots_from_payloads
 
 
 class YachiyoAgentService:
@@ -240,11 +242,16 @@ def _payload_run_id(payload: Any) -> str:
 def _chat_timeline_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimelineSnapshot:
     timeline = run_timeline_snapshot_from_payload(payload)
     visible_events = _chat_visible_events(timeline.events)
+    event_tool_calls = tool_call_snapshots_from_payloads(None, events=visible_events)
+    visible_tool_calls = _chat_task_tool_calls(event_tool_calls, visible_events)
     clean_payload = dict(payload)
     clean_payload.pop("run_events", None)
     clean_payload.pop("recent_events", None)
     clean_payload.pop("timeline", None)
     clean_payload["events"] = [event.model_dump() for event in visible_events]
+    clean_payload["tool_calls"] = [
+        tool_call.model_dump(mode="python") for tool_call in visible_tool_calls
+    ]
     return run_timeline_snapshot_from_payload(clean_payload)
 
 

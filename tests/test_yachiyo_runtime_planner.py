@@ -406,6 +406,15 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "把当前窗口里的表格复制出来，分析并输出报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "terminal.run", "artifact.write"],
     )
+    current_page_table = RuntimePlanner().decision(
+        "把当前页面里的表格复制出来，分析趋势并写报告",
+        allowed_tools=[
+            "browser.extract_text",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs["context_source"] == "current_page_content"
@@ -439,6 +448,21 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "paths": ["analysis-report.md"],
         "body_source": "current_page_content",
     }
+    assert current_page_table.selected_intent.kind == "data_analysis"
+    assert current_page_table.selected_intent.inputs["context_source"] == "current_page_content"
+    assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(current_page_table, "read-data-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert current_page_table.plan.tool_plan.required_capabilities == [
+        "browser.research",
+        "data.analysis",
+        "artifact.write",
+    ]
 
 
 def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
@@ -932,15 +956,19 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     workflow_step = _step_by_id(workflow, "workflow-orchestration")
     assert workflow_step.capability_id == "workflow.orchestration"
     assert workflow_step.action == "start_workflow"
+    assert workflow_step.tool_name == "workflow.run"
     assert workflow_step.status == "planned"
 
     named_workflow = RuntimePlanner().decision(
         "运行 Daily Summary workflow",
-        allowed_tools=["workflow.run", "artifact.write"],
+        allowed_tools=["workflow.start", "artifact.write"],
     )
     assert named_workflow.selected_intent.inputs == {
         "target_name_hint": "Daily Summary"
     }
+    named_workflow_step = _step_by_id(named_workflow, "workflow-orchestration")
+    assert named_workflow_step.tool_name == "workflow.start"
+    assert named_workflow_step.input_preview == {"target_name": "Daily Summary"}
 
     workflow_with_data_words = RuntimePlanner().decision(
         "启动工作流分析 sales.csv",
@@ -959,15 +987,19 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     group_step = _step_by_id(group, "group-multi_agent")
     assert group_step.capability_id == "group.multi_agent"
     assert group_step.action == "start_group_run"
+    assert group_step.tool_name == "group.run"
     assert group_step.status == "planned"
 
     named_group = RuntimePlanner().decision(
         "运行 Research Team group",
-        allowed_tools=["group.run", "artifact.write"],
+        allowed_tools=["group.start", "artifact.write"],
     )
     assert named_group.selected_intent.inputs == {
         "target_name_hint": "Research Team"
     }
+    named_group_step = _step_by_id(named_group, "group-multi_agent")
+    assert named_group_step.tool_name == "group.start"
+    assert named_group_step.input_preview == {"target_name": "Research Team"}
 
     single_agent_research = RuntimePlanner().decision(
         "研究 agent runtime 并总结",
@@ -1381,13 +1413,18 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "app_mode": "focus",
     }
     assert [step.step_id for step in first_result.plan.tool_plan.steps] == [
+        "discover-browser-app",
         "open-or-focus-browser",
         "open-web-search",
         "click-web-search-result",
     ]
+    discover_browser = _step_by_id(first_result, "discover-browser-app")
+    assert discover_browser.tool_name is None
+    assert discover_browser.status == "unavailable"
     browser_step = _step_by_id(first_result, "open-or-focus-browser")
     assert browser_step.tool_name is None
     assert browser_step.status == "unavailable"
+    assert browser_step.depends_on == ["discover-browser-app"]
     assert _step_by_id(first_result, "open-web-search").input_preview == {
         "url": "https://www.google.com/search?q=OpenAI"
     }
@@ -2233,6 +2270,32 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert _step_by_id(current_interface, "open-or-focus-app").input_preview == {
         "app_name": "Chrome",
     }
+
+    named_unknown_app = RuntimePlanner().decision(
+        "帮我打开一个叫 Linear 的应用，看看当前窗口里有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.ui_elements"],
+    )
+    assert named_unknown_app.selected_intent.kind == "desktop_operation"
+    assert named_unknown_app.selected_intent.inputs["app_name_hint"] == "Linear"
+    assert named_unknown_app.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert named_unknown_app.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert "window_list_hint" not in named_unknown_app.selected_intent.inputs
+    assert [step.step_id for step in named_unknown_app.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "read-foreground-ui",
+    ]
+    assert _step_by_id(named_unknown_app, "discover-desktop-state").input_preview == {
+        "query": "Linear",
+        "limit": 20,
+    }
+    assert _step_by_id(named_unknown_app, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(named_unknown_app, "read-foreground-ui").depends_on == [
+        "open-or-focus-app"
+    ]
     assert _step_by_id(current_interface, "read-foreground-ui").depends_on == [
         "open-or-focus-app"
     ]

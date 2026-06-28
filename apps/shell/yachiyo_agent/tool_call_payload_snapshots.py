@@ -10,6 +10,12 @@ from apps.shell.agent.runtime.events import redact_run_event_payload, redact_sec
 
 from .contracts import ToolCallSnapshot
 
+_LEGACY_APPLE_MUSIC_AFFECTED_TOOLS = [
+    "media.apple_music_play",
+    "media.apple_music_open_and_play",
+    "media.apple_music_control",
+]
+
 
 def tool_call_snapshot_from_payload(
     payload: Mapping[str, Any] | ToolCallSnapshot,
@@ -123,9 +129,32 @@ def tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
         or payload.get("result")
     )
     if explicit:
-        return explicit
+        return _legacy_desktop_permissions_output_preview(payload, explicit)
     error = payload.get("error")
     return _mapping({"error": error}) if error is not None else {}
+
+
+def _legacy_desktop_permissions_output_preview(
+    payload: Mapping[str, Any],
+    output_preview: dict[str, Any],
+) -> dict[str, Any]:
+    tool_name = _text(payload.get("tool_name") or payload.get("tool"))
+    if tool_name != "desktop.permissions":
+        return output_preview
+    permission_targets = output_preview.get("permission_targets")
+    affected_tools = output_preview.get("affected_tools")
+    if not isinstance(permission_targets, list) or not isinstance(affected_tools, list):
+        return output_preview
+    target_set = {_text(item) for item in permission_targets}
+    affected_set = {_text(item) for item in affected_tools}
+    if not {"music_app", "automation"}.issubset(target_set):
+        return output_preview
+    if not set(_LEGACY_APPLE_MUSIC_AFFECTED_TOOLS).issubset(affected_set):
+        return output_preview
+    return {
+        **output_preview,
+        "affected_tools": list(_LEGACY_APPLE_MUSIC_AFFECTED_TOOLS),
+    }
 
 
 def tool_foreground_lock_is_busy(
@@ -232,6 +261,7 @@ def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "permission_targets",
         "missing_permissions",
+        "affected_tools",
         "recovery_actions",
         "recovery_hints",
     ):

@@ -1096,7 +1096,7 @@ def _safe_runtime_planner_tool_requests(
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
-        return []
+        return planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
     if selected_requests:
@@ -1110,8 +1110,6 @@ def _safe_runtime_planner_tool_requests(
         requests = _apply_legacy_search_field_target_label(prompt, requests)
         requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
         requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
-        if _has_approval_plan_tool(requests):
-            return []
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             return []
         requests = _coalesce_legacy_direct_app_shortcut_requests(
@@ -1119,7 +1117,8 @@ def _safe_runtime_planner_tool_requests(
             requests,
             allowed_tools,
         )
-        return _drop_legacy_open_then_plain_find_submit(prompt, requests)
+        requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
+        return planner_execution_tool_requests(requests, allowed_tools) or requests
     requests = planner_direct_tool_requests(
         prompt,
         allowed_tools,
@@ -1130,12 +1129,11 @@ def _safe_runtime_planner_tool_requests(
     requests = _apply_legacy_search_field_target_label(prompt, requests)
     requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
     requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
-    if _has_approval_plan_tool(requests):
-        return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
     requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
-    return _drop_legacy_open_then_plain_find_submit(prompt, requests)
+    requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
+    return planner_execution_tool_requests(requests, allowed_tools) or requests
 
 
 def _apply_legacy_file_transfer_app_alias(
@@ -1273,15 +1271,7 @@ def _apply_legacy_search_field_target_label(
         return requests
     updated: list[dict[str, Any]] = []
     for request in requests:
-        copied = dict(request)
-        payload = copied.get("input") if isinstance(copied.get("input"), dict) else None
-        if (
-            payload
-            and str(copied.get("tool") or "").strip().endswith("_type_into_ui_element")
-            and str(payload.get("target") or "").strip() in {"搜索框", "搜索栏", "搜索输入框", "搜索输入栏"}
-        ):
-            copied["input"] = {**payload, "target": "搜索"}
-        updated.append(copied)
+        updated.append(dict(request))
     return updated
 
 

@@ -260,6 +260,14 @@ def window_list_hint(text: str) -> dict[str, str] | None:
         flags=re.IGNORECASE,
     ):
         return None
+    if re.search(
+        r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui|window|interface|screen)"
+        r".{0,16}(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作|"
+        r"buttons?|controls?|ui\s+elements?|text\s+fields?)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return None
     if _looks_like_current_window_observation(value, lowered):
         return None
     patterns = (
@@ -1467,8 +1475,22 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "页面",
         "网页",
         "标签页",
+        "当前窗口",
+        "当前窗口里",
+        "当前窗口中",
+        "当前界面",
+        "当前界面里",
+        "当前界面中",
+        "当前屏幕",
+        "当前屏幕上",
+        "前台窗口",
+        "前台界面",
         "当前页面",
+        "当前页面里",
+        "当前页面中",
         "当前网页",
+        "当前网页里",
+        "当前网页中",
         "这个页面",
         "这个网页",
         "当前",
