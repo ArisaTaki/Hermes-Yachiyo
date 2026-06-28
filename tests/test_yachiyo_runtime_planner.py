@@ -7529,7 +7529,7 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
     assert planner_tool_requests("我现在是不是在家", allowed_tools) == []
 
 
-def test_planner_direct_tool_requests_omits_discover_but_preserves_verify_steps() -> None:
+def test_planner_direct_tool_requests_keeps_unknown_app_discover_and_verify_steps() -> None:
     requests = planner_direct_tool_requests(
         "打开 PixelForge 并点击导出按钮",
         allowed_tools=[
@@ -7541,6 +7541,13 @@ def test_planner_direct_tool_requests_omits_discover_but_preserves_verify_steps(
     )
 
     assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
         {
             "protocol": "json_fallback",
             "tool": "app.open",
@@ -7650,6 +7657,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
 
     assert decision is not None
     assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
         "app.open",
         "desktop.click_ui_element",
         "desktop.ui_elements",
@@ -8452,6 +8460,47 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_typing_and_submit() ->
     )
 
     assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "搜索框",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_planner_direct_tool_requests_keeps_unknown_app_discovery_before_execution() -> None:
+    requests = planner_direct_tool_requests(
+        "打开 PixelForge 搜索框输入 hello 并回车",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_type_into_ui_element",

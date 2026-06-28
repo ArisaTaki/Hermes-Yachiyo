@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .app_name_hints import legacy_app_name_hint
+from .app_name_hints import legacy_app_name_hint, legacy_app_name_is_known
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
@@ -316,11 +316,15 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     return requests
 
 
-def _skip_desktop_direct_execution_step(step: Any) -> bool:
-    return str(getattr(step, "step_id", "") or "").strip() in {
-        "discover-desktop-state",
-        "verify-desktop-result",
-    }
+def _keep_direct_discovery_step(step: Any, tool_name: str) -> bool:
+    if str(getattr(step, "step_id", "") or "").strip() != "discover-desktop-state":
+        return False
+    if tool_name != "desktop.list_apps":
+        return False
+    input_preview = getattr(step, "input_preview", None)
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    query = str(payload.get("query") or "").strip()
+    return bool(query and not legacy_app_name_is_known(query))
 
 
 _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX = {
@@ -578,12 +582,12 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     }
     for step in decision.plan.tool_plan.steps:
         step_id = str(getattr(step, "step_id", "") or "").strip()
-        if step_id == "discover-desktop-state":
-            continue
-        if step_id == "list-app-windows" and "focus-app-window" in step_ids:
-            continue
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
+            continue
+        if step_id == "discover-desktop-state" and not _keep_direct_discovery_step(step, tool_name):
+            continue
+        if step_id == "list-app-windows" and "focus-app-window" in step_ids:
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}

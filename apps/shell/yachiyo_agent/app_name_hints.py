@@ -18,7 +18,7 @@ from apps.shell.agent.runtime.app_aliases import (
 from apps.shell.agent.runtime.media_apps import music_app_name_from_text
 
 
-def legacy_app_name_hint(value: str) -> str:
+def _legacy_app_name_compact(value: str) -> str:
     app_name = str(value or "").strip()
     if not app_name:
         return ""
@@ -40,7 +40,20 @@ def legacy_app_name_hint(value: str) -> str:
         compact = compact_app_alias(without_article)
     if compact in {"webbrowser", "webpage", "webpages", "web"}:
         compact = "browser"
+    return compact
+
+
+def legacy_app_name_hint(value: str) -> str:
+    app_name = str(value or "").strip()
+    if not app_name:
+        return ""
+    compact = _legacy_app_name_compact(app_name)
     return APP_ALIASES.get(compact, app_name)
+
+
+def legacy_app_name_is_known(value: str) -> bool:
+    compact = _legacy_app_name_compact(value)
+    return bool(compact and compact in APP_ALIASES)
 
 
 def compact_app_name_hint(value: str) -> str:
