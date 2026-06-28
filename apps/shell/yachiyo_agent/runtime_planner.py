@@ -328,6 +328,8 @@ class TaskIntentRouter:
                 "music",
                 "打开",
                 "启动",
+                "开启",
+                "开起来",
                 "切到",
                 "聚焦",
                 "点击",
@@ -390,6 +392,8 @@ class TaskIntentRouter:
             score = 0.18
         if score <= 0 and dynamic_context_transfer:
             score = 0.24
+        if score <= 0 and _app_first_control_app_name_hint(text):
+            score = 0.18
         if (
             score <= 0
             and click_target_hint(text)
@@ -5886,12 +5890,21 @@ def _app_name_hint(text: str) -> str:
         return ""
     patterns = [
         r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
+        r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:打开起来|启动起来|开启起来|开起来|打开|启动|开启|运行|拉起|开)"
+        r"(?:一下|下|起来)?\s*(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
+        r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:切到|切回|聚焦|激活)(?:一下|下|到前台|前台)?\s*"
+        r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
         r"(?:go\s+back\s+to|switch\s+back\s+to|back\s+to)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:can|could|would)\s+you\s+(?:please\s+)?"
         r"(?:open|launch|focus|start)\s+(?P<polite_app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?:the\s+)?(?:app|application)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:bring|switch)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:to\s+(?:the\s+)?(?:front|foreground)|forward)",
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
+        r"^(?!(?:can|could|would|please|pls|search|find|press|hit|tap|type|enter|click|send|submit)\b)"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:open|launch|start|focus|activate)(?:\s+(?:please|pls))?[.!?]*$",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点\s*[^。！？!?，,]+",
@@ -5927,6 +5940,21 @@ def _app_name_hint(text: str) -> str:
         ):
             return app
     return ""
+
+
+def _app_first_control_app_name_hint(text: str) -> str:
+    value = str(text or "").strip()
+    if re.search(r"://|(?:^|\s)[\w-]+\.[A-Za-z]{2,}(?:/|\s|$)", value):
+        return ""
+    if not re.search(
+        r"(?:打开起来|启动起来|开启起来|开起来|打开|启动|开启|运行|拉起|开|"
+        r"切到|切回|聚焦|激活|open|launch|start|focus|activate)\s*"
+        r"(?:一下|下|起来|到前台|前台|please|pls)?[?？。！!.]*$",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    return _app_name_hint(value)
 
 
 def _clean_app_name_hint(value: str) -> str:
@@ -5970,6 +5998,7 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip(" .，,。")
     app = re.sub(r"\s*(?:吗|嘛|呢|吧|么|\?|？)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(r"\s*(?:帮我|请|麻烦)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:please|pls)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"\s*(?:for\s+me)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(
@@ -5985,7 +6014,7 @@ def _clean_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
-    app = re.sub(r"\s*(?:一下|下)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:一下|下|起来)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")

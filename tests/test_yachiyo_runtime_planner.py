@@ -2149,11 +2149,19 @@ def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
         ("把 Arc 打开", "Arc", "app.open"),
         ("帮我把 Linear 启动起来", "Linear", "app.open"),
         ("把微信打开", "微信", "app.open"),
+        ("PixelForge 打开", "PixelForge", "app.open"),
+        ("PixelForge 启动", "PixelForge", "app.open"),
+        ("PixelForge 开起来", "PixelForge", "app.open"),
+        ("微信帮我打开一下", "微信", "app.open"),
         ("把 Slack 切到前台", "Slack", "app.focus"),
         ("把 Obsidian 聚焦", "Obsidian", "app.focus"),
+        ("Slack 切到", "Slack", "app.focus"),
+        ("Obsidian 聚焦", "Obsidian", "app.focus"),
         ("帮我打开一下 CleanMyMac 可以吗", "CleanMyMac", "app.open"),
         ("麻烦启动下飞书好吗", "飞书", "app.open"),
         ("能不能切到 Slack 一下", "Slack", "app.focus"),
+        ("PixelForge open", "PixelForge", "app.open"),
+        ("PixelForge focus", "PixelForge", "app.focus"),
     )
 
     for prompt, expected_app_name, expected_tool in cases:
@@ -2172,6 +2180,23 @@ def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
         assert _step_by_id(decision, "open-or-focus-app").input_preview == {
             "app_name": expected_app_name,
         }
+
+
+def test_runtime_planner_strips_launch_suffix_from_prefix_app_open() -> None:
+    decision = RuntimePlanner().decision(
+        "启动Chrome起来",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "Chrome",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Chrome",
+    }
 
 
 def test_runtime_planner_keeps_postposed_app_name_for_app_scoped_shortcut() -> None:

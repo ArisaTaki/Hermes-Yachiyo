@@ -121,18 +121,28 @@ def test_daily_desktop_planned_timeline_keeps_each_runtime_planner_request() -> 
 
 
 def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_default() -> None:
-    requests = planner_first_daily_desktop_entrypoint_requests(
-        "打开 PixelForge",
-        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    cases = (
+        ("打开 PixelForge", "app.open", "PixelForge"),
+        ("PixelForge 打开", "app.open", "PixelForge"),
+        ("PixelForge open", "app.open", "PixelForge"),
+        ("Slack 切到", "app.focus", "Slack"),
+        ("PixelForge focus", "app.focus", "PixelForge"),
     )
 
-    assert [request["tool"] for request in requests] == [
-        "desktop.list_apps",
-        "app.open",
-        "desktop.active_window",
-    ]
-    assert {request["source"] for request in requests} == {"runtime_planner"}
-    assert requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+    for prompt, tool_name, app_name in cases:
+        requests = planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.active_window"],
+        )
+
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            tool_name,
+            "desktop.active_window",
+        ]
+        assert {request["source"] for request in requests} == {"runtime_planner"}
+        assert requests[0]["input"] == {"query": app_name, "limit": 20}
+        assert requests[1]["input"] == {"app_name": app_name}
 
 
 def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
