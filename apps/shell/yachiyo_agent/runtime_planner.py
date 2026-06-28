@@ -3610,6 +3610,11 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         context_source = str(intent.inputs.get("context_source") or "").strip()
         direct_message = intent.inputs.get("direct_message_hint")
+        draft_preview = (
+            _communication_draft_input_preview(direct_message)
+            if isinstance(direct_message, Mapping)
+            else {}
+        )
         if isinstance(direct_message, Mapping):
             direct_steps = _direct_communication_steps(intent, allowed, direct_message)
             if direct_steps:
@@ -3661,6 +3666,7 @@ class RuntimePlanner:
                     "Draft communication",
                     "communication.compose",
                     compose_tool,
+                    input_preview=draft_preview,
                     risk_level="medium",
                     approval_required=True,
                     reason=(
@@ -3685,6 +3691,7 @@ class RuntimePlanner:
                 "Draft communication",
                 "communication.compose",
                 compose_tool,
+                input_preview=draft_preview,
                 risk_level="medium",
                 approval_required=True,
                 depends_on=depends_on,
@@ -4531,6 +4538,15 @@ def _direct_communication_steps(
         )
     )
     return steps
+
+
+def _communication_draft_input_preview(direct_message: Mapping[str, Any]) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    for key in ("app_name", "recipient", "body", "body_source", "channel"):
+        value = str(direct_message.get(key) or "").strip()
+        if value:
+            preview[key] = value
+    return preview
 
 
 def _current_page_find_steps(
@@ -7340,6 +7356,76 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             "mode": _communication_app_mode(value),
             "send_action": "send",
         }
+    return _generic_direct_communication_hint(value)
+
+
+def _generic_direct_communication_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    patterns = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:发送|发出|发消息|发)\s*(?:消息|短信|微信|message)?\s*"
+            r"(?:给|发给|发送给|到|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:说|内容是|内容为|[:：])\s*(?P<body>.+)$",
+            "message",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:发送|发出|发消息|发)\s*(?:消息|短信|微信|message)?\s*"
+            r"(?:说|内容是|内容为|[:：])\s*(?P<body>.+)$",
+            "message",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
+            r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
+            r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
+            "",
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
+            r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
+            r"(?:给|发给|发送给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
+            "",
+        ),
+        (
+            r"^(?:please\s+)?(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
+            "message",
+        ),
+        (
+            r"^(?:please\s+)?(?:write|draft|compose)\s+(?:an?\s+)?"
+            r"(?P<channel>email|e-mail|mail|message)\s+"
+            r"(?:to|for)\s+(?P<recipient>[^.!?,]+?)\s+"
+            r"(?P<body>(?:about|saying|that)\s+[^.!?]+)$",
+            "",
+        ),
+    )
+    for pattern, channel_hint in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
+        body = _clean_communication_body_text(groups.get("body") or "")
+        if not recipient or not body:
+            continue
+        channel = _canonical_communication_channel(groups.get("channel") or channel_hint)
+        hint = {
+            "recipient": recipient,
+            "body": body,
+            "mode": _communication_app_mode(value),
+            "send_action": (
+                "draft" if _looks_like_communication_draft_request(value) else "send"
+            ),
+        }
+        if channel:
+            hint["channel"] = channel
+        return hint
     return {}
 
 
@@ -7520,7 +7606,27 @@ def _clean_communication_recipient_text(value: str) -> str:
 
 
 def _clean_communication_body_text(value: str) -> str:
-    return _clean_foreground_compose_text(_clean_communication_hint_text(value))
+    text = _clean_foreground_compose_text(_clean_communication_hint_text(value))
+    return re.sub(r"^(?:说(?!明)|内容是|内容为)\s*", "", text, flags=re.IGNORECASE).strip()
+
+
+def _canonical_communication_channel(value: str) -> str:
+    normalized = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
+    if normalized in {"邮件", "电子邮件", "email", "mail"}:
+        return "email"
+    if normalized in {"消息", "短信", "微信", "message", "messages"}:
+        return "message"
+    return ""
+
+
+def _looks_like_communication_draft_request(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:写|撰写|起草|草拟|draft|compose|write)",
+            _clean_prompt(value),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _is_generic_communication_app_label(value: str) -> bool:

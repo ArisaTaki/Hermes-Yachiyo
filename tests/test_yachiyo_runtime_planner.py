@@ -6248,6 +6248,16 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
                 "send_action": "send",
             },
         ),
+        (
+            "在 Slack 给 Alice 发消息说会议改到三点",
+            {
+                "app_name": "Slack",
+                "recipient": "Alice",
+                "body": "会议改到三点",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
     ]
 
     for prompt, direct_hint in examples:
@@ -6261,7 +6271,50 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
         allowed_tools=allowed_tools,
     )
     assert generic_decision.selected_intent.kind == "communication"
-    assert generic_decision.selected_intent.inputs == {}
+    assert generic_decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body": "今晚八点见",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+        }
+    }
+
+
+def test_runtime_planner_preserves_generic_direct_communication_payload_for_discovery() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.open_and_type_into_ui_element",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(
+        "给 Alice 发消息说会议改到三点",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body": "会议改到三点",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+        }
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-communication-surface",
+        "draft-communication",
+    ]
+    assert _step_by_id(decision, "discover-communication-surface").tool_name == (
+        "desktop.running_apps"
+    )
+    assert _step_by_id(decision, "draft-communication").input_preview == {
+        "recipient": "Alice",
+        "body": "会议改到三点",
+        "channel": "message",
+    }
 
 
 def test_runtime_planner_routes_direct_context_communication_send_sequence() -> None:
@@ -6579,11 +6632,21 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     draft_step = _step_by_id(decision, "draft-communication")
     assert draft_step.tool_name == "artifact.write"
     assert draft_step.depends_on == []
+    assert draft_step.input_preview == {
+        "recipient": "Alice",
+        "body": "说明项目进展",
+        "channel": "email",
+    }
     assert draft_step.approval_required is True
     assert recipient_first.selected_intent.kind == "communication"
     assert recipient_first.plan.tool_plan.missing_capabilities == []
     recipient_first_draft = _step_by_id(recipient_first, "draft-communication")
     assert recipient_first_draft.tool_name == "artifact.write"
+    assert recipient_first_draft.input_preview == {
+        "recipient": "Alice",
+        "body": "说明会议延期",
+        "channel": "email",
+    }
     assert recipient_first_draft.approval_required is True
 
 
