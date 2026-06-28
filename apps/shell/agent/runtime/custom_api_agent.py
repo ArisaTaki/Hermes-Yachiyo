@@ -2423,6 +2423,12 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "recovery_retry_source_event_type",
             "retry_source_tool_call_id",
             "recovery_retry_source_tool_call_id",
+            "retry_input_source",
+            "recovery_retry_input_source",
+            "retry_artifact_tool",
+            "recovery_retry_artifact_tool",
+            "retry_artifact_kind",
+            "recovery_retry_artifact_kind",
             "retry_tool",
             "recovery_retry_tool",
         ):

@@ -20,6 +20,9 @@ RECOVERY_ACTION_TASK_METADATA_KEYS = (
     "recovery_retry_tool",
     "recovery_retry_input",
     "recovery_retry_input_schema",
+    "recovery_retry_input_source",
+    "recovery_retry_artifact_tool",
+    "recovery_retry_artifact_kind",
     "required_retry_fields",
     "recommended_tools",
     "recovery_retry_prompt",
@@ -62,6 +65,9 @@ def recovery_action_metadata_snapshot(
         "recovery_action_kind",
         "recovery_risk_level",
         "recovery_retry_tool",
+        "recovery_retry_input_source",
+        "recovery_retry_artifact_tool",
+        "recovery_retry_artifact_kind",
         "recovery_retry_prompt",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
@@ -97,6 +103,14 @@ def recovery_retry_context_payload(
     retry_input_schema = payload.get("recovery_retry_input_schema")
     if isinstance(retry_input_schema, dict) and retry_input_schema:
         context_payload["retry_input_schema"] = dict(retry_input_schema)
+    for source_key, context_key in (
+        ("recovery_retry_input_source", "retry_input_source"),
+        ("recovery_retry_artifact_tool", "retry_artifact_tool"),
+        ("recovery_retry_artifact_kind", "retry_artifact_kind"),
+    ):
+        value = payload.get(source_key)
+        if value:
+            context_payload[context_key] = value
     required_retry_fields = payload.get("required_retry_fields")
     if isinstance(required_retry_fields, list) and required_retry_fields:
         context_payload["required_retry_fields"] = list(required_retry_fields)

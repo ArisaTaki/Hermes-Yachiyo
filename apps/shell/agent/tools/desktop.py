@@ -5373,6 +5373,12 @@ def _ui_element_not_found_recovery_actions(
             "recovery_retry_input": retry_input,
             "retry_input_schema": retry_input_schema,
             "recovery_retry_input_schema": retry_input_schema,
+            "retry_input_source": "screen_capture_artifact",
+            "recovery_retry_input_source": "screen_capture_artifact",
+            "retry_artifact_tool": "screen.capture",
+            "recovery_retry_artifact_tool": "screen.capture",
+            "retry_artifact_kind": "image",
+            "recovery_retry_artifact_kind": "image",
             "required_retry_fields": ["x", "y"],
             "recommended_tools": ["screen.capture", "desktop.click"],
             "retry_prompt": (

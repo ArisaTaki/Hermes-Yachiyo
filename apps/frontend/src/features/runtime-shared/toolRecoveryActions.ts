@@ -9,6 +9,9 @@ export type RuntimeToolRecoveryAction = {
   risk_level?: string;
   retry_input?: Record<string, unknown>;
   retry_input_schema?: Record<string, unknown>;
+  retry_input_source?: string;
+  retry_artifact_tool?: string;
+  retry_artifact_kind?: string;
   retry_prompt?: string;
   retry_source_event_type?: string;
   retry_source_tool_call_id?: string;
@@ -22,6 +25,9 @@ export type RuntimeToolRecoveryRetryContext = Pick<
   | 'required_retry_fields'
   | 'retry_input'
   | 'retry_input_schema'
+  | 'retry_input_source'
+  | 'retry_artifact_tool'
+  | 'retry_artifact_kind'
   | 'retry_prompt'
   | 'retry_source_event_type'
   | 'retry_source_tool_call_id'
@@ -38,6 +44,9 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recovery_risk_level?: string;
   recovery_retry_input?: Record<string, unknown>;
   recovery_retry_input_schema?: Record<string, unknown>;
+  recovery_retry_input_source?: string;
+  recovery_retry_artifact_tool?: string;
+  recovery_retry_artifact_kind?: string;
   recovery_retry_prompt?: string;
   recovery_retry_source_event_type?: string;
   recovery_retry_source_tool_call_id?: string;
@@ -59,6 +68,9 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'recovery_retry_tool',
   'recovery_retry_input',
   'recovery_retry_input_schema',
+  'recovery_retry_input_source',
+  'recovery_retry_artifact_tool',
+  'recovery_retry_artifact_kind',
   'required_retry_fields',
   'recommended_tools',
   'recovery_retry_prompt',
@@ -98,6 +110,9 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.retry_tool ? { recovery_retry_tool: action.retry_tool } : {}),
     ...(action.retry_tool || action.retry_input ? { recovery_retry_input: action.retry_input || {} } : {}),
     ...(action.retry_input_schema ? { recovery_retry_input_schema: action.retry_input_schema } : {}),
+    ...(action.retry_input_source ? { recovery_retry_input_source: action.retry_input_source } : {}),
+    ...(action.retry_artifact_tool ? { recovery_retry_artifact_tool: action.retry_artifact_tool } : {}),
+    ...(action.retry_artifact_kind ? { recovery_retry_artifact_kind: action.retry_artifact_kind } : {}),
     ...(action.required_retry_fields?.length ? { required_retry_fields: action.required_retry_fields } : {}),
     ...(action.recommended_tools?.length ? { recommended_tools: action.recommended_tools } : {}),
     ...(action.retry_prompt ? { recovery_retry_prompt: action.retry_prompt } : {}),
@@ -126,6 +141,9 @@ export function runtimeToolRecoveryRetryAction(
     required_retry_fields: action.required_retry_fields,
     retry_input: retryInput,
     retry_input_schema: action.retry_input_schema,
+    retry_input_source: action.retry_input_source,
+    retry_artifact_tool: action.retry_artifact_tool,
+    retry_artifact_kind: action.retry_artifact_kind,
     retry_prompt: prompt,
     retry_source_event_type: action.retry_source_event_type,
     retry_source_tool_call_id: action.retry_source_tool_call_id,
@@ -503,6 +521,15 @@ function runtimeToolRecoveryRetryContext(
   const retryInputSchema = optionalObjectValue(action.retry_input_schema)
     || optionalObjectValue(action.recovery_retry_input_schema)
     || fallback.retry_input_schema;
+  const retryInputSource = optionalText(action.retry_input_source)
+    || optionalText(action.recovery_retry_input_source)
+    || fallback.retry_input_source;
+  const retryArtifactTool = optionalText(action.retry_artifact_tool)
+    || optionalText(action.recovery_retry_artifact_tool)
+    || fallback.retry_artifact_tool;
+  const retryArtifactKind = optionalText(action.retry_artifact_kind)
+    || optionalText(action.recovery_retry_artifact_kind)
+    || fallback.retry_artifact_kind;
   const requiredRetryFields = recoveryStringList(action.required_retry_fields)
     || fallback.required_retry_fields;
   const recommendedTools = recoveryStringList(action.recommended_tools)
@@ -523,6 +550,9 @@ function runtimeToolRecoveryRetryContext(
     ...(retryTool ? { retry_tool: retryTool } : {}),
     ...(retryTool || retryInput ? { retry_input: retryInput || {} } : {}),
     ...(retryInputSchema ? { retry_input_schema: retryInputSchema } : {}),
+    ...(retryInputSource ? { retry_input_source: retryInputSource } : {}),
+    ...(retryArtifactTool ? { retry_artifact_tool: retryArtifactTool } : {}),
+    ...(retryArtifactKind ? { retry_artifact_kind: retryArtifactKind } : {}),
     ...(retryPrompt ? { retry_prompt: retryPrompt } : {}),
     ...(retrySourceEventType ? { retry_source_event_type: retrySourceEventType } : {}),
     ...(retrySourceToolCallId ? { retry_source_tool_call_id: retrySourceToolCallId } : {}),
