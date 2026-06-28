@@ -75,6 +75,7 @@ _DAILY_DESKTOP_BROWSER_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_BROWSER_FOLLOWUP_MAX_CHARS = 120
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS = 80
+_ENTRYPOINT_PLANNING_CONTEXT_MAX_CHARS = 600
 _DAILY_DESKTOP_APP_CONTEXT_TOOLS = {
     "app.focus",
     "app.focus_and_safe_click",
@@ -1496,7 +1497,7 @@ class ChatAPI:
                 and current_context.get("conversation_kind") in {"", "main", None}
             ):
                 planner_orchestration_requests = self._planner_orchestration_entrypoint_requests(
-                    text,
+                    self._entrypoint_planning_text(text, metadata),
                     metadata=metadata,
                 )
                 runnable_orchestration = self._execute_planner_orchestration_runnable(
@@ -1522,7 +1523,9 @@ class ChatAPI:
             if current_context.get("conversation_kind") == "group" and not group_presynced:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
-            task_text = self._main_model_goal_text(text)
+            task_text = self._main_model_goal_text(
+                self._entrypoint_planning_text(text, metadata)
+            )
             task_text = self._daily_desktop_followup_goal_text(task_text, current_context)
             daily_desktop_requests = self._daily_desktop_entrypoint_requests(
                 task_text,
@@ -3385,6 +3388,23 @@ class ChatAPI:
             return value
         _, remainder = parsed
         return remainder.strip() or value
+
+    @staticmethod
+    def _entrypoint_planning_text(
+        text: str,
+        metadata: dict[str, Any] | None,
+    ) -> str:
+        value = (text or "").strip()
+        if not isinstance(metadata, dict):
+            return value
+        context = " ".join(str(metadata.get("entrypoint_planning_context") or "").split()).strip()
+        if not context:
+            return value
+        if len(context) > _ENTRYPOINT_PLANNING_CONTEXT_MAX_CHARS:
+            context = context[:_ENTRYPOINT_PLANNING_CONTEXT_MAX_CHARS].rstrip()
+        if contains_sensitive_text(context):
+            return value
+        return context
 
     @staticmethod
     def _compact_participant_detail(value: Any, *, max_chars: int = 120) -> str:

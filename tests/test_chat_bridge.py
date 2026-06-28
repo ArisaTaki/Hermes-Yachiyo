@@ -10394,6 +10394,61 @@ def test_chat_bridge_quick_message_forwards_entrypoint_metadata(tmp_path):
         store.close()
 
 
+def test_chat_bridge_quick_message_forwards_browser_followup_planning_context(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    bridge = ChatBridge(runtime)
+    received: dict[str, object] = {}
+
+    def get_messages(**_kwargs):
+        return {
+            "ok": True,
+            "messages": [
+                {"role": "user", "content": "打开 https://github.com"},
+                {"role": "assistant", "content": "已打开 https://github.com。"},
+            ],
+        }
+
+    def send_message(text, **kwargs):
+        received["text"] = text
+        received["metadata"] = kwargs.get("metadata")
+        return {
+            "ok": True,
+            "message_id": "message-launcher",
+            "task_id": "",
+            "status": "pending",
+        }
+
+    bridge._chat_api = SimpleNamespace(
+        get_messages=get_messages,
+        send_message=send_message,
+    )
+    try:
+        result = bridge.send_quick_message(
+            "点击登录",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+            },
+        )
+
+        assert result["ok"] is True
+        assert received == {
+            "text": "点击登录",
+            "metadata": {
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+                "runnable_kind": "main",
+                "entrypoint_planning_context": "当前浏览器页面 点击登录",
+            },
+        }
+    finally:
+        store.close()
+
+
 def test_session_summary_uses_processing_and_failed_statuses():
     assert chat_bridge_mod._session_summary([
         {

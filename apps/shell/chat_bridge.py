@@ -526,7 +526,7 @@ class ChatBridge:
         execution_metadata = dict(metadata or {})
         if planning_text != str(text or "").strip():
             execution_metadata["entrypoint_planning_context"] = planning_text
-        result = self._chat_api.send_message(text, metadata=metadata)
+        result = self._chat_api.send_message(text, metadata=execution_metadata)
         if result.get("ok") is False:
             return result
         task_id = str(result.get("task_id") or "").strip()

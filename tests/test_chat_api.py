@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
@@ -142,6 +143,42 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         assert user.task_id == task.task_id
         assert user.status == MessageStatus.PENDING
         assert api.get_session_info()["is_processing"] is True
+    finally:
+        store.close()
+
+
+def test_send_message_uses_entrypoint_planning_context_for_daily_entrypoint(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    planned: list[tuple[str, dict[str, Any] | None]] = []
+
+    def daily_desktop_entrypoint_requests(text: str, *, metadata=None):
+        planned.append((text, metadata))
+        return []
+
+    monkeypatch.setattr(
+        api,
+        "_daily_desktop_entrypoint_requests",
+        daily_desktop_entrypoint_requests,
+    )
+    try:
+        result = api.send_message(
+            "点击登录",
+            metadata={"entrypoint_planning_context": "当前浏览器页面 点击登录"},
+        )
+        task = runtime.state.get_task(result["task_id"])
+        user = runtime.chat_session.get_messages()[0]
+
+        assert result["ok"] is True
+        assert planned == [
+            (
+                "当前浏览器页面 点击登录",
+                {"entrypoint_planning_context": "当前浏览器页面 点击登录"},
+            )
+        ]
+        assert task is not None
+        assert task.description == "当前浏览器页面 点击登录"
+        assert user.content == "点击登录"
+        assert user.metadata["entrypoint_planning_context"] == "当前浏览器页面 点击登录"
     finally:
         store.close()
 
