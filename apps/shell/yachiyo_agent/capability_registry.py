@@ -319,7 +319,10 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         capability_id="media.playback",
         title="Control Media Playback",
         category="media",
-        description="Open music apps, start playback, search Apple Music, and control playback.",
+        description=(
+            "Open or focus named music apps, start playback, search via app UI when available, "
+            "and use Apple Music-specific tools as compatibility fallbacks."
+        ),
         tools=(
             "media.apple_music_play",
             "media.apple_music_status",
