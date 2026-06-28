@@ -8989,6 +8989,9 @@ def _web_search_query(text: str) -> str:
     app_name = _app_name_hint(text)
     if app_name and not search_surface and not _is_browser_or_search_app_name(app_name):
         return ""
+    research_report_query = _external_research_report_query(text)
+    if research_report_query:
+        return research_report_query
     lowered = text.lower()
     patterns = (
         r"\b(?:can\s+you\s+)?(?:research|look\s+up|find\s+out\s+about)\s+(.+)$",
@@ -9013,6 +9016,41 @@ def _web_search_query(text: str) -> str:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             query = _clean_web_search_query(match.group(1))
+            if query:
+                return query
+    return ""
+
+
+def _external_research_report_query(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    chinese_patterns = (
+        r"(?:写|生成|输出|整理|做|制作)\s*(?:一份|一个|篇)?\s*"
+        r"(?:关于|有关)\s*(?P<query>.+?)\s*(?:的)?"
+        r"(?:竞品分析|竞品|竞争分析|产品分析|产品能力|调研|研究|分析)?"
+        r"(?:报告|简报|文档)$",
+        r"(?:关于|有关)\s*(?P<query>.+?)\s*(?:的)?"
+        r"(?:竞品分析|竞品|竞争分析|产品分析|产品能力|调研|研究|分析)"
+        r"(?:报告|简报|文档)$",
+    )
+    for pattern in chinese_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            query = _clean_web_search_query(match.group("query"))
+            if query:
+                return query
+    english_patterns = (
+        r"\b(?:write|create|generate|produce)\s+(?:a\s+)?"
+        r"(?:competitive|competitor|market|research|analysis)[\w\s-]{0,30}?"
+        r"report\s+(?:about|on)\s+(?P<query>.+)$",
+        r"\b(?:about|on)\s+(?P<query>.+?)\s+"
+        r"(?:competitive|competitor|market|research|analysis)[\w\s-]{0,30}?report$",
+    )
+    for pattern in english_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            query = _clean_web_search_query(match.group("query"))
             if query:
                 return query
     return ""
@@ -9257,6 +9295,13 @@ def _clean_web_search_query(query: str) -> str:
         r"\s*(?:并|然后|并且|再|接着|之后|后|\b(?:and|then)\b)?\s*"
         r"(?:读|读取|看看|看一下|看下|概括|总结|摘要)(?:一下|下)?"
         r"(?:搜索)?(?:结果|内容)?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
+        r"[^。.,，；;！!？?]{0,8}(?:报告|总结|文档|结果)$",
         "",
         value,
         flags=re.IGNORECASE,

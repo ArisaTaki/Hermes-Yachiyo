@@ -1224,6 +1224,23 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert english_decision.selected_intent.kind == "web_research"
     assert english_decision.selected_intent.inputs["query"] == "openai latest news"
 
+    competitive_report = RuntimePlanner().decision(
+        "写一份关于 Hanako 和 Hermes 桌面 agent 的竞品分析报告",
+        allowed_tools=["browser.open_url", "artifact.write", "workspace.list"],
+    )
+    assert competitive_report.selected_intent.kind == "web_research"
+    assert competitive_report.selected_intent.inputs["query"] == "Hanako 和 Hermes 桌面 agent"
+    assert _step_by_id(competitive_report, "open-web-search").tool_name == "browser.open_url"
+
+    english_competitive_report = RuntimePlanner().decision(
+        "write a competitive analysis report about OpenAI Operator and Manus",
+        allowed_tools=["browser.open_url", "artifact.write", "workspace.list"],
+    )
+    assert english_competitive_report.selected_intent.kind == "web_research"
+    assert english_competitive_report.selected_intent.inputs["query"] == (
+        "OpenAI Operator and Manus"
+    )
+
 
 def test_runtime_planner_routes_current_page_browser_actions() -> None:
     screenshot = RuntimePlanner().decision(
@@ -9696,6 +9713,21 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "input": {"url": "https://www.google.com/search?q=open+hanako"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests(
+        "写一份关于 Hanako 和 Hermes 桌面 agent 的竞品分析报告",
+        allowed_tools=["browser.open_url", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {
+                "url": "https://www.google.com/search?q=Hanako+%E5%92%8C+Hermes+%E6%A1%8C%E9%9D%A2+agent"
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("搜索天气", allowed_tools=allowed) == [
