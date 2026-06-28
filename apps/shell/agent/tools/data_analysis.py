@@ -35,7 +35,7 @@ def analyze_data_file(
         if suffix == ".xlsx":
             table = _xlsx_table(path, max_rows=clean_max_rows)
         else:
-            text = path.read_text(encoding="utf-8")
+            text = _read_text_file(path)
             if suffix == ".json":
                 table = _json_table(text, max_rows=clean_max_rows)
             elif suffix == ".jsonl":
@@ -117,7 +117,7 @@ def _plain_text_report(
     artifact_paths: list[str],
     max_rows: int,
 ) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    text = _read_text_file(path)
     lines = text.splitlines()
     words = re.findall(r"\S+", text)
     preview = "\n".join(lines[: min(20, max_rows)])
@@ -211,6 +211,18 @@ def _delimited_table(text: str, *, delimiter: str, max_rows: int) -> dict[str, A
         reader = csv.reader(io.StringIO(text), dialect)
     rows = [list(row) for _, row in zip(range(max_rows + 1), reader)]
     return _table_from_rows(rows)
+
+
+def _read_text_file(path: Path) -> str:
+    last_error: UnicodeDecodeError | None = None
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return path.read_text(encoding="utf-8")
 
 
 def _json_table(text: str, *, max_rows: int) -> dict[str, Any]:

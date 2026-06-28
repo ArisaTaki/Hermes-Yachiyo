@@ -90,6 +90,29 @@ def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> No
     assert "| East | 10 |" in content
 
 
+def test_tool_broker_call_analyzes_gb18030_csv_file(tmp_path) -> None:
+    (tmp_path / "sales-cn.csv").write_text(
+        "地区,收入\n华东,10\n华西,20\n",
+        encoding="gb18030",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales-cn.csv", "artifact_path": "reports/sales-cn.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["source_kind"] == "csv"
+    assert result["rows"] == 2
+    assert result["columns"] == ["地区", "收入"]
+    content = (tmp_path / "artifacts" / "reports" / "sales-cn.md").read_text(
+        encoding="utf-8"
+    )
+    assert "| 华东 | 10 |" in content
+    assert "mean=15.0" in content
+
+
 def test_tool_broker_call_analyzes_data_file_and_writes_requested_artifacts(tmp_path) -> None:
     (tmp_path / "sales.csv").write_text(
         "region,revenue\nEast,10\nWest,20\nEast,30\n",
