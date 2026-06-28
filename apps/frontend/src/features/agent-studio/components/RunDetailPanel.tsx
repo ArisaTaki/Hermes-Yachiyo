@@ -374,6 +374,7 @@ export function RunDetailPanel({
           />
           <PlannerTraceInspector
             events={selectedRunPlannerEvents}
+            plannerSummary={selectedPublicRunTimeline?.planner_summary}
             sourceLabel={plannerTraceSource}
           />
           {selectedPublicRunTimeline || selectedRunToolCalls.length ? (

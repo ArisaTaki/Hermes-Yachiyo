@@ -1,6 +1,7 @@
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import type {
   CapabilitySnapshot,
+  PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RuntimePlanSnapshot,
   TaskIntentSnapshot,
@@ -19,6 +20,7 @@ type PlannerTrace = {
   selection: PlannerSelection | null;
   source: string;
   steps: ToolPlanStepSnapshot[];
+  summaryFallback?: boolean;
   toolPlan: ToolPlanSnapshot | null;
 };
 
@@ -53,16 +55,18 @@ type PlannerSelection = {
 
 type PlannerTraceInspectorProps = {
   events?: PublicRunEvent[];
+  plannerSummary?: PlannerTraceSummarySnapshot | null;
   sourceLabel?: string;
   testId?: string;
 };
 
 export function PlannerTraceInspector({
   events = [],
+  plannerSummary = null,
   sourceLabel = 'Intent / Capability / Plan 的 Runtime Planner replay 事实',
   testId = 'agent-run-detail-planner-trace',
 }: PlannerTraceInspectorProps) {
-  const trace = plannerTraceFromEvents(events);
+  const trace = plannerTraceFromEvents(events) || plannerTraceFromSummary(plannerSummary);
   if (!trace) return null;
 
   const intent = trace.intent || trace.plan?.intent || null;
@@ -112,6 +116,7 @@ export function PlannerTraceInspector({
       data-intent-kind={intent?.kind || ''}
       data-plan-id={trace.planId}
       data-route-to-studio={trace.routeToStudio === undefined ? '' : String(trace.routeToStudio)}
+      data-summary-fallback={String(trace.summaryFallback)}
       data-testid={testId}
       open
     >
@@ -591,6 +596,177 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     source,
     steps,
     toolPlan: effectiveToolPlan,
+  };
+}
+
+function plannerTraceFromSummary(summary: PlannerTraceSummarySnapshot | null | undefined): PlannerTrace | null {
+  if (!summary) return null;
+  const source = stringValue(summary.source) || 'planner_summary';
+  const decisionId = stringValue(summary.decision_id);
+  const planId = stringValue(summary.plan_id);
+  const intentKind = stringValue(summary.intent_kind);
+  const intentTitle = stringValue(summary.intent_title) || intentKind;
+  const planTools = uniqueStrings(summary.plan_tools || []);
+  const selectedTools = uniqueStrings(summary.selected_tools || []);
+  const planCapabilities = uniqueStrings(summary.plan_capabilities || []);
+  const requiredCapabilities = uniqueStrings(summary.required_capabilities || []);
+  const missingCapabilities = uniqueStrings(summary.missing_capabilities || []);
+  const approvalsRequired = uniqueStrings(summary.approvals_required || []);
+  const artifactsExpected = uniqueStrings(summary.artifacts_expected || []);
+  const openQuestions = uniqueStrings(summary.open_questions || []);
+  const stepCount = integerValue(summary.step_count, planTools.length);
+  const eventCount = integerValue(summary.event_count, 0);
+  const routeToStudio = booleanValue(summary.route_to_studio, undefined);
+  const hasIntent = Boolean(intentKind || intentTitle || requiredCapabilities.length || planCapabilities.length);
+  const intent: TaskIntentSnapshot | null = hasIntent ? {
+    intent_id: decisionId || `planner-summary-${slugValue(intentKind || intentTitle || 'intent')}`,
+    kind: intentKind || 'general',
+    title: intentTitle || 'Planner Summary Intent',
+    required_capabilities: requiredCapabilities.length ? requiredCapabilities : planCapabilities,
+    preferred_capabilities: [],
+    missing_inputs: openQuestions,
+    source,
+  } : null;
+  const steps = summaryPlanSteps(planTools, planCapabilities, requiredCapabilities, stepCount);
+  const hasToolPlan = Boolean(
+    planId
+    || steps.length
+    || requiredCapabilities.length
+    || missingCapabilities.length
+    || approvalsRequired.length
+    || artifactsExpected.length
+    || openQuestions.length
+  );
+  const toolPlan: ToolPlanSnapshot | null = hasToolPlan ? {
+    plan_id: planId || 'planner-summary-plan',
+    title: 'Runtime Planner Summary Plan',
+    steps,
+    required_capabilities: requiredCapabilities.length ? requiredCapabilities : planCapabilities,
+    missing_capabilities: missingCapabilities,
+    approvals_required: approvalsRequired,
+    artifacts_expected: artifactsExpected,
+    open_questions: openQuestions,
+    source,
+  } : null;
+  const selection = plannerSelectionFromSummary(
+    summary,
+    planTools,
+    selectedTools,
+    planCapabilities,
+    requiredCapabilities,
+    missingCapabilities,
+    approvalsRequired,
+    artifactsExpected,
+    openQuestions,
+    stepCount,
+  );
+  if (!intent && !toolPlan && !selection) return null;
+  return {
+    candidateIntents: [],
+    decisionId,
+    eventCount,
+    intent,
+    plan: null,
+    planId: planId || toolPlan?.plan_id || '',
+    routeToStudio,
+    selection,
+    source,
+    steps,
+    summaryFallback: true,
+    toolPlan,
+  };
+}
+
+function summaryPlanSteps(
+  planTools: string[],
+  planCapabilities: string[],
+  requiredCapabilities: string[],
+  stepCount: number,
+): ToolPlanStepSnapshot[] {
+  const steps: ToolPlanStepSnapshot[] = planTools.map((tool, index) => ({
+    step_id: `summary-step-${index + 1}-${slugValue(tool)}`,
+    title: `Use ${tool}`,
+    capability_id: planCapabilities[index] || requiredCapabilities[index] || desktopCapabilityForTool(tool),
+    action: tool,
+    tool_name: tool,
+    status: 'planned',
+  }));
+  const total = Math.max(stepCount, steps.length);
+  for (let index = steps.length; index < total; index += 1) {
+    steps.push({
+      step_id: `summary-step-${index + 1}`,
+      title: `Planner step ${index + 1}`,
+      capability_id: planCapabilities[index] || requiredCapabilities[index] || 'general.execution',
+      status: 'planned',
+    });
+  }
+  return steps;
+}
+
+function plannerSelectionFromSummary(
+  summary: PlannerTraceSummarySnapshot,
+  planTools: string[],
+  selectedTools: string[],
+  planCapabilities: string[],
+  requiredCapabilities: string[],
+  missingCapabilities: string[],
+  approvalsRequired: string[],
+  artifactsExpected: string[],
+  openQuestions: string[],
+  stepCount: number,
+): PlannerSelection | null {
+  const selectedSource = stringValue(summary.selection_source);
+  const selectedRole = stringValue(summary.selection_role);
+  const reason = stringValue(summary.selection_reason);
+  const plannerEntrypoint = stringValue(summary.planner_entrypoint);
+  const entrypointSource = stringValue(summary.entrypoint_source);
+  const launcherMode = stringValue(summary.launcher_mode);
+  const launcherSurface = stringValue(summary.launcher_surface);
+  const runnableKind = stringValue(summary.runnable_kind);
+  if (
+    !selectedSource
+    && !selectedRole
+    && !reason
+    && !selectedTools.length
+    && !planTools.length
+    && !planCapabilities.length
+    && !missingCapabilities.length
+    && !approvalsRequired.length
+    && !artifactsExpected.length
+    && !openQuestions.length
+    && !plannerEntrypoint
+    && !entrypointSource
+    && !launcherMode
+    && !launcherSurface
+    && !runnableKind
+  ) return null;
+  return {
+    approvalsRequired,
+    artifactsExpected,
+    dailyDesktopIntent: false,
+    entrypointSource,
+    launcherMode,
+    launcherSurface,
+    legacyFallback: false,
+    legacyRequestCount: 0,
+    legacyTools: [],
+    missingCapabilities,
+    missingCapabilityCount: missingCapabilities.length,
+    openQuestions,
+    planCapabilities,
+    planCapabilityCount: planCapabilities.length,
+    planStepCount: stepCount || planTools.length,
+    planTools,
+    plannerEntrypoint,
+    plannerRequestCount: 0,
+    plannerTools: [],
+    reason,
+    requiredCapabilities,
+    runnableKind,
+    selectedRequestCount: selectedTools.length,
+    selectedRole,
+    selectedSource,
+    selectedTools,
   };
 }
 

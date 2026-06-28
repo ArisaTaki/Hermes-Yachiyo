@@ -369,7 +369,7 @@ def test_runtime_planner_app_aliases_are_behind_discovery_compatibility_boundary
             "def supports_new_message_app_hint(value: str) -> bool:",
             "def legacy_music_app_name_hint(value: str) -> str:",
             "The planner should prefer desktop discovery when available.",
-            "APP_ALIASES.get(compact_app_alias(app_name), app_name)",
+            "return APP_ALIASES.get(compact, app_name)",
             "music_app_name_from_text(value)",
         ],
     )

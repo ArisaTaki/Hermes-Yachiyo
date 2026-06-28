@@ -3458,12 +3458,19 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "const selectedRunPlannerEvents = selectedRunReplayEvents.length",
             "RunEvent replay planner facts · Intent / Capability / Plan / Selection",
             "events={selectedRunPlannerEvents}",
+            "plannerSummary={selectedPublicRunTimeline?.planner_summary}",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/PlannerTraceInspector.tsx",
         [
             "export function PlannerTraceInspector",
+            "PlannerTraceSummarySnapshot",
+            "plannerSummary = null",
+            "plannerTraceFromEvents(events) || plannerTraceFromSummary(plannerSummary)",
+            "data-summary-fallback={String(trace.summaryFallback)}",
+            "function plannerTraceFromSummary",
+            "function summaryPlanSteps",
             "testId = 'agent-run-detail-planner-trace'",
             "agent.intent.selected",
             "agent.plan.created",
