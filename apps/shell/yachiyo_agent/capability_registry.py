@@ -65,7 +65,14 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "desktop.ui_elements",
             "screen.capture",
         ),
-        discovery_actions=("list_apps", "list_windows", "capture", "read_ui", "diagnose_permissions"),
+        discovery_actions=(
+            "list_apps",
+            "list_windows",
+            "capture",
+            "read_ui",
+            "verify",
+            "diagnose_permissions",
+        ),
         output_kinds=("desktop_state", "screenshot"),
     ),
     CapabilityDefinition(

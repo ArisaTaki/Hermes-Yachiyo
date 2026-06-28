@@ -1763,6 +1763,51 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["operate-foreground-ui"]
 
 
+def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "desktop.active_window",
+        "desktop.windows",
+        "desktop.ui_elements",
+        "app.open",
+        "app.focus",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.safe_shortcut",
+    ]
+    prompts = [
+        "打开 PixelForge",
+        "切到 Slack",
+        "显示 Slack 窗口列表",
+        "当前界面有哪些按钮",
+        "点击登录按钮",
+        "输入 hello",
+        "复制当前选中内容",
+    ]
+    observed_actions: set[str] = set()
+
+    for prompt in prompts:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        observed_actions.update(
+            step.action
+            for step in decision.plan.tool_plan.steps
+            if str(step.action or "").strip()
+        )
+
+    assert {
+        "list_apps",
+        "open_app",
+        "focus_app",
+        "list_windows",
+        "read_ui",
+        "click",
+        "type",
+        "shortcut",
+        "verify",
+    } <= observed_actions
+
+
 def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     decision = RuntimePlanner().decision(
         "打开 SuperData Studio",
@@ -6571,6 +6616,7 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
 
     assert "list_windows" in by_id["desktop.app_discovery"].discovery_actions
     assert "read_ui" in by_id["desktop.app_discovery"].discovery_actions
+    assert "verify" in by_id["desktop.app_discovery"].discovery_actions
     assert "open_app" in by_id["desktop.app_control"].execution_actions
     assert "focus_app" in by_id["desktop.app_control"].execution_actions
     assert {"click", "type", "shortcut", "verify"} <= set(
