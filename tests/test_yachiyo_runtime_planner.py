@@ -2836,6 +2836,8 @@ def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
         ("Chrome 开着吗", "Chrome"),
         ("Google Chrome 在运行吗", "Google Chrome"),
         ("检查一下 Slack 是否运行", "Slack"),
+        ("看看 PixelForge 是否打开", "PixelForge"),
+        ("check whether PixelForge is open", "PixelForge"),
         ("Finder 是否运行", "Finder"),
     ]
 

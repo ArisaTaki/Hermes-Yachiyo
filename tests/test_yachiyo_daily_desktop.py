@@ -651,6 +651,8 @@ def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() 
         ("Google Chrome 在运行吗", "Google Chrome"),
         ("检查一下 Slack 是否运行", "Slack"),
         ("看看 Slack 开没开", "Slack"),
+        ("看看 PixelForge 是否打开", "PixelForge"),
+        ("check whether PixelForge is open", "PixelForge"),
         ("Finder 是否运行", "Finder"),
     )
 

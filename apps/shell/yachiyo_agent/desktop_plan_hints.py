@@ -413,12 +413,25 @@ def app_management_hint(text: str) -> dict[str, str] | None:
             "status",
             r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:检查一下|检查|看看|看一下|查看|确认)?\s*"
+            r"(?P<app_status_open_whether>[^。！？!?，,]+?)\s*"
+            r"(?:是否|有没有|有无)(?:已经)?\s*(?:打开了|开了|打开|开启)"
+            r"(?:吗|嘛|呢|吧|么|\?|？)?$",
+        ),
+        (
+            "status",
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:检查一下|检查|看看|看一下|查看|确认)?\s*"
             r"(?P<app_status_open>[^。！？!?，,]+?)\s*(?:是否)?"
             r"(?:打开了|开了|打开|开启)(?:吗|嘛|呢|吧|么|\?|？)$",
         ),
         (
             "status",
             r"(?:is|check\s+if|see\s+if)\s+(?P<app_status_en>[^.!?]+?)\s+"
+            r"(?:is\s+)?(?:running|open)(?:\s+please)?$",
+        ),
+        (
+            "status",
+            r"(?:check|see)\s+whether\s+(?P<app_status_whether_en>[^.!?]+?)\s+"
             r"(?:is\s+)?(?:running|open)(?:\s+please)?$",
         ),
         (
