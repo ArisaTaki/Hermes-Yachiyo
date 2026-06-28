@@ -2862,7 +2862,7 @@ def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_ent
     ):
         assert tool_name in timeline_tool_names
     run_event_types = [event["event_type"] for event in result["_events"]]
-    assert run_event_types.count("agent.desktop.intent_planned") == 5
+    assert run_event_types.count("agent.desktop.intent_planned") == 6
     assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
         "agent.tool.call"
     ) < run_event_types.index("agent.desktop.intent_completed")
@@ -5712,7 +5712,7 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
         "desktop.safe_shortcut",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 3
+    assert event_types.count("agent.desktop.intent_planned") == 4
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
@@ -6626,7 +6626,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
         "desktop.safe_shortcut",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 3
+    assert event_types.count("agent.desktop.intent_planned") == 4
     assert "agent.desktop.permission_preflight" in event_types
     assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
         "tool.requested"
@@ -6704,7 +6704,7 @@ def test_chat_bridge_quick_message_executes_app_find_sequence_without_model(
         "desktop.safe_type_text",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 3
+    assert event_types.count("agent.desktop.intent_planned") == 4
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 

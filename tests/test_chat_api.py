@@ -2266,7 +2266,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert assistant.content == result["agent_task"]["summary"]
         assert latest_user.content == "搜索张三"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 5
+        assert event_types.count("agent.desktop.intent_planned") == 6
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
@@ -2318,7 +2318,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert second_assistant.content == second["agent_task"]["summary"]
         assert second_latest_user.content == "在微信搜索文件传输助手"
         assert second_run["status"] == "completed"
-        assert second_event_types.count("agent.desktop.intent_planned") == 5
+        assert second_event_types.count("agent.desktop.intent_planned") == 6
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
@@ -2400,7 +2400,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert fourth_assistant.status == MessageStatus.COMPLETED
         assert fourth_assistant.content == fourth["agent_task"]["summary"]
         assert fourth_run["status"] == "completed"
-        assert fourth_event_types.count("agent.desktop.intent_planned") == 5
+        assert fourth_event_types.count("agent.desktop.intent_planned") == 6
         assert "agent.desktop.intent_completed" in fourth_event_types
         assert "model.request.started" not in fourth_event_types
         assert "model.requested" not in fourth_event_types
@@ -2857,7 +2857,7 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == result["agent_task"]["summary"]
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 3
+        assert event_types.count("agent.desktop.intent_planned") == 4
         assert "agent.desktop.permission_preflight" in event_types
         assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
             "tool.requested"

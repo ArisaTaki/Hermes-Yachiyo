@@ -21,6 +21,7 @@ from apps.shell.yachiyo_agent.app_name_hints import (
 from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from apps.shell.yachiyo_agent.planner_execution import (
+    planner_execution_tool_requests,
     planner_orchestration_requests,
     planner_direct_tool_requests,
     planner_desktop_tool_requests,
@@ -4479,6 +4480,33 @@ def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() ->
     assert verify.tool_name == "desktop.ui_elements"
     assert verify.action == "read_ui"
     assert verify.depends_on == ["operate-foreground-ui-followup"]
+
+
+def test_planner_execution_keeps_ui_verification_after_ui_operations() -> None:
+    allowed_tools = [
+        "desktop.active_window",
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    requests = planner_direct_tool_requests(
+        "打开 Notes，输入 hello，再复制",
+        allowed_tools=allowed_tools,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert [
+        request["tool"]
+        for request in planner_execution_tool_requests(requests, allowed_tools)
+    ] == [
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
 
 
 def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> None:

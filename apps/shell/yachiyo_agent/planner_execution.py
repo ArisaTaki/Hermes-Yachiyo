@@ -507,10 +507,16 @@ def _keep_post_mutation_verification_request(
     previous_mutation_tool: str,
 ) -> bool:
     tool_name = str(request.get("tool") or "").strip()
-    if previous_mutation_tool not in {"app.open", "app.focus"}:
-        return False
-    if tool_name == "desktop.ui_elements":
+    if tool_name in {"desktop.ui_elements", "desktop.windows"}:
         return True
+    if tool_name in {"desktop.active_window", "desktop.running_apps"}:
+        return previous_mutation_tool.startswith("app.") or previous_mutation_tool in {
+            "desktop.hide_app",
+            "desktop.show_all_apps",
+            "desktop.minimize_window",
+            "desktop.close_window",
+            "desktop.quit_app",
+        }
     if tool_name == "screen.capture":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("reason") or "").strip())
