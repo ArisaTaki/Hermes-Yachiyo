@@ -924,6 +924,13 @@ class TaskIntentRouter:
                 "摘要",
                 "汇报",
                 "文档",
+                "周报",
+                "日报",
+                "月报",
+                "年报",
+                "纪要",
+                "简报",
+                "复盘",
             ],
         )
         file_context = _report_file_context_hint(text)

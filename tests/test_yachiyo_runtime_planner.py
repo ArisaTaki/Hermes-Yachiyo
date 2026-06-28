@@ -1809,6 +1809,10 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "把剪贴板内容做成报告",
         allowed_tools=["clipboard.read", "artifact.write"],
     )
+    selected_weekly = RuntimePlanner().decision(
+        "把当前选中的内容整理成周报",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
+    )
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
@@ -1821,6 +1825,21 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert _step_by_id(clipboard, "write-report-artifact").input_preview == {
         "path": "report.md",
         "body_source": "clipboard",
+    }
+    assert selected_weekly.selected_intent.kind == "report_generation"
+    assert selected_weekly.selected_intent.inputs == {"context_source": "selection"}
+    assert [step.step_id for step in selected_weekly.plan.tool_plan.steps] == [
+        "copy-selected-report-context",
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(selected_weekly, "copy-selected-report-context").tool_name == (
+        "desktop.safe_shortcut"
+    )
+    assert _step_by_id(selected_weekly, "read-report-context").tool_name == "clipboard.read"
+    assert _step_by_id(selected_weekly, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "selection",
     }
 
     read_only = RuntimePlanner().decision(
@@ -10054,8 +10073,29 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         "把选中的内容做成报告",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
     )
+    selected_weekly_requests = planner_tool_requests(
+        "把当前选中的内容整理成周报",
+        allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
+    )
 
     assert selection_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert selected_weekly_requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
