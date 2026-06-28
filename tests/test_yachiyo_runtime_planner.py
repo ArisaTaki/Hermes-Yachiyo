@@ -5029,6 +5029,94 @@ def test_runtime_planner_focuses_opened_app_before_generic_foreground_shortcut()
         "focus-opened-app"
     ]
 
+    write_note = RuntimePlanner().decision(
+        "打开 Notes 新建一个笔记写下 hello",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert write_note.selected_intent.kind == "desktop_operation"
+    assert write_note.selected_intent.inputs == {
+        "app_name_hint": "Notes",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+        "foreground_compose_text_hint": "hello",
+    }
+    assert [step.step_id for step in write_note.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(write_note, "operate-foreground-ui").input_preview == {
+        "action": "new_note"
+    }
+    assert _step_by_id(write_note, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "hello"
+    }
+    assert _step_by_id(write_note, "operate-foreground-ui-followup-type").depends_on == [
+        "operate-foreground-ui"
+    ]
+    assert _step_by_id(write_note, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui-followup-type"
+    ]
+    assert planner_direct_tool_requests(
+        "打开 Notes 新建一个笔记写下 hello",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        _app_discovery_request("Notes"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Notes"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Notes"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     allowed = [
@@ -5231,6 +5319,8 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         ),
         ("打开备忘录新建备忘录", "Notes", "new_note", "app.open_and_safe_shortcut"),
         ("备忘录新建", "Notes", "new_note", "app.focus_and_safe_shortcut"),
+        ("打开 Obsidian 新建一篇今天的日志", "Obsidian", "new_note", "app.open_and_safe_shortcut"),
+        ("打开我电脑上的 Obsidian 并新建一篇今天的日志", "Obsidian", "new_note", "app.open_and_safe_shortcut"),
         ("打开提醒事项新建提醒", "Reminders", "new_reminder", "app.open_and_safe_shortcut"),
         ("提醒事项新建", "Reminders", "new_reminder", "app.focus_and_safe_shortcut"),
         ("打开日历新建日程", "Calendar", "new_event", "app.open_and_safe_shortcut"),

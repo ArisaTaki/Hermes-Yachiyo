@@ -202,7 +202,7 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
 
 def safe_type_text_hint(text: str) -> str:
     patterns = (
-        r"(?:输入(?!框|栏)|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:输入(?!框|栏)|键入|填写|填入|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:type|enter|fill)\s+(?P<text_en>[^.!?,]+)",
     )
     for pattern in patterns:
@@ -580,6 +580,8 @@ def safe_shortcut_hint(text: str) -> dict[str, str] | None:
             action = _safe_shortcut_action_from_phrase(part)
             if action:
                 break
+    if not action:
+        action = _safe_shortcut_action_from_embedded_create_phrase(value)
     if not action:
         action = _safe_shortcut_action_from_trailing_phrase(value)
     return {"action": action} if action else None
@@ -2537,6 +2539,43 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
     finder_action = _finder_safe_shortcut_action(normalized, mode="suffix")
     if finder_action:
         return finder_action
+    return ""
+
+
+def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
+    text = clean(value)
+    lowered = text.lower()
+    if not re.search(
+        r"(?:打开|启动|开启|切到|聚焦|写下|写入|记录下|记下|"
+        r"\b(?:open|launch|start|focus|switch|type|enter|write)\b)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    if re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份)?\s*"
+        r"(?:今天的|今日的|新的|新)?\s*(?:笔记|备忘录|日志|日记)",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:make|create|open)?\s*(?:a\s+)?new\s+"
+        r"(?:note|journal|diary)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "new_note"
+    if re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条)?\s*"
+        r"(?:文档|文件(?!夹)|表格|工作簿|演示|演示文稿|幻灯片|项目|工单|任务|卡片)",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:make|create|open)?\s*(?:a\s+)?new\s+"
+        r"(?:document|file|spreadsheet|workbook|presentation|slide|project|ticket|issue|task|card)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "new_document"
     return ""
 
 

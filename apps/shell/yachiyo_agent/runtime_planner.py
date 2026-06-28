@@ -1909,7 +1909,16 @@ class RuntimePlanner:
             followup_return_hotkey = _explicit_return_key_followup_hint(intent.user_goal)
         if followup_return_hotkey:
             submit_action = ""
-        followup_safe_shortcut = safe_shortcut if safe_type_text and safe_shortcut else None
+        safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
+        create_first_safe_shortcut = (
+            safe_shortcut_action in {"new_note", "new_document"}
+            and bool(safe_type_text)
+        )
+        followup_safe_shortcut = (
+            safe_shortcut
+            if safe_type_text and safe_shortcut and not create_first_safe_shortcut
+            else None
+        )
         followup_safe_shortcut_sequence = [
             dict(item) for item in safe_shortcut_sequence[1:] if isinstance(item, Mapping)
         ]
@@ -1936,7 +1945,11 @@ class RuntimePlanner:
                     _web_search_engine_hint(intent.user_goal),
                     browser_search_query,
                 )
-        operation_safe_type_text = "" if click_target and safe_type_text else safe_type_text
+        operation_safe_type_text = (
+            ""
+            if (click_target and safe_type_text) or create_first_safe_shortcut
+            else safe_type_text
+        )
         operation_tool, operation_preview = _desktop_operation_tool_preview(
             app_name=app_name,
             mode=mode,
@@ -2957,6 +2970,23 @@ class RuntimePlanner:
                     input_preview={"text": safe_type_text},
                     depends_on=["operate-foreground-ui"],
                     reason="Type the explicit text only after the requested UI target is selected.",
+                )
+            )
+        if (
+            create_first_safe_shortcut
+            and safe_type_text
+            and any(step.step_id == "operate-foreground-ui" for step in steps)
+        ):
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui-followup-type",
+                    "Type after foreground create action",
+                    "desktop.ui_operation",
+                    _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed),
+                    input_preview={"text": safe_type_text},
+                    depends_on=["operate-foreground-ui"],
+                    reason="Type the explicit text only after creating the requested foreground item.",
                 )
             )
         if (
@@ -7043,7 +7073,7 @@ def _foreground_compose_text_hint(text: str) -> str:
         return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
-        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写)\s*(?P<text>[^。！？!?，,]+?)"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+?)"
         r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)?$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:发送|发出|(?<!开)发)\s*(?P<text>[^。！？!?，,]+)$",
