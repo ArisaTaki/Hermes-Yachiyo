@@ -80,6 +80,13 @@ Current desktop discovery/operate planner evidence is reproducible with
 names and app-scoped click/type requests plan through `desktop.list_apps`,
 app foreground tools, verification steps, and Studio-routable events.
 
+Current real desktop discovery evidence is reproducible with
+`python scripts/smoke_real_desktop_discovery.py`; on macOS this runs the real
+`desktop.list_apps` implementation against installed system apps without
+opening them, and archives permission preflight diagnostics. On non-macOS
+source checks it records skipped evidence instead of pretending desktop
+execution was exercised.
+
 Current planner/runtime tool parity evidence is reproducible with
 `python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder

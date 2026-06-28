@@ -365,6 +365,11 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "app_scoped_click",
         "app_scoped_type",
     }
+    assert report["real_desktop_discovery_smoke"]["status"] == "passed"
+    assert report["real_desktop_discovery_smoke"]["evidence"]["ok"] is True
+    assert report["real_desktop_discovery_smoke"]["evidence"]["mode"] == (
+        "real_desktop_discovery_smoke"
+    )
     assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 7
@@ -680,6 +685,77 @@ def test_release_candidate_verifier_fails_when_desktop_planner_discovery_smoke_f
         {
             "path": str(tmp_path / "scripts/smoke_desktop_planner_discovery.py"),
             "message": "Notion click routed to browser",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_real_desktop_discovery_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop discovery smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_discovery_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "real_desktop_discovery_smoke"
+    if section["evidence"].get("skipped"):
+        assert section["evidence"]["reason"] == "real desktop discovery smoke only runs on macOS"
+    else:
+        assert section["evidence"]["catalog"]["total_count"] > 0
+        assert {case["id"] for case in section["evidence"]["cases"]} == {
+            "safari",
+            "system_settings",
+            "textedit",
+        }
+        assert all(
+            case["checks"]["did_not_open_app"]
+            for case in section["evidence"]["cases"]
+        )
+
+
+def test_release_candidate_verifier_fails_when_real_desktop_discovery_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_discovery_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "real_desktop_discovery_smoke",
+            "error": "Safari was not discoverable",
+            "cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "real desktop discovery smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_discovery_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "Safari was not discoverable"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_real_desktop_discovery.py"),
+            "message": "Safari was not discoverable",
         }
     ]
 
