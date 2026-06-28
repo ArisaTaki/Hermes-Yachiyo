@@ -404,6 +404,14 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["runtime_approval_resume_smoke"]["evidence"]["execution_gate"][
         "call_order"
     ] == ["get_run", "approve_once", "get_run", "get_run"]
+    assert report["yachiyo_route_approval_smoke"]["status"] == "passed"
+    assert report["yachiyo_route_approval_smoke"]["evidence"]["ok"] is True
+    assert report["yachiyo_route_approval_smoke"]["evidence"]["chat"]["approved"][
+        "status"
+    ] == "completed"
+    assert report["yachiyo_route_approval_smoke"]["evidence"]["studio"]["artifact"][
+        "content"
+    ] == "# Route artifact"
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -856,6 +864,72 @@ def test_release_candidate_verifier_fails_when_runtime_approval_resume_smoke_fai
         {
             "path": str(tmp_path / "scripts/smoke_runtime_approval_resume.py"),
             "message": "duplicate approval claim executed the tool twice",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_yachiyo_route_approval_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "yachiyo route approval smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["yachiyo_route_approval_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "yachiyo_route_approval_smoke"
+    assert section["evidence"]["chat"]["calls"][0]["decision"]["metadata"][
+        "approval_id"
+    ] == "approval-chat-route"
+    assert section["evidence"]["studio"]["calls"][0]["decision"]["metadata"][
+        "approval_id"
+    ] == "approval-studio-route"
+    assert section["evidence"]["studio"]["artifact"]["path"] == "approval/route.md"
+
+
+def test_release_candidate_verifier_fails_when_yachiyo_route_approval_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_route_approval_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "yachiyo_route_approval_smoke",
+            "error": "chat approval id was not preserved",
+            "chat": {},
+            "studio": {},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "yachiyo route approval smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["yachiyo_route_approval_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "chat approval id was not preserved"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_yachiyo_route_approval.py"),
+            "message": "chat approval id was not preserved",
         }
     ]
 

@@ -46,6 +46,9 @@ from scripts.smoke_desktop_planner_discovery import (
 from scripts.smoke_runtime_approval_resume import (
     run_smoke as run_runtime_approval_resume_smoke,
 )
+from scripts.smoke_yachiyo_route_approval import (
+    run_smoke as run_route_approval_smoke,
+)
 from scripts.summarize_native_agent_capabilities import summarize_capabilities
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
@@ -1940,6 +1943,43 @@ def verify_runtime_approval_resume_smoke(root: Path) -> tuple[list[Finding], dic
     return [
         Finding(
             root / "scripts/smoke_runtime_approval_resume.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_yachiyo_route_approval_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_route_approval_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_yachiyo_route_approval.py",
+                f"Yachiyo route approval smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "yachiyo_route_approval_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_yachiyo_route_approval.py",
+                "Yachiyo route approval smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "yachiyo_route_approval_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "Yachiyo route approval smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_yachiyo_route_approval.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3949,6 +3989,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "yachiyo_route_approval_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -4096,6 +4142,12 @@ def verify_release_candidate(
             "run_requested": True,
         }
         report["desktop_planner_discovery_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
+        report["yachiyo_route_approval_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
@@ -4262,6 +4314,18 @@ def verify_release_candidate(
         "status": "failed" if runtime_approval_resume_findings else "passed",
         "evidence": runtime_approval_resume_evidence,
         "findings": _finding_report(runtime_approval_resume_findings),
+        "run_requested": True,
+    }
+
+    yachiyo_route_approval_findings, yachiyo_route_approval_evidence = (
+        verify_yachiyo_route_approval_smoke(root)
+    )
+    _print_findings("yachiyo route approval smoke", yachiyo_route_approval_findings)
+    failed = failed or bool(yachiyo_route_approval_findings)
+    report["yachiyo_route_approval_smoke"] = {
+        "status": "failed" if yachiyo_route_approval_findings else "passed",
+        "evidence": yachiyo_route_approval_evidence,
+        "findings": _finding_report(yachiyo_route_approval_findings),
         "run_requested": True,
     }
 

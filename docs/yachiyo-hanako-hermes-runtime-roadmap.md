@@ -102,6 +102,13 @@ remaining-tool follow-up, continuation projection, duplicate-claim suppression,
 next-approval projection, and fatal tool failure projection. It does not
 replace real provider or packaged-app smoke evidence.
 
+Current route-level approval boundary evidence is reproducible with
+`python scripts/smoke_yachiyo_route_approval.py`; this calls the Chat task and
+Agent Studio run approval route handlers with fake services to prove route
+metadata, `approval_id`, event-page bounds, public task/run snapshots, and
+artifact readback shape are preserved at the shared entrypoints. It does not
+replace packaged renderer, native provider, or full `NativeRunEngine` evidence.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,
