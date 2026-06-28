@@ -157,7 +157,7 @@ class TaskIntentRouter:
         )
         source_hint = data_source_hint(text, metadata)
         source_scope = data_source_scope_hint(text, metadata)
-        context_source = context_source_hint(text)
+        context_source = _task_context_source_hint(text)
         if _looks_like_visible_data_context_source(text):
             context_source = "visible_text"
         can_discover_source = _contains_any(
@@ -820,7 +820,7 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _dynamic_context_ui_transfer_hint(text) or _blocked_dynamic_context_ui_transfer_hint(text):
             return _empty_intent("web_research", text)
-        source = context_source_hint(text)
+        source = _task_context_source_hint(text)
         if source and safe_shortcut_hint(text):
             return _empty_intent("web_research", text)
         if _spotlight_search_query_hint(text):
@@ -895,6 +895,9 @@ class TaskIntentRouter:
         inputs = {"url_hint": _url_hint(text)}
         if dynamic_source and browser_action_name != "find_current_page":
             inputs["context_source"] = dynamic_source
+        output_target = _task_output_target_hint(text)
+        if output_target:
+            inputs["output_target_hint"] = output_target
         inputs.update(browser_action)
         existing_browser_app_name = str(inputs.get("app_name") or "").strip()
         browser_app_name = existing_browser_app_name or _browser_action_app_name_hint(
@@ -939,7 +942,7 @@ class TaskIntentRouter:
                     if dynamic_source
                     else []
                 ),
-                "artifact.write",
+                "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
             ],
             risk_level=risk_level,
         )
@@ -1001,10 +1004,19 @@ class TaskIntentRouter:
             inputs["context_source"] = context_source
         if file_context:
             inputs["file_context_hint"] = file_context
+        output_target = _task_output_target_hint(text)
+        if output_target:
+            inputs["output_target_hint"] = output_target
         file_context_capabilities = (
-            ["file.workspace_read", "terminal.execution", "artifact.write"]
+            (
+                [
+                    "file.workspace_read",
+                    "terminal.execution",
+                    "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
+                ]
+            )
             if file_context
-            else ["artifact.write"]
+            else ["clipboard.read_write" if output_target == "clipboard" else "artifact.write"]
         )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "report_generation", text),
@@ -1022,7 +1034,7 @@ class TaskIntentRouter:
                     if context_source
                     else ["file.workspace_read", "browser.research", "data.analysis", "terminal.execution"]
                 ),
-                "artifact.write",
+                "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
             ],
             risk_level="low",
         )
@@ -3410,6 +3422,15 @@ class RuntimePlanner:
                         reason="Persist the requested browser-derived report as a replayable artifact.",
                     )
                 )
+            if _task_output_target_hint(intent.user_goal) == "clipboard":
+                steps.append(
+                    _clipboard_output_step(
+                        intent,
+                        allowed,
+                        depends_on=[main_step.step_id],
+                        body_source=_web_clipboard_body_source(browser_action),
+                    )
+                )
             return steps
         if context_source and not url:
             context_steps = _context_source_steps(
@@ -3444,7 +3465,7 @@ class RuntimePlanner:
                     reason="Inspect the requested source before deciding which URL or query to open.",
                 ),
             ]
-        return [
+        steps = [
             _step(
                 intent,
                 "open-or-read-web",
@@ -3466,19 +3487,32 @@ class RuntimePlanner:
                 approval_required=True,
                 reason="Use browser tools for web content instead of desktop clicking when possible.",
             ),
-            _step(
-                intent,
-                "write-research-artifact",
-                "Write research artifact",
-                "artifact.write",
-                _first_allowed(("artifact.write",), allowed),
-                input_preview={
-                    "path": _artifact_output_path(intent.user_goal, "research-summary.md")
-                },
-                depends_on=["open-or-read-web"],
-                reason="Persist research output for replay.",
-            ),
         ]
+        if _task_output_target_hint(intent.user_goal) == "clipboard":
+            steps.append(
+                _clipboard_output_step(
+                    intent,
+                    allowed,
+                    depends_on=["open-or-read-web"],
+                    body_source="web_content",
+                )
+            )
+        else:
+            steps.append(
+                _step(
+                    intent,
+                    "write-research-artifact",
+                    "Write research artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={
+                        "path": _artifact_output_path(intent.user_goal, "research-summary.md")
+                    },
+                    depends_on=["open-or-read-web"],
+                    reason="Persist research output for replay.",
+                )
+            )
+        return steps
 
     def _report_steps(
         self,
@@ -3531,18 +3565,27 @@ class RuntimePlanner:
                     depends_on=["inspect-report-file-scope"],
                     reason="Use an approved local extraction step for non-tabular report sources such as PDFs.",
                 ),
-                _step(
-                    intent,
-                    "write-report-artifact",
-                    "Write report artifact",
-                    "artifact.write",
-                    _first_allowed(("artifact.write",), allowed),
-                    input_preview={
-                        "path": _artifact_output_path(intent.user_goal, "report.md"),
-                        "body_source": "local_file_context",
-                    },
-                    depends_on=["extract-report-file-context"],
-                    reason="Produce the requested durable output from the inspected local files.",
+                (
+                    _clipboard_output_step(
+                        intent,
+                        allowed,
+                        depends_on=["extract-report-file-context"],
+                        body_source="local_file_context",
+                    )
+                    if _task_output_target_hint(intent.user_goal) == "clipboard"
+                    else _step(
+                        intent,
+                        "write-report-artifact",
+                        "Write report artifact",
+                        "artifact.write",
+                        _first_allowed(("artifact.write",), allowed),
+                        input_preview={
+                            "path": _artifact_output_path(intent.user_goal, "report.md"),
+                            "body_source": "local_file_context",
+                        },
+                        depends_on=["extract-report-file-context"],
+                        reason="Produce the requested durable output from the inspected local files.",
+                    )
                 ),
             ]
         if context_source:
@@ -3556,21 +3599,30 @@ class RuntimePlanner:
             depends_on = [step.step_id for step in context_steps]
             return [
                 *context_steps,
-                _step(
-                    intent,
-                    "write-report-artifact",
-                    "Write report artifact",
-                    "artifact.write",
-                    _first_allowed(("artifact.write",), allowed),
-                    input_preview={
-                        "path": _artifact_output_path(intent.user_goal, "report.md"),
-                        "body_source": context_source,
-                    },
-                    depends_on=depends_on,
-                    reason="Produce the requested durable output from the inspected source.",
+                (
+                    _clipboard_output_step(
+                        intent,
+                        allowed,
+                        depends_on=depends_on,
+                        body_source=context_source,
+                    )
+                    if _task_output_target_hint(intent.user_goal) == "clipboard"
+                    else _step(
+                        intent,
+                        "write-report-artifact",
+                        "Write report artifact",
+                        "artifact.write",
+                        _first_allowed(("artifact.write",), allowed),
+                        input_preview={
+                            "path": _artifact_output_path(intent.user_goal, "report.md"),
+                            "body_source": context_source,
+                        },
+                        depends_on=depends_on,
+                        reason="Produce the requested durable output from the inspected source.",
+                    )
                 ),
             ]
-        return [
+        steps = [
             _step(
                 intent,
                 "gather-context",
@@ -3579,17 +3631,30 @@ class RuntimePlanner:
                 _first_allowed(("workspace.list", "browser.current_page", "workspace.read"), allowed),
                 reason="Inspect available context before writing.",
             ),
-            _step(
-                intent,
-                "write-report-artifact",
-                "Write report artifact",
-                "artifact.write",
-                _first_allowed(("artifact.write",), allowed),
-                input_preview={"path": _artifact_output_path(intent.user_goal, "report.md")},
-                depends_on=["gather-context"],
-                reason="Produce the requested durable output.",
-            ),
         ]
+        if _task_output_target_hint(intent.user_goal) == "clipboard":
+            steps.append(
+                _clipboard_output_step(
+                    intent,
+                    allowed,
+                    depends_on=["gather-context"],
+                    body_source="gathered_context",
+                )
+            )
+        else:
+            steps.append(
+                _step(
+                    intent,
+                    "write-report-artifact",
+                    "Write report artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={"path": _artifact_output_path(intent.user_goal, "report.md")},
+                    depends_on=["gather-context"],
+                    reason="Produce the requested durable output.",
+                )
+            )
+        return steps
 
     def _code_steps(
         self,
@@ -5876,12 +5941,118 @@ def _contains_any(text: str, terms: Iterable[str]) -> bool:
 def _context_artifact_source_hint(text: str) -> str:
     if _looks_like_visible_text_artifact_source(text):
         return "visible_text"
-    source = context_source_hint(text)
+    source = _task_context_source_hint(text)
     if source:
         return source
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
     return ""
+
+
+def _task_context_source_hint(text: str) -> str:
+    source = context_source_hint(text)
+    if (
+        source == "clipboard"
+        and _clipboard_output_target_requested(text)
+        and not _clipboard_context_source_requested(text)
+    ):
+        return ""
+    return source
+
+
+def _task_output_target_hint(text: str) -> str:
+    return "clipboard" if _clipboard_output_target_requested(text) else ""
+
+
+def _clipboard_output_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:复制|拷贝|写入|放到|放进|保存到|输出到|输出至|复制到|拷贝到|存到|设为|设置为)"
+            r"(?:一下|下)?\s*(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:到|进|至)\s*(?:系统)?(?:剪贴板|粘贴板)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:copy|write|put|save|output)\b.{0,80}\b(?:to|into)\s+"
+            r"(?:the\s+)?(?:system\s+)?clipboard\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clipboard_context_source_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:剪贴板|粘贴板).{0,8}(?:内容|里|里面|中的|上|中|里的)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:根据|使用|用|读取|读|从).{0,8}(?:剪贴板|粘贴板)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:clipboard\s+contents?|contents?\s+of\s+(?:the\s+)?clipboard|"
+            r"from\s+(?:the\s+)?clipboard|using\s+(?:the\s+)?clipboard)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clipboard_output_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: list[str],
+    body_source: str,
+) -> ToolPlanStepSnapshot:
+    return _step(
+        intent,
+        "write-clipboard-output",
+        "Write clipboard output",
+        "clipboard.read_write",
+        _first_allowed(("clipboard.write",), allowed),
+        input_preview={
+            "body_source": body_source,
+            "transform": _clipboard_output_transform_hint(intent.user_goal),
+        },
+        depends_on=depends_on,
+        reason="Write the generated task result to the clipboard after inspecting the requested source.",
+    )
+
+
+def _clipboard_output_transform_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if _contains_any(value, ("摘要", "总结", "summary", "summarize")):
+        return "summary"
+    if _contains_any(value, ("报告", "report", "文档", "document")):
+        return "report"
+    return "text"
+
+
+def _web_clipboard_body_source(browser_action: str) -> str:
+    action = str(browser_action or "").strip()
+    if action in {"current_page", "extract_text", "screenshot"}:
+        return "current_page_content"
+    if action in {"open_url_extract", "open_url_screenshot", "open_url"}:
+        return "web_url_content"
+    if action == "open_search":
+        return "web_search_result"
+    return "web_content"
 
 
 def _looks_like_visible_data_context_source(text: str) -> bool:

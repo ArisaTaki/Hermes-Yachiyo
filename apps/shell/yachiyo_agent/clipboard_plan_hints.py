@@ -13,6 +13,8 @@ def clipboard_operation_hint(prompt: str) -> dict[str, Any]:
         return {}
     if _clipboard_context_source_request(text):
         return {}
+    if _clipboard_context_transform_to_clipboard_request(text):
+        return {}
     write_text = _clipboard_write_text(text)
     if write_text:
         return {"action": "write", "text": write_text}
@@ -148,6 +150,25 @@ def _clipboard_context_source_request(text: str) -> bool:
     return has_clipboard_source and has_external_target
 
 
+def _clipboard_context_transform_to_clipboard_request(text: str) -> bool:
+    if not _looks_like_dynamic_clipboard_source(text):
+        return False
+    if not re.search(
+        r"(?:复制|拷贝|写入|放到|放进|保存到|输出到|输出至|copy|write|put|save|output)"
+        r".{0,24}(?:剪贴板|粘贴板|clipboard)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:摘要|总结|报告|整理|改写|翻译|分析|summary|summarize|report|rewrite|translate|analy[sz]e)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _clipboard_read_request(text: str) -> bool:
     lowered = text.lower()
     return bool(
@@ -241,6 +262,11 @@ def _looks_like_dynamic_clipboard_source(value: str) -> bool:
             text,
         )
         or re.search(r"\bclipboard\s+contents?\b", text)
+        or re.search(
+            r"(?:剪贴板|粘贴板).{0,8}(?:内容|里|里面|中的|里的)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 

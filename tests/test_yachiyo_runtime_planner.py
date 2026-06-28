@@ -2331,6 +2331,94 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
     ]
 
 
+def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> None:
+    allowed_tools = [
+        "browser.extract_text",
+        "browser.current_page",
+        "desktop.ui_elements",
+        "clipboard.read",
+        "clipboard.write",
+        "artifact.write",
+    ]
+    current_page = RuntimePlanner().decision(
+        "把当前网页摘要复制到剪贴板",
+        allowed_tools=allowed_tools,
+    )
+    current_window = RuntimePlanner().decision(
+        "把当前窗口内容总结后复制到剪贴板",
+        allowed_tools=allowed_tools,
+    )
+    clipboard_report = RuntimePlanner().decision(
+        "把剪贴板内容做成报告",
+        allowed_tools=allowed_tools,
+    )
+    clipboard_summary = RuntimePlanner().decision(
+        "把剪贴板内容摘要后复制到剪贴板",
+        allowed_tools=allowed_tools,
+    )
+    explicit_text = RuntimePlanner().decision(
+        "把 hello 复制到剪贴板",
+        allowed_tools=allowed_tools,
+    )
+
+    assert current_page.selected_intent.kind == "web_research"
+    assert current_page.selected_intent.inputs == {
+        "url_hint": "",
+        "output_target_hint": "clipboard",
+        "browser_action": "extract_text",
+        "presentation": "summary",
+    }
+    assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(current_page, "write-clipboard-output").input_preview == {
+        "body_source": "current_page_content",
+        "transform": "summary",
+    }
+    assert current_page.plan.tool_plan.artifacts_expected == []
+
+    assert current_window.selected_intent.kind == "report_generation"
+    assert current_window.selected_intent.inputs == {
+        "context_source": "visible_text",
+        "output_target_hint": "clipboard",
+    }
+    assert [step.step_id for step in current_window.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(current_window, "write-clipboard-output").input_preview == {
+        "body_source": "visible_text",
+        "transform": "summary",
+    }
+    assert current_window.plan.tool_plan.artifacts_expected == []
+
+    assert clipboard_report.selected_intent.kind == "report_generation"
+    assert clipboard_report.selected_intent.inputs == {"context_source": "clipboard"}
+    assert _step_by_id(clipboard_report, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "clipboard",
+    }
+    assert clipboard_report.plan.tool_plan.artifacts_expected == ["report.md"]
+
+    assert clipboard_summary.selected_intent.kind == "report_generation"
+    assert clipboard_summary.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "output_target_hint": "clipboard",
+    }
+    assert [step.step_id for step in clipboard_summary.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(clipboard_summary, "write-clipboard-output").input_preview == {
+        "body_source": "clipboard",
+        "transform": "summary",
+    }
+
+    assert explicit_text.selected_intent.kind == "clipboard_operation"
+    assert explicit_text.selected_intent.inputs == {"action": "write", "text": "hello"}
+
+
 def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "查找 Downloads 里的 PDF 并生成摘要报告",
@@ -7850,6 +7938,15 @@ def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> Non
         allowed_tools=["clipboard.write", "desktop.safe_shortcut"],
     )
     assert dynamic_source_decision.selected_intent.kind != "clipboard_operation"
+    clipboard_transform_decision = RuntimePlanner().decision(
+        "把剪贴板内容摘要后复制到剪贴板",
+        allowed_tools=["clipboard.read", "clipboard.write", "artifact.write"],
+    )
+    assert clipboard_transform_decision.selected_intent.kind == "report_generation"
+    assert clipboard_transform_decision.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "output_target_hint": "clipboard",
+    }
 
 
 def test_runtime_planner_routes_clipboard_read_to_clipboard_capability() -> None:
@@ -11352,6 +11449,10 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         "把当前应用内容整理成一份报告",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
+    current_window_clipboard_requests = planner_tool_requests(
+        "把当前窗口内容总结后复制到剪贴板",
+        allowed_tools=["desktop.ui_elements", "clipboard.write", "artifact.write"],
+    )
 
     assert selection_requests == [
         {
@@ -11424,10 +11525,24 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "continue_to_model": True,
         }
     ]
+    assert current_window_clipboard_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
 
     current_page_report_requests = planner_tool_requests(
         "把当前网页总结成一份报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+    current_page_clipboard_requests = planner_tool_requests(
+        "把当前网页摘要复制到剪贴板",
+        allowed_tools=["browser.current_page", "browser.extract_text", "clipboard.write"],
     )
     current_page_markdown_requests = planner_tool_requests(
         "把当前网页总结成 markdown 文件",
@@ -11441,6 +11556,17 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
     )
 
     assert current_page_report_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+            "continue_to_model": True,
+        }
+    ]
+    assert current_page_clipboard_requests == [
         {
             "protocol": "json_fallback",
             "tool": "browser.extract_text",

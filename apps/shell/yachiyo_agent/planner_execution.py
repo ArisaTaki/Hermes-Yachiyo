@@ -1235,11 +1235,16 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if presentation:
         request["presentation"] = presentation
     if (
-        _web_request_needs_model_followup(decision.selected_intent.user_goal)
+        (
+            _web_request_needs_model_followup(decision.selected_intent.user_goal)
+            or str(decision.selected_intent.inputs.get("output_target_hint") or "").strip()
+            == "clipboard"
+        )
         and (
             not browser_action
             or any(
-                str(getattr(item, "tool_name", "") or "").strip() == "artifact.write"
+                str(getattr(item, "tool_name", "") or "").strip()
+                in {"artifact.write", "clipboard.write"}
                 for item in decision.plan.tool_plan.steps
             )
         )
@@ -1779,6 +1784,7 @@ def _web_request_needs_model_followup(prompt: str) -> bool:
             "报告",
             "调研",
             "分析",
+            "摘要",
             "输出",
         ),
     )
