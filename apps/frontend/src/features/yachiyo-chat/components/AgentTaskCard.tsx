@@ -1,6 +1,10 @@
+import { useState } from 'react';
+
 import { UiIcon } from '../../../components/UiIcon';
+import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import {
+  runtimeToolRecoveryActionWithInputPatch,
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryMissingRequiredFields,
   runtimeToolRecoveryRetryAction,
@@ -53,9 +57,12 @@ export function AgentTaskCard({
     timelineSummaryEvents,
     toolCallFacts,
   } = useYachiyoTaskEventReplay(task);
+  const [recoveryCoordinate, setRecoveryCoordinate] = useState<TaskRecoveryCoordinate | null>(null);
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
+  const taskRecoveryCoordinate = recoveryCoordinate?.task_id === task.task_id ? recoveryCoordinate : null;
+  const recoveryScreenPointContract = taskRecoveryScreenPointContract(permissionRecovery);
   const plannerSummary = plannerSummaryFromTask(task);
 
   return (
@@ -132,12 +139,18 @@ export function AgentTaskCard({
                 data-testid="yachiyo-agent-task-recovery-actions"
               >
                 {permissionRecovery.actions.slice(0, 3).flatMap((action) => {
-                  const retryAction = runtimeToolRecoveryRetryAction(action);
+                  const retryAction = taskRecoveryRetryActionWithSelectedCoordinate(
+                    runtimeToolRecoveryRetryAction(action),
+                    taskRecoveryCoordinate,
+                  );
                   const retryFields = retryAction?.required_retry_fields || [];
                   const missingRetryFields = retryAction ? runtimeToolRecoveryMissingRequiredFields(retryAction) : [];
                   const retryInputSource = retryAction?.retry_input_source === 'screen_capture_artifact'
                     ? '截图定位'
                     : '';
+                  const selectedRetryPoint = retryInputSource && taskRecoveryCoordinate
+                    ? taskRecoveryCoordinate
+                    : null;
                   return [
                     <button
                       type="button"
@@ -161,6 +174,8 @@ export function AgentTaskCard({
                         data-missing-retry-fields={missingRetryFields.join(',')}
                         data-permission-target={retryAction.permission_target}
                         data-retry-input-source={retryAction.retry_input_source || ''}
+                        data-selected-retry-x={selectedRetryPoint?.x ?? ''}
+                        data-selected-retry-y={selectedRetryPoint?.y ?? ''}
                         data-recovery-kind="retry_original"
                         data-recovery-tool={retryAction.tool}
                         data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}
@@ -278,9 +293,24 @@ export function AgentTaskCard({
       ) : null}
       {artifactFacts.length ? (
         <div className="yachiyo-agent-task-artifacts">
-          {artifactFacts.slice(0, 3).map((artifact) => (
-            <ArtifactPreview artifact={artifact} key={artifact.artifact_id} taskId={task.task_id} />
-          ))}
+          {artifactFacts.slice(0, 3).map((artifact) => {
+            const enableImagePointSelection = taskArtifactMatchesRecoveryScreenPoint(
+              artifact,
+              recoveryScreenPointContract,
+            );
+            return (
+              <ArtifactPreview
+                artifact={artifact}
+                enableImagePointSelection={enableImagePointSelection}
+                key={artifact.artifact_id}
+                onSelectImagePoint={(selection) => {
+                  setRecoveryCoordinate(taskRecoveryCoordinateFromSelection(task.task_id, selection));
+                }}
+                selectedImagePoint={taskRecoverySelectedPointForArtifact(taskRecoveryCoordinate, artifact)}
+                taskId={task.task_id}
+              />
+            );
+          })}
         </div>
       ) : null}
     </section>
@@ -465,6 +495,23 @@ type TaskPermissionRecovery = {
 
 export type TaskPermissionRecoveryAction = RuntimeToolRecoveryAction;
 
+type TaskRecoveryCoordinate = {
+  artifact_id: string;
+  artifact_path: string;
+  kind?: string | null;
+  natural_height: number;
+  natural_width: number;
+  source_tool?: string | null;
+  task_id: string;
+  x: number;
+  y: number;
+};
+
+type TaskRecoveryScreenPointContract = {
+  artifactKind: string;
+  artifactTool: string;
+};
+
 const permissionTargetLabels: Record<string, string> = {
   accessibility: '辅助功能权限',
   automation: '自动化权限',
@@ -476,6 +523,86 @@ const permissionTargetLabels: Record<string, string> = {
   screen_recording: '屏幕录制权限',
   unsupported_platform: '当前平台',
 };
+
+function taskRecoveryRetryActionWithSelectedCoordinate(
+  action: RuntimeToolRecoveryAction | null,
+  coordinate: TaskRecoveryCoordinate | null,
+): RuntimeToolRecoveryAction | null {
+  if (!action || !coordinate || action.retry_input_source !== 'screen_capture_artifact') return action;
+  const inputPatch: Record<string, unknown> = {};
+  if (taskRecoveryActionNeedsRetryField(action, 'x')) inputPatch.x = coordinate.x;
+  if (taskRecoveryActionNeedsRetryField(action, 'y')) inputPatch.y = coordinate.y;
+  return Object.keys(inputPatch).length
+    ? runtimeToolRecoveryActionWithInputPatch(action, inputPatch)
+    : action;
+}
+
+function taskRecoveryActionNeedsRetryField(action: RuntimeToolRecoveryAction, field: string): boolean {
+  return (action.required_retry_fields || []).includes(field)
+    || runtimeToolRecoveryMissingRequiredFields(action).includes(field);
+}
+
+function taskRecoveryScreenPointContract(
+  recovery: TaskPermissionRecovery | null,
+): TaskRecoveryScreenPointContract | null {
+  const action = (recovery?.actions || [])
+    .map((candidate) => runtimeToolRecoveryRetryAction(candidate))
+    .find((candidate): candidate is RuntimeToolRecoveryAction => {
+      if (!candidate || candidate.retry_input_source !== 'screen_capture_artifact') return false;
+      return taskRecoveryActionNeedsRetryField(candidate, 'x')
+        || taskRecoveryActionNeedsRetryField(candidate, 'y');
+    });
+  if (!action) return null;
+  return {
+    artifactKind: action.retry_artifact_kind || 'image',
+    artifactTool: action.retry_artifact_tool || 'screen.capture',
+  };
+}
+
+function taskArtifactMatchesRecoveryScreenPoint(
+  artifact: NonNullable<AgentTaskSnapshot['artifacts']>[number],
+  contract: TaskRecoveryScreenPointContract | null,
+): boolean {
+  if (!contract) return false;
+  const kind = String(artifact.kind || '').trim();
+  const mimeType = String(artifact.mime_type || '').trim();
+  const path = String(artifact.path || '').trim();
+  const sourceTool = String(artifact.source_tool || '').trim();
+  if (sourceTool && contract.artifactTool && sourceTool !== contract.artifactTool) return false;
+  if (kind && contract.artifactKind && kind !== contract.artifactKind) return false;
+  return kind === 'image'
+    || mimeType.startsWith('image/')
+    || /\.(?:png|jpe?g|webp|gif)$/i.test(path);
+}
+
+function taskRecoveryCoordinateFromSelection(
+  taskId: string,
+  selection: RuntimeImageArtifactPointSelection,
+): TaskRecoveryCoordinate {
+  return {
+    artifact_id: selection.artifact.artifact_id,
+    artifact_path: selection.artifact_path,
+    kind: selection.artifact.kind,
+    natural_height: selection.natural_height,
+    natural_width: selection.natural_width,
+    source_tool: selection.artifact.source_tool,
+    task_id: taskId,
+    x: selection.x,
+    y: selection.y,
+  };
+}
+
+function taskRecoverySelectedPointForArtifact(
+  coordinate: TaskRecoveryCoordinate | null,
+  artifact: NonNullable<AgentTaskSnapshot['artifacts']>[number],
+): TaskRecoveryCoordinate | null {
+  if (!coordinate) return null;
+  const artifactId = String(artifact.artifact_id || '').trim();
+  const artifactPath = String(artifact.path || '').trim();
+  if (artifactId && coordinate.artifact_id && artifactId !== coordinate.artifact_id) return null;
+  if (artifactPath && coordinate.artifact_path && artifactPath !== coordinate.artifact_path) return null;
+  return coordinate;
+}
 
 export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecovery | null {
   return taskPermissionRecoveryFromTaskFacts(events, []);

@@ -152,6 +152,27 @@ export function runtimeToolRecoveryRetryAction(
   };
 }
 
+export function runtimeToolRecoveryActionWithInputPatch(
+  action: RuntimeToolRecoveryAction,
+  inputPatch: Record<string, unknown>,
+): RuntimeToolRecoveryAction {
+  const patch = objectValue(inputPatch);
+  if (!Object.keys(patch).length) return action;
+  const input = {
+    ...objectValue(action.input),
+    ...patch,
+  };
+  const retryInput = {
+    ...objectValue(action.retry_input),
+    ...patch,
+  };
+  return {
+    ...action,
+    input,
+    ...(action.retry_tool || action.retry_input ? { retry_input: retryInput } : {}),
+  };
+}
+
 export function runtimeToolRecoveryMissingRequiredFields(
   action: RuntimeToolRecoveryAction,
 ): string[] {

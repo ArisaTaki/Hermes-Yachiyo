@@ -9830,6 +9830,46 @@ body.electron-window .hy-traffic {
   object-fit: contain;
 }
 
+.runtime-readable-artifact-image-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.runtime-readable-artifact-image-frame.is-selectable img.runtime-readable-artifact-image {
+  cursor: crosshair;
+}
+
+.runtime-readable-artifact-image-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid oklch(82% 0.135 76);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px oklch(12% 0.025 240 / 0.75);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.runtime-readable-artifact-image-point {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  padding: 3px 6px;
+  border: 1px solid oklch(82% 0.135 76 / 0.38);
+  border-radius: 6px;
+  background: oklch(12% 0.025 240 / 0.82);
+  color: oklch(92% 0.04 85);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.2;
+  overflow: hidden;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hy-content .open-chat-shell .yachiyo-task-approval span,
 .hy-content .open-chat-shell .yachiyo-task-artifact span {
   color: var(--hy-faint);

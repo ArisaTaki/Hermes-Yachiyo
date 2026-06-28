@@ -1,13 +1,23 @@
-import { RuntimeReadableArtifactPreview } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
+import {
+  RuntimeReadableArtifactPreview,
+  type RuntimeImageArtifactPointSelection,
+  type RuntimeImageArtifactSelectedPoint,
+} from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { readYachiyoChatRunArtifact, readYachiyoTaskArtifact } from '../api';
 import { yachiyoTaskArtifactReadTarget } from '../taskSnapshots';
 import type { ArtifactSnapshot } from '../types';
 
 export function ArtifactPreview({
   artifact,
+  enableImagePointSelection = false,
+  onSelectImagePoint,
+  selectedImagePoint,
   taskId = '',
 }: {
   artifact: ArtifactSnapshot;
+  enableImagePointSelection?: boolean;
+  onSelectImagePoint?: (selection: RuntimeImageArtifactPointSelection) => void;
+  selectedImagePoint?: RuntimeImageArtifactSelectedPoint | null;
   taskId?: string;
 }) {
   const artifactTarget = yachiyoTaskArtifactReadTarget(artifact, taskId);
@@ -26,6 +36,8 @@ export function ArtifactPreview({
       previewClassName="yachiyo-task-artifact"
       previewTestId="yachiyo-task-artifact-preview"
       previewVariant="compact"
+      imagePointLabel="点击截图补齐坐标"
+      onSelectImagePoint={enableImagePointSelection ? onSelectImagePoint : undefined}
       readArtifact={
         canReadRunArtifact
           ? (artifactPath) => readYachiyoChatRunArtifact(artifactTarget.runId, artifactPath)
@@ -33,6 +45,7 @@ export function ArtifactPreview({
             ? (artifactPath) => readYachiyoTaskArtifact(artifactTarget.taskId, artifactPath)
             : undefined
       }
+      selectedImagePoint={enableImagePointSelection ? selectedImagePoint : null}
       shellTestId="yachiyo-task-artifact-shell"
       statusClassName="yachiyo-task-artifact-status"
       statusTestId="yachiyo-task-artifact-loading"

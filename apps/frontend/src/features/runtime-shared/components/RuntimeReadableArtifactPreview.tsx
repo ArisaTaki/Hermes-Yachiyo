@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react';
 import { useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
@@ -12,6 +13,22 @@ export type RuntimeReadableArtifactContent = {
   mime_type?: string | null;
   truncated?: boolean;
 };
+
+export type RuntimeImageArtifactPointSelection = {
+  artifact: RuntimeArtifactSnapshot;
+  artifact_path: string;
+  natural_height: number;
+  natural_width: number;
+  rendered_height: number;
+  rendered_width: number;
+  x: number;
+  y: number;
+};
+
+export type RuntimeImageArtifactSelectedPoint = Pick<
+  RuntimeImageArtifactPointSelection,
+  'artifact_path' | 'natural_height' | 'natural_width' | 'x' | 'y'
+>;
 
 type RuntimeReadableArtifactPreviewProps = {
   artifact: RuntimeArtifactSnapshot;
@@ -28,10 +45,13 @@ type RuntimeReadableArtifactPreviewProps = {
   previewClassName?: string;
   previewTestId?: string;
   previewVariant?: RuntimeArtifactVariant;
+  imagePointLabel?: string;
+  onSelectImagePoint?: (selection: RuntimeImageArtifactPointSelection) => void;
   readArtifact?: (
     path: string,
     artifact: RuntimeArtifactSnapshot,
   ) => Promise<RuntimeReadableArtifactContent>;
+  selectedImagePoint?: RuntimeImageArtifactSelectedPoint | null;
   shellTestId?: string;
   statusClassName?: string;
   statusTestId?: string;
@@ -53,7 +73,10 @@ export function RuntimeReadableArtifactPreview({
   previewClassName = 'runtime-artifact-preview',
   previewTestId = 'runtime-artifact-preview',
   previewVariant = 'compact',
+  imagePointLabel = '点击截图补齐坐标',
+  onSelectImagePoint,
   readArtifact,
+  selectedImagePoint,
   shellTestId = 'runtime-readable-artifact-shell',
   statusClassName = 'runtime-readable-artifact-status',
   statusTestId = 'runtime-readable-artifact-loading',
@@ -96,6 +119,20 @@ export function RuntimeReadableArtifactPreview({
 
   const label = artifact.title || path || artifact.kind || 'Artifact';
   const imagePreviewSrc = preview ? runtimeArtifactImagePreviewSource(preview, artifact) : '';
+  const selectedPoint = selectedImagePoint && (!selectedImagePoint.artifact_path || selectedImagePoint.artifact_path === path)
+    ? selectedImagePoint
+    : null;
+  const selectedPointStyle = selectedPoint
+    ? runtimeImageArtifactPointStyle(selectedPoint)
+    : undefined;
+  const selectableImage = Boolean(onSelectImagePoint);
+
+  function handleImagePointSelection(event: MouseEvent<HTMLImageElement>) {
+    if (!onSelectImagePoint) return;
+    const selection = runtimeImageArtifactPointSelection(event, artifact, path);
+    if (selection) onSelectImagePoint(selection);
+  }
+
   return (
     <div
       className={className}
@@ -134,12 +171,37 @@ export function RuntimeReadableArtifactPreview({
         </p>
       ) : null}
       {preview && imagePreviewSrc ? (
-        <img
-          alt={label}
-          className={`${contentClassName} runtime-readable-artifact-image`}
-          data-testid={contentTestId}
-          src={imagePreviewSrc}
-        />
+        <div
+          className={`runtime-readable-artifact-image-frame${selectableImage ? ' is-selectable' : ''}`}
+          data-coordinate-pick-enabled={selectableImage ? 'true' : 'false'}
+          data-selected-x={selectedPoint?.x ?? ''}
+          data-selected-y={selectedPoint?.y ?? ''}
+          data-testid={`${contentTestId}-point-frame`}
+        >
+          <img
+            alt={label}
+            className={`${contentClassName} runtime-readable-artifact-image`}
+            data-testid={contentTestId}
+            onClick={handleImagePointSelection}
+            src={imagePreviewSrc}
+          />
+          {selectedPoint && selectedPointStyle ? (
+            <span
+              aria-hidden="true"
+              className="runtime-readable-artifact-image-marker"
+              data-testid={`${contentTestId}-point-marker`}
+              style={selectedPointStyle}
+            />
+          ) : null}
+          {selectableImage ? (
+            <small
+              className="runtime-readable-artifact-image-point"
+              data-testid={`${contentTestId}-point-label`}
+            >
+              {selectedPoint ? `${selectedPoint.x}, ${selectedPoint.y}` : imagePointLabel}
+            </small>
+          ) : null}
+        </div>
       ) : preview ? (
         <pre className={contentClassName} data-testid={contentTestId}>
           {preview.content || emptyContentLabel}
@@ -158,4 +220,43 @@ function runtimeArtifactImagePreviewSource(
   if (!mimeType.startsWith('image/') || !content) return '';
   if (content.startsWith('data:image/')) return content;
   return `data:${mimeType};base64,${content}`;
+}
+
+function runtimeImageArtifactPointSelection(
+  event: MouseEvent<HTMLImageElement>,
+  artifact: RuntimeArtifactSnapshot,
+  path: string,
+): RuntimeImageArtifactPointSelection | null {
+  const image = event.currentTarget;
+  const rect = image.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const naturalWidth = image.naturalWidth || Math.round(rect.width);
+  const naturalHeight = image.naturalHeight || Math.round(rect.height);
+  if (!naturalWidth || !naturalHeight) return null;
+  const relativeX = clampNumber(event.clientX - rect.left, 0, rect.width);
+  const relativeY = clampNumber(event.clientY - rect.top, 0, rect.height);
+  return {
+    artifact,
+    artifact_path: path,
+    natural_height: naturalHeight,
+    natural_width: naturalWidth,
+    rendered_height: rect.height,
+    rendered_width: rect.width,
+    x: Math.round((relativeX / rect.width) * Math.max(0, naturalWidth - 1)),
+    y: Math.round((relativeY / rect.height) * Math.max(0, naturalHeight - 1)),
+  };
+}
+
+function runtimeImageArtifactPointStyle(point: RuntimeImageArtifactSelectedPoint) {
+  const naturalWidth = Number(point.natural_width || 0);
+  const naturalHeight = Number(point.natural_height || 0);
+  if (!naturalWidth || !naturalHeight) return undefined;
+  return {
+    left: `${(Number(point.x || 0) / Math.max(1, naturalWidth - 1)) * 100}%`,
+    top: `${(Number(point.y || 0) / Math.max(1, naturalHeight - 1)) * 100}%`,
+  };
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
