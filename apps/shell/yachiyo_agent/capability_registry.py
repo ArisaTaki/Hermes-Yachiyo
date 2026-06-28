@@ -324,13 +324,13 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "and use Apple Music-specific tools as compatibility fallbacks."
         ),
         tools=(
+            "media.music_app_open_and_play",
+            "media.music_app_control",
+            "media.system_control",
             "media.apple_music_play",
             "media.apple_music_status",
             "media.apple_music_open_and_play",
             "media.apple_music_control",
-            "media.music_app_open_and_play",
-            "media.music_app_control",
-            "media.system_control",
         ),
         discovery_actions=("read_playback_status",),
         execution_actions=("play", "pause", "next", "previous", "open_music_app"),
