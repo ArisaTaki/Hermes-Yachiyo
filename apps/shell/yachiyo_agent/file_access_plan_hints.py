@@ -88,6 +88,9 @@ def _dynamic_open_path(text: str) -> str:
 
 def _dynamic_reveal_path(text: str) -> str:
     lowered = text.lower()
+    generated_artifact = _generated_artifact_path(text)
+    if generated_artifact:
+        return generated_artifact
     if _contains_any(text, ("选中的 finder 文件", "当前选中的 finder 文件", "选中文件", "选中的文件")):
         return "finder_selection"
     if re.search(r"\b(?:show|reveal|locate)\s+(?:the\s+)?(?:currently\s+)?selected\s+(?:finder\s+)?(?:file|item)", lowered):
@@ -104,6 +107,39 @@ def _dynamic_reveal_path(text: str) -> str:
         return "latest_desktop_item"
     if re.search(r"\b(?:show|reveal|locate)\s+(?:the\s+)?(?:latest|newest|most\s+recent|recent)\s+(?:desktop\s+)?(?:file|item)", lowered):
         return "latest_desktop_item"
+    return ""
+
+
+def _generated_artifact_path(text: str) -> str:
+    lowered = text.lower()
+    if not (
+        _contains_any(
+            text,
+            (
+                "生成的",
+                "刚生成",
+                "刚才生成",
+                "输出的",
+                "导出的",
+                "产物",
+                "分析报告",
+                "网页摘要",
+                "调研报告",
+            ),
+        )
+        or re.search(r"\b(?:generated|created|exported|written)\s+.+\b(?:artifact|report|summary|file|chart|csv)\b", lowered)
+    ):
+        return ""
+    if _contains_any(text, ("图表", "趋势图", "chart", "plot")):
+        return "analysis-chart.png"
+    if _contains_any(text, ("csv", "表格", "汇总表", "table")):
+        return "analysis-summary.csv"
+    if _contains_any(text, ("网页", "页面", "调研", "research", "web", "page")):
+        return "research-summary.md"
+    if _contains_any(text, ("分析", "数据", "analysis", "data")):
+        return "analysis-report.md"
+    if _contains_any(text, ("报告", "摘要", "markdown", "文档", "report", "summary", "document")):
+        return "report.md"
     return ""
 
 

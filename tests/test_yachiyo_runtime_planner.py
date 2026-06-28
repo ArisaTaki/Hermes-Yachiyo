@@ -2419,6 +2419,112 @@ def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> 
     assert explicit_text.selected_intent.inputs == {"action": "write", "text": "hello"}
 
 
+def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
+    allowed_tools = [
+        "data.analyze",
+        "workspace.read",
+        "workspace.list",
+        "terminal.run",
+        "artifact.write",
+        "desktop.reveal_path",
+        "browser.extract_text",
+        "browser.current_page",
+        "desktop.ui_elements",
+    ]
+    generated_report = RuntimePlanner().decision(
+        "把生成的分析报告在 Finder 里显示出来",
+        allowed_tools=allowed_tools,
+    )
+    builtin_data = RuntimePlanner().decision(
+        "请分析 sales.csv 并把报告保存到 Downloads，然后在 Finder 中显示",
+        allowed_tools=allowed_tools,
+    )
+    current_window = RuntimePlanner().decision(
+        "把当前窗口内容总结成 markdown 文件并在 Finder 中显示",
+        allowed_tools=allowed_tools,
+    )
+    current_page = RuntimePlanner().decision(
+        "把当前网页总结成 markdown 文件并在 Finder 中显示",
+        allowed_tools=allowed_tools,
+    )
+    current_page_table = RuntimePlanner().decision(
+        "把当前页面表格导出成 csv 保存到 Downloads，然后在 Finder 里显示",
+        allowed_tools=allowed_tools,
+    )
+
+    assert generated_report.selected_intent.kind == "file_access"
+    assert generated_report.selected_intent.inputs == {
+        "action": "reveal_path",
+        "path": "analysis-report.md",
+    }
+    assert _step_by_id(generated_report, "reveal-local-path").input_preview == {
+        "path": "analysis-report.md"
+    }
+
+    assert builtin_data.selected_intent.kind == "data_analysis"
+    assert [step.step_id for step in builtin_data.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "reveal-artifact-in-finder",
+    ]
+    assert _step_by_id(builtin_data, "analyze-data-file").input_preview[
+        "artifact_path"
+    ] == "Downloads/analysis-report.md"
+    assert _step_by_id(builtin_data, "reveal-artifact-in-finder").input_preview == {
+        "path": "Downloads/analysis-report.md"
+    }
+    assert _step_by_id(builtin_data, "reveal-artifact-in-finder").depends_on == [
+        "analyze-data-file"
+    ]
+    assert builtin_data.plan.tool_plan.required_capabilities == [
+        "data.analysis",
+        "file.desktop_access",
+    ]
+    assert builtin_data.plan.tool_plan.artifacts_expected == [
+        "Downloads/analysis-report.md"
+    ]
+
+    assert current_window.selected_intent.kind == "report_generation"
+    assert [step.step_id for step in current_window.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+        "reveal-artifact-in-finder",
+    ]
+    assert _step_by_id(current_window, "reveal-artifact-in-finder").input_preview == {
+        "path": "report.md"
+    }
+    assert _step_by_id(current_window, "reveal-artifact-in-finder").depends_on == [
+        "write-report-artifact"
+    ]
+    assert current_window.plan.tool_plan.artifacts_expected == ["report.md"]
+
+    assert current_page.selected_intent.kind == "web_research"
+    assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+        "reveal-artifact-in-finder",
+    ]
+    assert _step_by_id(current_page, "reveal-artifact-in-finder").input_preview == {
+        "path": "research-summary.md"
+    }
+    assert current_page.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+
+    assert current_page_table.selected_intent.kind == "data_analysis"
+    assert _step_by_id(current_page_table, "write-analysis-artifact").input_preview == {
+        "paths": ["Downloads/analysis-report.md", "Downloads/analysis-summary.csv"],
+        "body_source": "current_page_content",
+    }
+    assert _step_by_id(current_page_table, "reveal-artifact-in-finder").input_preview == {
+        "path": "Downloads/analysis-summary.csv"
+    }
+    assert _step_by_id(current_page_table, "reveal-artifact-in-finder").depends_on == [
+        "write-analysis-artifact"
+    ]
+    assert current_page_table.plan.tool_plan.artifacts_expected == [
+        "Downloads/analysis-report.md",
+        "Downloads/analysis-summary.csv",
+    ]
+
+
 def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "查找 Downloads 里的 PDF 并生成摘要报告",
@@ -10530,6 +10636,47 @@ def test_planner_tool_requests_uses_builtin_data_analysis_when_available() -> No
             "input": _data_analysis_preview("~/Downloads/sales.csv", "csv"),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+
+
+def test_planner_tool_requests_reveals_builtin_data_analysis_artifacts() -> None:
+    requests = planner_tool_requests(
+        "请分析 sales.csv 并把报告保存到 Downloads，然后在 Finder 中显示",
+        allowed_tools=["data.analyze", "artifact.write", "desktop.reveal_path"],
+    )
+    standalone_requests = planner_tool_requests(
+        "把生成的分析报告在 Finder 里显示出来",
+        allowed_tools=["desktop.reveal_path"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview(
+                "sales.csv",
+                "csv",
+                artifact_paths=["Downloads/analysis-report.md"],
+            ),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.reveal_path",
+            "input": {"path": "Downloads/analysis-report.md"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+    ]
+    assert standalone_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.reveal_path",
+            "input": {"path": "analysis-report.md"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
         }
     ]
 

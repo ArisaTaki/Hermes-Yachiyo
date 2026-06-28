@@ -788,13 +788,19 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 ]
             if payload.get("max_rows"):
                 request_input["max_rows"] = int(payload.get("max_rows") or 1000)
+            analyze_request = _request(
+                "data.analyze",
+                request_input,
+                planning_reason="planner_builtin_data_analysis",
+            )
             return [
                 *app_requests,
-                _request(
-                    "data.analyze",
-                    request_input,
+                analyze_request,
+                *_artifact_reveal_tool_requests(
+                    decision,
+                    allowed,
                     planning_reason="planner_builtin_data_analysis",
-                )
+                ),
             ]
 
     inputs = decision.selected_intent.inputs
@@ -864,6 +870,37 @@ def _data_analysis_spreadsheet_app_requests(
             tool_name,
             _desktop_request_payload(tool_name, payload),
             planning_reason="planner_fallback_data_analysis_spreadsheet_app",
+        )
+    ]
+
+
+def _artifact_reveal_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "step_id", "") == "reveal-artifact-in-finder"
+        ),
+        None,
+    )
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name != "desktop.reveal_path" or tool_name not in allowed:
+        return []
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    path = str(payload.get("path") or "").strip()
+    if not path:
+        return []
+    return [
+        _request(
+            "desktop.reveal_path",
+            {"path": path},
+            planning_reason=planning_reason,
         )
     ]
 

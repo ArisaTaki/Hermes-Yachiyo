@@ -1519,7 +1519,14 @@ class RuntimePlanner:
                 else []
             )
             depends_on = context_depends_on + [step.step_id for step in spreadsheet_steps]
-            return [
+            artifact_paths = _artifact_output_paths(
+                intent.user_goal,
+                data_analysis_artifacts_expected(
+                    intent.expected_outputs,
+                    intent.user_goal,
+                ),
+            )
+            steps = [
                 *context_steps,
                 *spreadsheet_steps,
                 _step(
@@ -1541,19 +1548,20 @@ class RuntimePlanner:
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
                     input_preview={
-                        "paths": _artifact_output_paths(
-                            intent.user_goal,
-                            data_analysis_artifacts_expected(
-                                intent.expected_outputs,
-                                intent.user_goal,
-                            ),
-                        ),
+                        "paths": artifact_paths,
                         "body_source": context_source,
                     },
                     depends_on=["run-analysis"],
                     reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
                 ),
             ]
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=artifact_paths,
+                depends_on="write-analysis-artifact",
+            )
         if _can_use_builtin_data_analysis(intent, allowed):
             artifact_paths = _artifact_output_paths(
                 intent.user_goal,
@@ -1578,7 +1586,7 @@ class RuntimePlanner:
             if len(artifact_paths) > 1:
                 input_preview["artifact_paths"] = artifact_paths
             depends_on = [spreadsheet_app_step.step_id] if spreadsheet_app_step is not None else []
-            return [
+            steps = [
                 *([spreadsheet_app_step] if spreadsheet_app_step is not None else []),
                 _step(
                     intent,
@@ -1594,6 +1602,13 @@ class RuntimePlanner:
                     ),
                 )
             ]
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=artifact_paths,
+                depends_on="analyze-data-file",
+            )
         inspect_tool_candidates = (
             ("workspace.read", "workspace.list")
             if source_hint
@@ -1604,7 +1619,14 @@ class RuntimePlanner:
             if spreadsheet_app_step is not None
             else []
         )
-        return [
+        artifact_paths = _artifact_output_paths(
+            intent.user_goal,
+            data_analysis_artifacts_expected(
+                intent.expected_outputs,
+                intent.user_goal,
+            ),
+        )
+        steps = [
             _step(
                 intent,
                 "inspect-data-source",
@@ -1638,18 +1660,19 @@ class RuntimePlanner:
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
                 input_preview={
-                    "paths": _artifact_output_paths(
-                        intent.user_goal,
-                        data_analysis_artifacts_expected(
-                            intent.expected_outputs,
-                            intent.user_goal,
-                        ),
-                    )
+                    "paths": artifact_paths
                 },
                 depends_on=["run-analysis"],
                 reason="Return a durable report artifact that Studio and Chat can replay.",
             ),
         ]
+        return _append_artifact_reveal_step(
+            intent,
+            allowed,
+            steps,
+            artifact_paths=artifact_paths,
+            depends_on="write-analysis-artifact",
+        )
 
     def _desktop_operation_steps(
         self,
@@ -3402,9 +3425,14 @@ class RuntimePlanner:
                 *([prepare_step] if prepare_step is not None else []),
                 main_step,
             ]
+            artifact_path = ""
             if _web_research_artifact_requested(intent) and (
                 allowed is None or "artifact.write" in allowed
             ):
+                artifact_path = _artifact_output_path(
+                    intent.user_goal,
+                    "research-summary.md",
+                )
                 steps.append(
                     _step(
                         intent,
@@ -3413,10 +3441,7 @@ class RuntimePlanner:
                         "artifact.write",
                         _first_allowed(("artifact.write",), allowed),
                         input_preview={
-                            "path": _artifact_output_path(
-                                intent.user_goal,
-                                "research-summary.md",
-                            )
+                            "path": artifact_path
                         },
                         depends_on=[main_step.step_id],
                         reason="Persist the requested browser-derived report as a replayable artifact.",
@@ -3431,7 +3456,13 @@ class RuntimePlanner:
                         body_source=_web_clipboard_body_source(browser_action),
                     )
                 )
-            return steps
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[artifact_path] if artifact_path else [],
+                depends_on="write-research-artifact",
+            )
         if context_source and not url:
             context_steps = _context_source_steps(
                 intent,
@@ -3498,6 +3529,7 @@ class RuntimePlanner:
                 )
             )
         else:
+            artifact_path = _artifact_output_path(intent.user_goal, "research-summary.md")
             steps.append(
                 _step(
                     intent,
@@ -3506,11 +3538,18 @@ class RuntimePlanner:
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
                     input_preview={
-                        "path": _artifact_output_path(intent.user_goal, "research-summary.md")
+                        "path": artifact_path
                     },
                     depends_on=["open-or-read-web"],
                     reason="Persist research output for replay.",
                 )
+            )
+            steps = _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[artifact_path],
+                depends_on="write-research-artifact",
             )
         return steps
 
@@ -3534,7 +3573,8 @@ class RuntimePlanner:
                 }.items()
                 if value
             }
-            return [
+            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
+            steps = [
                 _step(
                     intent,
                     "inspect-report-file-scope",
@@ -3580,7 +3620,7 @@ class RuntimePlanner:
                         "artifact.write",
                         _first_allowed(("artifact.write",), allowed),
                         input_preview={
-                            "path": _artifact_output_path(intent.user_goal, "report.md"),
+                            "path": artifact_path,
                             "body_source": "local_file_context",
                         },
                         depends_on=["extract-report-file-context"],
@@ -3588,6 +3628,13 @@ class RuntimePlanner:
                     )
                 ),
             ]
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[] if _task_output_target_hint(intent.user_goal) == "clipboard" else [artifact_path],
+                depends_on="write-report-artifact",
+            )
         if context_source:
             context_steps = _context_source_steps(
                 intent,
@@ -3597,7 +3644,8 @@ class RuntimePlanner:
                 capability_id="artifact.write",
             )
             depends_on = [step.step_id for step in context_steps]
-            return [
+            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
+            steps = [
                 *context_steps,
                 (
                     _clipboard_output_step(
@@ -3614,7 +3662,7 @@ class RuntimePlanner:
                         "artifact.write",
                         _first_allowed(("artifact.write",), allowed),
                         input_preview={
-                            "path": _artifact_output_path(intent.user_goal, "report.md"),
+                            "path": artifact_path,
                             "body_source": context_source,
                         },
                         depends_on=depends_on,
@@ -3622,6 +3670,13 @@ class RuntimePlanner:
                     )
                 ),
             ]
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[] if _task_output_target_hint(intent.user_goal) == "clipboard" else [artifact_path],
+                depends_on="write-report-artifact",
+            )
         steps = [
             _step(
                 intent,
@@ -3642,6 +3697,7 @@ class RuntimePlanner:
                 )
             )
         else:
+            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
             steps.append(
                 _step(
                     intent,
@@ -3649,10 +3705,17 @@ class RuntimePlanner:
                     "Write report artifact",
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
-                    input_preview={"path": _artifact_output_path(intent.user_goal, "report.md")},
+                    input_preview={"path": artifact_path},
                     depends_on=["gather-context"],
                     reason="Produce the requested durable output.",
                 )
+            )
+            steps = _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[artifact_path],
+                depends_on="write-report-artifact",
             )
         return steps
 
@@ -5329,6 +5392,10 @@ def _required_capabilities_for_plan(
             "desktop.app_control" not in required
         ):
             required.insert(0, "desktop.app_control")
+        if any(step.step_id == "reveal-artifact-in-finder" for step in steps) and (
+            "file.desktop_access" not in required
+        ):
+            required.append("file.desktop_access")
         return required
     return _step_required_capabilities(steps) or list(intent.required_capabilities)
 
@@ -5400,6 +5467,86 @@ def _artifact_write_paths_from_steps(steps: Iterable[ToolPlanStepSnapshot]) -> l
         if path:
             return [path]
     return []
+
+
+def _append_artifact_reveal_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_paths: Iterable[str],
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    if not _artifact_reveal_requested(intent.user_goal):
+        return steps
+    path = _artifact_reveal_path(intent.user_goal, artifact_paths)
+    if not path:
+        return steps
+    return [
+        *steps,
+        _step(
+            intent,
+            "reveal-artifact-in-finder",
+            "Reveal artifact in Finder",
+            "file.desktop_access",
+            _first_allowed(("desktop.reveal_path",), allowed),
+            input_preview={"path": path},
+            depends_on=[depends_on],
+            reason="Reveal the generated artifact through Finder only after the artifact-producing step finishes.",
+        ),
+    ]
+
+
+def _artifact_reveal_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not re.search(r"(?:Finder|访达)", value, flags=re.IGNORECASE):
+        return False
+    return bool(
+        re.search(
+            r"(?:显示|定位|找出|找一下|打开|查看|show|reveal|locate|view).{0,40}(?:Finder|访达)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:Finder|访达).{0,40}(?:显示|定位|找出|找一下|打开|查看|show|reveal|locate|view)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _artifact_reveal_path(text: str, artifact_paths: Iterable[str]) -> str:
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    if not paths:
+        return ""
+    value = _clean_prompt(text)
+    if _contains_any(value, ("csv", "表格", "汇总表", "table")):
+        csv_path = _first_path_with_suffix(paths, (".csv", ".tsv"))
+        if csv_path:
+            return csv_path
+    if _contains_any(value, ("图表", "趋势图", "chart", "plot")):
+        chart_path = _first_path_with_suffix(paths, (".png", ".jpg", ".jpeg", ".svg"))
+        if chart_path:
+            return chart_path
+    if _contains_any(value, ("报告", "摘要", "markdown", "md", "文档", "report", "summary", "document")):
+        report_path = _first_path_with_suffix(paths, (".md", ".html", ".pdf", ".docx"))
+        if report_path:
+            return report_path
+    return paths[0]
+
+
+def _first_path_with_suffix(paths: Iterable[str], suffixes: tuple[str, ...]) -> str:
+    for path in paths:
+        lowered = str(path or "").strip().lower()
+        if lowered.endswith(suffixes):
+            return str(path or "").strip()
+    return ""
 
 
 def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> bool:
