@@ -984,7 +984,29 @@ class TaskIntentRouter:
                 preferred_capabilities=["artifact.write"],
                 risk_level="high",
             )
-        score = _score_terms(text, ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"])
+        score = _score_terms(
+            text,
+            [
+                "code",
+                "test",
+                "bug",
+                "build",
+                "repo",
+                "script",
+                "python",
+                "javascript",
+                "typescript",
+                "代码",
+                "测试",
+                "修复",
+                "仓库",
+                "脚本",
+                "程序",
+                "编程",
+                "实现",
+                "开发",
+            ],
+        )
         if score <= 0:
             return _empty_intent("code_task", text)
         return TaskIntentSnapshot(

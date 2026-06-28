@@ -140,6 +140,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ("给 Alice 写一封邮件说明会议延期", "communication", ["communication.compose"]),
         ("明天上午九点提醒我提交报告", "schedule", ["schedule.reminder"]),
         ("修复这个仓库里的 failing tests", "code_task", ["file.workspace_read"]),
+        ("帮我写一个 Python 脚本处理日志", "code_task", ["file.workspace_read"]),
         ("运行日报 Workflow", "workflow_orchestration", ["workflow.orchestration"]),
         ("让研究群组协作比较三个方案", "multi_agent", ["group.multi_agent"]),
         ("打开 PixelForge", "desktop_operation", ["desktop.app_discovery"]),
