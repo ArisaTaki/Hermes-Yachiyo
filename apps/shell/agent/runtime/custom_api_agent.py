@@ -2608,9 +2608,13 @@ def _music_app_open_and_play_summary(result: dict[str, Any], planned_input: dict
     app_name = str(data.get("app_name") or planned_input.get("app_name") or "").strip()
     if not app_name:
         return ""
+    track = str(data.get("track") or "").strip()
+    artist = str(data.get("artist") or "").strip()
+    track_text = f"{track}{f' - {artist}' if artist else ''}" if track else ""
     if data.get("playback_state_unverified"):
         return f"已打开{_display_target_name(app_name)}，并用媒体键尝试开始播放。"
-    return f"已打开{_display_target_name(app_name)}并开始播放。"
+    suffix = f"当前：{track_text}。" if track_text else ""
+    return f"已打开{_display_target_name(app_name)}，并开始播放。{suffix}"
 
 
 def _music_app_control_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

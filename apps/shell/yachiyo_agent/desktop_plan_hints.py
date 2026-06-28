@@ -780,6 +780,9 @@ def media_tool_preview(
                 else _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
             )
             return tool_name, {"action": "play"} if tool_name else {}
+        generic_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
+        if generic_tool:
+            return generic_tool, {"app_name": app_name or "Music"}
         tool_name = _first_allowed(
             ("media.apple_music_open_and_play", "media.apple_music_control", "media.system_control"),
             allowed,
@@ -948,6 +951,10 @@ def music_app_name_hint(text: str) -> str:
 
 def media_query_hint(text: str) -> str:
     value = clean(text)
+    if re.fullmatch(r"(?:播放|播|放)(?:一下|下)?", value, flags=re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"(?:play|start playing)", value, flags=re.IGNORECASE):
+        return ""
     patterns = (
         r"(?:put|play)\s+(?P<query_put>.+?)\s+(?:on|in|with)\s+(?:apple\s*music|music)",
         r"(?:search|find)\s+(?:apple\s*music|music)\s+for\s+(?P<query_search>.+?)\s+(?:and\s+)?(?:play|start)",

@@ -341,7 +341,7 @@ def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_
             assert captured[-1]["daily_desktop_policy_overlay"] is True
             user = [message for message in runtime.chat_session.get_messages() if message.role == "user"][-1]
             assert user.metadata["launcher_mode"] == mode
-            assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+            assert user.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
         finally:
             store.close()
 
@@ -2450,15 +2450,15 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
 ):
     open_and_play_calls = 0
 
-    def fake_apple_music_open_and_play() -> dict:
+    def fake_music_app_open_and_play(app_name: str) -> dict:
         nonlocal open_and_play_calls
         open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
             "data": {
-                "app_name": "Music",
+                "app_name": app_name,
                 "open_ok": True,
                 "playback_ok": True,
                 "control": "play",
@@ -2469,9 +2469,11 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
-        fake_apple_music_open_and_play,
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
     )
+    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_tool = "media.music_app_open_and_play"
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -2480,13 +2482,13 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
 
     assert result["ok"] is True
     assert open_and_play_calls == 1
-    assert agent_task["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+    assert agent_task["summary"] == expected_summary
+    assert agent_task["tool_calls"][-1]["tool_name"] == expected_tool
     assert agent_task["tool_calls"][-1]["status"] == "completed"
     assert result["_task_timeline"]["run_id"] == run["run_id"]
     assert result["_task_timeline"]["task_id"] == result["task_id"]
     assert result["_task_timeline"]["status"] == "completed"
-    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == expected_tool
     assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
     assert result["_task_timeline"]["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
     timeline_event_types = [
@@ -2535,12 +2537,12 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         )
 
         assert result["ok"] is True
-        assert agent_task["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert agent_task["summary"] == expected_summary
+        assert agent_task["tool_calls"][-1]["tool_name"] == expected_tool
         assert agent_task["tool_calls"][-1]["status"] == "completed"
         assert result["_task_timeline"]["run_id"] == run["run_id"]
         assert result["_task_timeline"]["status"] == "completed"
-        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

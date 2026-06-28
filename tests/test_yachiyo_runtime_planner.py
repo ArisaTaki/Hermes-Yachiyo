@@ -5290,6 +5290,23 @@ def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
         assert "media.apple_music_open_and_play" in media_capability.tools
 
 
+def test_runtime_planner_prefers_generic_music_app_playback_when_available() -> None:
+    decision = RuntimePlanner().decision(
+        "能帮我播放 Apple Music 吗",
+        allowed_tools=[
+            "media.music_app_open_and_play",
+            "media.apple_music_open_and_play",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs["action"] == "play"
+    assert decision.selected_intent.inputs["query"] == ""
+    step = _step_by_id(decision, "control-media-playback")
+    assert step.tool_name == "media.music_app_open_and_play"
+    assert step.input_preview == {"app_name": "Music"}
+
+
 def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None:
     for prompt, query in (
         ("播放超时空辉夜姬", "超时空辉夜姬"),

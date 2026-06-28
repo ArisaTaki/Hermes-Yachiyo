@@ -202,15 +202,15 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         ),
     )
 
-    def fake_apple_music_open_and_play() -> dict:
+    def fake_music_app_open_and_play(app_name: str) -> dict:
         nonlocal open_and_play_calls
         open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
             "data": {
-                "app_name": "Music",
+                "app_name": app_name,
                 "open_ok": True,
                 "playback_ok": True,
                 "control": "play",
@@ -221,9 +221,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
-        fake_apple_music_open_and_play,
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
     )
+    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_tool = "media.music_app_open_and_play"
     try:
         result = api.send_message("能不能直接播个 Apple Music")
         task = runtime.state.get_task(result["task_id"])
@@ -238,24 +240,24 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert result["status"] == "completed"
         assert result["run_id"] == run["run_id"]
         assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert result["agent_task"]["summary"] == expected_summary
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert task.result == expected_summary
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert assistant.content == expected_summary
         assert user.metadata["daily_desktop_intent"] is True
         assert user.metadata["daily_desktop_source"] == "runtime_planner"
         assert user.metadata["daily_desktop_planning_reason"] == "planner_fallback_media_playback"
-        assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
-        assert user.metadata["daily_desktop_tools"] == ["media.apple_music_open_and_play"]
+        assert user.metadata["daily_desktop_tool"] == expected_tool
+        assert user.metadata["daily_desktop_tools"] == [expected_tool]
         assert user.metadata["entrypoint_plan"] is True
         assert user.metadata["entrypoint_plan_source"] == "runtime_planner"
         assert user.metadata["entrypoint_plan_reason"] == "planner_fallback_media_playback"
-        assert user.metadata["entrypoint_plan_tool"] == "media.apple_music_open_and_play"
-        assert user.metadata["entrypoint_plan_tools"] == ["media.apple_music_open_and_play"]
+        assert user.metadata["entrypoint_plan_tool"] == expected_tool
+        assert user.metadata["entrypoint_plan_tools"] == [expected_tool]
         assert user.metadata["entrypoint_plan_legacy_fallback"] is False
         assert open_and_play_calls == 1
         assert run["status"] == "completed", run.get("result")
@@ -266,9 +268,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
             event for event in events if event["event_type"] == "agent.plan.selection"
         )
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["selected_tools"] == [
-            "media.apple_music_open_and_play",
-        ]
+        assert selection_event["payload"]["selected_tools"] == [expected_tool]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -288,11 +288,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert second["ok"] is True
         assert second["status"] == "completed"
         assert second["agent_task"]["status"] == "completed"
-        assert second["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert second["agent_task"]["summary"] == expected_summary
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert second_task is not None
         assert second_task.status == TaskStatus.COMPLETED
-        assert second_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert second_user.metadata["daily_desktop_tool"] == expected_tool
         assert open_and_play_calls == 2
         assert second_run["status"] == "completed"
         assert "agent.desktop.intent_planned" in second_event_types
@@ -314,11 +314,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert third["ok"] is True
         assert third["status"] == "completed"
         assert third["agent_task"]["status"] == "completed"
-        assert third["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert third["agent_task"]["summary"] == expected_summary
+        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert third_task is not None
         assert third_task.status == TaskStatus.COMPLETED
-        assert third_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert third_user.metadata["daily_desktop_tool"] == expected_tool
         assert open_and_play_calls == 3
         assert third_run["status"] == "completed"
         assert "agent.desktop.intent_planned" in third_event_types
@@ -340,11 +340,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert fourth["ok"] is True
         assert fourth["status"] == "completed"
         assert fourth["agent_task"]["status"] == "completed"
-        assert fourth["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert fourth["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert fourth["agent_task"]["summary"] == expected_summary
+        assert fourth["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert fourth_task is not None
         assert fourth_task.status == TaskStatus.COMPLETED
-        assert fourth_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert fourth_user.metadata["daily_desktop_tool"] == expected_tool
         assert open_and_play_calls == 4
         assert fourth_run["status"] == "completed"
         assert "agent.desktop.intent_planned" in fourth_event_types
@@ -368,11 +368,11 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
             assert followup["ok"] is True
             assert followup["status"] == "completed"
             assert followup["agent_task"]["status"] == "completed"
-            assert followup["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-            assert followup["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+            assert followup["agent_task"]["summary"] == expected_summary
+            assert followup["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
             assert followup_task is not None
             assert followup_task.status == TaskStatus.COMPLETED
-            assert followup_user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+            assert followup_user.metadata["daily_desktop_tool"] == expected_tool
             assert open_and_play_calls == expected_calls
     finally:
         service.close()
@@ -617,15 +617,15 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         ),
     )
 
-    def fake_apple_music_open_and_play() -> dict:
+    def fake_music_app_open_and_play(app_name: str) -> dict:
         nonlocal open_and_play_calls
         open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
             "data": {
-                "app_name": "Music",
+                "app_name": app_name,
                 "open_ok": True,
                 "playback_ok": True,
                 "control": "play",
@@ -636,9 +636,11 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_open_and_play",
-        fake_apple_music_open_and_play,
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
     )
+    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_tool = "media.music_app_open_and_play"
     try:
         result = api.send_message(
             "能否帮我播放apple Music?",
@@ -657,16 +659,16 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert result["status"] == "completed"
         assert result["run_id"] == run["run_id"]
         assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_open_and_play"
+        assert result["agent_task"]["summary"] == expected_summary
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == expected_tool
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert assistant is not None
         assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已打开 Apple Music 并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        assert assistant.content == expected_summary
         assert user.metadata["runnable_kind"] == "main"
         assert user.metadata["daily_desktop_intent"] is True
-        assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert user.metadata["daily_desktop_tool"] == expected_tool
         assert open_and_play_calls == 1
         assert run["status"] == "completed", run.get("result")
         assert "agent.intent.selected" in event_types
@@ -676,9 +678,7 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
             event for event in events if event["event_type"] == "agent.plan.selection"
         )
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["selected_tools"] == [
-            "media.apple_music_open_and_play",
-        ]
+        assert selection_event["payload"]["selected_tools"] == [expected_tool]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -12110,15 +12110,15 @@ def test_selected_runnable_executes_daily_desktop_intent_before_model(tmp_path, 
         ),
     )
 
-    def fake_music_open_and_play() -> dict:
+    def fake_music_open_and_play(app_name: str) -> dict:
         nonlocal open_and_play_calls
         open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
             "data": {
-                "app_name": "Music",
+                "app_name": app_name,
                 "open_ok": True,
                 "playback_ok": True,
                 "control": "play",
@@ -12128,7 +12128,7 @@ def test_selected_runnable_executes_daily_desktop_intent_before_model(tmp_path, 
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.music_app_open_and_play", fake_music_open_and_play)
     try:
         result = api.send_message("能否帮我播放apple Music?", runnable_id=agent["agent_id"])
         run_id = str(result.get("agent_run_id") or result.get("run_id") or "")
@@ -12138,19 +12138,19 @@ def test_selected_runnable_executes_daily_desktop_intent_before_model(tmp_path, 
         planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
         user_message = runtime.chat_session.get_messages()[0]
-        assistant = _wait_for_assistant_content_contains(api, "已打开 Apple Music 并开始播放")
+        assistant = _wait_for_assistant_content_contains(api, "已打开 Music，并开始播放")
 
         assert result["ok"] is True
         assert result["runnable_command"] is True
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
-        assert "已打开 Apple Music 并开始播放" in run["result"]
+        assert "已打开 Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"
         assert planned_event["payload"]["source"] == "runtime_planner"
-        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert tool_event["payload"]["tool"] == "media.music_app_open_and_play"
+        assert user_message.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
         assert assistant["metadata"]["run_status"] == "completed"
     finally:
         service.close()
@@ -12291,7 +12291,7 @@ def test_agent_runnable_daily_desktop_intent_requests_policy_overlay(tmp_path, m
                 on_complete({
                     **run,
                     "status": "completed",
-                    "result": "已打开 Apple Music 并开始播放。",
+                    "result": "已打开 Music，并开始播放。",
                 })
             return run
 
@@ -12306,8 +12306,8 @@ def test_agent_runnable_daily_desktop_intent_requests_policy_overlay(tmp_path, m
         assert captured["daily_desktop_policy_overlay"] is True
         user_message = runtime.chat_session.get_messages()[0]
         assert user_message.metadata["daily_desktop_intent"] is True
-        assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
-        _wait_for_assistant_content(runtime, "已打开 Apple Music 并开始播放。")
+        assert user_message.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
+        _wait_for_assistant_content(runtime, "已打开 Music，并开始播放。")
     finally:
         store.close()
 
@@ -12373,7 +12373,7 @@ def test_bound_agent_session_daily_desktop_intent_requests_policy_overlay(tmp_pa
         assert captured[-1]["user_goal"] == "能否帮我播放apple Music?"
         assert captured[-1]["daily_desktop_policy_overlay"] is True
         user_message = runtime.chat_session.get_messages()[-2]
-        assert user_message.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert user_message.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
     finally:
         store.close()
 
@@ -12409,15 +12409,15 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         ),
     )
 
-    def fake_music_open_and_play() -> dict:
+    def fake_music_open_and_play(app_name: str) -> dict:
         nonlocal open_and_play_calls
         open_and_play_calls += 1
         return {
             "ok": True,
-            "action": "media.apple_music_open_and_play",
-            "summary": "Opened Music and started playback",
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
             "data": {
-                "app_name": "Music",
+                "app_name": app_name,
                 "open_ok": True,
                 "playback_ok": True,
                 "control": "play",
@@ -12427,7 +12427,7 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.music_app_open_and_play", fake_music_open_and_play)
     try:
         created = api.create_group_session(
             name="demo Channel",
@@ -12443,7 +12443,7 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
         messages = api.get_messages()["messages"]
         user_message = [message for message in messages if message["role"] == "user"][-1]
-        assistant = _wait_for_assistant_content_contains(api, "已打开 Apple Music 并开始播放")
+        assistant = _wait_for_assistant_content_contains(api, "已打开 Music，并开始播放")
         current = next(
             item
             for item in api.list_sessions()["sessions"]
@@ -12455,15 +12455,15 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         assert result["runnable_command"] is True
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
-        assert "已打开 Apple Music 并开始播放" in run["result"]
+        assert "已打开 Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"
         assert planned_event["payload"]["source"] == "runtime_planner"
         assert policy_event["payload"]["reason"] == "daily_desktop_policy_overlay"
         assert policy_event["payload"]["policy_overlay"] is True
-        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert user_message["metadata"]["daily_desktop_tool"] == "media.apple_music_open_and_play"
+        assert tool_event["payload"]["tool"] == "media.music_app_open_and_play"
+        assert user_message["metadata"]["daily_desktop_tool"] == "media.music_app_open_and_play"
         assert assistant["metadata"]["conversation_kind"] == "group"
         assert assistant["metadata"]["run_status"] == "completed"
         assert current["conversation_kind"] == "group"
