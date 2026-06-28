@@ -3536,6 +3536,14 @@ def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
         "screen.capture",
     ]
     assert result["recommended_tools"] == ["app.open", "desktop.active_window", "screen.capture"]
+    assert result["missing_permissions"] == ["foreground_focus"]
+    assert result["permission_targets"] == ["foreground_focus"]
+    assert result["recovery_hints"] == [
+        (
+            "Allow the current Oha-Yachiyo runtime to bring target apps to the foreground. "
+            "Check Automation and Accessibility permissions in macOS System Settings > Privacy & Security."
+        )
+    ]
     assert result["recovery_actions"] == [
         {
             "label": "重新打开Slack",

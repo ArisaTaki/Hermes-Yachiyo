@@ -20,6 +20,7 @@ DESKTOP_EXECUTION_CAPABILITY_IDS = (
     "active_window",
     "app_control",
     "media_control",
+    "foreground_activation",
     "foreground_input",
     "browser_control",
 )
@@ -554,6 +555,29 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.type_text",
         "desktop.click",
     ),
+    "foreground_activation": (
+        "app.focus",
+        "app.focus_window",
+        "app.show",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+    ),
     "browser_control": (
         "browser.open_url",
         "browser.open_url_and_extract_text",
@@ -572,6 +596,7 @@ DESKTOP_CAPABILITY_RISK_DEFAULTS: dict[str, DesktopExecutionRisk] = {
     "active_window": "low",
     "app_control": "low",
     "media_control": "low",
+    "foreground_activation": "low",
     "foreground_input": "medium",
     "browser_control": "medium",
 }
@@ -582,6 +607,7 @@ DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES: dict[str, str | None] = {
     "active_window": "/system/active-window",
     "app_control": "/ui/native-agent/diagnostics/cache",
     "media_control": "/ui/native-agent/diagnostics/cache",
+    "foreground_activation": "/ui/native-agent/diagnostics/cache",
     "foreground_input": "/ui/native-agent/diagnostics/cache",
     "browser_control": "/ui/native-agent/diagnostics/cache",
 }
@@ -614,6 +640,8 @@ GROUP_TOOL_POLICY_PRESETS: dict[str, tuple[str, ...]] = {
     "app": DESKTOP_CAPABILITY_TOOLS["app_control"],
     "media_control": DESKTOP_CAPABILITY_TOOLS["media_control"],
     "media": DESKTOP_CAPABILITY_TOOLS["media_control"],
+    "foreground_activation": DESKTOP_CAPABILITY_TOOLS["foreground_activation"],
+    "focus": DESKTOP_CAPABILITY_TOOLS["foreground_activation"],
     "foreground_input": DESKTOP_CAPABILITY_TOOLS["foreground_input"],
     "input": DESKTOP_CAPABILITY_TOOLS["foreground_input"],
     "browser_control": DESKTOP_CAPABILITY_TOOLS["browser_control"],
@@ -884,15 +912,23 @@ def _tool_missing_permissions(
 ) -> list[str]:
     values = [*_missing_permissions(missing_by_capability, "desktop_execution")]
     capability_missing = _missing_permissions(missing_by_capability, capability_id)
+    app_control_missing = _missing_permissions(missing_by_capability, "app_control")
+    foreground_activation_missing = _missing_permissions(
+        missing_by_capability,
+        "foreground_activation",
+    )
+    foreground_input_missing = _missing_permissions(missing_by_capability, "foreground_input")
     if tool == "app.open":
         values.extend(value for value in capability_missing if value == "open_command")
     elif tool == "system.settings_open":
         values.extend(value for value in capability_missing if value == "open_command")
     elif tool == "app.focus":
-        values.extend(value for value in capability_missing if value != "open_command")
+        values.extend(value for value in app_control_missing if value != "open_command")
+        values.extend(foreground_activation_missing)
     elif tool in {"app.focus_window", "app.show"}:
-        values.extend(value for value in capability_missing if value != "open_command")
-        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+        values.extend(value for value in app_control_missing if value != "open_command")
+        values.extend(foreground_activation_missing)
+        values.extend(foreground_input_missing)
     elif tool in {
         "app.open_and_safe_type_text",
         "app.open_and_safe_shortcut",
@@ -903,12 +939,9 @@ def _tool_missing_permissions(
         "app.open_and_click_ui_element",
         "app.open_and_type_into_ui_element",
     }:
-        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-        values.extend(
-            value
-            for value in _missing_permissions(missing_by_capability, "app_control")
-            if value == "open_command"
-        )
+        values.extend(foreground_input_missing)
+        values.extend(foreground_activation_missing)
+        values.extend(value for value in app_control_missing if value == "open_command")
     elif tool in {
         "app.focus_and_safe_type_text",
         "app.focus_and_safe_shortcut",
@@ -919,22 +952,18 @@ def _tool_missing_permissions(
         "app.focus_and_click_ui_element",
         "app.focus_and_type_into_ui_element",
     }:
-        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-        values.extend(
-            value
-            for value in _missing_permissions(missing_by_capability, "app_control")
-            if value != "open_command"
-        )
+        values.extend(foreground_input_missing)
+        values.extend(foreground_activation_missing)
+        values.extend(value for value in app_control_missing if value != "open_command")
     elif tool in {"app.hide", "app.minimize"}:
-        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
-    elif tool in {"media.music_app_open_and_play", "media.music_app_control", "media.system_control"}:
-        values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
+        values.extend(foreground_input_missing)
+    elif tool in {"media.music_app_open_and_play", "media.music_app_control"}:
+        values.extend(foreground_input_missing)
+        values.extend(foreground_activation_missing)
         if tool == "media.music_app_open_and_play":
-            values.extend(
-                value
-                for value in _missing_permissions(missing_by_capability, "app_control")
-                if value == "open_command"
-            )
+            values.extend(value for value in app_control_missing if value == "open_command")
+    elif tool == "media.system_control":
+        values.extend(foreground_input_missing)
     else:
         values.extend(capability_missing)
     if tool in {"browser.screenshot", "browser.open_url_and_screenshot"}:

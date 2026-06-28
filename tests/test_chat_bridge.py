@@ -1681,7 +1681,7 @@ def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
             "data": {"app_name": app_name},
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,
@@ -1795,7 +1795,7 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             "data": {"direction": direction, "pages": pages},
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,
@@ -1936,7 +1936,7 @@ def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_fo
 ):
     calls: list[tuple[str, object, object]] = []
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,
@@ -2037,7 +2037,7 @@ def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_
             "data": {"app_name": app_name, "launch_verified": True},
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,
@@ -2109,7 +2109,7 @@ def test_chat_bridge_quick_message_opens_system_settings_then_reads_options_with
             },
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         calls.append(("ui", role_filter, limit))
         return {
             "ok": True,
@@ -8682,7 +8682,7 @@ def test_chat_bridge_quick_message_executes_observation_recovery_actions_without
             },
         }
 
-    def fake_ui_elements(role_filter: str = "", limit: int = 80) -> dict:
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
         ui_calls.append((role_filter, limit))
         return {
             "ok": True,

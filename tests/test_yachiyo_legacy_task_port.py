@@ -119,6 +119,7 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
         "agent.intent.selected",
         "agent.plan.created",
         "agent.plan.step",
+        "agent.plan.step",
     ]
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "media_playback"
     plan = planner_events[1][1]["payload"]["plan"]
@@ -127,7 +128,10 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
         for capability in plan["capabilities"]
     }
     assert "media.playback" in capabilities
-    assert plan["tool_plan"]["steps"][0]["tool_name"] == "media.apple_music_open_and_play"
+    assert [step["tool_name"] for step in plan["tool_plan"]["steps"]] == [
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
 
 
 def test_planner_first_direct_selection_owns_media_playback_without_legacy() -> None:
@@ -536,25 +540,27 @@ def test_planner_first_direct_selection_owns_app_search_dynamic_context_without_
     cases = (
         (
             "在微信里查找选中的内容",
-                [
-                    "desktop.safe_shortcut",
-                    "app.focus",
-                    "desktop.safe_shortcut",
-                    "desktop.safe_shortcut",
-                    "desktop.search_submit",
-                    "desktop.ui_elements",
-                ],
-            ),
-            (
-                "在 Slack 里查找剪贴板内容",
-                [
-                    "app.focus",
-                    "desktop.safe_shortcut",
-                    "desktop.safe_shortcut",
-                    "desktop.search_submit",
-                    "desktop.ui_elements",
-                ],
-            ),
+            [
+                "desktop.list_apps",
+                "desktop.safe_shortcut",
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+                "desktop.ui_elements",
+            ],
+        ),
+        (
+            "在 Slack 里查找剪贴板内容",
+            [
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_shortcut",
+                "desktop.search_submit",
+                "desktop.ui_elements",
+            ],
+        ),
     )
 
     for prompt, expected_tools in cases:
@@ -624,10 +630,14 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         "desktop.submit_foreground",
     ]
     cases = (
-        ("微信关闭窗口", ["app.focus", "desktop.close_window", "desktop.active_window"]),
+        (
+            "微信关闭窗口",
+            ["desktop.list_apps", "app.focus", "desktop.close_window", "desktop.active_window"],
+        ),
         (
             "在 VS Code 里执行命令 Format Document",
             [
+                "desktop.list_apps",
                 "app.focus",
                 "desktop.safe_shortcut",
                 "desktop.safe_type_text",
@@ -638,6 +648,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         (
             "Finder look for Downloads",
             [
+                "desktop.list_apps",
                 "app.focus",
                 "desktop.safe_shortcut",
                 "desktop.safe_type_text",
@@ -645,8 +656,14 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
                 "desktop.ui_elements",
             ],
         ),
-        ("微信打开搜索", ["app.focus", "desktop.safe_shortcut", "desktop.ui_elements"]),
-        ("Chrome 点登录", ["app.focus_and_click_ui_element", "desktop.ui_elements"]),
+        (
+            "微信打开搜索",
+            ["desktop.list_apps", "app.focus", "desktop.safe_shortcut", "desktop.ui_elements"],
+        ),
+        (
+            "Chrome 点登录",
+            ["desktop.list_apps", "app.focus_and_click_ui_element", "desktop.ui_elements"],
+        ),
     )
 
     for prompt, expected_tools in cases:
@@ -991,6 +1008,13 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
     assert windows_selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "desktop.windows",
             "input": {"app_name": "Slack"},
             "source": "runtime_planner",
@@ -1024,6 +1048,13 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert open_selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "PixelForge"},
             "source": "runtime_planner",
@@ -1035,6 +1066,13 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert chinese_app_selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "WeChat", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
@@ -1044,6 +1082,13 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert focus_selection.selected_source == "runtime_planner"
     assert focus_selection.event_payload["legacy_request_count"] == 0
     assert focus_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -1088,7 +1133,9 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
 
         assert selection.selected_source == "runtime_planner"
         assert selection.event_payload["legacy_request_count"] == 0
-        assert selection.requests == [
+        assert selection.requests[0]["tool"] == "desktop.list_apps"
+        assert selection.requests[0]["input"]["limit"] == 20
+        assert selection.requests[1:] == [
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
@@ -1489,6 +1536,13 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
     assert open_shortcut_selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "WeChat", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
@@ -1569,6 +1623,13 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
     assert finder_selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Finder", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Finder", "action": "new_folder"},
             "source": "runtime_planner",
@@ -1616,6 +1677,7 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["selected_tools"] == [
+        "desktop.list_apps",
         "app.open",
         "desktop.active_window",
     ]
@@ -1763,15 +1825,7 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
-    assert selection_events[0][1]["payload"]["selected_tools"] == [
-        "desktop.safe_shortcut",
-        "app.focus",
-        "desktop.safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "desktop.safe_shortcut",
-        "desktop.submit_foreground",
-    ]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["desktop.submit_foreground"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]

@@ -561,6 +561,29 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "media.apple_music_control",
         "media.music_app_control",
     ),
+    "foreground_activation": (
+        "app.focus",
+        "app.focus_window",
+        "app.show",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+    ),
     "foreground_input": (
         "media.music_app_open_and_play",
         "media.music_app_control",
@@ -654,6 +677,22 @@ _PERMISSION_RECOVERY_ACTIONS = {
         },
     ),
     "accessibility": (
+        {
+            "label": "打开辅助功能权限",
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        },
+    ),
+    "foreground_focus": (
+        {
+            "label": "打开自动化权限",
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
         {
             "label": "打开辅助功能权限",
             "tool": "system.settings_open",
@@ -2448,6 +2487,9 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
         },
         "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
+        "missing_permissions": ["foreground_focus"],
+        "permission_targets": ["foreground_focus"],
+        "recovery_hints": _permission_recovery_hints_for_targets(["foreground_focus"]),
         "recovery_actions": _app_focus_recovery_actions(resolved_name),
         "permission_error": False,
         "fallback_used": resolved_name != clean_name,
@@ -5836,6 +5878,10 @@ def _permission_recovery_hints_for_targets(targets: list[str]) -> list[str]:
         "automation_or_accessibility": (
             "Grant Automation and Accessibility permissions to Oha-Yachiyo or the current "
             "runtime in macOS System Settings > Privacy & Security."
+        ),
+        "foreground_focus": (
+            "Allow the current Oha-Yachiyo runtime to bring target apps to the foreground. "
+            "Check Automation and Accessibility permissions in macOS System Settings > Privacy & Security."
         ),
         "music_app": (
             "Open Music.app once, confirm the track exists in the local library, "

@@ -31,6 +31,8 @@ def test_desktop_permission_probe_aggregates_macos_permission_gaps(monkeypatch) 
     monkeypatch.setattr(desktop_permissions_mod, "_configured_browser_cdp_url", lambda: "")
 
     def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return False, "not authorized to set frontmost app"
         if "first application process" in script:
             return False, "not authorized to send Apple events to System Events"
         if 'id of application "Finder"' in script:
@@ -53,6 +55,7 @@ def test_desktop_permission_probe_aggregates_macos_permission_gaps(monkeypatch) 
     assert missing == {
         "screen_capture": ["screen_recording"],
         "active_window": ["automation_or_accessibility"],
+        "foreground_activation": ["automation_or_accessibility"],
         "media_control": ["music_app"],
         "foreground_input": ["accessibility"],
         "browser_control": ["chrome_cdp"],
@@ -70,6 +73,8 @@ def test_desktop_permission_probe_marks_music_automation_gap(monkeypatch) -> Non
     monkeypatch.setattr(desktop_permissions_mod, "_browser_cdp_reachable", lambda _url: True)
 
     def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|true|Finder|Codex|com.openai.codex"
         if "first application process" in script:
             return True, "Finder"
         if 'id of application "Finder"' in script:
@@ -92,6 +97,41 @@ def test_desktop_permission_probe_marks_music_automation_gap(monkeypatch) -> Non
     ) == {"media_control": ["automation"]}
 
 
+def test_desktop_permission_probe_marks_foreground_activation_gap(monkeypatch) -> None:
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
+    monkeypatch.setattr(desktop_permissions_mod, "_command_exists", lambda _command: True)
+    monkeypatch.setattr(desktop_permissions_mod, "_configured_browser_cdp_url", lambda: "http://127.0.0.1:9222")
+    monkeypatch.setattr(desktop_permissions_mod, "_browser_cdp_reachable", lambda _url: True)
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|false|Codex|Codex|com.openai.codex"
+        if "first application process" in script:
+            return True, "Codex"
+        if 'id of application "Finder"' in script:
+            return True, "com.apple.finder"
+        if 'tell application "Finder"' in script:
+            return True, "Finder"
+        if 'id of application "Music"' in script:
+            return True, "com.apple.Music"
+        if 'tell application "Music"' in script:
+            return True, "Music"
+        if "UI elements enabled" in script:
+            return True, "true"
+        raise AssertionError(script)
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
+
+    assert desktop_permissions_mod.desktop_permission_missing_by_capability(
+        platform_name="Darwin",
+        use_cache=False,
+    ) == {"foreground_activation": ["foreground_focus"]}
+
+
 def test_desktop_permission_probe_keeps_browser_available_when_cdp_is_reachable(monkeypatch) -> None:
     monkeypatch.setattr(
         desktop_permissions_mod,
@@ -99,7 +139,12 @@ def test_desktop_permission_probe_keeps_browser_available_when_cdp_is_reachable(
         lambda: {"ok": True, "allowed": True},
     )
     monkeypatch.setattr(desktop_permissions_mod, "_command_exists", lambda _command: True)
-    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", lambda *_args, **_kwargs: (True, "true"))
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|true|Finder|Codex|com.openai.codex"
+        return True, "true"
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
     monkeypatch.setattr(desktop_permissions_mod, "_configured_browser_cdp_url", lambda: "http://127.0.0.1:9222")
     monkeypatch.setattr(desktop_permissions_mod, "_browser_cdp_reachable", lambda _url: True)
 
@@ -118,7 +163,13 @@ def test_desktop_permission_probe_uses_cached_copies(monkeypatch) -> None:
 
     monkeypatch.setattr(desktop_permissions_mod, "_check_screen_capture_permission", fake_screen_capture)
     monkeypatch.setattr(desktop_permissions_mod, "_command_exists", lambda _command: True)
-    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", lambda *_args, **_kwargs: (True, "true"))
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|true|Finder|Codex|com.openai.codex"
+        return True, "true"
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
     monkeypatch.setattr(desktop_permissions_mod, "_configured_browser_cdp_url", lambda: "")
 
     first = desktop_permissions_mod.desktop_permission_missing_by_capability(platform_name="Darwin")

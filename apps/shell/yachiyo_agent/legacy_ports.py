@@ -1097,7 +1097,7 @@ def _safe_runtime_planner_tool_requests(
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
-        return planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
+        return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
     if selected_requests:
@@ -1376,12 +1376,19 @@ def _approval_first_selection_payload(
 ) -> dict[str, Any]:
     if not selected_requests:
         return payload
-    first_tool = str(selected_requests[0].get("tool") or "").strip()
-    if first_tool not in _APPROVAL_PLAN_TOOLS:
+    approval_tool = next(
+        (
+            str(request.get("tool") or "").strip()
+            for request in selected_requests
+            if str(request.get("tool") or "").strip() in _APPROVAL_PLAN_TOOLS
+        ),
+        "",
+    )
+    if not approval_tool:
         return payload
     return {
         **payload,
-        "selected_tools": [first_tool],
+        "selected_tools": [approval_tool],
         "selected_request_count": 1,
     }
 

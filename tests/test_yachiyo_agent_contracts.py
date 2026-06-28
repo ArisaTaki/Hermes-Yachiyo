@@ -958,6 +958,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "active_window",
         "app_control",
         "media_control",
+        "foreground_activation",
         "foreground_input",
         "browser_control",
     ]
@@ -1045,6 +1046,28 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
     assert capabilities["media_control"]["degraded_tools"] == [
         "media.music_app_open_and_play",
     ]
+
+
+def test_desktop_execution_capability_policy_models_foreground_activation_gap() -> None:
+    capabilities = desktop_execution_capability_snapshots(
+        platform_name="Darwin",
+        registered_tools={
+            "app.open",
+            "app.focus",
+            "app.focus_window",
+            "app.open_and_safe_type_text",
+            "app.focus_and_safe_type_text",
+        },
+        missing_permissions={
+            "foreground_activation": ["foreground_focus"],
+        },
+    )
+
+    assert capabilities["foreground_activation"]["available"] is False
+    assert capabilities["foreground_activation"]["missing_permissions"] == ["foreground_focus"]
+    assert "app.open" in capabilities["app_control"]["available_tools"]
+    assert "app.focus" in capabilities["app_control"]["unavailable_tools"]
+    assert "app.open_and_safe_type_text" in capabilities["foreground_input"]["unavailable_tools"]
 
 
 def test_desktop_execution_capability_policy_reports_tool_level_degradation() -> None:

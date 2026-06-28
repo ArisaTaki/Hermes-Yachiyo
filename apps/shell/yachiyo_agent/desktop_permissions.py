@@ -41,6 +41,7 @@ def desktop_permission_missing_by_capability(
     _probe_screen_capture(missing)
     _probe_active_window(missing)
     _probe_app_control(missing)
+    _probe_foreground_activation(missing)
     _probe_media_control(missing)
     _probe_foreground_input(missing)
     _probe_browser_control(missing)
@@ -126,6 +127,16 @@ def _probe_media_control(missing: dict[str, list[str]]) -> None:
         _add_missing(missing, "media_control", "automation")
 
 
+def _probe_foreground_activation(missing: dict[str, list[str]]) -> None:
+    result = _check_foreground_activation()
+    if result.get("verified"):
+        return
+    if result.get("permission_denied"):
+        _add_missing(missing, "foreground_activation", "automation_or_accessibility")
+        return
+    _add_missing(missing, "foreground_activation", "foreground_focus")
+
+
 def _probe_foreground_input(missing: dict[str, list[str]]) -> None:
     ok, output = _run_osascript(
         'tell application "System Events" to return UI elements enabled',
@@ -145,6 +156,71 @@ def _check_screen_capture_permission() -> Mapping[str, Any]:
     from apps.locald.screenshot import check_screen_capture_permission
 
     return check_screen_capture_permission(open_settings=False)
+
+
+def _check_foreground_activation() -> dict[str, Any]:
+    ok, output = _run_osascript(
+        """
+        set targetName to "Finder"
+        set originalName to ""
+        set originalBundleId to ""
+        tell application "System Events"
+            try
+                set originalProc to first application process whose frontmost is true
+                set originalName to name of originalProc
+                try
+                    set originalBundleId to bundle identifier of originalProc
+                end try
+            end try
+        end tell
+        tell application targetName to activate
+        delay 0.2
+        set targetFrontmost to false
+        set frontName to ""
+        tell application "System Events"
+            try
+                set targetProc to first application process whose name is targetName
+                try
+                    set frontmost of targetProc to true
+                end try
+                delay 0.1
+                try
+                    set targetFrontmost to frontmost of targetProc
+                end try
+            end try
+            try
+                set frontName to name of first application process whose frontmost is true
+            end try
+        end tell
+        if originalName is not "" and originalName is not targetName then
+            try
+                tell application originalName to activate
+            end try
+        end if
+        return "foreground_activation|" & targetName & "|" & (targetFrontmost as text) & "|" & frontName & "|" & originalName & "|" & originalBundleId
+        """,
+        timeout=4.0,
+    )
+    if not ok:
+        return {
+            "verified": False,
+            "permission_denied": _looks_like_permission_error(output),
+            "output": output,
+        }
+    parts = str(output or "").strip().split("|")
+    if len(parts) < 4 or parts[0] != "foreground_activation":
+        return {"verified": False, "output": output}
+    target_name = parts[1].strip()
+    target_frontmost = parts[2].strip().lower() in {"true", "yes", "1"}
+    front_name = parts[3].strip()
+    return {
+        "verified": target_frontmost or front_name == target_name,
+        "target_app": target_name,
+        "frontmost_app": front_name,
+        "original_app": parts[4].strip() if len(parts) > 4 else "",
+        "original_bundle_id": parts[5].strip() if len(parts) > 5 else "",
+        "output": output,
+    }
 
 
 def _run_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
@@ -209,6 +285,22 @@ def _env_value(name: str) -> str:
 
 def _command_exists(command: str) -> bool:
     return shutil.which(command) is not None
+
+
+def _looks_like_permission_error(value: Any) -> bool:
+    normalized = str(value or "").lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "not authorized",
+            "not allowed",
+            "not permitted",
+            "accessibility",
+            "automation",
+            "privacy",
+            "tcc",
+        )
+    )
 
 
 def _desktop_platform(platform_name: str | None = None) -> str:

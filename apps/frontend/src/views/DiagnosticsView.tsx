@@ -1016,7 +1016,7 @@ function diagnosticPermissionTargets(value: string): Set<DiagnosticPermissionAct
 
 function diagnosticPermissionTargetAction(token: string): DiagnosticPermissionAction | null {
   if (token === 'screen_recording' || token === 'screen_capture_probe_failed') return 'screen_recording';
-  if (token === 'accessibility' || token === 'foreground_input') return 'accessibility';
+  if (token === 'accessibility' || token === 'foreground_input' || token === 'foreground_focus') return 'accessibility';
   if (
     token === 'automation'
     || token === 'automation_or_accessibility'
