@@ -1529,9 +1529,12 @@ class RuntimePlanner:
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
                     input_preview={
-                        "paths": data_analysis_artifacts_expected(
-                            intent.expected_outputs,
+                        "paths": _artifact_output_paths(
                             intent.user_goal,
+                            data_analysis_artifacts_expected(
+                                intent.expected_outputs,
+                                intent.user_goal,
+                            ),
                         ),
                         "body_source": context_source,
                     },
@@ -1540,9 +1543,12 @@ class RuntimePlanner:
                 ),
             ]
         if _can_use_builtin_data_analysis(intent, allowed):
-            artifact_paths = data_analysis_artifacts_expected(
-                intent.expected_outputs,
+            artifact_paths = _artifact_output_paths(
                 intent.user_goal,
+                data_analysis_artifacts_expected(
+                    intent.expected_outputs,
+                    intent.user_goal,
+                ),
             )
             artifact_path = artifact_paths[0] if artifact_paths else "analysis-report.md"
             source_kind = str(
@@ -1620,9 +1626,12 @@ class RuntimePlanner:
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
                 input_preview={
-                    "paths": data_analysis_artifacts_expected(
-                        intent.expected_outputs,
+                    "paths": _artifact_output_paths(
                         intent.user_goal,
+                        data_analysis_artifacts_expected(
+                            intent.expected_outputs,
+                            intent.user_goal,
+                        ),
                     )
                 },
                 depends_on=["run-analysis"],
@@ -3391,7 +3400,12 @@ class RuntimePlanner:
                         "Write research artifact",
                         "artifact.write",
                         _first_allowed(("artifact.write",), allowed),
-                        input_preview={"path": "research-summary.md"},
+                        input_preview={
+                            "path": _artifact_output_path(
+                                intent.user_goal,
+                                "research-summary.md",
+                            )
+                        },
                         depends_on=[main_step.step_id],
                         reason="Persist the requested browser-derived report as a replayable artifact.",
                     )
@@ -3458,7 +3472,9 @@ class RuntimePlanner:
                 "Write research artifact",
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
-                input_preview={"path": "research-summary.md"},
+                input_preview={
+                    "path": _artifact_output_path(intent.user_goal, "research-summary.md")
+                },
                 depends_on=["open-or-read-web"],
                 reason="Persist research output for replay.",
             ),
@@ -3522,7 +3538,7 @@ class RuntimePlanner:
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
                     input_preview={
-                        "path": "report.md",
+                        "path": _artifact_output_path(intent.user_goal, "report.md"),
                         "body_source": "local_file_context",
                     },
                     depends_on=["extract-report-file-context"],
@@ -3546,7 +3562,10 @@ class RuntimePlanner:
                     "Write report artifact",
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
-                    input_preview={"path": "report.md", "body_source": context_source},
+                    input_preview={
+                        "path": _artifact_output_path(intent.user_goal, "report.md"),
+                        "body_source": context_source,
+                    },
                     depends_on=depends_on,
                     reason="Produce the requested durable output from the inspected source.",
                 ),
@@ -3566,7 +3585,7 @@ class RuntimePlanner:
                 "Write report artifact",
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
-                input_preview={"path": "report.md"},
+                input_preview={"path": _artifact_output_path(intent.user_goal, "report.md")},
                 depends_on=["gather-context"],
                 reason="Produce the requested durable output.",
             ),
@@ -5270,16 +5289,19 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
                 ]
             artifact_path = str(step.input_preview.get("artifact_path") or "").strip()
             return [artifact_path or "analysis-report.md"]
+    artifact_write_paths = _artifact_write_paths_from_steps(steps)
     if intent.kind == "web_research":
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
         if browser_action in {"screenshot", "open_url_screenshot"}:
             return ["browser/current-page.png"]
-        if browser_action and any(step.tool_name == "artifact.write" for step in steps):
-            return ["research-summary.md"]
+        if browser_action and artifact_write_paths:
+            return artifact_write_paths
         if browser_action:
             return []
     if not any(step.tool_name == "artifact.write" for step in steps):
         return []
+    if artifact_write_paths:
+        return artifact_write_paths
     if intent.kind == "data_analysis":
         return data_analysis_artifacts_expected(intent.expected_outputs, intent.user_goal)
     if intent.kind == "web_research":
@@ -5296,6 +5318,23 @@ def _artifacts_expected(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnap
     if intent.kind == "information_capture":
         return ["captured-note.md"]
     return ["report.md"]
+
+
+def _artifact_write_paths_from_steps(steps: Iterable[ToolPlanStepSnapshot]) -> list[str]:
+    for step in steps:
+        if step.tool_name != "artifact.write":
+            continue
+        paths = step.input_preview.get("paths")
+        if isinstance(paths, list):
+            return [
+                str(path or "").strip()
+                for path in paths
+                if str(path or "").strip()
+            ]
+        path = str(step.input_preview.get("path") or "").strip()
+        if path:
+            return [path]
+    return []
 
 
 def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> bool:
@@ -5371,6 +5410,88 @@ def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapsh
 
 def _clean_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", str(prompt or "").strip())
+
+
+_ARTIFACT_OUTPUT_LOCATION_ALIASES = {
+    "download": "Downloads",
+    "downloads": "Downloads",
+    "download folder": "Downloads",
+    "downloads folder": "Downloads",
+    "下载": "Downloads",
+    "下载文件夹": "Downloads",
+    "下载目录": "Downloads",
+    "desktop": "Desktop",
+    "桌面": "Desktop",
+    "documents": "Documents",
+    "documents folder": "Documents",
+    "文档": "Documents",
+    "文档文件夹": "Documents",
+    "文档目录": "Documents",
+    "文稿": "Documents",
+}
+
+_ARTIFACT_OUTPUT_LOCATION_PATTERNS = (
+    re.compile(
+        r"(?:保存|存到|另存|另存为|输出|导出|写入|放到|放进|生成|save|export|output|write|put)\s*"
+        r"(?:到|至|在|进|为|成|to|in|into|as)?\s*"
+        r"(?P<target>~/[^\s，。；,;]+|/[^\s，。；,;]+|[A-Za-z]:[\\/][^\s，。；,;]+|"
+        r"Downloads?\b|downloads?\b|Desktop\b|desktop\b|Documents?\b|documents?\b|"
+        r"下载文件夹|下载目录|下载|桌面|文档文件夹|文档目录|文档|文稿)"
+    ),
+    re.compile(
+        r"(?:到|至|在|进|to|in|into)\s*"
+        r"(?P<target>~/[^\s，。；,;]+|/[^\s，。；,;]+|[A-Za-z]:[\\/][^\s，。；,;]+|"
+        r"Downloads?\b|downloads?\b|Desktop\b|desktop\b|Documents?\b|documents?\b|"
+        r"下载文件夹|下载目录|下载|桌面|文档文件夹|文档目录|文档|文稿)"
+        r"\s*(?:$|[，。；,;])"
+    ),
+)
+
+
+def _artifact_output_path(text: str, filename: str) -> str:
+    path = str(filename or "").strip()
+    if not path:
+        return path
+    location = _artifact_output_location_hint(text)
+    if not location or _artifact_path_has_directory(path):
+        return path
+    return f"{location.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _artifact_output_paths(text: str, filenames: Iterable[str]) -> list[str]:
+    return [_artifact_output_path(text, filename) for filename in filenames]
+
+
+def _artifact_output_location_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    for pattern in _ARTIFACT_OUTPUT_LOCATION_PATTERNS:
+        for match in pattern.finditer(value):
+            target = str(match.group("target") or "").strip()
+            normalized = _normalize_artifact_output_location(target)
+            if normalized:
+                return normalized
+    return ""
+
+
+def _normalize_artifact_output_location(target: str) -> str:
+    value = str(target or "").strip().rstrip("/\\")
+    if not value:
+        return ""
+    if value.startswith(("~/", "/")) or re.match(r"^[A-Za-z]:[\\/]", value):
+        return value
+    normalized = re.sub(r"\s+", " ", value).strip().lower()
+    return _ARTIFACT_OUTPUT_LOCATION_ALIASES.get(normalized, "")
+
+
+def _artifact_path_has_directory(path: str) -> bool:
+    value = str(path or "").strip()
+    if value.startswith(("/", "~/", "./", "../")):
+        return True
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return True
+    return "/" in value or "\\" in value
 
 
 def _stable_id(prefix: str, kind: Any, text: str) -> str:

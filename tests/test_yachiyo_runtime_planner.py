@@ -2257,6 +2257,80 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert read_only.selected_intent.kind == "clipboard_operation"
 
 
+def test_runtime_planner_applies_artifact_output_locations() -> None:
+    current_window_report = RuntimePlanner().decision(
+        "把当前窗口内容总结成 markdown 文件并保存到 Downloads",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_page_markdown = RuntimePlanner().decision(
+        "把当前网页总结成 markdown 文件并保存到桌面",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+    clipboard_table = RuntimePlanner().decision(
+        "把剪贴板里的表格做成 csv 和趋势图并保存到 Downloads",
+        allowed_tools=["clipboard.read", "terminal.run", "artifact.write"],
+    )
+    current_page_table = RuntimePlanner().decision(
+        "把当前页面表格导出成 csv 保存到 Downloads",
+        allowed_tools=[
+            "browser.extract_text",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    builtin_file_report = RuntimePlanner().decision(
+        "请分析 sales.csv 并把报告保存到 Downloads",
+        allowed_tools=["data.analyze", "workspace.read", "artifact.write", "terminal.run"],
+    )
+
+    assert current_window_report.selected_intent.kind == "report_generation"
+    assert _step_by_id(current_window_report, "write-report-artifact").input_preview == {
+        "path": "Downloads/report.md",
+        "body_source": "visible_text",
+    }
+    assert current_window_report.plan.tool_plan.artifacts_expected == [
+        "Downloads/report.md"
+    ]
+    assert current_page_markdown.selected_intent.kind == "web_research"
+    assert _step_by_id(current_page_markdown, "write-research-artifact").input_preview == {
+        "path": "Desktop/research-summary.md"
+    }
+    assert current_page_markdown.plan.tool_plan.artifacts_expected == [
+        "Desktop/research-summary.md"
+    ]
+    assert clipboard_table.selected_intent.kind == "data_analysis"
+    assert _step_by_id(clipboard_table, "write-analysis-artifact").input_preview == {
+        "paths": [
+            "Downloads/analysis-report.md",
+            "Downloads/analysis-chart.png",
+            "Downloads/analysis-summary.csv",
+        ],
+        "body_source": "clipboard",
+    }
+    assert clipboard_table.plan.tool_plan.artifacts_expected == [
+        "Downloads/analysis-report.md",
+        "Downloads/analysis-chart.png",
+        "Downloads/analysis-summary.csv",
+    ]
+    assert current_page_table.selected_intent.kind == "data_analysis"
+    assert _step_by_id(current_page_table, "write-analysis-artifact").input_preview == {
+        "paths": ["Downloads/analysis-report.md", "Downloads/analysis-summary.csv"],
+        "body_source": "current_page_content",
+    }
+    assert current_page_table.plan.tool_plan.artifacts_expected == [
+        "Downloads/analysis-report.md",
+        "Downloads/analysis-summary.csv",
+    ]
+    assert builtin_file_report.selected_intent.kind == "data_analysis"
+    builtin_step = _step_by_id(builtin_file_report, "analyze-data-file")
+    assert builtin_step.tool_name == "data.analyze"
+    assert builtin_step.input_preview["artifact_path"] == "Downloads/analysis-report.md"
+    assert builtin_file_report.plan.tool_plan.artifacts_expected == [
+        "Downloads/analysis-report.md"
+    ]
+
+
 def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "查找 Downloads 里的 PDF 并生成摘要报告",
