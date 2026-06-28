@@ -428,6 +428,40 @@ def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(mo
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "能帮我播放 Apple Music 吗",
+        allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+    assert daily_desktop_user_metadata(requests) == {
+        "daily_desktop_intent": True,
+        "daily_desktop_source": "runtime_planner",
+        "daily_desktop_planning_reason": "planner_fallback_media_playback",
+        "daily_desktop_tool": "media.music_app_open_and_play",
+        "daily_desktop_tools": [
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    }
+
+
 def test_entrypoint_plan_user_metadata_preserves_legacy_keys_with_plan_aliases() -> None:
     requests = [
         {

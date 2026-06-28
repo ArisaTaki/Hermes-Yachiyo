@@ -3231,7 +3231,7 @@ class RuntimePlanner:
             return steps
 
         tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
-        return [
+        steps = [
             _step(
                 intent,
                 "control-media-playback",
@@ -3242,6 +3242,10 @@ class RuntimePlanner:
                 reason="Use dedicated media tools for playback instead of explaining manual steps.",
             )
         ]
+        verify_step = _media_playback_verify_step(intent, allowed)
+        if verify_step is not None:
+            steps.append(verify_step)
+        return steps
 
     def _system_control_steps(
         self,
@@ -5371,6 +5375,40 @@ def _desktop_verify_input_preview(
         if key in operation_preview and operation_preview[key] not in (None, "")
     }
     return preview
+
+
+def _media_playback_verify_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> ToolPlanStepSnapshot | None:
+    action = str(intent.inputs.get("action") or "").strip() or "play"
+    if action == "status":
+        return None
+    tool_name = _first_allowed(
+        ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+        allowed,
+    )
+    if not tool_name:
+        return None
+    return _step(
+        intent,
+        "verify-media-playback",
+        "Verify media playback",
+        "desktop.app_discovery",
+        tool_name,
+        input_preview=_media_playback_verify_input_preview(tool_name),
+        depends_on=["control-media-playback"],
+        action=_desktop_discovery_action(tool_name),
+        reason="Observe the media app after changing playback state.",
+    )
+
+
+def _media_playback_verify_input_preview(tool_name: str | None) -> dict[str, Any]:
+    if tool_name == "desktop.ui_elements":
+        return {"role_filter": "", "limit": 80}
+    if tool_name == "screen.capture":
+        return {"reason": "verify media playback"}
+    return {}
 
 
 def _service_action(capability_id: str) -> str:

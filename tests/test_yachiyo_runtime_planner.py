@@ -6886,6 +6886,34 @@ def test_runtime_planner_prefers_generic_music_app_playback_when_available() -> 
     assert step.input_preview == {"app_name": "Music"}
 
 
+def test_runtime_planner_verifies_simple_media_playback_when_available() -> None:
+    decision = RuntimePlanner().decision(
+        "能帮我播放 Apple Music 吗",
+        allowed_tools=[
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "control-media-playback",
+        "verify-media-playback",
+    ]
+    assert _step_by_id(decision, "control-media-playback").tool_name == (
+        "media.music_app_open_and_play"
+    )
+    verify = _step_by_id(decision, "verify-media-playback")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.input_preview == {"role_filter": "", "limit": 80}
+    assert verify.depends_on == ["control-media-playback"]
+    assert verify.action == "read_ui"
+    assert decision.plan.tool_plan.required_capabilities == [
+        "media.playback",
+        "desktop.app_discovery",
+    ]
+
+
 def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None:
     for prompt, query in (
         ("播放超时空辉夜姬", "超时空辉夜姬"),
@@ -10434,6 +10462,30 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
             "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_available() -> None:
+    requests = planner_desktop_tool_requests(
+        "播放 Spotify",
+        allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

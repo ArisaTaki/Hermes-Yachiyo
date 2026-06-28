@@ -981,13 +981,36 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
         return []
-    return [
+    requests = [
         _request(
             tool_name,
             payload,
             planning_reason="planner_fallback_media_playback",
         )
     ]
+    verify_request = _media_playback_verify_request(inputs, allowed)
+    if verify_request:
+        requests.append(verify_request)
+    return requests
+
+
+def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str]) -> dict[str, Any]:
+    action = str(inputs.get("action") or "").strip() or "play"
+    if action == "status":
+        return {}
+    tool_name = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
+    if not tool_name:
+        return {}
+    payload: dict[str, Any] = {}
+    if tool_name == "desktop.ui_elements":
+        payload = {"role_filter": "", "limit": 80}
+    elif tool_name == "screen.capture":
+        payload = {"reason": "verify media playback"}
+    return _request(
+        tool_name,
+        payload,
+        planning_reason="planner_fallback_media_playback",
+    )
 
 
 def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
