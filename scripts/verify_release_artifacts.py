@@ -1345,6 +1345,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must run the browser planner artifact smoke helper",
     ),
     (
+        '"desktop_planner_discovery_smoke"',
+        "release candidate verifier must archive desktop discovery planner evidence",
+    ),
+    (
+        "verify_desktop_planner_discovery_smoke",
+        "release candidate verifier must expose desktop discovery planner smoke verification",
+    ),
+    (
+        "run_desktop_planner_discovery_smoke",
+        "release candidate verifier must run the desktop discovery planner smoke helper",
+    ),
+    (
         '"bridge_statuses"',
         "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
     ),

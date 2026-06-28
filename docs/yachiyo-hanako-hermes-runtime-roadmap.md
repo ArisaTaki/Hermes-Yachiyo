@@ -75,6 +75,11 @@ Current Browser/Web planner artifact evidence is reproducible with
 selects browser tools and expected artifacts, while real browser/CDP execution
 remains covered by later UI or opt-in integration smoke evidence.
 
+Current desktop discovery/operate planner evidence is reproducible with
+`python scripts/smoke_desktop_planner_discovery.py`; this proves arbitrary app
+names and app-scoped click/type requests plan through `desktop.list_apps`,
+app foreground tools, verification steps, and Studio-routable events.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,

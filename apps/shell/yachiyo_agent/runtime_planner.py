@@ -301,7 +301,13 @@ class TaskIntentRouter:
         if (
             browser_interaction_hint
             and (
-                not app_scoped_desktop_mapping
+                (
+                    not app_scoped_desktop_mapping
+                    and (
+                        not browser_scoped_app
+                        or _is_browser_or_search_app_name(browser_scoped_app)
+                    )
+                )
                 or _is_browser_or_search_app_name(browser_scoped_app)
             )
             and not dynamic_context_transfer
@@ -6100,6 +6106,7 @@ _BROWSER_TEXT_INPUT_SELECTOR = (
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
     external_info_lookup = _looks_like_external_info_lookup(text)
+    app_scoped_ui_operation = _app_scoped_ui_operation_hint(text)
     if intent.kind == "desktop_operation" and _looks_like_file_organization_request(text):
         score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_recipient_message_request(text):
@@ -6117,6 +6124,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.16
     if intent.kind == "desktop_operation" and _looks_like_ui_operation(text):
         score += 0.08
+    if (
+        intent.kind == "desktop_operation"
+        and app_scoped_ui_operation
+        and intent.inputs.get("app_name_hint")
+    ):
+        score += 0.28
     if intent.kind == "desktop_operation" and external_info_lookup:
         score -= 0.42
     if intent.kind == "desktop_operation" and intent.inputs.get("foreground_submit_action_hint"):
@@ -6265,6 +6278,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() == "click"
     ):
         score += 0.34
+        if app_scoped_ui_operation:
+            score -= 0.38
     if (
         intent.kind == "web_research"
         and str(intent.inputs.get("browser_action") or "").strip()
@@ -9605,6 +9620,20 @@ def _app_scoped_desktop_operation_hint(text: str) -> bool:
             text,
             ("click", "press", "tap", "type", "enter", "fill", "点击", "点按", "按", "输入"),
         )
+    )
+
+
+def _app_scoped_ui_operation_hint(text: str) -> bool:
+    app_name = _app_name_hint(text)
+    if not app_name or _is_browser_or_search_app_name(app_name):
+        return False
+    if _looks_like_non_app_operation_fragment(app_name):
+        return False
+    return bool(
+        click_target_hint(text)
+        or type_into_ui_hint(text, app_name=app_name)
+        or _app_first_click_scope_hint(text)
+        or _app_first_type_scope_hint(text)
     )
 
 

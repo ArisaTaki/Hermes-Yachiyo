@@ -34,6 +34,9 @@ from scripts.smoke_browser_planner_artifacts import (
 from scripts.smoke_data_analysis_artifacts import (
     run_smoke as run_data_analysis_artifact_smoke,
 )
+from scripts.smoke_desktop_planner_discovery import (
+    run_smoke as run_desktop_planner_discovery_smoke,
+)
 from scripts.summarize_native_agent_capabilities import summarize_capabilities
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
@@ -1780,6 +1783,43 @@ def verify_browser_planner_artifact_smoke(root: Path) -> tuple[list[Finding], di
     return [
         Finding(
             root / "scripts/smoke_browser_planner_artifacts.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_desktop_planner_discovery_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_desktop_planner_discovery_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_desktop_planner_discovery.py",
+                f"desktop planner discovery smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "desktop_planner_discovery_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_desktop_planner_discovery.py",
+                "desktop planner discovery smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "desktop_planner_discovery_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "desktop planner discovery smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_desktop_planner_discovery.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -3765,6 +3805,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "desktop_planner_discovery_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -3911,6 +3957,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         }
+        report["desktop_planner_discovery_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
         report["built_artifact_guards"] = {
             "status": "failed",
             "artifact_paths": [],
@@ -4024,6 +4076,18 @@ def verify_release_candidate(
         "status": "failed" if browser_smoke_findings else "passed",
         "evidence": browser_smoke_evidence,
         "findings": _finding_report(browser_smoke_findings),
+        "run_requested": True,
+    }
+
+    desktop_smoke_findings, desktop_smoke_evidence = verify_desktop_planner_discovery_smoke(
+        root
+    )
+    _print_findings("desktop planner discovery smoke", desktop_smoke_findings)
+    failed = failed or bool(desktop_smoke_findings)
+    report["desktop_planner_discovery_smoke"] = {
+        "status": "failed" if desktop_smoke_findings else "passed",
+        "evidence": desktop_smoke_evidence,
+        "findings": _finding_report(desktop_smoke_findings),
         "run_requested": True,
     }
 

@@ -1808,6 +1808,56 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert link_step.action == "read_current_page"
 
 
+def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+        "browser.click",
+        "app.focus",
+    ]
+
+    notion = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=allowed_tools,
+    )
+
+    assert notion.selected_intent.kind == "desktop_operation"
+    assert notion.selected_intent.inputs == {
+        "app_name_hint": "Notion",
+        "operation_hint": "click",
+    }
+    assert [step.step_id for step in notion.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(notion, "operate-foreground-ui").tool_name == (
+        "app.focus_and_click_ui_element"
+    )
+    assert _step_by_id(notion, "operate-foreground-ui").input_preview == {
+        "app_name": "Notion",
+        "target": "New Page",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests("在 Notion 点击 New Page", allowed_tools)] == [
+        "desktop.list_apps",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    chrome = RuntimePlanner().decision(
+        "Chrome 点击搜索结果",
+        allowed_tools=allowed_tools,
+    )
+
+    assert chrome.selected_intent.kind == "web_research"
+    assert chrome.selected_intent.inputs["app_name"] == "Google Chrome"
+    assert _step_by_id(chrome, "click-current-page-element").tool_name == "browser.click"
+
+
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(
         "search current page for hello",

@@ -353,6 +353,18 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "current_page_screenshot",
         "search_report",
     }
+    assert report["desktop_planner_discovery_smoke"]["status"] == "passed"
+    assert report["desktop_planner_discovery_smoke"]["evidence"]["ok"] is True
+    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 4
+    assert {
+        case["id"]
+        for case in report["desktop_planner_discovery_smoke"]["evidence"]["cases"]
+    } == {
+        "generic_app_open",
+        "generic_app_read_buttons",
+        "app_scoped_click",
+        "app_scoped_type",
+    }
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -532,6 +544,80 @@ def test_release_candidate_verifier_fails_when_browser_planner_artifact_smoke_fa
         {
             "path": str(tmp_path / "scripts/smoke_browser_planner_artifacts.py"),
             "message": "search report did not use a browser tool",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_desktop_planner_discovery_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "desktop planner discovery smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["desktop_planner_discovery_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "desktop_planner_discovery_smoke"
+    case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
+    assert [request["tool"] for request in case_by_id["generic_app_open"]["requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert case_by_id["app_scoped_click"]["requests"][1]["tool"] == (
+        "app.focus_and_click_ui_element"
+    )
+    assert case_by_id["app_scoped_type"]["requests"][1]["tool"] == (
+        "app.focus_and_type_into_ui_element"
+    )
+    assert all(
+        case["checks"]["uses_no_browser_tool"]
+        for case in case_by_id.values()
+    )
+
+
+def test_release_candidate_verifier_fails_when_desktop_planner_discovery_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_desktop_planner_discovery_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "desktop_planner_discovery_smoke",
+            "error": "Notion click routed to browser",
+            "cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "desktop planner discovery smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["desktop_planner_discovery_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "Notion click routed to browser"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_desktop_planner_discovery.py"),
+            "message": "Notion click routed to browser",
         }
     ]
 

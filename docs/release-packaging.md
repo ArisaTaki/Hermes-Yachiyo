@@ -203,7 +203,7 @@ Release workflow 会基于当前渠道上一条 `stable-v*` / `alpha-v*` / `expe
 python scripts/verify_release_candidate.py --require-artifacts
 ```
 
-该命令会运行 source-level release guard，默认执行数据分析 sample dataset -> Markdown/CSV/HTML/PNG artifact readback smoke、Browser/Web planner -> browser tool/artifact smoke，并对已生成的 `dist/backend`、`dist/electron` 和 `release` 执行 binary/package verifier。需要确认 DMG 内真实 `.app` 也可扫描时运行：
+该命令会运行 source-level release guard，默认执行数据分析 sample dataset -> Markdown/CSV/HTML/PNG artifact readback smoke、Browser/Web planner -> browser tool/artifact smoke、Desktop planner -> discovery/operate/verify smoke，并对已生成的 `dist/backend`、`dist/electron` 和 `release` 执行 binary/package verifier。需要确认 DMG 内真实 `.app` 也可扫描时运行：
 
 ```bash
 python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount
