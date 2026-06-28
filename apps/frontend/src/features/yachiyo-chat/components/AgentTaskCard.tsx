@@ -2,6 +2,7 @@ import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import {
   runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryMissingRequiredFields,
   runtimeToolRecoveryRetryAction,
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
@@ -132,6 +133,8 @@ export function AgentTaskCard({
               >
                 {permissionRecovery.actions.slice(0, 3).flatMap((action) => {
                   const retryAction = runtimeToolRecoveryRetryAction(action);
+                  const retryFields = retryAction?.required_retry_fields || [];
+                  const missingRetryFields = retryAction ? runtimeToolRecoveryMissingRequiredFields(retryAction) : [];
                   return [
                     <button
                       type="button"
@@ -150,17 +153,26 @@ export function AgentTaskCard({
                     retryAction ? (
                       <button
                         type="button"
+                        className={retryFields.length ? 'has-retry-contract' : undefined}
+                        data-required-retry-fields={retryFields.join(',')}
+                        data-missing-retry-fields={missingRetryFields.join(',')}
                         data-permission-target={retryAction.permission_target}
                         data-recovery-kind="retry_original"
                         data-recovery-tool={retryAction.tool}
+                        data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}
                         data-testid="yachiyo-agent-task-run-retry-action"
-                        disabled={busy || !onRunRecoveryAction}
+                        disabled={busy || !onRunRecoveryAction || missingRetryFields.length > 0}
                         key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
                         onClick={() => void onRunRecoveryAction?.(task, retryAction)}
                         title={retryAction.prompt}
                       >
                         <UiIcon name="retry" />
                         <span>{retryAction.label}</span>
+                        {missingRetryFields.length ? (
+                          <small className="yachiyo-agent-task-retry-contract">
+                            待补参数：{missingRetryFields.join('、')}
+                          </small>
+                        ) : null}
                       </button>
                     ) : null,
                   ];

@@ -7,6 +7,7 @@ import {
 } from '../approval';
 import {
   runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryMissingRequiredFields,
   runtimeToolRecoveryRetryAction,
   type RuntimeToolRecoveryAction,
 } from '../toolRecoveryActions';
@@ -113,6 +114,8 @@ export function RuntimeToolCallCard({
         <div className="runtime-tool-call-recovery-actions" data-testid={`${testId}-recovery-actions`}>
           {recoveryActions.slice(0, 3).flatMap((action) => {
             const retryAction = runtimeToolRecoveryRetryAction(action);
+            const retryFields = retryAction?.required_retry_fields || [];
+            const missingRetryFields = retryAction ? runtimeToolRecoveryMissingRequiredFields(retryAction) : [];
             return [
               <button
                 type="button"
@@ -130,16 +133,25 @@ export function RuntimeToolCallCard({
               retryAction ? (
                 <button
                   type="button"
+                  className={retryFields.length ? 'has-retry-contract' : undefined}
+                  data-required-retry-fields={retryFields.join(',')}
+                  data-missing-retry-fields={missingRetryFields.join(',')}
                   data-permission-target={retryAction.permission_target}
                   data-recovery-kind="retry_original"
                   data-recovery-tool={retryAction.tool}
+                  data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}
                   data-testid={`${testId}-run-retry-action`}
-                  disabled={recoveryActionDisabled || !onRunRecoveryAction}
+                  disabled={recoveryActionDisabled || !onRunRecoveryAction || missingRetryFields.length > 0}
                   key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
                   onClick={() => void onRunRecoveryAction?.(toolCall, retryAction)}
                   title={retryAction.prompt}
                 >
                   {retryAction.label}
+                  {missingRetryFields.length ? (
+                    <small className="runtime-tool-call-retry-contract">
+                      待补参数：{missingRetryFields.join('、')}
+                    </small>
+                  ) : null}
                 </button>
               ) : null,
             ];
