@@ -6535,6 +6535,8 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "future_task.list",
             "future_task.cancel",
         ],
+        "memory.runtime": ["memory.add", "memory.replace", "memory.remove"],
+        "skill.runtime": ["skill.read"],
         "workflow.orchestration": ["workflow.run"],
         "group.multi_agent": ["group.run"],
     }
@@ -6552,6 +6554,31 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
     assert {"click", "type", "shortcut", "verify"} <= set(
         by_id["desktop.ui_operation"].execution_actions
     )
+    assert by_id["memory.runtime"].category == "memory"
+    assert by_id["memory.runtime"].approval_required is True
+    assert "retrieve_memory" in by_id["memory.runtime"].discovery_actions
+    assert "dispatch_skill" in by_id["skill.runtime"].execution_actions
+
+
+def test_capability_registry_exposes_dynamic_memory_and_skill_tools() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=[
+            "memory.add",
+            "memory.custom_archive",
+            "skill.read",
+            "skill.dispatch.custom",
+        ],
+        capability_ids=["memory.runtime", "skill.runtime"],
+    )
+    by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
+
+    assert by_id["memory.runtime"].available_tools == [
+        "memory.add",
+        "memory.custom_archive",
+    ]
+    assert by_id["memory.runtime"].missing_tools == ["memory.replace", "memory.remove"]
+    assert by_id["skill.runtime"].available_tools == ["skill.read", "skill.dispatch.custom"]
+    assert by_id["skill.runtime"].missing_tools == []
 
 
 def test_capability_registry_does_not_treat_workspace_patch_as_read() -> None:

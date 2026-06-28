@@ -108,6 +108,8 @@ def test_capability_category_contract_covers_runtime_registry_categories() -> No
     assert {
         "capture",
         "clipboard",
+        "memory",
+        "skill",
         "system",
     }.issubset(set(get_args(CapabilityCategory)))
 
