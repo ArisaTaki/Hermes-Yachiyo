@@ -3231,6 +3231,112 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
     )
 
 
+def test_runtime_planner_splits_app_first_field_typing_targets() -> None:
+    cases = (
+        (
+            "PixelForge 用户名输入框输入 alice",
+            "PixelForge",
+            "用户名",
+            "alice",
+            "type",
+            "app.focus_and_type_into_ui_element",
+        ),
+        (
+            "PixelForge username field type alice",
+            "PixelForge",
+            "username",
+            "alice",
+            "type",
+            "app.focus_and_type_into_ui_element",
+        ),
+        (
+            "PixelForge message field enter hello",
+            "PixelForge",
+            "message",
+            "hello",
+            "type",
+            "app.focus_and_type_into_ui_element",
+        ),
+        (
+            "在 PixelForge 里用户名输入框输入 alice",
+            "PixelForge",
+            "用户名",
+            "alice",
+            "type",
+            "app.focus_and_type_into_ui_element",
+        ),
+        (
+            "Slack 点击搜索框输入 Alice",
+            "Slack",
+            "搜索框",
+            "Alice",
+            "click",
+            "app.focus_and_type_into_ui_element",
+        ),
+    )
+
+    for prompt, app_name, target, text, operation_hint, tool_name in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open_and_type_into_ui_element",
+                "app.focus_and_type_into_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert decision.selected_intent.inputs["operation_hint"] == operation_hint
+        type_step = _step_by_id(decision, "operate-foreground-ui")
+        assert type_step.tool_name == tool_name
+        assert type_step.input_preview == {
+            "app_name": app_name,
+            "target": target,
+            "text": text,
+            "role_filter": "text",
+            "limit": 80,
+        }
+
+    target_first = RuntimePlanner().decision(
+        "Export field type hello",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    chinese_target_first = RuntimePlanner().decision(
+        "用户名输入框输入 alice",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert target_first.selected_intent.inputs["app_name_hint"] == ""
+    assert _step_by_id(target_first, "operate-foreground-ui").tool_name == (
+        "desktop.type_into_ui_element"
+    )
+    assert _step_by_id(target_first, "operate-foreground-ui").input_preview == {
+        "target": "Export",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert chinese_target_first.selected_intent.inputs["app_name_hint"] == ""
+    assert _step_by_id(chinese_target_first, "operate-foreground-ui").input_preview == {
+        "target": "用户名",
+        "text": "alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+
+
 def test_runtime_planner_routes_safe_shortcut_without_approval() -> None:
     decision = RuntimePlanner().decision(
         "刷新当前页面",

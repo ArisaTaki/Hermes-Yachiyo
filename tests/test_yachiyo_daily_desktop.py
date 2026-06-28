@@ -199,6 +199,82 @@ def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_t
         ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_targets() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "PixelForge 用户名输入框输入 alice",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "用户名",
+                "text": "alice",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "Export field type hello",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "Export",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",

@@ -56,6 +56,7 @@ from .desktop_plan_hints import (
     safe_shortcut_sequence_hint,
     screen_capture_hint,
     submit_action_hint,
+    clean_followup_text,
     clean_type_target,
     type_into_ui_hint,
     ui_inspection_hint,
@@ -301,6 +302,9 @@ class TaskIntentRouter:
         app_preferences = _app_preferences_hint(text)
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         app_click_scope = _app_first_click_scope_hint(text)
+        app_type_scope = _app_first_type_scope_hint(text)
+        if app_type_scope or _target_first_foreground_type_hint(text):
+            foreground_compose_text = ""
         if _standalone_hotkey_request(text):
             app_scoped_safe_shortcut_app = ""
         spotlight_search_query = _spotlight_search_query_hint(text)
@@ -396,6 +400,8 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and _app_first_control_app_name_hint(text):
             score = 0.18
+        if score <= 0 and app_type_scope:
+            score = 0.18
         if (
             score <= 0
             and click_target_hint(text)
@@ -465,10 +471,13 @@ class TaskIntentRouter:
             or (app_management or {}).get("app_name")
             or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or dynamic_context_transfer.get("app_name")
+            or app_type_scope.get("app_name")
             or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
             or _app_name_hint(text)
             or ""
         ).strip()
+        if not app_type_scope and _target_first_foreground_type_hint(text):
+            app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             app_name_hint = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
@@ -514,7 +523,14 @@ class TaskIntentRouter:
             app_name_hint,
             app_management,
         )
-        app_search = {} if app_click_scope else _app_search_hint(text, app_name_hint)
+        app_search = (
+            {}
+            if (
+                app_click_scope
+                or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
+            )
+            else _app_search_hint(text, app_name_hint)
+        )
         app_search_app_name = str(app_search.get("app_name") or "").strip()
         if app_search_app_name and (
             not app_name_hint
@@ -537,6 +553,7 @@ class TaskIntentRouter:
             or ("safe_scroll" if safe_scroll else "")
             or ("hotkey" if hotkey and foreground_management is None else "")
             or _desktop_operation_hint(text)
+            or ("type" if app_type_scope else "")
         )
         if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
             operation_hint = ""
@@ -1631,7 +1648,11 @@ class RuntimePlanner:
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
             )
-        if _app_first_click_scope_hint(intent.user_goal):
+        app_type_scope_hint = _app_first_type_scope_hint(intent.user_goal)
+        if _app_first_click_scope_hint(intent.user_goal) or (
+            app_type_scope_hint
+            and not _app_search_field_input_allows_safe_search(intent.user_goal)
+        ):
             app_search = {}
         app_search_context_source = _app_search_query_context_source(app_search)
         command_palette = intent.inputs.get("command_palette_hint")
@@ -1668,9 +1689,12 @@ class RuntimePlanner:
                 else _app_scoped_safe_shortcut_app_name_hint(intent.user_goal, safe_shortcut)
             )
             or (app_management or {}).get("app_name")
+            or _app_first_type_scope_hint(intent.user_goal).get("app_name")
             or _foreground_compose_app_name_hint(intent.user_goal)
             or ""
         ).strip()
+        if not _app_first_type_scope_hint(intent.user_goal) and _target_first_foreground_type_hint(intent.user_goal):
+            app_name = ""
         if _standalone_hotkey_request(intent.user_goal):
             app_name = ""
             app_management = None
@@ -1768,6 +1792,17 @@ class RuntimePlanner:
         if app_name and click_target and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         type_target = type_into_ui_hint(intent.user_goal, app_name=app_name)
+        app_type_scope = _app_first_type_scope_hint(intent.user_goal)
+        scoped_type_app = str(app_type_scope.get("app_name") or "").strip()
+        scoped_type_target = app_type_scope.get("type_target")
+        if scoped_type_app and isinstance(scoped_type_target, Mapping):
+            if not app_name or compact_app_name_hint(app_name).startswith(
+                compact_app_name_hint(scoped_type_app)
+            ):
+                app_name = scoped_type_app
+                type_target = dict(scoped_type_target)
+        if app_name and type_target and not _explicit_app_open_request(intent.user_goal):
+            mode = "focus"
         if (
             app_search
             and type_target
@@ -1775,11 +1810,15 @@ class RuntimePlanner:
             and not _app_search_safe_sequence_available(intent.user_goal, app_search, allowed)
         ):
             app_search = {}
-        foreground_compose_text = str(
-            intent.inputs.get("foreground_compose_text_hint")
-            or _foreground_compose_text_hint(intent.user_goal)
-            or ""
-        ).strip()
+        foreground_compose_text = (
+            ""
+            if type_target
+            else str(
+                intent.inputs.get("foreground_compose_text_hint")
+                or _foreground_compose_text_hint(intent.user_goal)
+                or ""
+            ).strip()
+        )
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
         safe_type_text = (
@@ -2755,6 +2794,7 @@ class RuntimePlanner:
         if (
             _looks_like_ui_operation(intent.user_goal)
             or click_target
+            or type_target
             or primary_safe_shortcut
             or safe_key
             or safe_scroll
@@ -5904,7 +5944,12 @@ def _app_name_hint(text: str) -> str:
     app_click_scope = _app_first_click_scope_hint(text)
     if app_click_scope:
         return str(app_click_scope.get("app_name") or "").strip()
+    app_type_scope = _app_first_type_scope_hint(text)
+    if app_type_scope:
+        return str(app_type_scope.get("app_name") or "").strip()
     if _target_first_foreground_click_hint(text):
+        return ""
+    if _target_first_foreground_type_hint(text):
         return ""
     patterns = [
         r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
@@ -5980,7 +6025,7 @@ def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _clean_app_name_hint(match.group("app"))
+        app_name = _canonical_app_name_hint(match.group("app"))
         if not app_name:
             continue
         raw_target = match.group("target")
@@ -6013,9 +6058,151 @@ def _target_first_foreground_click_hint(text: str) -> bool:
     )
 
 
+def _app_first_type_scope_hint(text: str) -> dict[str, Any]:
+    value = str(text or "").strip()
+    patterns = (
+        r"^(?:打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)(?:的|里|中|上|内|在)\s*"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?:打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)"
+        r"(?P<target>搜索框|搜索栏|消息框|聊天框|地址栏)\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?:打开|启动|开启|切到|聚焦)\s*(?P<app>[\w .·-]{1,40}?)\s+"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|的|上的)\s*"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?:在|用|通过)\s+(?P<app>[\w .·-]{2,40}?)\s+"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{2,40}?)(?:的|里|中|上|内|在)\s*"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{2,40}?)\s+"
+        r"(?P<target>[^。！？!?，,]{0,40}?"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*"
+        r"(?:输入|键入|填写|填入|写入|写|填)\s*(?P<text>[^。！？!?，,]+)$",
+        r"^(?!(?:in|inside|within|using|with)\b)(?P<app>[A-Za-z][A-Za-z0-9_-]{1,40})\s+"
+        r"(?P<target>[^.!?,]{0,40}?"
+        r"(?:search box|search field|message field|address bar|input field|text box|input|field))\s+"
+        r"(?:type|enter|fill)\s+(?P<text>[^.!?,]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _canonical_app_name_hint(match.group("app"))
+        if not app_name:
+            continue
+        raw_target = match.group("target")
+        target = _clean_app_first_type_target(raw_target, app_name=app_name)
+        if _generic_type_target_label(target):
+            continue
+        typed_text = clean_followup_text(match.group("text"))
+        if not target or not typed_text:
+            continue
+        return {
+            "app_name": app_name,
+            "type_target": {
+                "target": target,
+                "text": typed_text,
+                "role_filter": "text",
+            },
+        }
+    return {}
+
+
+def _clean_app_first_type_target(value: str, *, app_name: str) -> str:
+    target = str(value or "").strip(" .，,。")
+    clean_app = str(app_name or "").strip()
+    if clean_app and target.lower().startswith(clean_app.lower()):
+        target = target[len(clean_app) :].strip(" .，,。")
+    target = re.sub(
+        r"^(?:打开|启动|开启|切到|聚焦|open|launch|focus|switch\s+to)\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    target = re.sub(
+        r"^(?:(?:在|用|通过)\s+|(?:in|inside|within|using|with)\s+)",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    target = re.sub(r"^(?:的|在|里|中|上|内|上的|里的|中的|内的)\s*", "", target)
+    target = re.sub(
+        r"^(?:点击|点一下|点按|单击|按一下|按|click|press|tap)\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    if re.fullmatch(
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|input field|search box|search field|message field|address bar|text box)",
+        target,
+        flags=re.IGNORECASE,
+    ):
+        return clean_type_target(f"{app_name} {target}", app_name=app_name) or target
+    target = re.sub(
+        r"\s*(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box|input|field)$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    if not target:
+        return clean_type_target(value, app_name=app_name)
+    if re.fullmatch(r"(?:搜索|search)", target, flags=re.IGNORECASE):
+        return "search" if re.search(r"[A-Za-z]", target) else "搜索"
+    if re.fullmatch(r"(?:消息|message)", target, flags=re.IGNORECASE):
+        return "message" if re.search(r"[A-Za-z]", target) else "消息"
+    if re.fullmatch(r"(?:地址|address)", target, flags=re.IGNORECASE):
+        return "address" if re.search(r"[A-Za-z]", target) else "地址"
+    return target
+
+
+def _target_first_foreground_type_hint(text: str) -> bool:
+    value = str(text or "").strip()
+    return bool(
+        re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9 ._-]{1,40}?\s+"
+            r"(?:search box|search field|message field|address bar|input field|text box|input|field)\s+"
+            r"(?:type|enter|fill)\s+[^.!?,]+",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            r"[\w .·-]{1,40}?"
+            r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏)\s*"
+            r"(?:输入|键入|填写|填入|写入|写|填)\s*[^。！？!?，,]+",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _generic_click_target_label(value: str) -> bool:
     compact = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
     return compact in {"", "button", "menu", "menuitem", "checkbox", "按钮", "控件", "元素", "菜单", "菜单项", "复选框"}
+
+
+def _generic_type_target_label(value: str) -> bool:
+    compact = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
+    return compact in {
+        "",
+        "input",
+        "field",
+        "inputfield",
+        "textbox",
+        "输入框",
+        "文本框",
+        "输入栏",
+    }
 
 
 def _app_first_control_app_name_hint(text: str) -> str:

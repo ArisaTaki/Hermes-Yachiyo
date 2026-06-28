@@ -1114,7 +1114,7 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
         flags=re.IGNORECASE,
     ).strip()
     target = re.sub(
-        r"^(?:在|用|通过|in|inside|within|using|with)\s*",
+        r"^(?:(?:在|通过)\s*|用\s+|(?:in|inside|within|using|with)\s+)",
         "",
         target,
         flags=re.IGNORECASE,
