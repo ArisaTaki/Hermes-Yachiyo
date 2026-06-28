@@ -9,6 +9,10 @@ type ToolCallInspectorProps = {
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
   ) => unknown | Promise<unknown>;
+  recoveryActionInputPatch?: (
+    toolCall: ToolCallSnapshot,
+    action: RuntimeToolRecoveryAction,
+  ) => Record<string, unknown> | null | undefined;
   recoveryActionDisabled?: boolean;
   sourceLabel?: string;
   testId?: string;
@@ -19,6 +23,7 @@ export function ToolCallInspector({
   cardTestId = 'agent-run-detail-tool-call-card',
   listTestId = 'agent-run-detail-tool-call-list',
   onRunRecoveryAction,
+  recoveryActionInputPatch,
   recoveryActionDisabled = false,
   sourceLabel = '工具调用、审批关联和输入输出预览',
   testId = 'agent-run-detail-tool-calls',
@@ -39,6 +44,7 @@ export function ToolCallInspector({
             toolCall={toolCall}
             className="studio-runtime-tool-call"
             onRunRecoveryAction={onRunRecoveryAction}
+            recoveryActionInputPatch={recoveryActionInputPatch}
             recoveryActionDisabled={recoveryActionDisabled}
             testId={cardTestId}
           />

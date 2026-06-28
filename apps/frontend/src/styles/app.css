@@ -18302,6 +18302,15 @@ button.activity-item {
   max-height: 360px;
 }
 
+.artifact-preview img.agent-run-detail-artifact-preview-content {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  object-fit: contain;
+}
+
 .run-execution-steps {
   display: grid;
   gap: 0;

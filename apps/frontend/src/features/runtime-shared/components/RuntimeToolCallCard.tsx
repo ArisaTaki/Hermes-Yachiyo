@@ -6,6 +6,7 @@ import {
   runtimeToolFamily,
 } from '../approval';
 import {
+  runtimeToolRecoveryActionWithInputPatch,
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryMissingRequiredFields,
   runtimeToolRecoveryRetryAction,
@@ -39,6 +40,7 @@ export function RuntimeToolCallCard({
   className = 'runtime-tool-call',
   onRunRecoveryAction,
   recoveryActionDisabled = false,
+  recoveryActionInputPatch,
   testId = 'runtime-tool-call-card',
 }: {
   toolCall: RuntimeToolCallCardSnapshot;
@@ -48,6 +50,10 @@ export function RuntimeToolCallCard({
     action: RuntimeToolRecoveryAction,
   ) => unknown | Promise<unknown>;
   recoveryActionDisabled?: boolean;
+  recoveryActionInputPatch?: (
+    toolCall: RuntimeToolCallCardSnapshot,
+    action: RuntimeToolRecoveryAction,
+  ) => Record<string, unknown> | null | undefined;
   testId?: string;
 }) {
   const inputPreview = approvalPreviewRecord(toolCall.input_preview);
@@ -113,12 +119,19 @@ export function RuntimeToolCallCard({
       {recoveryActions.length ? (
         <div className="runtime-tool-call-recovery-actions" data-testid={`${testId}-recovery-actions`}>
           {recoveryActions.slice(0, 3).flatMap((action) => {
-            const retryAction = runtimeToolRecoveryRetryAction(action);
+            const baseRetryAction = runtimeToolRecoveryRetryAction(action);
+            const retryInputPatch = baseRetryAction
+              ? recoveryActionInputPatch?.(toolCall, baseRetryAction)
+              : null;
+            const retryAction = baseRetryAction && retryInputPatch
+              ? runtimeToolRecoveryActionWithInputPatch(baseRetryAction, retryInputPatch)
+              : baseRetryAction;
             const retryFields = retryAction?.required_retry_fields || [];
             const missingRetryFields = retryAction ? runtimeToolRecoveryMissingRequiredFields(retryAction) : [];
             const retryInputSource = retryAction?.retry_input_source === 'screen_capture_artifact'
               ? '截图定位'
               : '';
+            const retryInput = retryAction?.input || {};
             return [
               <button
                 type="button"
@@ -141,6 +154,8 @@ export function RuntimeToolCallCard({
                   data-missing-retry-fields={missingRetryFields.join(',')}
                   data-permission-target={retryAction.permission_target}
                   data-retry-input-source={retryAction.retry_input_source || ''}
+                  data-selected-retry-x={retryInput.x ?? ''}
+                  data-selected-retry-y={retryInput.y ?? ''}
                   data-recovery-kind="retry_original"
                   data-recovery-tool={retryAction.tool}
                   data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}

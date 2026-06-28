@@ -25,6 +25,8 @@ export function useRunArtifactActions({
       setArtifactPreview({
         path: payload.path || path,
         content: payload.content || '',
+        mime_type: payload.mime_type,
+        run_id: payload.run_id || runId,
         truncated: payload.truncated,
       });
       setStatus('Artifact 已读取');

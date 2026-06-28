@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
 import type {
@@ -8,8 +8,14 @@ import type {
   ToolCallSnapshot,
   YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
+import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
-import type { RuntimeToolRecoveryAction } from '../../runtime-shared/toolRecoveryActions';
+import {
+  runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryMissingRequiredFields,
+  runtimeToolRecoveryRetryAction,
+  type RuntimeToolRecoveryAction,
+} from '../../runtime-shared/toolRecoveryActions';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -26,7 +32,12 @@ import { ToolCallInspector } from './ToolCallInspector';
 import { WorkflowChildApprovalBridge } from './WorkflowChildApprovalBridge';
 import { WorkflowRunDetailPanel } from './WorkflowRunDetailPanel';
 import { WorkflowStepResults } from './WorkflowStepResults';
-import type { RunArtifactPreview, RunDetailWorkflowStepRef } from './runDetailTypes';
+import type {
+  RunArtifactPreview,
+  RunDetailWorkflowStepRef,
+  RunRecoveryCoordinate,
+  RunRecoveryScreenPointContract,
+} from './runDetailTypes';
 import {
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
@@ -156,6 +167,7 @@ export function RunDetailPanel({
   workflowStepKindLabel: (kind: RunDetailWorkflowStepRef['kind']) => string;
   workflowStepSummary: (step: RunDetailWorkflowStepRef, childRun: RunSpec | null) => string;
 }) {
+  const [recoveryCoordinate, setRecoveryCoordinate] = useState<RunRecoveryCoordinate | null>(null);
   const timelineMemoryTraces = selectedPublicRunTimeline?.memory_traces || [];
   const timelineSkillTraces = selectedPublicRunTimeline?.skill_traces || [];
   const hasTimelineMemorySkillTraces = Boolean(timelineMemoryTraces.length || timelineSkillTraces.length);
@@ -176,6 +188,10 @@ export function RunDetailPanel({
     selectedPublicRunTimeline?.tool_calls || [],
     replayToolCalls,
   );
+  const selectedRunRecoveryCoordinate = selectedRun && recoveryCoordinate?.run_id === selectedRun.run_id
+    ? recoveryCoordinate
+    : null;
+  const recoveryScreenPointContract = runRecoveryScreenPointContractFromToolCalls(selectedRunToolCalls);
   const toolCallSource = replayToolCalls.length
     ? 'RunTimelineSnapshot + RunEvent replay tool facts'
     : 'RunTimelineSnapshot tool calls';
@@ -382,6 +398,10 @@ export function RunDetailPanel({
               sourceLabel={toolCallSource}
               toolCalls={selectedRunToolCalls}
               onRunRecoveryAction={onRunToolRecoveryAction}
+              recoveryActionInputPatch={(_, action) => runRecoveryInputPatchForAction(
+                action,
+                selectedRunRecoveryCoordinate,
+              )}
               recoveryActionDisabled={busy}
             />
           ) : null}
@@ -454,8 +474,13 @@ export function RunDetailPanel({
           <ArtifactInspector
             artifactPreview={artifactPreview}
             onOpenArtifact={onOpenArtifact}
+            onSelectImagePoint={(selection) => {
+              setRecoveryCoordinate(runRecoveryCoordinateFromSelection(selectedRun.run_id, selection));
+            }}
+            recoveryScreenPointContract={recoveryScreenPointContract}
             selectedRun={selectedRun}
             selectedRunArtifacts={selectedRunArtifactFacts}
+            selectedImagePoint={selectedRunRecoveryCoordinate}
             sourceLabel={artifactSource}
           />
         </article>
@@ -477,4 +502,74 @@ function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }):
 function agentInitial(name: string): string {
   const clean = name.trim();
   return clean ? clean.slice(0, 1).toUpperCase() : 'A';
+}
+
+function runRecoveryScreenPointContractFromToolCalls(
+  toolCalls: ToolCallSnapshot[],
+): RunRecoveryScreenPointContract | null {
+  for (const toolCall of toolCalls) {
+    const inputPreview = objectValue(toolCall.input_preview);
+    const outputPreview = objectValue(toolCall.output_preview);
+    const actions = runtimeToolRecoveryActionsFromRecords(
+      [outputPreview, inputPreview],
+      {
+        retry_input: inputPreview,
+        retry_source_tool_call_id: toolCall.tool_call_id,
+        retry_tool: String(toolCall.tool_name || '').trim(),
+      },
+    );
+    const retryAction = actions
+      .map((action) => runtimeToolRecoveryRetryAction(action))
+      .find((action): action is RuntimeToolRecoveryAction => {
+        if (!action || action.retry_input_source !== 'screen_capture_artifact') return false;
+        return runRecoveryActionNeedsRetryField(action, 'x')
+          || runRecoveryActionNeedsRetryField(action, 'y');
+      });
+    if (retryAction) {
+      return {
+        artifactKind: retryAction.retry_artifact_kind || 'image',
+        artifactTool: retryAction.retry_artifact_tool || 'screen.capture',
+      };
+    }
+  }
+  return null;
+}
+
+function runRecoveryInputPatchForAction(
+  action: RuntimeToolRecoveryAction,
+  coordinate: RunRecoveryCoordinate | null,
+): Record<string, unknown> | null {
+  if (!coordinate || action.retry_input_source !== 'screen_capture_artifact') return null;
+  const inputPatch: Record<string, unknown> = {};
+  if (runRecoveryActionNeedsRetryField(action, 'x')) inputPatch.x = coordinate.x;
+  if (runRecoveryActionNeedsRetryField(action, 'y')) inputPatch.y = coordinate.y;
+  return Object.keys(inputPatch).length ? inputPatch : null;
+}
+
+function runRecoveryActionNeedsRetryField(action: RuntimeToolRecoveryAction, field: string): boolean {
+  return (action.required_retry_fields || []).includes(field)
+    || runtimeToolRecoveryMissingRequiredFields(action).includes(field);
+}
+
+function runRecoveryCoordinateFromSelection(
+  runId: string,
+  selection: RuntimeImageArtifactPointSelection,
+): RunRecoveryCoordinate {
+  return {
+    artifact_id: selection.artifact.artifact_id,
+    artifact_path: selection.artifact_path,
+    kind: selection.artifact.kind,
+    natural_height: selection.natural_height,
+    natural_width: selection.natural_width,
+    run_id: selection.artifact.run_id || selection.artifact.source_run_id || runId,
+    source_tool: selection.artifact.source_tool,
+    x: selection.x,
+    y: selection.y,
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

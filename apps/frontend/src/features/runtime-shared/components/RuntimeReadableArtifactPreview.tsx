@@ -30,6 +30,18 @@ export type RuntimeImageArtifactSelectedPoint = Pick<
   'artifact_path' | 'natural_height' | 'natural_width' | 'x' | 'y'
 >;
 
+type RuntimeReadableArtifactContentPreviewProps = {
+  artifact: RuntimeArtifactSnapshot;
+  className?: string;
+  contentTestId?: string;
+  emptyContentLabel?: string;
+  imagePointLabel?: string;
+  label?: string;
+  onSelectImagePoint?: (selection: RuntimeImageArtifactPointSelection) => void;
+  preview: RuntimeReadableArtifactContent;
+  selectedImagePoint?: RuntimeImageArtifactSelectedPoint | null;
+};
+
 type RuntimeReadableArtifactPreviewProps = {
   artifact: RuntimeArtifactSnapshot;
   busyLabel?: string;
@@ -118,20 +130,6 @@ export function RuntimeReadableArtifactPreview({
   }
 
   const label = artifact.title || path || artifact.kind || 'Artifact';
-  const imagePreviewSrc = preview ? runtimeArtifactImagePreviewSource(preview, artifact) : '';
-  const selectedPoint = selectedImagePoint && (!selectedImagePoint.artifact_path || selectedImagePoint.artifact_path === path)
-    ? selectedImagePoint
-    : null;
-  const selectedPointStyle = selectedPoint
-    ? runtimeImageArtifactPointStyle(selectedPoint)
-    : undefined;
-  const selectableImage = Boolean(onSelectImagePoint);
-
-  function handleImagePointSelection(event: MouseEvent<HTMLImageElement>) {
-    if (!onSelectImagePoint) return;
-    const selection = runtimeImageArtifactPointSelection(event, artifact, path);
-    if (selection) onSelectImagePoint(selection);
-  }
 
   return (
     <div
@@ -170,44 +168,89 @@ export function RuntimeReadableArtifactPreview({
           {error}
         </p>
       ) : null}
-      {preview && imagePreviewSrc ? (
-        <div
-          className={`runtime-readable-artifact-image-frame${selectableImage ? ' is-selectable' : ''}`}
-          data-coordinate-pick-enabled={selectableImage ? 'true' : 'false'}
-          data-selected-x={selectedPoint?.x ?? ''}
-          data-selected-y={selectedPoint?.y ?? ''}
-          data-testid={`${contentTestId}-point-frame`}
-        >
-          <img
-            alt={label}
-            className={`${contentClassName} runtime-readable-artifact-image`}
-            data-testid={contentTestId}
-            onClick={handleImagePointSelection}
-            src={imagePreviewSrc}
-          />
-          {selectedPoint && selectedPointStyle ? (
-            <span
-              aria-hidden="true"
-              className="runtime-readable-artifact-image-marker"
-              data-testid={`${contentTestId}-point-marker`}
-              style={selectedPointStyle}
-            />
-          ) : null}
-          {selectableImage ? (
-            <small
-              className="runtime-readable-artifact-image-point"
-              data-testid={`${contentTestId}-point-label`}
-            >
-              {selectedPoint ? `${selectedPoint.x}, ${selectedPoint.y}` : imagePointLabel}
-            </small>
-          ) : null}
-        </div>
-      ) : preview ? (
-        <pre className={contentClassName} data-testid={contentTestId}>
-          {preview.content || emptyContentLabel}
-        </pre>
+      {preview ? (
+        <RuntimeReadableArtifactContentPreview
+          artifact={artifact}
+          className={contentClassName}
+          contentTestId={contentTestId}
+          emptyContentLabel={emptyContentLabel}
+          imagePointLabel={imagePointLabel}
+          onSelectImagePoint={onSelectImagePoint}
+          preview={preview}
+          selectedImagePoint={selectedImagePoint}
+        />
       ) : null}
     </div>
+  );
+}
+
+export function RuntimeReadableArtifactContentPreview({
+  artifact,
+  className = 'runtime-readable-artifact-content',
+  contentTestId = 'runtime-readable-artifact-content',
+  emptyContentLabel = '(empty artifact)',
+  imagePointLabel = '点击截图补齐坐标',
+  label = artifact.title || artifact.path || artifact.kind || 'Artifact',
+  onSelectImagePoint,
+  preview,
+  selectedImagePoint,
+}: RuntimeReadableArtifactContentPreviewProps) {
+  const path = String(artifact.path || '').trim();
+  const imagePreviewSrc = runtimeArtifactImagePreviewSource(preview, artifact);
+  const selectedPoint = selectedImagePoint && (!selectedImagePoint.artifact_path || selectedImagePoint.artifact_path === path)
+    ? selectedImagePoint
+    : null;
+  const selectedPointStyle = selectedPoint
+    ? runtimeImageArtifactPointStyle(selectedPoint)
+    : undefined;
+  const selectableImage = Boolean(onSelectImagePoint);
+
+  function handleImagePointSelection(event: MouseEvent<HTMLImageElement>) {
+    if (!onSelectImagePoint) return;
+    const selection = runtimeImageArtifactPointSelection(event, artifact, path);
+    if (selection) onSelectImagePoint(selection);
+  }
+
+  if (imagePreviewSrc) {
+    return (
+      <div
+        className={`runtime-readable-artifact-image-frame${selectableImage ? ' is-selectable' : ''}`}
+        data-coordinate-pick-enabled={selectableImage ? 'true' : 'false'}
+        data-selected-x={selectedPoint?.x ?? ''}
+        data-selected-y={selectedPoint?.y ?? ''}
+        data-testid={`${contentTestId}-point-frame`}
+      >
+        <img
+          alt={label}
+          className={`${className} runtime-readable-artifact-image`}
+          data-testid={contentTestId}
+          onClick={handleImagePointSelection}
+          src={imagePreviewSrc}
+        />
+        {selectedPoint && selectedPointStyle ? (
+          <span
+            aria-hidden="true"
+            className="runtime-readable-artifact-image-marker"
+            data-testid={`${contentTestId}-point-marker`}
+            style={selectedPointStyle}
+          />
+        ) : null}
+        {selectableImage ? (
+          <small
+            className="runtime-readable-artifact-image-point"
+            data-testid={`${contentTestId}-point-label`}
+          >
+            {selectedPoint ? `${selectedPoint.x}, ${selectedPoint.y}` : imagePointLabel}
+          </small>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <pre className={className} data-testid={contentTestId}>
+      {preview.content || emptyContentLabel}
+    </pre>
   );
 }
 
