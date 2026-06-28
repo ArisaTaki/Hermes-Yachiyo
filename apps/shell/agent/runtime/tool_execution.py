@@ -127,6 +127,7 @@ def _tool_request_with_app_name_resolution(
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     return {
         **tool_request,
+        "input_resolution": resolution,
         "input": {
             **raw_input,
             "app_name": str(resolution.get("resolved_app_name") or "").strip(),
@@ -152,6 +153,26 @@ def _tool_request_app_name_resolution(
         "resolved_app_name": discovered_app_name,
         "source_tool": "desktop.list_apps",
     }
+
+
+def _input_preview_with_app_name_resolution(
+    input_preview: Any,
+    resolution: dict[str, str],
+) -> Any:
+    if not resolution:
+        return input_preview
+    preview = dict(input_preview) if isinstance(input_preview, dict) else {}
+    requested_app_name = str(resolution.get("requested_app_name") or "").strip()
+    resolved_app_name = str(resolution.get("resolved_app_name") or "").strip()
+    source_tool = str(resolution.get("source_tool") or "").strip()
+    if resolved_app_name:
+        preview.setdefault("app_name", resolved_app_name)
+        preview.setdefault("resolved_app_name", resolved_app_name)
+    if requested_app_name:
+        preview.setdefault("requested_app_name", requested_app_name)
+    if source_tool:
+        preview.setdefault("app_resolution_source", source_tool)
+    return preview
 
 
 def _tool_result_artifact(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
@@ -234,6 +255,12 @@ class RuntimeToolCallExecutor:
         tool_name = self._normalize_tool_name(tool_request.get("tool"))
         payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         input_preview = self._input_preview(payload)
+        input_resolution = (
+            tool_request.get("input_resolution")
+            if isinstance(tool_request.get("input_resolution"), dict)
+            else {}
+        )
+        input_preview = _input_preview_with_app_name_resolution(input_preview, input_resolution)
         budget = budget or self._run_budget(run_id, timeline)
         if not self._allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
@@ -412,7 +439,13 @@ class RuntimeToolRequestRunner:
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
         for index, tool_request in enumerate(tool_requests):
-            app_name_resolution = _tool_request_app_name_resolution(tool_request, timeline)
+            app_name_resolution = (
+                tool_request.get("input_resolution")
+                if isinstance(tool_request.get("input_resolution"), dict)
+                else {}
+            )
+            if not app_name_resolution:
+                app_name_resolution = _tool_request_app_name_resolution(tool_request, timeline)
             tool_request = _tool_request_with_app_name_resolution(
                 tool_request,
                 app_name_resolution,
@@ -438,7 +471,10 @@ class RuntimeToolRequestRunner:
                         "agent.tool.input_resolved",
                         resolution_payload,
                     )
-            input_preview = self._input_preview(raw_input)
+            input_preview = _input_preview_with_app_name_resolution(
+                self._input_preview(raw_input),
+                app_name_resolution,
+            )
             goal_block_reason = self._goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
                 budget.claim_tool_call(tool_name)

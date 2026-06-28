@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.approval_tool_sets import (
@@ -561,6 +562,11 @@ class RuntimeCustomApiAgentLoop:
                     full_plan_requests,
                     allowed_tools,
                 )
+                execution_requests = self._legacy_return_hotkey_projection(
+                    planning_context,
+                    execution_requests,
+                    allowed_tools,
+                )
                 if execution_requests and not self._has_approval_plan_tool(execution_requests):
                     return (
                         selection.decision,
@@ -576,6 +582,11 @@ class RuntimeCustomApiAgentLoop:
                     )
             execution_requests = planner_execution_tool_requests(
                 selection.requests,
+                allowed_tools,
+            )
+            execution_requests = self._legacy_return_hotkey_projection(
+                planning_context,
+                execution_requests,
                 allowed_tools,
             )
             event_payload = selection.event_payload
@@ -595,6 +606,53 @@ class RuntimeCustomApiAgentLoop:
             return selection.decision, execution_requests, event_payload
         except Exception:
             return None, [], {}
+
+    @staticmethod
+    def _legacy_return_hotkey_projection(
+        planning_context: str,
+        requests: list[dict[str, Any]],
+        allowed_tools: list[str],
+    ) -> list[dict[str, Any]]:
+        if not requests or "desktop.hotkey" not in {str(tool or "").strip() for tool in allowed_tools}:
+            return requests
+        if not RuntimeCustomApiAgentLoop._legacy_explicit_return_key_prompt(planning_context):
+            return requests
+        updated: list[dict[str, Any]] = []
+        converted = False
+        for request in requests:
+            tool_name = str(request.get("tool") or "").strip()
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if (
+                not converted
+                and tool_name == "desktop.submit_foreground"
+                and str(payload.get("action") or "").strip() == "confirm"
+            ):
+                updated.append(
+                    {
+                        **request,
+                        "tool": "desktop.hotkey",
+                        "input": {"key": "return", "modifiers": []},
+                        "planning_reason": "planner_desktop_hotkey",
+                    }
+                )
+                converted = True
+                continue
+            updated.append(request)
+        return updated
+
+    @staticmethod
+    def _legacy_explicit_return_key_prompt(planning_context: str) -> bool:
+        value = str(planning_context or "").strip()
+        if re.search(r"(?:发送|提交|send|submit).{0,8}(?:回车|enter|return)", value, flags=re.IGNORECASE):
+            return False
+        return bool(
+            re.search(
+                r"(?:并|再|然后|接着|之后|后|and\s+then|then)?.{0,8}"
+                r"(?:按|敲|触发|press|hit|tap)?\s*(?:回车键?|enter|return)(?:\s|$|[。！？!?，,])",
+                value,
+                flags=re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:

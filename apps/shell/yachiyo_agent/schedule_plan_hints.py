@@ -252,7 +252,12 @@ def _strip_schedule_prefix(value: str) -> str:
     title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我)\s*", "", title)
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
-    return title.strip(" .，,。")
+    title = title.strip(" .，,。")
+    if title in {"个", "一个", "一条", "一项", "新的", "提醒", "提醒事项", "日程", "事件", "会议"}:
+        return ""
+    if title.lower() in {"a", "an", "new", "reminder", "event", "meeting"}:
+        return ""
+    return title
 
 
 _SCHEDULE_TIME_PATTERNS = (

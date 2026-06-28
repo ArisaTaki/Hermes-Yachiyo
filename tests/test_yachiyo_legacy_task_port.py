@@ -1597,14 +1597,14 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     )
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_tool"] == "app.open"
-    assert metadata["daily_desktop_tools"] == ["app.open", "desktop.active_window"]
-    assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_planning_reason"] == "planner_desktop_operation"
+    assert metadata["daily_desktop_tools"] == ["app.open"]
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
     assert metadata["entrypoint_plan"] is True
-    assert metadata["entrypoint_plan_source"] == "runtime_planner"
-    assert metadata["entrypoint_plan_reason"] == "planner_desktop_operation"
-    assert metadata["entrypoint_plan_tools"] == ["app.open", "desktop.active_window"]
-    assert metadata["entrypoint_plan_legacy_fallback"] is False
+    assert metadata["entrypoint_plan_source"] == "daily_desktop_intent"
+    assert metadata["entrypoint_plan_reason"] == "clear_daily_desktop_intent"
+    assert metadata["entrypoint_plan_tools"] == ["app.open"]
+    assert metadata["entrypoint_plan_legacy_fallback"] is True
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [event[1]["event_type"] for event in planner_events[:2]] == [
         "agent.intent.selected",

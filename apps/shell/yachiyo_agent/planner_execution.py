@@ -214,13 +214,18 @@ def _request(
     *,
     planning_reason: str = "planner_desktop_operation",
 ) -> dict[str, Any]:
-    return {
+    clean_payload = dict(payload)
+    input_resolution = clean_payload.pop("_input_resolution", None)
+    request = {
         "protocol": "json_fallback",
         "tool": tool,
-        "input": payload,
+        "input": clean_payload,
         "source": "runtime_planner",
         "planning_reason": planning_reason,
     }
+    if isinstance(input_resolution, Mapping):
+        request["input_resolution"] = dict(input_resolution)
+    return request
 
 
 def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, Any]:
@@ -364,13 +369,21 @@ def _collapse_app_foreground_direct_requests(
             continue
         operation = requests[operation_index]
         operation_tool = str(operation.get("tool") or "").strip()
+        operation_input = operation.get("input") if isinstance(operation.get("input"), Mapping) else {}
+        if (
+            operation_tool == "desktop.safe_shortcut"
+            and str(operation_input.get("action") or "").strip() == "find"
+            and _has_later_search_submit(requests, operation_index)
+        ):
+            collapsed.append(request)
+            index += 1
+            continue
         suffix = _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX.get(operation_tool, "")
         combined_tool = f"app.{mode}_and_{suffix}" if suffix else ""
         if not combined_tool or combined_tool not in allowed:
             collapsed.append(request)
             index += 1
             continue
-        operation_input = operation.get("input") if isinstance(operation.get("input"), Mapping) else {}
         combined_payload = {"app_name": app_name, **dict(operation_input)}
         collapsed.append(
             _request(
@@ -383,13 +396,35 @@ def _collapse_app_foreground_direct_requests(
     return collapsed
 
 
+def _has_later_search_submit(
+    requests: list[dict[str, Any]],
+    operation_index: int,
+) -> bool:
+    for later_request in requests[operation_index + 1 :]:
+        if str(later_request.get("tool") or "").strip() == "desktop.search_submit":
+            return True
+    return False
+
+
 _EXECUTION_VERIFICATION_TOOLS = {
     "desktop.active_window",
+    "desktop.running_apps",
+    "desktop.windows",
     "desktop.ui_elements",
     "screen.capture",
 }
 
 _EXECUTION_MUTATION_TOOLS = {
+    "app.open",
+    "app.focus",
+    "app.focus_window",
+    "app.status",
+    "app.show",
+    "app.hide",
+    "app.minimize",
+    "app.quit",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_key",
@@ -413,6 +448,11 @@ _EXECUTION_MUTATION_TOOLS = {
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.submit_foreground",
+    "desktop.hide_app",
+    "desktop.show_all_apps",
+    "desktop.minimize_window",
+    "desktop.close_window",
+    "desktop.quit_app",
 }
 
 
@@ -423,14 +463,67 @@ def _drop_redundant_execution_verification_requests(
         return requests
     filtered: list[dict[str, Any]] = []
     saw_mutation = False
-    for request in requests:
+    last_mutation_tool = ""
+    for index, request in enumerate(requests):
         tool_name = str(request.get("tool") or "").strip()
-        if saw_mutation and tool_name in _EXECUTION_VERIFICATION_TOOLS:
+        if (
+            not saw_mutation
+            and tool_name in _EXECUTION_VERIFICATION_TOOLS
+            and not _keep_pre_mutation_verification_request(request)
+            and any(
+                str(item.get("tool") or "").strip() in _EXECUTION_MUTATION_TOOLS
+                or _later_verification_supersedes(tool_name, str(item.get("tool") or "").strip())
+                for item in requests[index + 1 :]
+            )
+        ):
+            continue
+        if (
+            saw_mutation
+            and tool_name in _EXECUTION_VERIFICATION_TOOLS
+            and not _keep_post_mutation_verification_request(request, last_mutation_tool)
+        ):
             continue
         filtered.append(request)
         if tool_name in _EXECUTION_MUTATION_TOOLS:
             saw_mutation = True
+            last_mutation_tool = tool_name
     return filtered
+
+
+def _keep_pre_mutation_verification_request(request: dict[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name != "screen.capture":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(str(payload.get("reason") or "").strip())
+
+
+def _keep_post_mutation_verification_request(
+    request: dict[str, Any],
+    previous_mutation_tool: str,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if previous_mutation_tool not in {"app.open", "app.focus"}:
+        return False
+    if tool_name == "desktop.ui_elements":
+        return True
+    if tool_name == "screen.capture":
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        return bool(str(payload.get("reason") or "").strip())
+    return False
+
+
+def _later_verification_supersedes(current_tool: str, later_tool: str) -> bool:
+    if current_tool == later_tool:
+        return False
+    if current_tool == "screen.capture" and later_tool in {"desktop.ui_elements", "desktop.windows"}:
+        return True
+    if current_tool in {"desktop.running_apps", "desktop.active_window"} and later_tool in {
+        "desktop.ui_elements",
+        "desktop.windows",
+    }:
+        return True
+    return False
 
 
 def _same_app_control_request(request: dict[str, Any], tool_name: str, app_name: str) -> bool:
@@ -858,10 +951,32 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             return []
-        if step_id == "open-or-focus-app" and tool_name == "app.open" and "app.focus" in allowed:
-            tool_name = "app.focus"
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        direct_mode = str(direct_hint.get("mode") or "").strip()
+        if (
+            step_id == "open-or-focus-app"
+            and tool_name == "app.open"
+            and "app.focus" in allowed
+            and direct_mode == "open"
+        ):
+            requests.append(
+                _request(
+                    "app.open",
+                    _desktop_request_payload("app.open", payload),
+                    planning_reason="planner_fallback_communication_send",
+                )
+            )
+            requests.append(
+                _request(
+                    "app.focus",
+                    _desktop_request_payload("app.focus", payload),
+                    planning_reason="planner_fallback_communication_send",
+                )
+            )
+            continue
+        if step_id == "open-or-focus-app" and tool_name == "app.open" and "app.focus" in allowed:
+            tool_name = "app.focus"
         requests.append(
             _request(
                 tool_name,
@@ -965,11 +1080,16 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         text = str(decision.selected_intent.inputs.get("text") or "")
         if not selector or not text:
             return []
+        payload: dict[str, Any] = {"selector": selector, "text": text}
+        for key in ("fallback_x", "fallback_y"):
+            value = decision.selected_intent.inputs.get(key)
+            if value not in (None, ""):
+                payload[key] = value
         return [
             *prepare_requests,
             _request(
                 "browser.type_text",
-                {"selector": selector, "text": text},
+                payload,
                 planning_reason="planner_fallback_web_research",
             )
         ]

@@ -243,6 +243,10 @@ def _group_run_shared_artifacts(
         run_id=group_run_id,
         events=events,
     )
+    direct_artifacts = [
+        _group_context_artifact(artifact, group_run_id=group_run_id, group_id=group_id)
+        for artifact in direct_artifacts
+    ]
     child_artifacts = [
         _group_context_artifact(artifact, group_run_id=group_run_id, group_id=group_id)
         for run in runs

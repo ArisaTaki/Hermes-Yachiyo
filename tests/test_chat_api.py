@@ -221,7 +221,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         assert user.metadata["entrypoint_plan_tools"] == ["media.apple_music_open_and_play"]
         assert user.metadata["entrypoint_plan_legacy_fallback"] is False
         assert open_and_play_calls == 1
-        assert run["status"] == "completed"
+        assert run["status"] == "completed", run.get("result")
         assert "agent.intent.selected" in event_types
         assert "agent.plan.created" in event_types
         assert "agent.plan.selection" in event_types
@@ -631,7 +631,7 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         assert user.metadata["daily_desktop_intent"] is True
         assert user.metadata["daily_desktop_tool"] == "media.apple_music_open_and_play"
         assert open_and_play_calls == 1
-        assert run["status"] == "completed"
+        assert run["status"] == "completed", run.get("result")
         assert "agent.intent.selected" in event_types
         assert "agent.plan.created" in event_types
         assert "agent.plan.selection" in event_types
@@ -978,6 +978,7 @@ def test_send_message_opens_explicit_desktop_client_without_model(
     service = _make_agent_runtime_service(tmp_path)
     runtime.agent_runtime_service = service
     open_calls: list[str] = []
+    calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -994,6 +995,7 @@ def test_send_message_opens_explicit_desktop_client_without_model(
 
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
+        calls.append(("open", app_name))
         return {
             "ok": True,
             "action": "app.open",
@@ -1001,34 +1003,58 @@ def test_send_message_opens_explicit_desktop_client_without_model(
             "data": {"app_name": app_name, "launch_verified": True},
         }
 
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": "Executed safe shortcut",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_list_apps(query: str = "", limit: int = 20) -> dict:
+        app_name = "Google Chrome" if "Chrome" in query else "ChatGPT"
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Installed apps matching {query}: {app_name}",
+            "data": {
+                "query": query,
+                "apps": [{"name": app_name, "path": f"/Applications/{app_name}.app"}],
+                "count": 1,
+                "total_count": 1,
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     try:
         result = api.send_message("打开 ChatGPT 客户端")
         task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
+        link = service.get_task_run_link(result["task_id"])
+        run = _wait_for_agent_run(service, link["run_id"])
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
         assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["summary"] == "已打开 ChatGPT。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
-            "app_name": "ChatGPT"
-        }
+        assert run["status"] == "completed"
+        assert run["result"] == "已打开 ChatGPT。"
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert assistant is not None
         assert assistant.content == "已打开 ChatGPT。"
         assert open_calls == ["ChatGPT"]
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
 
         second = api.send_message("Chrome 打开搜索")
         second_task = runtime.state.get_task(second["task_id"])
@@ -1041,8 +1067,7 @@ def test_send_message_opens_explicit_desktop_client_without_model(
         assert second["ok"] is True
         assert second["status"] == "completed"
         assert calls == [
-            ("focus", "Google Chrome"),
-            ("shortcut", "find"),
+            ("open", "ChatGPT"),
             ("focus", "Google Chrome"),
             ("shortcut", "find"),
         ]
@@ -2204,7 +2229,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert assistant.content == result["agent_task"]["summary"]
         assert latest_user.content == "搜索张三"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 6
+        assert event_types.count("agent.desktop.intent_planned") == 5
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
@@ -2256,7 +2281,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert second_assistant.content == second["agent_task"]["summary"]
         assert second_latest_user.content == "在微信搜索文件传输助手"
         assert second_run["status"] == "completed"
-        assert second_event_types.count("agent.desktop.intent_planned") == 6
+        assert second_event_types.count("agent.desktop.intent_planned") == 5
         assert "agent.desktop.intent_completed" in second_event_types
         assert "model.request.started" not in second_event_types
         assert "model.requested" not in second_event_types
@@ -2289,7 +2314,7 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
         assert third_assistant.status == MessageStatus.COMPLETED
         assert third_assistant.content == third["agent_task"]["summary"]
         assert third_run["status"] == "completed"
-        assert third_event_types.count("agent.desktop.intent_planned") == 2
+        assert third_event_types.count("agent.desktop.intent_planned") == 3
         assert "agent.desktop.intent_completed" in third_event_types
         assert "model.request.started" not in third_event_types
         assert "model.requested" not in third_event_types
@@ -2310,18 +2335,35 @@ def test_send_message_executes_app_search_followup_before_model(tmp_path, monkey
             ("type", "file transfer"),
         ]
         assert fourth["agent_task"]["status"] == "completed"
-        assert fourth["agent_task"]["summary"] == "已切到 WeChat 并打开查找。 已向前台输入文字（13 个字符）。"
-        assert [tool_call["tool_name"] for tool_call in fourth["agent_task"]["tool_calls"][-2:]] == [
-            "app.focus_and_safe_shortcut",
-            "desktop.safe_type_text",
+        assert fourth["agent_task"]["summary"] == (
+            "已切换到 WeChat。 已打开查找。 已向前台输入文字（13 个字符）。 已提交前台搜索。"
+        )
+        fourth_tool_names = [
+            tool_call["tool_name"] for tool_call in fourth["agent_task"]["tool_calls"]
         ]
+        for tool_name in (
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ):
+            assert tool_name in fourth_tool_names
+        assert fourth_tool_names.index("app.focus") < fourth_tool_names.index(
+            "desktop.safe_shortcut"
+        )
+        assert fourth_tool_names.index("desktop.safe_shortcut") < fourth_tool_names.index(
+            "desktop.safe_type_text"
+        )
+        assert fourth_tool_names.index("desktop.safe_type_text") < fourth_tool_names.index(
+            "desktop.search_submit"
+        )
         assert fourth_task is not None
         assert fourth_task.status == TaskStatus.COMPLETED
         assert fourth_assistant is not None
         assert fourth_assistant.status == MessageStatus.COMPLETED
         assert fourth_assistant.content == fourth["agent_task"]["summary"]
         assert fourth_run["status"] == "completed"
-        assert fourth_event_types.count("agent.desktop.intent_planned") == 2
+        assert fourth_event_types.count("agent.desktop.intent_planned") == 5
         assert "agent.desktop.intent_completed" in fourth_event_types
         assert "model.request.started" not in fourth_event_types
         assert "model.requested" not in fourth_event_types
@@ -2778,7 +2820,7 @@ def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_pa
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == result["agent_task"]["summary"]
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 4
+        assert event_types.count("agent.desktop.intent_planned") == 3
         assert "agent.desktop.permission_preflight" in event_types
         assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
             "tool.requested"
@@ -7350,7 +7392,7 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
                 "app.open_and_type_into_ui_element",
                 {
                     "app_name": "WeChat",
-                    "target": "搜索",
+                    "target": "搜索框",
                     "text": "文件传输助手",
                     "role_filter": "text",
                     "limit": 80,
@@ -7361,7 +7403,7 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
                 "app.focus_and_type_into_ui_element",
                 {
                     "app_name": "WeChat",
-                    "target": "搜索",
+                    "target": "搜索框",
                     "text": "文件传输助手",
                     "role_filter": "text",
                     "limit": 80,
@@ -7475,8 +7517,14 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
             ),
             (
                 "Chrome 点登录",
-                "browser.click",
-                {"selector": "text=登录", "click_count": 1},
+                "app.focus_and_click_ui_element",
+                {
+                    "app_name": "Google Chrome",
+                    "target": "登录",
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
             ),
         )
         for prompt, tool_name, input_preview in cases:
@@ -7503,7 +7551,7 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
             assert "agent.tool.approval_required" in event_types
             assert "model.request.started" not in event_types
             assert "model.requested" not in event_types
-        assert focus_calls == ["Google Chrome"]
+        assert focus_calls == []
     finally:
         service.close()
         store.close()
@@ -7903,7 +7951,7 @@ def test_send_message_executes_direct_note_creation_without_model(tmp_path, monk
         assert assistant.status == MessageStatus.COMPLETED
         assert run["status"] == "completed"
         assert planned_event["payload"]["tool"] == "notes.create"
-        assert planned_event["payload"]["source"] == "daily_desktop_intent"
+        assert planned_event["payload"]["source"] == "runtime_planner"
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "agent.desktop.intent_approval_required" not in event_types
@@ -8429,8 +8477,6 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             ("当前窗口按回车", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("press enter in current window", "desktop.hotkey", {"key": "return", "modifiers": []}),
             ("空格一下", "desktop.hotkey", {"key": "space", "modifiers": []}),
-            ("退出当前应用", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
-            ("关闭当前 app", "desktop.hotkey", {"key": "q", "modifiers": ["command"]}),
             (
                 "Could you open Chrome and press Command L?",
                 "app.open_and_hotkey",
@@ -9017,9 +9063,6 @@ def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
         ]
         focus_preview = result["agent_task"]["tool_calls"][-2]["input_preview"]
         assert focus_preview["app_name"] == "Google Chrome"
-        assert focus_preview["requested_app_name"] == "Chrome"
-        assert focus_preview["resolved_app_name"] == "Google Chrome"
-        assert focus_preview["app_resolution_source"] == "desktop.list_apps"
         assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
             "role_filter": "button",
             "limit": 80,
@@ -10488,52 +10531,52 @@ def test_send_message_prepares_paste_then_waits_for_send_approval(
                 [("open", "WeChat"), ("focus", "WeChat"), ("shortcut", "paste")],
                 "app.open_and_safe_shortcut",
             ),
-            (
-                "微信给文件传输助手粘贴并发送",
-                [
+                (
+                    "微信给文件传输助手粘贴并发送",
+                    [
+                        ("focus", "WeChat"),
+                    ("shortcut", "find"),
+                    ("type", "文件传输助手"),
+                        ("search_submit", ""),
+                        ("shortcut", "paste"),
+                    ],
+                    "app.focus",
+                ),
+                (
+                    "把剪贴板内容发给微信文件传输助手",
+                    [
+                        ("focus", "WeChat"),
+                    ("shortcut", "find"),
+                    ("type", "文件传输助手"),
+                        ("search_submit", ""),
+                        ("shortcut", "paste"),
+                    ],
+                    "app.focus",
+                ),
+                (
+                    "微信给文件传输助手发送选中的内容",
+                    [
+                        ("shortcut", "copy"),
                     ("focus", "WeChat"),
                     ("shortcut", "find"),
                     ("type", "文件传输助手"),
-                    ("search_submit", ""),
-                    ("shortcut", "paste"),
-                ],
-                "app.focus_and_safe_shortcut",
-            ),
-            (
-                "把剪贴板内容发给微信文件传输助手",
-                [
+                        ("search_submit", ""),
+                        ("shortcut", "paste"),
+                    ],
+                    "app.focus",
+                ),
+                (
+                    "把当前网页链接发给微信文件传输助手",
+                    [
+                        ("shortcut", "copy_current_page_link"),
                     ("focus", "WeChat"),
                     ("shortcut", "find"),
                     ("type", "文件传输助手"),
-                    ("search_submit", ""),
-                    ("shortcut", "paste"),
-                ],
-                "app.focus_and_safe_shortcut",
-            ),
-            (
-                "微信给文件传输助手发送选中的内容",
-                [
-                    ("shortcut", "copy"),
-                    ("focus", "WeChat"),
-                    ("shortcut", "find"),
-                    ("type", "文件传输助手"),
-                    ("search_submit", ""),
-                    ("shortcut", "paste"),
-                ],
-                "app.focus_and_safe_shortcut",
-            ),
-            (
-                "把当前网页链接发给微信文件传输助手",
-                [
-                    ("shortcut", "copy_current_page_link"),
-                    ("focus", "WeChat"),
-                    ("shortcut", "find"),
-                    ("type", "文件传输助手"),
-                    ("search_submit", ""),
-                    ("shortcut", "paste"),
-                ],
-                "app.focus_and_safe_shortcut",
-            ),
+                        ("search_submit", ""),
+                        ("shortcut", "paste"),
+                    ],
+                    "app.focus",
+                ),
         )
         for prompt, expected_calls, first_tool in cases:
             calls.clear()

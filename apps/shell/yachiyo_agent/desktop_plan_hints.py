@@ -23,6 +23,7 @@ _GENERIC_MUSIC_QUERIES = {
     "播放进度",
     "在播状态",
     "进度",
+    "播",
     "apple",
     "个",
     "点",
@@ -128,6 +129,16 @@ def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
 
 
 def click_target_hint(text: str) -> dict[str, Any] | None:
+    if re.search(
+        r"\b(?:press|hit|tap)\s+(?:command|cmd|control|ctrl|option|alt|shift)\b",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:按|敲).{0,6}(?:command|cmd|⌘|control|ctrl|option|alt|shift)",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ):
+        return None
     patterns = (
         r"(?P<target_post>[^。！？!?，,]{1,60}?)(?:按钮|控件|元素|菜单项|菜单|复选框)?\s*(?:双击|点击|点一下|点按|单击)$",
         r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*(?P<target>[^。！？!?，,]+)",
@@ -199,6 +210,12 @@ def safe_type_text_hint(text: str) -> str:
         typed_text = clean_followup_text(
             match.groupdict().get("text") or match.groupdict().get("text_en") or ""
         )
+        typed_text = re.sub(
+            r"^(?:文本|文字|内容|text)\s+",
+            "",
+            typed_text,
+            flags=re.IGNORECASE,
+        ).strip()
         if typed_text:
             return typed_text
     return ""
@@ -235,6 +252,13 @@ def window_list_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     lowered = value.lower()
     if not re.search(r"(?:窗口|windows?)", value, flags=re.IGNORECASE):
+        return None
+    if re.search(
+        r"(?:当前|现在|这个|前台|该)?(?:窗口|window)"
+        r".{0,8}(?:内容|文字|文本|正文|content|text)",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return None
     if _looks_like_current_window_observation(value, lowered):
         return None
@@ -391,7 +415,7 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         ),
         (
             "show",
-            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"^(?:你能(?:不能)?(?:帮我)?|你可以(?:帮我)?|帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:显示|显示一下|显示出来|调出来|叫出来|还原|恢复|取消隐藏|show|restore|unhide)\s*"
             r"(?P<app>[^。！？!?，,]+)",
         ),
@@ -693,13 +717,13 @@ def safe_click_hint(text: str) -> dict[str, int | float] | None:
     value = clean(text)
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:点击|点一下|点按|单击|点|click)\s*"
+        r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|点|click)\s*"
         r"(?:屏幕坐标|屏幕|坐标|位置)?\s*"
         r"(?P<x>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y>\d+(?:\.\d+)?)",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|到)\s*(?:屏幕坐标|屏幕|坐标|位置)?\s*"
         r"(?P<x2>\d+(?:\.\d+)?)\s*(?:,|，|\s)\s*(?P<y2>\d+(?:\.\d+)?)\s*"
-        r"(?:点击|点一下|点按|单击|点|click)",
+        r"(?:(?P<double2>双击|double\s+click)|点击|点一下|点按|单击|点|click)",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -707,15 +731,22 @@ def safe_click_hint(text: str) -> dict[str, int | float] | None:
             continue
         x = match.groupdict().get("x") or match.groupdict().get("x2") or ""
         y = match.groupdict().get("y") or match.groupdict().get("y2") or ""
-        return {"x": _numeric_value(x), "y": _numeric_value(y)}
+        click_count = 2 if match.groupdict().get("double") or match.groupdict().get("double2") else 1
+        payload: dict[str, int | float] = {"x": _numeric_value(x), "y": _numeric_value(y)}
+        if click_count != 1:
+            payload["click_count"] = click_count
+        return payload
     return None
 
 
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
+    app_name = music_app_name_hint(text)
+    if not app_name and _implicit_apple_music_control_hint(text, action=action):
+        app_name = "Music"
     return {
         "action": action,
-        "app_name": music_app_name_hint(text),
+        "app_name": app_name,
         "query": media_query_hint(text) if action == "play" else "",
         "control_only": "true" if media_control_only_hint(text, action=action) else "",
     }
@@ -742,8 +773,12 @@ def media_tool_preview(
         payload = {"app_name": app_name, "action": action} if tool_name == "media.music_app_control" else {"action": action}
         return tool_name, payload
     if action == "play":
-        if control_only and not app_name:
-            tool_name = _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
+        if control_only:
+            tool_name = (
+                _first_allowed(("media.apple_music_control", "media.system_control"), allowed)
+                if app_name
+                else _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
+            )
             return tool_name, {"action": "play"} if tool_name else {}
         tool_name = _first_allowed(
             ("media.apple_music_open_and_play", "media.apple_music_control", "media.system_control"),
@@ -856,7 +891,7 @@ def media_action_hint(text: str) -> str:
         ["暂停", "停一下", "停止", "停止播放", "别放了", "关掉", "pause", "stop playing"],
     ):
         return "pause"
-    if contains_any(lowered, ["继续", "恢复播放", "恢复音乐", "恢复歌", "resume", "continue"]):
+    if _media_resume_play_hint(str(text or "")):
         return "play"
     if re.search(r"\bput\s+.+\s+on\s+(?:apple\s*music|music)\b", lowered):
         return "play"
@@ -875,7 +910,35 @@ def media_control_only_hint(text: str, *, action: str = "") -> bool:
     if action in {"next", "previous", "pause"}:
         return not re.search(r"apple\s*music|苹果音乐|spotify|网易云|qq\s*音乐|qq music", lowered)
     if action == "play":
-        return contains_any(lowered, ["继续", "恢复播放", "恢复音乐", "恢复歌", "resume", "continue"])
+        return _media_resume_play_hint(str(text or "")) or bool(
+            re.fullmatch(r"\s*(?:播放|播|放)(?:一下|下)?\s*", str(text or ""), flags=re.IGNORECASE)
+        )
+    return False
+
+
+def _media_resume_play_hint(text: str) -> bool:
+    value = clean(text)
+    lowered = value.lower()
+    return bool(
+        re.fullmatch(r"(?:播放继续|继续播放|恢复播放|接着播放)", value, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:继续|恢复|接着).{0,8}(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|媒体|播放)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:resume|continue)\s+(?:the\s+)?(?:current\s+)?(?:music|song|track|media|playback|playing)\b",
+            lowered,
+        )
+    )
+
+
+def _implicit_apple_music_control_hint(text: str, *, action: str = "") -> bool:
+    value = clean(text)
+    if action == "next":
+        return bool(re.fullmatch(r"(?:下一首|下一曲|下首)", value, flags=re.IGNORECASE))
+    if action == "play":
+        return bool(re.fullmatch(r"(?:播放|播|放)(?:一下|下)?", value, flags=re.IGNORECASE))
     return False
 
 
@@ -995,6 +1058,26 @@ def clean_target(value: str) -> str:
 
 
 def clean_type_target(value: str, *, app_name: str = "") -> str:
+    raw_field_suffix = re.search(
+        r"(?:^|并|然后|再|接着|之后|后|,|，)\s*(?:在|向|到|in|inside|into)?\s*"
+        r"(?P<field>搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box)$",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    if raw_field_suffix:
+        field = raw_field_suffix.group("field").strip()
+        return clean_target(field) or field
+
+    named_field_match = re.search(
+        r"(?:名为|叫做|叫)\s*(?P<name>[^。！？!?，,]{1,40}?)\s*(?:的)?\s*"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏)",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    if named_field_match:
+        return f"名为 {named_field_match.group('name').strip()} 的"
+
     target = clean_target(value)
     target = re.sub(
         r"^(?:打开|启动|切到|聚焦|open|launch|focus|switch to)\s*",
@@ -1027,8 +1110,12 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
         clean(value),
         flags=re.IGNORECASE,
     )
-    if raw_field_match and target in {"搜索", "消息", "地址"}:
+    if raw_field_match and clean_app_name and target in {"搜索", "消息", "地址"}:
         target = raw_field_match.group(1)
+    if not clean_app_name:
+        target = re.sub(r"^(?:搜索框|搜索栏)$", "搜索", target, flags=re.IGNORECASE)
+        target = re.sub(r"^(?:地址栏)$", "地址", target, flags=re.IGNORECASE)
+        target = re.sub(r"^(?:消息框|聊天框)$", "消息", target, flags=re.IGNORECASE)
     return target.strip(" .，,。") or clean_target(value)
 
 
@@ -1106,9 +1193,10 @@ def _clean_window_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     )
+    app = re.sub(r"\s*(?:的)$", "", app, flags=re.IGNORECASE)
     app = app.strip(" .，,。")
     if re.fullmatch(
-        r"(?:当前|现在|前台|这个|该)?(?:应用|app|软件|程序|窗口|window)",
+        r"(?:当前|现在|前台|这个|该)?(?:应用|app|软件|程序|窗口|window)(?:的)?",
         app,
         flags=re.IGNORECASE,
     ):
@@ -1224,7 +1312,7 @@ def _looks_like_foreground_mutation(value: str, lowered: str) -> bool:
 
 
 def _ui_role_filter_hint(value: str) -> str:
-    if re.search(r"(?:文字|文本|正文|content|text)", value, flags=re.IGNORECASE):
+    if re.search(r"(?:文字|文本|正文|内容|content|text)", value, flags=re.IGNORECASE):
         return "text"
     if re.search(r"(?:按钮|button)", value, flags=re.IGNORECASE):
         return "button"
@@ -1319,13 +1407,16 @@ def _clean_ui_app_name_hint(value: str) -> str:
     ).strip()
     app = re.sub(
         r"\s*(?:当前|现在|这个|前台|该|current|active|foreground|this)?\s*"
-        r"(?:界面|窗口|屏幕|应用|ui|interface|window|screen|app|application)$",
+        r"(?:界面|窗口|屏幕|页面|网页|标签页|应用|"
+        r"ui|interface|window|screen|page|webpage|app|application)$",
         "",
         app,
         flags=re.IGNORECASE,
     ).strip()
     if re.fullmatch(
-        r"(?:当前|现在|这个|前台|该)?(?:应用|app|界面|窗口|屏幕|ui|interface|window|screen)",
+        r"(?:当前|现在|这个|前台|该)?"
+        r"(?:应用|app|界面|窗口|屏幕|页面|网页|标签页|"
+        r"ui|interface|window|screen|page|webpage)",
         app,
         flags=re.IGNORECASE,
     ):
@@ -1338,6 +1429,8 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "window",
         "interface",
         "screen",
+        "page",
+        "webpage",
         "ui",
         "current",
         "active",
@@ -1363,6 +1456,14 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "窗口",
         "界面",
         "屏幕",
+        "图",
+        "页面",
+        "网页",
+        "标签页",
+        "当前页面",
+        "当前网页",
+        "这个页面",
+        "这个网页",
         "当前",
         "前台",
         "并",
@@ -1469,7 +1570,7 @@ def _screen_capture_app_name_hint(value: str) -> str:
 def _clean_management_app_name_hint(value: str) -> str:
     app = clean(value)
     app = re.sub(
-        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|把|将|the)\s*",
+        r"^(?:你能(?:不能)?(?:帮我)?|你可以(?:帮我)?|帮我|请|麻烦|能否|能不能|可以|直接|把|将|the)\s*",
         "",
         app,
         flags=re.IGNORECASE,
@@ -2061,6 +2162,7 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "显示应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
         "显示当前应用所有窗口": "application_windows",
+        "显示当前应用的所有窗口": "application_windows",
         "显示前台应用窗口": "application_windows",
         "显示前台应用所有窗口": "application_windows",
         "应用窗口": "application_windows",

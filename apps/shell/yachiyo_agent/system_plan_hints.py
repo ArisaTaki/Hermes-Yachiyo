@@ -159,7 +159,19 @@ def _volume_payload(text: str) -> dict[str, Any]:
     level_match = re.search(r"(?P<level>\d{1,3})\s*%?", text)
     if _contains_any(text, ["取消静音", "解除静音", "恢复声音"]) or re.search(r"\bunmute\b", lowered):
         return {"action": "unmute"}
-    if _contains_any(text, ["静音", "关闭声音", "关掉声音", "别出声"]) or re.search(r"\bmute\b", lowered):
+    if _contains_any(
+        text,
+        [
+            "静音",
+            "关闭声音",
+            "关掉声音",
+            "声音关掉",
+            "声音关闭",
+            "声音关了",
+            "关声音",
+            "别出声",
+        ],
+    ) or re.search(r"\bmute\b", lowered):
         return {"action": "mute"}
     if has_volume_context and _contains_any(text, ["一半", "半"]):
         return {"action": "set", "level": 50}
@@ -177,6 +189,8 @@ def _volume_payload(text: str) -> dict[str, Any]:
             "提高",
             "放大音量",
             "放大声音",
+            "音量放大",
+            "声音放大",
             "大声",
             "大点声",
             "大一点声",
@@ -200,6 +214,8 @@ def _volume_payload(text: str) -> dict[str, Any]:
             "降低",
             "缩小音量",
             "缩小声音",
+            "音量缩小",
+            "声音缩小",
             "小声",
             "小点声",
             "小一点声",

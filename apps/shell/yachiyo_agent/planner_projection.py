@@ -8,6 +8,8 @@ from typing import Any
 from .contracts import PlannerDecisionSnapshot
 from .runtime_planner import RuntimePlanner
 
+_MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+
 
 def runtime_planner_decision(
     prompt: str,
@@ -61,6 +63,9 @@ def planner_enriched_chat_request(
     allowed_tools: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     payload = dict(request)
+    runnable_id = str(payload.get("agent_id") or payload.get("runnable_id") or "").strip()
+    if runnable_id and runnable_id != _MAIN_CHAT_AGENT_ID:
+        return payload
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     decision = runtime_planner_decision(
         str(payload.get("prompt") or payload.get("goal") or ""),

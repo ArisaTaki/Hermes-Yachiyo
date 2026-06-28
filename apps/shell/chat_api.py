@@ -1082,8 +1082,12 @@ class ChatAPI:
         metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        try:
+            runtime_service = self._agent_runtime_service()
+        except Exception:
+            runtime_service = None
         allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
-            self._agent_runtime_service(),
+            runtime_service,
             fallback=allowed_daily_desktop_tools,
         )
         return planner_first_daily_desktop_entrypoint_requests(
@@ -1527,7 +1531,7 @@ class ChatAPI:
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and bool(daily_desktop_requests)
+                and self._daily_desktop_requests_can_direct_execute(daily_desktop_requests)
             )
             direct_planner_orchestration_intent = (
                 not raw_attachments
@@ -4044,6 +4048,12 @@ class ChatAPI:
             return False
         executor = getattr(runner, "executor", None)
         return bool(execution_capabilities(executor).get("model"))
+
+    @staticmethod
+    def _daily_desktop_requests_can_direct_execute(requests: list[dict[str, Any]]) -> bool:
+        if not requests:
+            return False
+        return not any(bool(request.get("continue_to_model")) for request in requests)
 
     @staticmethod
     def _should_attach_desktop_snapshot(text: str, saved_attachments: list[dict]) -> bool:

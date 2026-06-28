@@ -7320,6 +7320,62 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_studio_routes_preserve_runtime_debug_snapshot_fields() -> None:
+    runtime = _FakeAgentRuntime()
+    runtime.runs["run-observable"] = _observable_run_payload("run-observable")
+    runtime.runs["run-1"] = _observable_run_payload("run-1")
+    runtime.task_links["task-observable"] = {
+        "task_id": "task-observable",
+        "run_id": "run-observable",
+        "session_id": "chat-observable",
+        "run_status": "approval_required",
+        "last_event_sequence": 4,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:04Z",
+    }
+    request = _request(runtime)
+
+    runs = await yachiyo.list_studio_runs(request, limit=5)
+    timeline = await yachiyo.get_studio_run_timeline("run-observable", request)
+    group_runs = await yachiyo.list_studio_group_runs(request, limit=5)
+    group_run = await yachiyo.get_studio_group_run("group-run-1", request)
+    workflows = await yachiyo.list_studio_workflows(request)
+
+    listed_run = runs["runs"][0]
+    assert listed_run["run_id"] == "run-observable"
+    assert listed_run["task_id"] == "task-observable"
+    assert listed_run["task_run_link_last_event_sequence"] == 4
+    assert listed_run["planner_summary"]["intent_kind"] == "data_analysis"
+    assert listed_run["planner_summary"]["plan_tools"] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert listed_run["tool_calls"][0]["tool_name"] == "terminal.run"
+    assert listed_run["pending_approval"]["tool_name"] == "terminal.run"
+    assert listed_run["artifacts"][0]["path"] == "reports/observable.md"
+
+    assert timeline["memory_traces"][0]["memory_id"] == "memory-observable"
+    assert timeline["skill_traces"][0]["skill_id"] == "skill-observable"
+    assert timeline["artifacts"][1]["artifact_id"] == "artifact-event-observable"
+    assert timeline["events"][0]["event_type"] == "memory.retrieved"
+
+    listed_group_run = group_runs["group_runs"][0]
+    assert listed_group_run["group_run_id"] == "group-run-1"
+    assert listed_group_run["runs"][0]["run_id"] == "run-1"
+    assert listed_group_run["runs"][0]["planner_summary"]["intent_kind"] == "data_analysis"
+    assert listed_group_run["tool_calls"][0]["tool_name"] == "terminal.run"
+    assert listed_group_run["pending_approvals"][0]["approval_id"] == "approval-run-1"
+    assert listed_group_run["shared_artifacts"][0]["group_run_id"] == "group-run-1"
+    assert listed_group_run["memory_traces"][0]["memory_id"] == "memory-observable"
+    assert listed_group_run["skill_traces"][0]["skill_id"] == "skill-observable"
+
+    assert group_run["child_run_ids"] == ["run-1"]
+    assert group_run["runs"][0]["artifacts"][0]["path"] == "reports/observable.md"
+    assert workflows["workflows"][0]["nodes"][0]["type"] == "start"
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -8057,6 +8113,107 @@ def _run_payload(
         "artifacts": [{"artifact_id": "artifact-1", "kind": "markdown", "path": "report.md"}],
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _observable_run_payload(run_id: str) -> dict[str, Any]:
+    return _run_payload(run_id=run_id, user_goal="Analyze sales data") | {
+        "status": "approval_required",
+        "planner_summary": {
+            "source": "runtime_planner",
+            "decision_id": f"decision-{run_id}",
+            "plan_id": f"plan-{run_id}",
+            "intent_kind": "data_analysis",
+            "intent_title": "Analyze data",
+            "route_to_studio": True,
+            "plan_tools": ["workspace.read", "terminal.run", "artifact.write"],
+            "selected_tools": ["workspace.read", "terminal.run"],
+            "plan_capabilities": ["file_read", "terminal_execution", "artifact_output"],
+            "required_capabilities": ["file_read", "data_analysis"],
+            "approvals_required": ["terminal.run"],
+            "artifacts_expected": ["markdown_report"],
+            "step_count": 3,
+            "event_count": 2,
+        },
+        "tool_calls": [
+            {
+                "tool_call_id": f"tool-{run_id}",
+                "tool_name": "terminal.run",
+                "status": "waiting_approval",
+                "risk_level": "medium",
+                "input_preview": {"command": "python analyze.py"},
+                "approval_id": f"approval-{run_id}",
+            }
+        ],
+        "pending_approval": {
+            "approval_id": f"approval-{run_id}",
+            "tool": "terminal.run",
+            "risk_level": "medium",
+            "input_preview": {"command": "python analyze.py"},
+        },
+        "artifacts": [
+            {
+                "artifact_id": f"artifact-direct-{run_id}",
+                "kind": "markdown",
+                "path": "reports/observable.md",
+                "title": "Observable report",
+            }
+        ],
+        "events": [
+            {
+                "event_id": f"memory-{run_id}",
+                "run_id": run_id,
+                "sequence": 1,
+                "event_type": "memory.retrieved",
+                "payload": {
+                    "count": 1,
+                    "group_id": "group-run-1",
+                    "run_group_id": "group-run-1",
+                    "memories": [
+                        {
+                            "memory_id": "memory-observable",
+                            "kind": "preference",
+                            "scope": "shared",
+                        }
+                    ],
+                },
+            },
+            {
+                "event_id": f"skill-{run_id}",
+                "run_id": run_id,
+                "sequence": 2,
+                "event_type": "skill.selected",
+                "payload": {
+                    "skill_id": "skill-observable",
+                    "skill_name": "Data analyst",
+                    "source_ref": "skills/data-analyst/SKILL.md",
+                },
+            },
+            {
+                "event_id": f"artifact-{run_id}",
+                "run_id": run_id,
+                "sequence": 3,
+                "event_type": "artifact.created",
+                "payload": {
+                    "artifact_id": "artifact-event-observable",
+                    "kind": "markdown",
+                    "path": "reports/event-observable.md",
+                    "title": "Event report",
+                },
+            },
+            {
+                "event_id": f"group-{run_id}",
+                "run_id": run_id,
+                "sequence": 4,
+                "event_type": "group.member.started",
+                "payload": {
+                    "group_id": "group-run-1",
+                    "run_group_id": "group-run-1",
+                    "member_agent_id": "agent-1",
+                    "objective": "Summary",
+                },
+            },
+        ],
     }
 
 

@@ -64,6 +64,18 @@ from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
+_DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+    "desktop.windows",
+    "desktop.permissions",
+}
+_DAILY_DESKTOP_METADATA_VERIFY_TOOLS = {
+    "desktop.active_window",
+    "desktop.windows",
+    "desktop.ui_elements",
+    "screen.capture",
+}
 
 
 def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
@@ -87,6 +99,41 @@ def _prefer_execution_requests_for_metadata(metadata: dict[str, Any] | None) -> 
     launcher_mode = str(metadata.get("launcher_mode") or "").strip()
     launcher_surface = str(metadata.get("launcher_surface") or "").strip()
     return source == "launcher" or bool(launcher_mode) or bool(launcher_surface)
+
+
+def _visible_daily_desktop_metadata_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    primary = [
+        request
+        for request in requests
+        if str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS
+        and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
+    ]
+    return primary or requests
+
+
+def _task_message_metadata(chat_session: Any, task_id: str, *, role: str) -> dict[str, Any]:
+    for message in getattr(chat_session, "messages", []) or []:
+        if str(getattr(message, "task_id", "") or "").strip() != str(task_id or "").strip():
+            continue
+        message_role = getattr(message, "role", "")
+        role_value = str(getattr(message_role, "value", message_role) or "").strip()
+        if role_value != role:
+            continue
+        metadata = getattr(message, "metadata", None)
+        return dict(metadata) if isinstance(metadata, dict) else {}
+    return {}
+
+
+def _legacy_app_launch_metadata_compat(requests: list[dict[str, Any]]) -> bool:
+    if len(requests) != 1:
+        return False
+    request = requests[0]
+    return (
+        str(request.get("tool") or "").strip() == "app.open"
+        and str(request.get("planning_reason") or "").strip() == "planner_desktop_operation"
+    )
 
 
 def _legacy_hotkey_compat_required(runtime: Any) -> bool:
@@ -222,6 +269,19 @@ class LegacyChatTaskStarter:
             allowed_tools=allowed_entrypoint_tools,
             metadata_allowed_tools=allowed_daily_desktop_tools,
         )
+        if _prefer_execution_requests_for_metadata(metadata):
+            planned_requests = [
+                {
+                    **request,
+                    "planning_reason": (
+                        "planner_fallback_desktop_operation"
+                        if str(request.get("planning_reason") or "").strip()
+                        == "planner_desktop_operation"
+                        else request.get("planning_reason")
+                    ),
+                }
+                for request in planned_requests
+            ]
         return daily_desktop_planned_timeline(
             prompt,
             requests=planned_requests,
@@ -268,6 +328,11 @@ class LegacyChatTaskStarter:
             selected_requests = _apply_legacy_search_field_target_label(
                 prompt or execution_prompt,
                 selection.requests,
+            )
+            selected_requests = _apply_legacy_return_hotkey_projection(
+                prompt or execution_prompt,
+                selected_requests,
+                allowed_entrypoint_tools,
             )
             raw_selected_requests = list(selected_requests)
             if _legacy_hotkey_compat_required(self._runtime):
@@ -422,10 +487,22 @@ class LegacyChatTaskStarter:
         update_metadata = getattr(chat_session, "update_message_metadata_for_task", None)
         if not callable(update_metadata):
             return
+        visible_requests = _visible_daily_desktop_metadata_requests(desktop_requests)
+        existing_user_metadata = _task_message_metadata(chat_session, task_id, role="user")
         metadata = {
             **runtime_planner_metadata(planner_decision),
-            **entrypoint_plan_user_metadata(desktop_requests),
+            **entrypoint_plan_user_metadata(visible_requests),
         }
+        if (
+            metadata.get("daily_desktop_source") == "runtime_planner"
+            and _legacy_app_launch_metadata_compat(visible_requests)
+            and not _prefer_execution_requests_for_metadata(existing_user_metadata)
+        ):
+            metadata["daily_desktop_source"] = "daily_desktop_intent"
+            metadata["daily_desktop_planning_reason"] = "clear_daily_desktop_intent"
+            metadata["entrypoint_plan_source"] = "daily_desktop_intent"
+            metadata["entrypoint_plan_reason"] = "clear_daily_desktop_intent"
+            metadata["entrypoint_plan_legacy_fallback"] = True
         if not metadata:
             return
         try:
@@ -1031,12 +1108,18 @@ def _safe_runtime_planner_tool_requests(
         requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
         requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
         requests = _apply_legacy_search_field_target_label(prompt, requests)
+        requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
         requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
         if _has_approval_plan_tool(requests):
             return []
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             return []
-        return _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
+        requests = _coalesce_legacy_direct_app_shortcut_requests(
+            prompt,
+            requests,
+            allowed_tools,
+        )
+        return _drop_legacy_open_then_plain_find_submit(prompt, requests)
     requests = planner_direct_tool_requests(
         prompt,
         allowed_tools,
@@ -1045,13 +1128,14 @@ def _safe_runtime_planner_tool_requests(
     requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
     requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
     requests = _apply_legacy_search_field_target_label(prompt, requests)
+    requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
     requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
     if _has_approval_plan_tool(requests):
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
     requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
-    return requests
+    return _drop_legacy_open_then_plain_find_submit(prompt, requests)
 
 
 def _apply_legacy_file_transfer_app_alias(
@@ -1061,8 +1145,10 @@ def _apply_legacy_file_transfer_app_alias(
 ) -> list[dict[str, Any]]:
     if not requests or _search_field_prompt(prompt):
         return requests
+    if "企业微信" not in str(prompt or ""):
+        return requests
     if not re.search(
-        r"微信\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*文件传输助手",
+        r"企业微信\s*(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)\s*文件传输助手",
         str(prompt or ""),
     ):
         return requests
@@ -1094,7 +1180,11 @@ def _apply_legacy_plain_search_open_mode(
         flags=re.IGNORECASE,
     ):
         return requests
-    if not re.search(r"(?:搜索|查找|检索|找|search|find|look)", value, flags=re.IGNORECASE):
+    if not re.search(
+        r"(?:搜索|查找|检索|找|\b(?:search|find|look)\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return requests
     if any(str(request.get("tool") or "").strip() == "app.open" for request in requests):
         return requests
@@ -1107,6 +1197,59 @@ def _apply_legacy_plain_search_open_mode(
             converted = True
         updated.append(copied)
     return updated
+
+
+def _drop_legacy_open_then_plain_find_submit(
+    prompt: str,
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not requests or not _legacy_open_then_plain_find_prompt(prompt):
+        return requests
+    updated: list[dict[str, Any]] = []
+    has_find_shortcut = False
+    has_typed_query = False
+    dropped_submit = False
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if tool_name in {"desktop.safe_shortcut", "app.open_and_safe_shortcut"}:
+            has_find_shortcut = str(payload.get("action") or "").strip() == "find"
+        elif has_find_shortcut and tool_name == "desktop.safe_type_text":
+            has_typed_query = True
+        if (
+            has_find_shortcut
+            and has_typed_query
+            and not dropped_submit
+            and tool_name == "desktop.search_submit"
+        ):
+            dropped_submit = True
+            continue
+        updated.append(request)
+    return updated
+
+
+def _legacy_open_then_plain_find_prompt(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    if _search_field_prompt(value):
+        return False
+    return bool(
+        _legacy_explicit_app_open_request(value)
+        and re.search(
+            r"(?:然后|接着|之后)\s*(?:搜索|查找|检索)\s*[^。！？!?，,]+$",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _legacy_explicit_app_open_request(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:打开|启动|开启|open|launch|start)\s+",
+            str(prompt or ""),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _has_app_scoped_find_shortcut(requests: list[dict[str, Any]]) -> bool:
@@ -1169,6 +1312,53 @@ def _apply_legacy_hotkey_safe_shortcut_request(
                 }
             ]
     return requests
+
+
+def _apply_legacy_return_hotkey_projection(
+    prompt: str,
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not requests or "desktop.hotkey" not in {str(tool or "").strip() for tool in allowed_tools}:
+        return requests
+    if not _legacy_explicit_return_key_prompt(prompt):
+        return requests
+    updated: list[dict[str, Any]] = []
+    converted = False
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if (
+            not converted
+            and tool_name == "desktop.submit_foreground"
+            and str(payload.get("action") or "").strip() == "confirm"
+        ):
+            updated.append(
+                {
+                    **request,
+                    "tool": "desktop.hotkey",
+                    "input": {"key": "return", "modifiers": []},
+                    "planning_reason": "planner_desktop_hotkey",
+                }
+            )
+            converted = True
+            continue
+        updated.append(request)
+    return updated
+
+
+def _legacy_explicit_return_key_prompt(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    if re.search(r"(?:发送|提交|send|submit).{0,8}(?:回车|enter|return)", value, flags=re.IGNORECASE):
+        return False
+    return bool(
+        re.search(
+            r"(?:并|再|然后|接着|之后|后|and\s+then|then)?.{0,8}"
+            r"(?:按|敲|触发|press|hit|tap)?\s*(?:回车键?|enter|return)(?:\s|$|[。！？!?，,])",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _selection_payload_with_selected_requests(

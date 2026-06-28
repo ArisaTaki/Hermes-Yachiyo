@@ -1319,11 +1319,17 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "followup_action": "click_search_result",
         "selector": "search-result=1",
         "click_count": 1,
+        "app_name": "Chrome",
+        "app_mode": "focus",
     }
     assert [step.step_id for step in first_result.plan.tool_plan.steps] == [
+        "open-or-focus-browser",
         "open-web-search",
         "click-web-search-result",
     ]
+    browser_step = _step_by_id(first_result, "open-or-focus-browser")
+    assert browser_step.tool_name is None
+    assert browser_step.status == "unavailable"
     assert _step_by_id(first_result, "open-web-search").input_preview == {
         "url": "https://www.google.com/search?q=OpenAI"
     }
@@ -2030,6 +2036,10 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
         "当前界面有哪些按钮",
         allowed_tools=["desktop.active_window", "desktop.ui_elements"],
     )
+    current_window_content = RuntimePlanner().decision(
+        "读取当前窗口内容",
+        allowed_tools=["desktop.active_window", "desktop.windows", "desktop.ui_elements"],
+    )
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.risk_level == "low"
@@ -2048,6 +2058,14 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     assert read_ui.input_preview == {"role_filter": "button", "limit": 80}
     assert read_ui.depends_on == ["discover-desktop-state"]
     assert read_ui.approval_required is False
+    assert current_window_content.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert current_window_content.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(current_window_content, "read-foreground-ui").tool_name == (
+        "desktop.ui_elements"
+    )
 
     polite_current = RuntimePlanner().decision(
         "你能看看现在有哪些按钮吗",
@@ -7952,6 +7970,13 @@ def test_entrypoint_selection_routes_web_search_first_result_sequence_to_planner
     assert selection.requests == [
         {
             "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
             "source": "runtime_planner",
@@ -8809,6 +8834,37 @@ def test_planner_tool_requests_maps_explicit_hotkey_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_hotkey",
         }
+    ]
+
+
+def test_planner_tool_requests_preserves_hotkey_type_return_sequence() -> None:
+    requests = planner_tool_requests(
+        "按 Command+L，再输入 github.com，再按回车",
+        allowed_tools=["desktop.hotkey", "desktop.safe_type_text"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        },
     ]
 
 

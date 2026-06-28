@@ -1899,7 +1899,7 @@ def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_
     }
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
-    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert event_types.count("agent.desktop.intent_planned") == 3
     assert "agent.tool.call" in event_types
     assert "agent.desktop.intent_completed" in event_types
     assert "agent.desktop.intent_approval_required" not in event_types
@@ -2873,7 +2873,7 @@ def test_chat_bridge_quick_message_executes_app_search_followup_for_launcher_ent
     ):
         assert tool_name in timeline_tool_names
     run_event_types = [event["event_type"] for event in result["_events"]]
-    assert run_event_types.count("agent.desktop.intent_planned") == 6
+    assert run_event_types.count("agent.desktop.intent_planned") == 5
     assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
         "agent.tool.call"
     ) < run_event_types.index("agent.desktop.intent_completed")
@@ -3007,11 +3007,11 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
     assert "model.requested" not in event_types
 
     launcher_cases = [
-        ("在微信搜索文件传输助手", "bubble", "企业微信", "文件传输助手"),
-        ("Apple Music 搜索超时空辉夜姬", "live2d", "Music", "超时空辉夜姬"),
-        ("Finder 找下载文件", "bubble", "Finder", "下载文件"),
+        ("在微信搜索文件传输助手", "bubble", "focus", "WeChat", "文件传输助手"),
+        ("Apple Music 搜索超时空辉夜姬", "live2d", "focus", "Music", "超时空辉夜姬"),
+        ("Finder 找下载文件", "bubble", "focus", "Finder", "下载文件"),
     ]
-    for prompt, launcher_mode, app_name, typed_text in launcher_cases:
+    for prompt, launcher_mode, app_action, app_name, typed_text in launcher_cases:
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
             monkeypatch,
@@ -3021,7 +3021,7 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
 
         assert result["ok"] is True
         assert calls[-4:] == [
-            ("open", app_name),
+            (app_action, app_name),
             ("shortcut", "find"),
             ("type", typed_text),
             ("search_submit", ""),
@@ -3029,13 +3029,15 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
         assert agent_task["status"] == "completed"
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
-        open_summary = f"已打开{app_name}" if app_name == "企业微信" else f"已打开 {app_name}"
+        open_summary = (
+            f"已切换到 {app_name}" if app_action == "focus" else f"已打开 {app_name}"
+        )
         assert agent_task["summary"] == (
             f"{open_summary}。 已打开查找。 "
             f"已向前台输入文字（{len(typed_text)} 个字符）。 已提交前台搜索。"
         )
         tool_names = [tool_call["tool_name"] for tool_call in agent_task["tool_calls"]]
-        assert "app.open" in tool_names
+        assert f"app.{app_action}" in tool_names
         assert "desktop.safe_shortcut" in tool_names
         assert "desktop.safe_type_text" in tool_names
         assert "desktop.search_submit" in tool_names
@@ -3454,6 +3456,7 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
     runtime.chat_session.add_assistant_message("已打开 GitHub。")
     focus_calls: list[str] = []
     click_calls: list[tuple[str, int]] = []
+    ui_click_calls: list[tuple[str, str, int, int]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: _FakeNoDefaultProfileService(),
@@ -3491,7 +3494,23 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
             "data": {"app_name": app_name},
         }
 
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+        click_count: int = 1,
+    ) -> dict:
+        ui_click_calls.append((target, role_filter, limit, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": f"Clicked UI element: {target}",
+            "data": {"target": target, "label": target, "role": role_filter or "button"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
     try:
@@ -3548,17 +3567,23 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
         second_waiting_run = service.get_run(second_link["run_id"])
 
         assert second["ok"] is True
-        assert focus_calls == ["Google Chrome"]
+        assert focus_calls == []
         assert click_calls == [("text=登录", 1)]
+        assert ui_click_calls == []
         assert second_waiting_task["status"] == "waiting_approval"
         assert second_waiting_task["needs_user_action"] is True
-        assert second_waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert second_waiting_task["pending_approvals"][0]["tool_name"] == (
+            "app.focus_and_click_ui_element"
+        )
         assert second_waiting_task["pending_approvals"][0]["input_preview"] == {
-            "selector": "text=登录",
+            "app_name": "Google Chrome",
+            "target": "登录",
+            "role_filter": "button",
             "click_count": 1,
+            "limit": 80,
         }
         assert second_waiting_run["status"] == "approval_required"
-        assert second_waiting_run["pending_approval"]["tool"] == "browser.click"
+        assert second_waiting_run["pending_approval"]["tool"] == "app.focus_and_click_ui_element"
 
         second_approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(second_task_id)
         second_run = service.get_run(second_link["run_id"])
@@ -3567,7 +3592,9 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
             for event in service.list_run_events(second_run["run_id"])["events"]
         ]
 
-        assert click_calls == [("text=登录", 1), ("text=登录", 1)]
+        assert focus_calls == ["Google Chrome"]
+        assert click_calls == [("text=登录", 1)]
+        assert ui_click_calls == [("登录", "button", 80, 1)]
         assert second_approved.status == "completed"
         assert "agent.desktop.intent_approval_required" in second_event_types
         assert "agent.desktop.intent_completed" in second_event_types
@@ -3592,7 +3619,9 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
     )
     runtime.agent_runtime_service = service
     open_calls: list[str] = []
+    focus_calls: list[str] = []
     click_calls: list[tuple[str, int]] = []
+    ui_click_calls: list[tuple[str, str, int, int]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: _FakeNoDefaultProfileService(),
@@ -3617,6 +3646,15 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
             "data": {"app_name": app_name, "launch_verified": True},
         }
 
+    def fake_app_focus(app_name: str) -> dict:
+        focus_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
     def fake_browser_click(selector: str, **kwargs: Any) -> dict:
         click_calls.append((selector, int(kwargs.get("click_count") or 1)))
         return {
@@ -3630,7 +3668,24 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
             },
         }
 
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+        click_count: int = 1,
+    ) -> dict:
+        ui_click_calls.append((target, role_filter, limit, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": f"Clicked UI element: {target}",
+            "data": {"target": target, "label": target, "role": role_filter or "button"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
     try:
@@ -3648,17 +3703,22 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
-        assert open_calls == ["Google Chrome"]
+        assert open_calls == []
+        assert focus_calls == []
         assert click_calls == []
+        assert ui_click_calls == []
         assert waiting_task["status"] == "waiting_approval"
         assert waiting_task["needs_user_action"] is True
-        assert waiting_task["pending_approvals"][0]["tool_name"] == "browser.click"
+        assert waiting_task["pending_approvals"][0]["tool_name"] == "app.open_and_click_ui_element"
         assert waiting_task["pending_approvals"][0]["input_preview"] == {
-            "selector": "text=登录",
+            "app_name": "Google Chrome",
+            "target": "登录",
+            "role_filter": "button",
             "click_count": 1,
+            "limit": 80,
         }
         assert waiting_run["status"] == "approval_required"
-        assert waiting_run["pending_approval"]["tool"] == "browser.click"
+        assert waiting_run["pending_approval"]["tool"] == "app.open_and_click_ui_element"
 
         approved = YachiyoAgentService(LegacyRuntimePort(service)).approve(task_id)
         run = service.get_run(link["run_id"])
@@ -3668,9 +3728,11 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         ]
 
         assert open_calls == ["Google Chrome"]
-        assert click_calls == [("text=登录", 1)]
+        assert focus_calls == ["Google Chrome"]
+        assert click_calls == []
+        assert ui_click_calls == [("登录", "button", 80, 1)]
         assert approved.status == "completed"
-        assert approved.summary == "已打开 Google Chrome。 已点击网页元素：登录。"
+        assert approved.summary == "已打开 Google Chrome 并点击前台控件：登录。"
         assert approved.needs_user_action is False
         assert approved.pending_approvals == []
         assert run["status"] == "completed"
@@ -4425,7 +4487,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_search_field
     assert agent_task["pending_approvals"][0]["tool_name"] == "app.open_and_type_into_ui_element"
     assert agent_task["pending_approvals"][0]["input_preview"] == {
         "app_name": "WeChat",
-        "target": "搜索",
+        "target": "搜索框",
         "text": "文件传输助手",
         "role_filter": "text",
         "limit": 80,
@@ -5452,7 +5514,7 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
     ]
     assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert event_types.count("agent.desktop.intent_planned") == 3
     assert "artifact.created" in event_types
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
@@ -5487,7 +5549,7 @@ def test_chat_bridge_quick_message_executes_app_then_screen_capture_without_mode
         ]
         assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 3
         assert "artifact.created" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -5546,7 +5608,7 @@ def test_chat_bridge_quick_message_executes_app_prefix_screen_capture_without_mo
         }
         assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 3
         assert "artifact.created" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -5592,7 +5654,7 @@ def test_chat_bridge_quick_message_executes_app_prefix_screen_capture_without_mo
         ]
         assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 2
+        assert event_types.count("agent.desktop.intent_planned") == 3
         assert "artifact.created" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
@@ -5661,7 +5723,7 @@ def test_chat_bridge_quick_message_executes_app_safe_shortcut_sequence_without_m
         "desktop.safe_shortcut",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 2
+    assert event_types.count("agent.desktop.intent_planned") == 3
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
@@ -6575,7 +6637,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
         "desktop.safe_shortcut",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 4
+    assert event_types.count("agent.desktop.intent_planned") == 3
     assert "agent.desktop.permission_preflight" in event_types
     assert event_types.index("agent.desktop.permission_preflight") < event_types.index(
         "tool.requested"
@@ -6638,6 +6700,7 @@ def test_chat_bridge_quick_message_executes_app_find_sequence_without_model(
 
     assert calls == [
         ("open", "Finder"),
+        ("focus", "Finder"),
         ("shortcut", "find"),
         ("type", "下载"),
     ]
@@ -6645,17 +6708,14 @@ def test_chat_bridge_quick_message_executes_app_find_sequence_without_model(
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == (
-        "已打开 Finder。 已打开查找。 已向前台输入文字（2 个字符）。 已提交前台搜索。"
+        "已打开 Finder 并打开查找。 已向前台输入文字（2 个字符）。"
     )
-    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-5:]] == [
-        "app.open",
-        "desktop.safe_shortcut",
+    assert [tool_call["tool_name"] for tool_call in agent_task["tool_calls"][-2:]] == [
+        "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
-        "desktop.search_submit",
-        "desktop.ui_elements",
     ]
     assert run["status"] == "completed"
-    assert event_types.count("agent.desktop.intent_planned") == 6
+    assert event_types.count("agent.desktop.intent_planned") == 3
     assert "agent.desktop.intent_completed" in event_types
     assert "model.request.started" not in event_types
 
@@ -7325,7 +7385,7 @@ def test_chat_bridge_quick_message_prepares_paste_then_waits_for_send_approval(
                 ("search_submit", ""),
                 ("shortcut", "paste"),
             ],
-            "app.focus_and_safe_shortcut",
+            "app.focus",
         ),
     )
     for prompt, launcher_mode, expected_calls, first_tool in cases:

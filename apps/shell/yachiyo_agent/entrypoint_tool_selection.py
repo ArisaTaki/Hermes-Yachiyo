@@ -129,6 +129,10 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
     if _runtime_planner_clipboard_owns_selection(requests):
         return False
     if _runtime_planner_web_research_owns_selection(requests):
+        if _bare_cjk_search_prompt(prompt):
+            return True
+        if _browser_shortcut_search_prompt(prompt):
+            return True
         return False
     if _runtime_planner_communication_send_owns_selection(requests):
         return False
@@ -254,6 +258,29 @@ def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]])
         "browser.screenshot",
         "browser.type_text",
     }
+
+
+def _browser_shortcut_search_prompt(prompt: str) -> bool:
+    value = str(prompt or "")
+    return bool(
+        re.search(
+            r"(?:chrome|google\s*chrome|safari|浏览器|谷歌).{0,20}"
+            r"(?:新建标签页|新标签页|打开新标签页|开新标签页|新建窗口|新窗口|new\s+tab|new\s+window)"
+            r".{0,24}(?:搜索|查找|检索|search|find)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _bare_cjk_search_prompt(prompt: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:搜索|查找|检索)\s*[\u3400-\u9fff]{1,12}",
+            str(prompt or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _runtime_planner_communication_send_owns_selection(requests: list[dict[str, Any]]) -> bool:

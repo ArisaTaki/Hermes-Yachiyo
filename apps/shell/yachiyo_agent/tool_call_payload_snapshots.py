@@ -219,7 +219,7 @@ def _restore_stable_scalar_types(source: Any, target: Any) -> dict[str, Any]:
 
 def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value)
-    for key in ("limit", "click_count", "repeat_count", "level", "pages"):
+    for key in ("limit", "click_count", "repeat_count", "level", "pages", "x", "y"):
         item = result.get(key)
         if isinstance(item, str) and item.isdigit():
             result[key] = int(item)
@@ -240,12 +240,20 @@ def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
             parsed = _literal_preview_value(item)
             if isinstance(parsed, list):
                 result[key] = parsed
+    data = result.get("data")
+    if isinstance(data, str):
+        parsed_data = _literal_preview_value(data)
+        if isinstance(parsed_data, (dict, list)):
+            result["data"] = parsed_data
     return result
 
 
 def _literal_preview_value(value: str) -> Any:
     text = value.strip()
-    if not (text.startswith("[") and text.endswith("]")):
+    if not (
+        (text.startswith("[") and text.endswith("]"))
+        or (text.startswith("{") and text.endswith("}"))
+    ):
         return value
     try:
         return ast.literal_eval(text)
