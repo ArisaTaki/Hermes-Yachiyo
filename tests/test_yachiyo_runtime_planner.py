@@ -2120,6 +2120,14 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
             "workspace.list",
         ],
     )
+    current_window_markdown = RuntimePlanner().decision(
+        "把当前窗口内容总结成 markdown 文件",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_report = RuntimePlanner().decision(
+        "把当前应用内容整理成一份报告",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
@@ -2162,6 +2170,33 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert not any(
         step.tool_name == "workspace.list"
         for step in selected_markdown.plan.tool_plan.steps
+    )
+    assert current_window_markdown.selected_intent.kind == "report_generation"
+    assert current_window_markdown.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert [step.step_id for step in current_window_markdown.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(current_window_markdown, "read-report-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(current_window_markdown, "read-report-context").input_preview == {
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(current_window_markdown, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "visible_text",
+    }
+    assert current_app_report.selected_intent.kind == "report_generation"
+    assert current_app_report.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert not any(
+        step.tool_name == "workspace.list"
+        for step in current_app_report.plan.tool_plan.steps
     )
 
     read_only = RuntimePlanner().decision(
@@ -11066,6 +11101,14 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "workspace.list",
         ],
     )
+    current_window_markdown_requests = planner_tool_requests(
+        "读取当前窗口内容，然后把摘要保存成 markdown 文件",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_report_requests = planner_tool_requests(
+        "把当前应用内容整理成一份报告",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
 
     assert selection_requests == [
         {
@@ -11117,6 +11160,26 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "planning_reason": "planner_prefetch_report_context",
             "continue_to_model": True,
         },
+    ]
+    assert current_window_markdown_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert current_app_report_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
     ]
 
     current_page_report_requests = planner_tool_requests(

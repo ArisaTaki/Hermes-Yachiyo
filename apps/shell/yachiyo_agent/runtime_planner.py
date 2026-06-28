@@ -5707,12 +5707,82 @@ def _contains_any(text: str, terms: Iterable[str]) -> bool:
 
 
 def _context_artifact_source_hint(text: str) -> str:
+    if _looks_like_visible_text_artifact_source(text):
+        return "visible_text"
     source = context_source_hint(text)
     if source:
         return source
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
     return ""
+
+
+def _looks_like_visible_text_artifact_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        [
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+            "当前网页",
+            "当前页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+        ],
+    ):
+        return False
+    return _contains_any(
+        value,
+        [
+            "current window",
+            "current app",
+            "current application",
+            "current screen",
+            "foreground window",
+            "foreground app",
+            "visible text",
+            "当前窗口",
+            "当前应用",
+            "当前 app",
+            "当前App",
+            "当前软件",
+            "前台窗口",
+            "前台应用",
+            "当前界面",
+            "当前屏幕",
+            "屏幕内容",
+            "界面内容",
+        ],
+    ) and _contains_any(
+        value,
+        [
+            "content",
+            "text",
+            "summarize",
+            "summary",
+            "write",
+            "report",
+            "document",
+            "markdown",
+            "md",
+            "内容",
+            "文字",
+            "文本",
+            "总结",
+            "摘要",
+            "整理",
+            "报告",
+            "文档",
+            "文件",
+            "保存",
+            "产物",
+        ],
+    )
 
 
 def _looks_like_current_page_artifact_source(text: str) -> bool:
