@@ -8358,13 +8358,18 @@ def _app_search_result_communication_hint(text: str) -> dict[str, str]:
         source_scope = "foreground"
         query = str(foreground_search.get("query") or "").strip()
     else:
-        leading_search = _leading_app_search_hint(value)
-        source_app = str(leading_search.get("app_name") or "").strip()
-        query = str(leading_search.get("query") or "").strip()
-        if not source_app:
-            source_app = _app_name_hint(value)
-        if source_app and not query:
-            query = _app_search_query_hint(value, source_app)
+        source_search = _app_search_result_source_hint(value)
+        if source_search:
+            source_app = str(source_search.get("app_name") or "").strip()
+            query = str(source_search.get("query") or "").strip()
+        else:
+            leading_search = _leading_app_search_hint(value)
+            source_app = str(leading_search.get("app_name") or "").strip()
+            query = str(leading_search.get("query") or "").strip()
+            if not source_app:
+                source_app = _app_name_hint(value)
+            if source_app and not query:
+                query = _app_search_query_hint(value, source_app)
 
     query = _clean_app_search_query(query)
     if not query:
@@ -8402,6 +8407,35 @@ def _app_search_result_communication_hint(text: str) -> dict[str, str]:
     if transform:
         hint["content_transform_hint"] = transform
     return hint
+
+
+def _app_search_result_source_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    search_verb = r"(?:搜索|查找|查询|检索|找(?:到)?)"
+    result_noun = r"(?:搜索结果|查询结果|检索结果|结果)"
+    delivery_verb = r"(?:发给|发送给|发到|发送到|转发给|转发到)"
+    patterns = (
+        rf"^(?:把|将)\s*(?:在\s*)?(?P<app>[\w .·-]{{1,60}}?)"
+        rf"(?:\s*(?:里|中|上|内))?\s*{search_verb}\s*"
+        rf"(?P<query>[^。！？!?，,]+?)\s*(?:的)?{result_noun}"
+        rf"[^。！？!?]{{0,40}}?{delivery_verb}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _canonical_app_name_hint(match.group("app"))
+        query = _clean_app_search_query(match.group("query"))
+        if (
+            app_name
+            and query
+            and not _invalid_app_scoped_followup_app(app_name)
+            and not _is_generic_foreground_app_label(app_name)
+        ):
+            return {"app_name": app_name, "query": query}
+    return {}
 
 
 def _app_search_result_communication_target_text(text: str) -> str:

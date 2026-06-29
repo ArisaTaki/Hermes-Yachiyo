@@ -10848,6 +10848,102 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
         },
     ]
 
+    for prompt, expected_app, expected_query, expected_recipient in (
+        (
+            "把 Notion 搜索 release plan 的结果发给 Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "把 Notion 里搜索 release plan 的结果发给 Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "把在 Notion 搜索 release plan 的结果发给 Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "把 Notion 搜索 release plan 的搜索结果发给 Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "将 Linear 检索 BUG-123 的结果转发给张三",
+            "Linear",
+            "BUG-123",
+            "张三",
+        ),
+    ):
+        short_form = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert short_form.selected_intent.kind == "communication"
+        assert short_form.selected_intent.inputs["direct_message_hint"][
+            "source_app_name"
+        ] == expected_app
+        assert short_form.selected_intent.inputs["direct_message_hint"][
+            "source_app_search_query"
+        ] == expected_query
+        assert short_form.selected_intent.inputs["direct_message_hint"][
+            "recipient"
+        ] == expected_recipient
+        assert _step_by_id(short_form, "discover-app-search-source").input_preview == {
+            "query": expected_app,
+            "limit": 20,
+        }
+        assert _step_by_id(short_form, "type-app-search-query").input_preview == {
+            "text": expected_query
+        }
+        assert _step_by_id(short_form, "read-communication-context").input_preview == {
+            "role_filter": "text",
+            "limit": 120,
+            "app_name": expected_app,
+        }
+
+    direct_short_form = RuntimePlanner().decision(
+        "把 Notion 搜索 release plan 的结果发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+
+    assert direct_short_form.selected_intent.inputs["direct_message_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "文件传输助手",
+        "body_source": "app_search_result",
+        "source_app_name": "Notion",
+        "source_app_mode": "focus",
+        "source_app_search_query": "release plan",
+        "mode": "focus",
+        "send_action": "send",
+    }
+    assert _step_by_id(direct_short_form, "open-or-focus-app").input_preview == {
+        "app_name": "WeChat"
+    }
+    assert _step_by_id(direct_short_form, "type-communication-recipient").input_preview == {
+        "text": "文件传输助手"
+    }
+    legacy_calls: list[dict[str, Any]] = []
+    short_form_selection = planner_first_direct_tool_selection(
+        "把 Notion 搜索 release plan 的结果发给微信文件传输助手",
+        allowed_tools,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    assert short_form_selection.selected_source == "runtime_planner"
+    assert short_form_selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in short_form_selection.requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert legacy_calls == []
+
     app_scoped_tools = [
         "desktop.list_apps",
         "desktop.running_apps",
