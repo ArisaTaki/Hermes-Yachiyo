@@ -10879,6 +10879,30 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
             "BUG-123",
             "张三",
         ),
+        (
+            "send Notion search results for release plan to Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "send the Notion search results for release plan to Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "send the results of searching Notion for release plan to Alice",
+            "Notion",
+            "release plan",
+            "Alice",
+        ),
+        (
+            "forward Linear search results for BUG-123 to Zhang San",
+            "Linear",
+            "BUG-123",
+            "Zhang San",
+        ),
     ):
         short_form = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
@@ -10926,6 +10950,59 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
     assert _step_by_id(direct_short_form, "type-communication-recipient").input_preview == {
         "text": "文件传输助手"
     }
+
+    english_direct_short_form = RuntimePlanner().decision(
+        "summarize Notion search results for release plan and send to WeChat file transfer assistant",
+        allowed_tools=allowed_tools,
+    )
+
+    assert english_direct_short_form.selected_intent.kind == "communication"
+    assert english_direct_short_form.selected_intent.inputs["content_transform_hint"] == "summary"
+    assert english_direct_short_form.selected_intent.inputs["direct_message_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "file transfer assistant",
+        "body_source": "app_search_result",
+        "source_app_name": "Notion",
+        "source_app_mode": "focus",
+        "source_app_search_query": "release plan",
+        "mode": "focus",
+        "send_action": "send",
+        "content_transform_hint": "summary",
+    }
+    assert _step_by_id(english_direct_short_form, "type-app-search-query").input_preview == {
+        "text": "release plan"
+    }
+    assert _step_by_id(english_direct_short_form, "open-or-focus-app").input_preview == {
+        "app_name": "WeChat"
+    }
+    assert _step_by_id(
+        english_direct_short_form,
+        "type-communication-recipient",
+    ).input_preview == {
+        "text": "file transfer assistant"
+    }
+
+    english_open_followup = RuntimePlanner().decision(
+        "open Notion search release plan and send the results to Alice",
+        allowed_tools=allowed_tools,
+    )
+
+    assert english_open_followup.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body_source": "app_search_result",
+        "source_app_name": "Notion",
+        "source_app_mode": "open",
+        "source_app_search_query": "release plan",
+        "mode": "open",
+        "send_action": "send",
+    }
+    assert _step_by_id(english_open_followup, "open-app-search-source").tool_name == (
+        "app.open"
+    )
+    assert _step_by_id(english_open_followup, "type-app-search-query").input_preview == {
+        "text": "release plan"
+    }
+
     legacy_calls: list[dict[str, Any]] = []
     short_form_selection = planner_first_direct_tool_selection(
         "把 Notion 搜索 release plan 的结果发给微信文件传输助手",
@@ -10935,6 +11012,23 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
     assert short_form_selection.selected_source == "runtime_planner"
     assert short_form_selection.event_payload["legacy_request_count"] == 0
     assert [request["tool"] for request in short_form_selection.requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert legacy_calls == []
+
+    english_selection = planner_first_direct_tool_selection(
+        "summarize Notion search results for release plan and send to WeChat file transfer assistant",
+        allowed_tools,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    assert english_selection.selected_source == "runtime_planner"
+    assert english_selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in english_selection.requests] == [
         "desktop.list_apps",
         "app.focus",
         "desktop.safe_shortcut",

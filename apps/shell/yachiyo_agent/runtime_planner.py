@@ -959,6 +959,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _spotlight_open_hint(text) or _foreground_search_submit_hint(text):
             return _empty_intent("web_research", text)
+        if _app_search_result_communication_hint(text):
+            return _empty_intent("web_research", text)
         communication_target = _web_research_communication_target_hint(text)
         if _direct_communication_hint(text) and not communication_target:
             return _empty_intent("web_research", text)
@@ -7844,6 +7846,7 @@ _COMMUNICATION_ACTION_TERMS = (
     "message ",
     "email ",
     "mail ",
+    "forward ",
     "发给",
     "发到",
     "发送",
@@ -8376,6 +8379,9 @@ def _app_search_result_communication_hint(text: str) -> dict[str, str]:
         return {}
 
     target_app, recipient = _split_communication_surface_and_recipient(target)
+    if target_app and _looks_like_person_name_communication_target(target):
+        target_app = ""
+        recipient = _clean_communication_recipient_text(target)
     if not recipient:
         recipient = _clean_communication_recipient_text(target)
     if not target_app and recipient:
@@ -8421,13 +8427,52 @@ def _app_search_result_source_hint(text: str) -> dict[str, str]:
         rf"(?:\s*(?:里|中|上|内))?\s*{search_verb}\s*"
         rf"(?P<query>[^。！？!?，,]+?)\s*(?:的)?{result_noun}"
         rf"[^。！？!?]{{0,40}}?{delivery_verb}",
+        r"^(?:send|message|forward)\s+(?:the\s+)?"
+        r"(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:search\s+)?results?\s+(?:for|about)\s+"
+        r"(?P<query_en>[^.!?,]+?)\s+(?:to|for)\s+",
+        r"^(?:send|message|forward)\s+(?:the\s+)?results?\s+of\s+"
+        r"(?:searching|finding|looking\s+up)\s+"
+        r"(?P<app_result_en>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:for|about)\s+(?P<query_result_en>[^.!?,]+?)\s+(?:to|for)\s+",
+        r"^(?:summari[sz]e|write|generate|draft)\s+(?:the\s+)?"
+        r"(?P<app_transform_en>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:search\s+)?results?\s+(?:for|about)\s+"
+        r"(?P<query_transform_en>[^.!?,]+?)\s+(?:and\s+)?"
+        r"(?:send|message|forward)\s+(?:to|for)\s+",
+        r"^(?:open|launch|start|focus)\s+"
+        r"(?P<app_open_en>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:and\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?"
+        r"(?P<query_open_en>[^.!?,]+?)\s+(?:and|then)\s+"
+        r"(?:send|message|forward)\s+(?:the\s+)?results?\s+(?:to|for)\s+",
+        r"^(?P<app_leading_en>[A-Za-z][A-Za-z0-9 ._-]{1,60}?)\s+"
+        r"(?:search|find|look\s+up)\s+(?:for\s+)?"
+        r"(?P<query_leading_en>[^.!?,]+?)\s+(?:and|then)\s+"
+        r"(?:send|message|forward)\s+(?:the\s+)?results?\s+(?:to|for)\s+",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _canonical_app_name_hint(match.group("app"))
-        query = _clean_app_search_query(match.group("query"))
+        groups = match.groupdict()
+        app_name = _canonical_app_name_hint(
+            groups.get("app")
+            or groups.get("app_en")
+            or groups.get("app_result_en")
+            or groups.get("app_transform_en")
+            or groups.get("app_open_en")
+            or groups.get("app_leading_en")
+            or ""
+        )
+        query = _clean_app_search_query(
+            groups.get("query")
+            or groups.get("query_en")
+            or groups.get("query_result_en")
+            or groups.get("query_transform_en")
+            or groups.get("query_open_en")
+            or groups.get("query_leading_en")
+            or ""
+        )
         if (
             app_name
             and query
@@ -8443,6 +8488,18 @@ def _app_search_result_communication_target_text(text: str) -> str:
     patterns = (
         r"(?:把|将)?.{0,40}?(?:搜索结果|当前结果|查询结果|检索结果|结果).{0,30}?"
         r"(?:发给|发送给|发到|发送到|转发给|转发到)\s*(?P<target>[^。！？!?]+)$",
+        r"(?:send|message|forward)\s+(?:the\s+)?"
+        r"(?:[A-Za-z][A-Za-z0-9 ._-]{1,60}?\s+)?(?:search\s+)?results?\s+"
+        r"(?:for|about)\s+[^.!?,]+?\s+(?:to|for)\s+(?P<target_en_scoped>[^.!?]+)$",
+        r"(?:send|message|forward)\s+(?:the\s+)?results?\s+of\s+"
+        r"(?:searching|finding|looking\s+up)\s+[A-Za-z][A-Za-z0-9 ._-]{1,60}?\s+"
+        r"(?:for|about)\s+[^.!?,]+?\s+(?:to|for)\s+(?P<target_en_result>[^.!?]+)$",
+        r"(?:summari[sz]e|write|generate|draft)\s+(?:the\s+)?"
+        r"[A-Za-z][A-Za-z0-9 ._-]{1,60}?\s+(?:search\s+)?results?\s+"
+        r"(?:for|about)\s+[^.!?,]+?\s+(?:and\s+)?"
+        r"(?:send|message|forward)\s+(?:to|for)\s+(?P<target_en_transform>[^.!?]+)$",
+        r"(?:and|then)\s+(?:send|message|forward)\s+(?:the\s+)?results?\s+"
+        r"(?:to|for)\s+(?P<target_en_followup>[^.!?]+)$",
         r"(?:send|message|forward)\s+(?:the\s+)?(?:search\s+)?results?\s+"
         r"(?:to|for)\s+(?P<target_en>[^.!?]+)$",
     )
@@ -8452,10 +8509,41 @@ def _app_search_result_communication_target_text(text: str) -> str:
             continue
         return _clean_communication_hint_text(
             match.groupdict().get("target")
+            or match.groupdict().get("target_en_scoped")
+            or match.groupdict().get("target_en_result")
+            or match.groupdict().get("target_en_transform")
+            or match.groupdict().get("target_en_followup")
             or match.groupdict().get("target_en")
             or ""
         )
     return ""
+
+
+def _looks_like_person_name_communication_target(value: str) -> bool:
+    text = _clean_communication_hint_text(value)
+    if not text:
+        return False
+    if _communication_surface_for_recipient_hint(text):
+        return False
+    known_surface_prefixes = (
+        "Microsoft Teams",
+        "Google Chat",
+        "Apple Messages",
+        "Messages",
+        "Telegram",
+        "WhatsApp",
+        "Discord",
+        "Slack",
+        "WeChat",
+        "Mail",
+    )
+    lowered = text.lower()
+    if any(
+        lowered == surface.lower() or lowered.startswith(surface.lower() + " ")
+        for surface in known_surface_prefixes
+    ):
+        return False
+    return bool(re.fullmatch(r"[A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+", text))
 
 
 def _app_search_result_source_mode(text: str) -> str:
