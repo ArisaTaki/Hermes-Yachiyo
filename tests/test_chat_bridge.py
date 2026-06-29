@@ -65,6 +65,15 @@ def _agent_task_tool_call(agent_task: dict[str, Any], tool_name: str) -> dict[st
     raise AssertionError(f"missing agent task tool call: {tool_name}")
 
 
+def _fake_active_window_result(app_name: str, title: str = "") -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "desktop.active_window",
+        "summary": f"Active {app_name}",
+        "data": {"app_name": app_name, "title": title or app_name},
+    }
+
+
 def _assert_planner_trace_prefix(
     agent_task: dict[str, Any],
     *,
@@ -978,6 +987,14 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
             },
         }
 
+    def fake_active_window() -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Notes",
+            "data": {"app_name": "Notes", "title": "Notes"},
+        }
+
     extract_calls: list[str] = []
 
     def fake_extract_text(selector: str = "") -> dict:
@@ -1011,6 +1028,7 @@ def test_chat_bridge_quick_message_opens_notes_and_creates_note_without_model(
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.windows", fake_windows)
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
@@ -1198,8 +1216,17 @@ def test_chat_bridge_quick_message_opens_word_and_creates_document_without_model
             },
         }
 
+    def fake_active_window() -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Microsoft Word",
+            "data": {"app_name": "Microsoft Word", "title": "Document"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -1269,8 +1296,17 @@ def test_chat_bridge_quick_message_opens_calendar_and_creates_event_without_mode
             },
         }
 
+    def fake_active_window() -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Calendar",
+            "data": {"app_name": "Calendar", "title": "Calendar"},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     cases = (
         (
@@ -1833,7 +1869,6 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             [
                 ("list_apps", "PixelForge", 20),
                 ("focus", "PixelForge Studio", None),
-                ("active", "PixelForge Studio", None),
                 ("shortcut", "new_window", None),
                 ("ui", "", 80),
             ],
@@ -1859,7 +1894,6 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             [
                 ("list_apps", "PixelForge", 20),
                 ("focus", "PixelForge Studio", None),
-                ("active", "PixelForge Studio", None),
                 ("shortcut", "refresh", None),
                 ("ui", "", 80),
             ],
@@ -1885,7 +1919,6 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             [
                 ("list_apps", "PixelForge", 20),
                 ("focus", "PixelForge Studio", None),
-                ("active", "PixelForge Studio", None),
                 ("key", "escape", 1),
                 ("ui", "", 80),
             ],
@@ -1912,7 +1945,6 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             [
                 ("list_apps", "PixelForge", 20),
                 ("focus", "PixelForge Studio", None),
-                ("active", "PixelForge Studio", None),
                 ("scroll", "down", 1),
                 ("ui", "", 80),
             ],
@@ -2068,7 +2100,6 @@ def test_chat_bridge_quick_message_executes_discovered_app_followup_without_mode
         ("list_apps", "markdown", 20),
         ("open", "Typora", None),
         ("focus", "Typora", None),
-        ("active", "Typora", None),
         ("shortcut", "new_document", None),
         ("type", "周报", None),
         ("ui", "", 80),
@@ -3319,8 +3350,15 @@ def test_chat_bridge_quick_message_executes_app_search_field_type_without_approv
             "data": {"key": "return", "modifiers": []},
         }
 
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action in {"open", "focus"}:
+                return _fake_active_window_result(app_name)
+        return _fake_active_window_result("Slack")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
@@ -3886,6 +3924,7 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict:
         ui_click_calls.append((target, role_filter, limit, click_count))
         return {
@@ -3911,9 +3950,13 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
             "data": {"app_name": app_name, "focus_verified": focus},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "Google Chrome")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
     try:
@@ -4079,6 +4122,7 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict:
         ui_click_calls.append((target, role_filter, limit, click_count))
         return {
@@ -4104,10 +4148,14 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
             "data": {"app_name": app_name, "focus_verified": focus},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "Google Chrome")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
     bridge = ChatBridge(runtime)
     try:
@@ -4155,9 +4203,7 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         assert click_calls == []
         assert ui_click_calls == [("登录", "button", 80, 1)]
         assert approved.status == "completed"
-        assert approved.summary == (
-            "已切换到 Google Chrome。 已打开 Google Chrome 并点击前台控件：登录。"
-        )
+        assert approved.summary == "已打开 Google Chrome 并点击前台控件：登录。"
         assert approved.needs_user_action is False
         assert approved.pending_approvals == []
         assert run["status"] == "completed"
@@ -4360,6 +4406,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict:
         click_calls.append((target, role_filter, limit, click_count))
         return {
@@ -4369,12 +4416,16 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
             "data": {"target": target, "role_filter": role_filter},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "Slack")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.click_ui_element",
         fake_click_ui_element,
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
@@ -4536,6 +4587,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict:
         click_calls.append((target, role_filter, limit, click_count))
         return {
@@ -4561,6 +4613,9 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
             "data": {"app_name": app_name, "focus_verified": focus},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "Slack")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
@@ -4568,6 +4623,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         "apps.shell.agent.tools.desktop.click_ui_element",
         fake_click_ui_element,
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
@@ -4681,6 +4737,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict:
         click_calls.append((target, role_filter, limit, click_count))
         return {
@@ -4715,6 +4772,9 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
             "data": {"app_name": app_name, "focus_verified": focus},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "Slack")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
@@ -4722,6 +4782,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
         "apps.shell.agent.tools.desktop.click_ui_element",
         fake_click_ui_element,
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_type_text",
         fake_safe_type_text,
@@ -4840,6 +4901,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         *,
         role_filter: str = "",
         limit: int = 80,
+        expected_app_name: str = "",
     ) -> dict:
         type_calls.append((target, text, role_filter, limit))
         return {
@@ -4870,6 +4932,9 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
             "data": {"app_name": app_name, "focus_verified": focus},
         }
 
+    def fake_active_window() -> dict:
+        return _fake_active_window_result(focus_calls[-1] if focus_calls else "WeChat")
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
@@ -4877,6 +4942,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         "apps.shell.agent.tools.desktop.type_into_ui_element",
         fake_type_into_ui_element,
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     bridge = ChatBridge(runtime)
     try:
         result = bridge.send_quick_message(
@@ -5298,20 +5364,32 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
     monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
     monkeypatch.setattr("apps.shell.agent.tools.browser.screenshot", fake_screenshot)
     cases = (
-        ("打开 Chrome 访问 github.com 并截图", "bubble", "https://github.com"),
-        ("打开网页并截图 github.com", "live2d", "https://github.com"),
+        (
+            "打开 Chrome 访问 github.com 并截图",
+            "bubble",
+            "https://github.com",
+            "已打开 Google Chrome。 已打开网页并截取当前网页。",
+        ),
+        (
+            "打开网页并截图 github.com",
+            "live2d",
+            "https://github.com",
+            "已打开网页并截取当前网页。",
+        ),
         (
             "用浏览器搜索 oha yachiyo 并截图",
             "bubble",
             "https://www.google.com/search?q=oha+yachiyo",
+            "已打开网页并截取当前网页。",
         ),
         (
             "google oha yachiyo and screenshot results",
             "live2d",
             "https://www.google.com/search?q=oha+yachiyo",
+            "已打开网页并截取当前网页。",
         ),
     )
-    for text, launcher_mode, expected_url in cases:
+    for text, launcher_mode, expected_url, expected_summary in cases:
         calls.clear()
         result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
             tmp_path,
@@ -5326,7 +5404,7 @@ def test_chat_bridge_quick_message_executes_browser_open_url_and_screenshot(
         assert agent_task["status"] == "completed"
         assert agent_task["needs_user_action"] is False
         assert agent_task["pending_approvals"] == []
-        assert agent_task["summary"] == "已打开网页并截取当前网页。"
+        assert agent_task["summary"] == expected_summary
         assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_screenshot"
         assert agent_task["tool_calls"][-1]["input_preview"] == {
             "url": expected_url,
@@ -7002,6 +7080,14 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
         calls.append(("focus", app_name))
         return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
 
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action in {"open", "focus"}:
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "Notes"))
+        return _fake_active_window_result("Notes")
+
     def fake_safe_type_text(text: str) -> dict:
         calls.append(("type", text))
         return {
@@ -7013,6 +7099,7 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -7020,7 +7107,12 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
         "打开 Notes 输入 hello yachiyo",
     )
 
-    assert calls == [("open", "Notes"), ("focus", "Notes"), ("type", "hello yachiyo")]
+    assert calls == [
+        ("open", "Notes"),
+        ("focus", "Notes"),
+        ("active", "Notes"),
+        ("type", "hello yachiyo"),
+    ]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
@@ -7036,7 +7128,12 @@ def test_chat_bridge_quick_message_executes_app_open_and_safe_type_text_without_
         "打开微信输入你好",
     )
 
-    assert calls[-3:] == [("open", "WeChat"), ("focus", "WeChat"), ("type", "你好")]
+    assert calls[-4:] == [
+        ("open", "WeChat"),
+        ("focus", "WeChat"),
+        ("active", "WeChat"),
+        ("type", "你好"),
+    ]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
@@ -7067,6 +7164,14 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     def fake_app_focus(app_name: str) -> dict:
         calls.append(("focus", app_name))
         return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action in {"open", "focus"}:
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "Notes"))
+        return _fake_active_window_result("Notes")
 
     def fake_safe_type_text(text: str) -> dict:
         calls.append(("type", text))
@@ -7128,6 +7233,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -7141,6 +7247,7 @@ def test_chat_bridge_quick_message_executes_multi_step_daily_desktop_intent_with
     assert calls == [
         ("open", "Notes"),
         ("focus", "Notes"),
+        ("active", "Notes"),
         ("type", "hello"),
         ("shortcut", "copy"),
     ]
@@ -7636,6 +7743,14 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_click_without_model(
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action == "focus":
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "Google Chrome"))
+        return _fake_active_window_result("Google Chrome")
+
     def fake_safe_click(x: int, y: int) -> dict:
         calls.append(("click", x, y))
         return {
@@ -7651,6 +7766,7 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_click_without_model(
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_click", fake_safe_click)
     for launcher_mode in ("bubble", "live2d"):
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -7677,8 +7793,10 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_click_without_model(
 
     assert calls == [
         ("focus", "Google Chrome"),
+        ("active", "Google Chrome"),
         ("click", 120, 240),
         ("focus", "Google Chrome"),
+        ("active", "Google Chrome"),
         ("click", 120, 240),
     ]
 
@@ -7698,6 +7816,14 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_type_text_without_mo
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action == "focus":
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "Google Chrome"))
+        return _fake_active_window_result("Google Chrome")
+
     def fake_safe_type_text(text: str) -> dict:
         calls.append(("type", text))
         return {
@@ -7708,6 +7834,7 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_type_text_without_mo
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     for launcher_mode in ("bubble", "live2d"):
         _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
@@ -7733,8 +7860,10 @@ def test_chat_bridge_quick_message_executes_app_prefix_safe_type_text_without_mo
 
     assert calls == [
         ("focus", "Google Chrome"),
+        ("active", "Google Chrome"),
         ("type", "hello"),
         ("focus", "Google Chrome"),
+        ("active", "Google Chrome"),
         ("type", "hello"),
     ]
 
@@ -7758,6 +7887,14 @@ def test_chat_bridge_quick_message_prepares_app_safe_type_text_then_waits_for_se
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict:
+        for action, app_name in reversed(calls):
+            if action in {"open", "focus"}:
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "WeChat"))
+        return _fake_active_window_result("WeChat")
+
     def fake_safe_type_text(text: str) -> dict:
         calls.append(("type", text))
         return {
@@ -7769,6 +7906,7 @@ def test_chat_bridge_quick_message_prepares_app_safe_type_text_then_waits_for_se
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_submit_foreground",
@@ -7780,19 +7918,19 @@ def test_chat_bridge_quick_message_prepares_app_safe_type_text_then_waits_for_se
         (
             "微信输入 hello 并发送",
             "bubble",
-            [("focus", "WeChat"), ("type", "hello")],
+            [("focus", "WeChat"), ("active", "WeChat"), ("type", "hello")],
             "app.focus_and_safe_type_text",
         ),
         (
             "打开微信发送 hello",
             "live2d",
-            [("open", "WeChat"), ("focus", "WeChat"), ("type", "hello")],
+            [("open", "WeChat"), ("focus", "WeChat"), ("active", "WeChat"), ("type", "hello")],
             "app.open_and_safe_type_text",
         ),
         (
             "打开微信发你好",
             "bubble",
-            [("open", "WeChat"), ("focus", "WeChat"), ("type", "你好")],
+            [("open", "WeChat"), ("focus", "WeChat"), ("active", "WeChat"), ("type", "你好")],
             "app.open_and_safe_type_text",
         ),
     )
@@ -9355,6 +9493,15 @@ def test_chat_bridge_quick_message_executes_app_foreground_recovery_actions_with
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict:
+        for call in reversed(calls):
+            if len(call) >= 2 and call[0] in {"open", "focus"}:
+                app_name = str(call[1])
+                calls.append(("active", app_name))
+                return _fake_active_window_result(app_name)
+        calls.append(("active", "Google Chrome"))
+        return _fake_active_window_result("Google Chrome")
+
     def fake_safe_type_text(text: str) -> dict:
         calls.append(("type", text))
         return {
@@ -9402,6 +9549,7 @@ def test_chat_bridge_quick_message_executes_app_foreground_recovery_actions_with
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)

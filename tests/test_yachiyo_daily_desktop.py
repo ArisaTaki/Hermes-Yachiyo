@@ -275,7 +275,6 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
         },
     ]
 

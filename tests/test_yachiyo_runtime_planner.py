@@ -6509,6 +6509,31 @@ def test_runtime_planner_cleans_current_interface_from_app_capture_hint() -> Non
     ]
 
 
+def test_runtime_planner_does_not_discover_message_words_as_apps_for_observation() -> None:
+    allowed_tools = ["desktop.list_apps", "app.open", "screen.capture"]
+    cases = (
+        ("打开微信看看有没有新消息", "微信"),
+        ("把微信打开然后看看有没有未读", "微信"),
+    )
+
+    for prompt, expected_app in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app
+        assert "desktop_discovery_hint" not in decision.selected_intent.inputs
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": expected_app,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app
+        }
+        assert _step_by_id(decision, "capture-screen").depends_on == [
+            "open-or-focus-app"
+        ]
+
+
 def test_runtime_planner_focuses_app_before_app_scoped_screen_capture() -> None:
     decision = RuntimePlanner().decision(
         "看一下 Slack 界面",
@@ -9405,7 +9430,6 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
         },
     ]
     assert planner_direct_tool_requests(
@@ -10300,6 +10324,14 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "desktop.submit_foreground",
         ],
     )
+    open_app_short_send = planner_direct_tool_requests(
+        "打开微信发你好",
+        [
+            "app.open_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    )
     generic_open_app = planner_direct_tool_requests(
         "打开 Obsidian 写 hello",
         [
@@ -10335,6 +10367,22 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_type_text",
             "input": {"app_name": "WeChat", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert open_app_short_send == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "WeChat", "text": "你好"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -15133,7 +15181,6 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
-            "continue_to_model": True,
         }
     ]
     assert legacy_calls == []
@@ -17551,7 +17598,6 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
-            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("根据当前网页写一份竞品调研报告", allowed_tools=allowed) == [
@@ -17592,7 +17638,6 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
-            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("读取当前网页内容", allowed_tools=allowed) == [
@@ -17749,7 +17794,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
-            "continue_to_model": True,
         },
     ]
     assert planner_tool_requests(
@@ -18055,7 +18099,6 @@ def test_planner_tool_requests_maps_explicit_browser_url_open_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
-            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("请调研 https://example.com 并截图", allowed_tools=allowed) == [
@@ -19885,7 +19928,7 @@ def test_planner_first_owns_app_scoped_creation_with_verification_over_legacy() 
     ]
     assert selection.requests[1]["input"] == {"app_name": "Notion", "action": "new_document"}
     assert selection.requests[2]["input"] == {"text": "本周业绩总结"}
-    assert selection.requests[3]["continue_to_model"] is True
+    assert "continue_to_model" not in selection.requests[3]
     assert legacy_calls == []
 
 

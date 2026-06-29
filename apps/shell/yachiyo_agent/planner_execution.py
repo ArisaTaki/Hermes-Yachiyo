@@ -764,18 +764,106 @@ def _desktop_observation_step_needs_model_followup(
         and isinstance(inputs.get("creative_canvas_hint"), Mapping)
     ):
         return True
+    if _desktop_observation_step_is_direct_readback(prompt, inputs):
+        return False
+    if _desktop_observation_prompt_needs_model_followup(prompt, inputs):
+        return True
+    if _desktop_verify_step_is_direct_control(step_id, tool_name, inputs):
+        return False
+    return False
+
+
+def _desktop_observation_prompt_needs_model_followup(prompt: str, inputs: Any) -> bool:
+    prompt_for_intent = prompt
+    if isinstance(inputs, Mapping):
+        compose_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
+        if compose_text:
+            prompt_for_intent = prompt_for_intent.replace(compose_text, "")
     return bool(
         re.search(
             r"(?:判断|决定|分析|识别|告诉|说明|总结|摘要|下一步|该点哪里|该点哪个|"
-            r"能否|能不能|可以点|是否可以|是否能|如果能|如果可以|"
+            r"可以点|是否可以点|是否能点|如果能点|如果可以点|"
             r"最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪一个|哪项|哪条)",
-            prompt,
+            prompt_for_intent,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:judge|decide|analy[sz]e|identify|tell|explain|summari[sz]e|"
-            r"determine|whether|what|which|where|can|should|next|closest|similar|"
+            r"determine|whether|what|which|where|should|next\s+step|closest|similar|"
             r"related|matching|appropriate|suitable|possible)\b",
+            prompt_for_intent,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _desktop_verify_step_is_direct_control(
+    step_id: str,
+    tool_name: str,
+    inputs: Any,
+) -> bool:
+    if step_id != "verify-desktop-result" or tool_name not in {
+        "desktop.active_window",
+        "desktop.ui_elements",
+    }:
+        return False
+    if not isinstance(inputs, Mapping):
+        return False
+    if any(
+        isinstance(inputs.get(key), Mapping)
+        for key in (
+            "creative_canvas_hint",
+            "ui_inspection_hint",
+            "screen_capture_hint",
+            "app_capability_hint",
+        )
+    ):
+        return False
+    operation = str(inputs.get("operation_hint") or "").strip()
+    return operation in {
+        "",
+        "open",
+        "focus",
+        "open_app",
+        "focus_app",
+        "hide_app",
+        "minimize_window",
+        "show_all_apps",
+        "safe_shortcut",
+        "safe_key",
+        "safe_scroll",
+    }
+
+
+def _desktop_observation_step_is_direct_readback(
+    prompt: str,
+    inputs: Any,
+) -> bool:
+    if not isinstance(inputs, Mapping):
+        return False
+    if str(inputs.get("operation_hint") or "").strip() != "read_ui":
+        return False
+    if not isinstance(inputs.get("ui_inspection_hint"), Mapping):
+        return False
+    return bool(
+        re.search(
+            r"(?:有哪些|有什么|有什么可见|可见.*(?:按钮|控件|元素)|"
+            r"(?:按钮|控件|元素).{0,8}(?:有哪些|有什么|可见))",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bwhat\s+(?:buttons?|controls?|elements?)\s+(?:are\s+)?(?:visible|shown|available)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:visible|shown|available)\s+(?:buttons?|controls?|elements?)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bwhere\s+(?:is|are)\s+(?:the\s+)?(?:.+?\s+)?(?:buttons?|controls?|elements?)\b",
             prompt,
             flags=re.IGNORECASE,
         )
@@ -1616,10 +1704,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
         if presentation:
             request["presentation"] = presentation
-        if (
-            _web_request_needs_model_followup(decision.selected_intent.user_goal)
-            or presentation
-        ):
+        if _web_read_request_needs_model_followup(decision, read_tool_name, presentation):
             request["continue_to_model"] = True
         requests.append(request)
         return [*prepare_requests, *requests]
@@ -1675,12 +1760,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
     if presentation:
         request["presentation"] = presentation
-    if (
-        _web_request_needs_model_followup(decision.selected_intent.user_goal)
-        or str(decision.selected_intent.inputs.get("output_target_hint") or "").strip()
-        == "clipboard"
-        or presentation
-    ) and (
+    if _web_read_request_needs_model_followup(decision, tool_name, presentation) and (
         not browser_action
         or _browser_tool_result_can_feed_model(tool_name)
         or any(
@@ -1691,6 +1771,44 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     ):
         request["continue_to_model"] = True
     return [*prepare_requests, request]
+
+
+def _web_read_request_needs_model_followup(
+    decision: Any,
+    tool_name: str,
+    presentation: str,
+) -> bool:
+    if _web_read_request_can_direct_present(decision, tool_name, presentation):
+        return False
+    inputs = decision.selected_intent.inputs
+    return bool(
+        _web_request_needs_model_followup(decision.selected_intent.user_goal)
+        or str(inputs.get("output_target_hint") or "").strip() == "clipboard"
+        or str(presentation or "").strip()
+    )
+
+
+def _web_read_request_can_direct_present(
+    decision: Any,
+    tool_name: str,
+    presentation: str,
+) -> bool:
+    if str(presentation or "").strip() != "summary":
+        return False
+    if tool_name not in {
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+    }:
+        return False
+    inputs = decision.selected_intent.inputs
+    if str(inputs.get("output_target_hint") or "").strip():
+        return False
+    return not any(
+        str(getattr(item, "tool_name", "") or "").strip()
+        in {"artifact.write", "clipboard.write"}
+        for item in decision.plan.tool_plan.steps
+    )
 
 
 def _browser_tool_result_can_feed_model(tool_name: str) -> bool:

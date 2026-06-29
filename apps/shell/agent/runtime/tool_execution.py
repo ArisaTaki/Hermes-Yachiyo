@@ -476,11 +476,13 @@ class RuntimeToolRequestRunner:
                 self._input_preview(raw_input),
                 app_name_resolution,
             )
-            runtime_skip = _runtime_readiness_skip_result(
-                tool_name,
-                raw_input,
-                foreground_readiness_blocker,
-            )
+            runtime_skip = None
+            if not _broker_requires_approval(broker, tool_name):
+                runtime_skip = _runtime_readiness_skip_result(
+                    tool_name,
+                    raw_input,
+                    foreground_readiness_blocker,
+                )
             if runtime_skip is not None:
                 budget.claim_tool_call(tool_name)
                 timeline.append(
@@ -699,6 +701,13 @@ def _runtime_readiness_skip_result(
     if isinstance(recommended_tools, list) and recommended_tools:
         result["recommended_tools"] = recommended_tools
     return result
+
+
+def _broker_requires_approval(broker: Any, tool_name: str) -> bool:
+    approvals = getattr(broker, "approvals", None)
+    if not isinstance(approvals, dict):
+        return False
+    return bool(approvals.get(str(tool_name or "").strip()))
 
 
 def _foreground_readiness_blocker(

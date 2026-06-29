@@ -16,6 +16,7 @@ from urllib.parse import quote_plus
 
 from .app_name_hints import (
     compact_app_name_hint,
+    is_legacy_app_name_hint,
     legacy_app_name_hint,
     supports_new_message_app_hint,
 )
@@ -396,6 +397,13 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        if (
+            desktop_discovery is not None
+            and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
+            and (screen_capture is not None or ui_inspection is not None)
+            and _app_name_hint(text)
+        ):
+            desktop_discovery = None
         app_capability = _app_capability_discovery_hint(text)
         if app_capability:
             desktop_discovery = {
@@ -1008,6 +1016,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
             return _empty_intent("web_research", text)
+        if type_into_ui_hint(text) and not _has_browser_page_context(text):
+            return _empty_intent("web_research", text)
         if _desktop_window_text_context_hint(text):
             return _empty_intent("web_research", text)
         if (
@@ -1028,13 +1038,17 @@ class TaskIntentRouter:
         communication_target = _web_research_communication_target_hint(text)
         if _direct_communication_hint(text) and not communication_target:
             return _empty_intent("web_research", text)
+        app_name_hint = _app_name_hint(text)
+        app_search_hint = _app_search_hint(text, app_name_hint)
+        if app_search_hint and (
+            _looks_like_app_search_field_input(text) or _app_first_type_scope_hint(text)
+        ):
+            return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
-        app_name_hint = _app_name_hint(text)
-        app_search_hint = _app_search_hint(text, app_name_hint)
         app_search_app_name = str(app_search_hint.get("app_name") or app_name_hint).strip()
         if (
             app_search_hint
@@ -1457,13 +1471,17 @@ class TaskIntentRouter:
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
             return _empty_intent("file_access", text)
-        if _looks_like_file_organization_request(text):
-            return _empty_intent("file_access", text)
         if _looks_like_scoped_data_analysis_request(text):
             return _empty_intent("file_access", text)
         if _finder_search_then_ui_action_hint(text):
             return _empty_intent("file_access", text)
         hint = file_access_hint(text)
+        if _looks_like_file_organization_request(text) and not (
+            hint
+            and str(hint.get("action") or "").strip() == "open_path"
+            and str(hint.get("path") or "").strip() == "~/.Trash"
+        ):
+            return _empty_intent("file_access", text)
         if not hint:
             return _empty_intent("file_access", text)
         return TaskIntentSnapshot(
@@ -10908,12 +10926,32 @@ def _app_first_control_app_name_hint(text: str) -> str:
 
 
 def _clean_app_name_hint(value: str) -> str:
+    raw_app = str(value or "").strip()
+    folder_aliases = {"folder", "folders", "afolder", "directory", "directories", "文件夹", "目录"}
+    if compact_app_name_hint(raw_app) in folder_aliases:
+        return "Finder"
+    if is_legacy_app_name_hint(raw_app):
+        return raw_app.strip(" .，,。")
+    scoped_raw_app = re.sub(
+        r"^(?:在|用|通过)\s*",
+        "",
+        raw_app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    if compact_app_name_hint(scoped_raw_app) in folder_aliases:
+        return "Finder"
+    if scoped_raw_app != raw_app and is_legacy_app_name_hint(scoped_raw_app):
+        return scoped_raw_app.strip(" .，,。")
     app = re.split(
         r"(?:并|然后|再|接着|之后|后|播放|点击|点按|点|按|输入|粘贴|搜索|创建|新建|重命名|上一级|显示简介|查看简介|快速查看|快速预览|预览|复制选中|写|发送|回车|确认|提交|分析|操作|查看|看看|看一下|看下|观察|识别|有没有|是否|可以|可不可以|行不行|好不好|好吗|好么|\b(?:and|then|to|paste|thanks)\b)",
-        str(value or "").strip(),
+        raw_app,
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
+    if compact_app_name_hint(app) in folder_aliases:
+        return "Finder"
+    if is_legacy_app_name_hint(app):
+        return app.strip(" .，,。")
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE).strip()
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(
@@ -11123,6 +11161,8 @@ def _clean_app_name_hint(value: str) -> str:
     }
     if context_source_hint(app):
         return ""
+    if _looks_like_too_short_cjk_app_label(app):
+        return ""
     if compact_app_name_hint(app) in {
         "folder",
         "folders",
@@ -11263,6 +11303,19 @@ def _looks_like_chinese_foreground_send_verb(text: str) -> bool:
             r"(?:并|然后|再|接着|之后|后|把|将)\s*发(?:给|到|出去|一下|下)?",
             value,
             flags=re.IGNORECASE,
+        )
+        or (
+            not re.search(
+                r"(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*[^。！？!?，,]*?(?<!开)发",
+                value,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+                r"(?:打开|启动|切到|聚焦)?\s*[\w .·-]{1,40}?\s*(?<!开)发\s*[^。！？!?，,]+$",
+                value,
+                flags=re.IGNORECASE,
+            )
         )
     )
 
@@ -14392,7 +14445,7 @@ def _chat_status_meta_text_hint(text: str) -> bool:
 def _leading_app_search_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     patterns = (
-        r"^(?P<app>[\w .·-]{1,40}?)\s*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?P<app>[\w .·-]{1,40}?)[\s，,]*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
         r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up|look)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
         r"^(?:search|find|look\s+up|look)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?"
         r"(?P<app_in>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:for\s+)?(?P<query_in>[^.!?,]+)$",
@@ -16823,9 +16876,46 @@ def _local_app_discovery_query(text: str) -> str:
             or ""
         )
         app = _clean_app_name_hint(raw_app)
-        if app and not _is_generic_foreground_app_label(app):
+        if (
+            app
+            and not _is_generic_foreground_app_label(app)
+            and not _invalid_local_app_discovery_subject(raw_app)
+            and not _invalid_local_app_discovery_subject(app)
+        ):
             return app
     return ""
+
+
+def _invalid_local_app_discovery_subject(value: str) -> bool:
+    subject = _clean_prompt(value)
+    compact = compact_app_name_hint(subject)
+    if compact in {
+        "消息",
+        "新消息",
+        "未读",
+        "未读消息",
+        "通知",
+        "新通知",
+        "当前聊天",
+        "聊天",
+        "currentchat",
+        "message",
+        "messages",
+        "newmessage",
+        "newmessages",
+        "unread",
+        "unreadmessages",
+        "notification",
+        "notifications",
+    }:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:新|未读|当前)?(?:消息|通知|聊天|对话)",
+            subject,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_ui_operation(text: str) -> bool:
