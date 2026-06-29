@@ -3106,6 +3106,124 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    form_fill_then_click = RuntimePlanner().decision(
+        "打开 LedgerPro，先看看界面，然后在金额输入框输入 100，再点击保存",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert form_fill_then_click.selected_intent.kind == "desktop_operation"
+    assert form_fill_then_click.selected_intent.inputs["app_name_hint"] == "LedgerPro"
+    assert [step.step_id for step in form_fill_then_click.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-click",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(form_fill_then_click, "inspect-app").input_preview == {
+        "app_name": "LedgerPro",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(form_fill_then_click, "operate-foreground-ui").input_preview == {
+        "app_name": "LedgerPro",
+        "target": "金额",
+        "text": "100",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(form_fill_then_click, "operate-foreground-ui-followup-click").input_preview == {
+        "target": "保存",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "打开 LedgerPro，先看看界面，然后在金额输入框输入 100，再点击保存",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.open_and_type_into_ui_element",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    english_form_fill_then_click = RuntimePlanner().decision(
+        "open any app LedgerPro, inspect the UI, type 100 into the amount field, then click Save",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert english_form_fill_then_click.selected_intent.kind == "desktop_operation"
+    assert english_form_fill_then_click.selected_intent.inputs["app_name_hint"] == "LedgerPro"
+    assert _step_by_id(english_form_fill_then_click, "operate-foreground-ui").input_preview == {
+        "app_name": "LedgerPro",
+        "target": "amount",
+        "text": "100",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(
+        english_form_fill_then_click,
+        "operate-foreground-ui-followup-click",
+    ).input_preview == {
+        "target": "Save",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+
+    search_click_type_return = RuntimePlanner().decision(
+        "打开 PixelForge，先读取界面，然后点击搜索框，输入 revenue，再按回车",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.hotkey",
+            "desktop.ui_elements",
+        ],
+    )
+    assert search_click_type_return.selected_intent.kind == "desktop_operation"
+    assert search_click_type_return.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert [step.step_id for step in search_click_type_return.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "operate-foreground-ui-followup-return",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(search_click_type_return, "operate-foreground-ui").input_preview == {
+        "app_name": "PixelForge",
+        "target": "搜索",
+        "role_filter": "text",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert _step_by_id(search_click_type_return, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "revenue",
+    }
+    assert _step_by_id(search_click_type_return, "operate-foreground-ui-followup-return").input_preview == {
+        "key": "return",
+        "modifiers": [],
+    }
+
     observe_then_create = RuntimePlanner().decision(
         "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记",
         allowed_tools=[

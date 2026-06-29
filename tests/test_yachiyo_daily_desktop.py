@@ -465,6 +465,63 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_inpu
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 LedgerPro，先看看界面，然后在金额输入框输入 100，再点击保存",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "text",
+                "limit": 80,
+                "app_name": "LedgerPro",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "LedgerPro",
+                "target": "金额",
+                "text": "100",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "保存",
+                "role_filter": "",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_create() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(

@@ -2370,6 +2370,13 @@ class RuntimePlanner:
             followup_return_hotkey = _explicit_return_key_followup_hint(intent.user_goal)
         if followup_return_hotkey:
             submit_action = ""
+            if (
+                any((click_target, type_target, safe_type_text))
+                and str((hotkey or {}).get("key") or "").strip().lower()
+                in {"return", "enter"}
+                and not (hotkey or {}).get("modifiers")
+            ):
+                hotkey = None
         if (
             not app_search
             and app_type_scope
@@ -3729,6 +3736,33 @@ class RuntimePlanner:
                     input_preview={"text": safe_type_text},
                     depends_on=["operate-foreground-ui"],
                     reason="Type the explicit text only after the requested UI target is selected.",
+                )
+            )
+        if type_target and click_target and any(step.step_id == "operate-foreground-ui" for step in steps):
+            followup_click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
+            followup_click_payload = {**click_target, "limit": 80}
+            if not followup_click_tool and app_name:
+                followup_click_tool = _first_allowed(
+                    app_foreground_tool_candidates("focus", "click_ui_element"),
+                    allowed,
+                )
+                if str(followup_click_tool or "").startswith("app."):
+                    followup_click_payload = {
+                        "app_name": app_name,
+                        **followup_click_payload,
+                    }
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui-followup-click",
+                    "Click after foreground input",
+                    "desktop.ui_operation",
+                    followup_click_tool,
+                    input_preview=followup_click_payload,
+                    risk_level=_desktop_operation_risk_level(followup_click_tool),
+                    approval_required=_desktop_operation_approval_required(followup_click_tool),
+                    depends_on=["operate-foreground-ui"],
+                    reason="Click the explicit follow-up UI target only after the requested input is complete.",
                 )
             )
         if (
@@ -13889,6 +13923,7 @@ def _app_search_field_input_submit_query(text: str) -> str:
 
 def _app_search_field_input_query(text: str) -> str:
     value = _clean_prompt(text)
+    query = ""
     patterns = (
         r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)\s*"
         r"(?:输入|键入|填写|填入|写入|写)\s*"

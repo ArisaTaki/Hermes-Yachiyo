@@ -1179,6 +1179,35 @@ def clean_target(value: str) -> str:
 
 
 def clean_type_target(value: str, *, app_name: str = "") -> str:
+    named_field_suffix = re.search(
+        r"^(?:并|然后|再|接着|之后|后|,|，)?\s*"
+        r"(?:把|将)?\s*(?:在|向|到|往)?\s*"
+        r"(?P<name>[^。！？!?，,]{1,40}?)\s*"
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏)$",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    if named_field_suffix:
+        name = named_field_suffix.group("name").strip(" .，,。")
+        clean_app_name = clean(app_name)
+        name = re.sub(
+            r"^(?:(?:在|通过)\s*|用\s+|(?:in|inside|within|using|with)\s+)",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).strip(" .，,。")
+        if clean_app_name and name.lower().startswith(clean_app_name.lower()):
+            name = name[len(clean_app_name) :].strip(" .，,。")
+        name = re.sub(
+            r"^(?:的|里|中|上|内|里的|中的|上的|内的|"
+            r"点击|点一下|点按|单击|按一下|按|click|press|tap)\s*",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).strip(" .，,。")
+        if name and name not in {"把", "将", "在", "向", "到", "往"}:
+            return name
+
     raw_field_suffix = re.search(
         r"(?:^|并|然后|再|接着|之后|后|,|，)\s*"
         r"(?:把|将)?\s*(?:在|向|到|in|inside|into)?\s*"
@@ -1203,6 +1232,12 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
     target = clean_target(value)
     target = re.sub(
         r"^(?:打开|启动|切到|聚焦|open|launch|focus|switch to)\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    target = re.sub(
+        r"^(?:并|然后|再|接着|之后|后)\s*",
         "",
         target,
         flags=re.IGNORECASE,
@@ -1662,6 +1697,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "this",
         "and",
         "then",
+        "先",
         "你能",
         "我",
         "我的",
