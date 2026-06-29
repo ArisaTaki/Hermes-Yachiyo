@@ -12473,11 +12473,30 @@ def _web_search_results_output_hint(text: str) -> dict[str, Any]:
 
 def _browser_search_deliverable_extract_requested(text: str) -> bool:
     surface = _web_search_surface_hint(text)
+    if not _desktop_content_artifact_requested(text):
+        return False
+    if not surface:
+        return _plain_web_search_deliverable_extract_requested(text)
     return bool(
-        surface
-        and _is_browser_or_search_app_name(surface)
+        _is_browser_or_search_app_name(surface)
         and not _is_generic_browser_app_label(surface)
-        and _desktop_content_artifact_requested(text)
+    )
+
+
+def _plain_web_search_deliverable_extract_requested(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s+",
+            _clean_prompt(text),
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+            r"(?:search|look\s+up|find\s+out\s+about)\s+",
+            _clean_prompt(text),
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -12588,6 +12607,12 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:(?:打开|启动|开启|新建|开)\s*(?:一个|个)?\s*"
         r"(?:新标签页?|新标签|new\s+tab)?\s*)?"
         r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s*"
+        r"(?P<query>[^。！？!?]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"search\s+"
+        r"(?P<query>[^.!?]+)$",
         r"\b(?:google|baidu)\s+(?P<query>[^.!?,]+)$",
     )
     for pattern in patterns:
@@ -12595,9 +12620,26 @@ def _direct_web_search_query(text: str) -> str:
         if not match:
             continue
         query = _clean_web_search_query(match.group("query"))
-        if query:
+        if (
+            query
+            and not _looks_like_local_search_query(query)
+            and not _looks_like_non_browser_search_surface(value)
+        ):
             return query
     return ""
+
+
+def _looks_like_local_search_query(query: str) -> bool:
+    return bool(
+        context_source_hint(query)
+        or data_source_hint(query)
+        or data_source_scope_hint(query)
+    )
+
+
+def _looks_like_non_browser_search_surface(text: str) -> bool:
+    surface = _web_search_surface_hint(text)
+    return bool(surface and not _is_browser_or_search_app_name(surface))
 
 
 def _web_search_engine_hint(text: str) -> str:
