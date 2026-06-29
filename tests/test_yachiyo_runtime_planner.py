@@ -263,6 +263,128 @@ def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis(
     ]
 
 
+def test_runtime_planner_opens_requested_data_file_when_desktop_path_tool_is_allowed() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
+        allowed_tools=[
+            "app.open",
+            "desktop.open_path",
+            "data.analyze",
+            "workspace.read",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["spreadsheet_app_hint"] == "Excel"
+    assert decision.plan.tool_plan.required_capabilities == [
+        "desktop.app_control",
+        "data.analysis",
+        "file.desktop_access",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-spreadsheet-app",
+        "open-data-file",
+        "analyze-data-file",
+    ]
+    assert _step_by_id(decision, "open-data-file").tool_name == "desktop.open_path"
+    assert _step_by_id(decision, "open-data-file").input_preview == {
+        "path": "~/Downloads/sales.csv"
+    }
+    assert _step_by_id(decision, "open-data-file").depends_on == [
+        "open-spreadsheet-app"
+    ]
+    assert _step_by_id(decision, "analyze-data-file").depends_on == [
+        "open-spreadsheet-app",
+        "open-data-file",
+    ]
+    assert planner_tool_requests(
+        "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
+        allowed_tools=[
+            "app.open",
+            "desktop.open_path",
+            "data.analyze",
+            "workspace.read",
+            "terminal.run",
+            "artifact.write",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Excel"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "~/Downloads/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_file_open",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview("~/Downloads/sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+    ]
+
+
+def test_runtime_planner_opens_requested_data_file_before_model_followup_without_builtin_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
+        allowed_tools=["app.open", "desktop.open_path", "workspace.read"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.plan.tool_plan.required_capabilities == [
+        "file.workspace_read",
+        "desktop.app_control",
+        "file.desktop_access",
+        "data.analysis",
+        "artifact.write",
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == [
+        "data.analysis",
+        "artifact.write",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "open-spreadsheet-app",
+        "open-data-file",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "open-data-file").depends_on == [
+        "inspect-data-source",
+        "open-spreadsheet-app",
+    ]
+    assert planner_tool_requests(
+        "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
+        allowed_tools=["app.open", "desktop.open_path", "workspace.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Excel"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "~/Downloads/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_file_open",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> None:
     decision = RuntimePlanner().decision(
         "分析 metrics.xlsx 并输出 html 报告、csv 汇总和图表",

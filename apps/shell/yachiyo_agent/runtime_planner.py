@@ -1663,6 +1663,12 @@ class RuntimePlanner:
         source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
         source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
         spreadsheet_app_step = _spreadsheet_app_open_step(intent, allowed)
+        data_file_open_step = _data_file_open_step(
+            intent,
+            allowed,
+            source_hint=source_hint,
+            depends_on=[spreadsheet_app_step.step_id] if spreadsheet_app_step is not None else [],
+        )
         if context_source and not source_hint:
             spreadsheet_first_steps = (
                 [spreadsheet_app_step]
@@ -1801,9 +1807,13 @@ class RuntimePlanner:
             }
             if len(artifact_paths) > 1:
                 input_preview["artifact_paths"] = artifact_paths
-            depends_on = [spreadsheet_app_step.step_id] if spreadsheet_app_step is not None else []
-            steps = [
+            prepare_steps = [
                 *([spreadsheet_app_step] if spreadsheet_app_step is not None else []),
+                *([data_file_open_step] if data_file_open_step is not None else []),
+            ]
+            depends_on = [step.step_id for step in prepare_steps]
+            steps = [
+                *prepare_steps,
                 _step(
                     intent,
                     "analyze-data-file",
@@ -1835,6 +1845,20 @@ class RuntimePlanner:
             if spreadsheet_app_step is not None
             else []
         )
+        fallback_data_file_open_step = _data_file_open_step(
+            intent,
+            allowed,
+            source_hint=source_hint,
+            depends_on=[
+                "inspect-data-source",
+                *[step.step_id for step in spreadsheet_steps],
+            ],
+        )
+        file_open_steps = (
+            [fallback_data_file_open_step]
+            if fallback_data_file_open_step is not None
+            else []
+        )
         artifact_paths = _artifact_output_paths(
             intent.user_goal,
             data_analysis_artifacts_expected(
@@ -1857,6 +1881,7 @@ class RuntimePlanner:
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),
             *spreadsheet_steps,
+            *file_open_steps,
             _step(
                 intent,
                 "run-analysis",
@@ -1869,6 +1894,7 @@ class RuntimePlanner:
                 depends_on=[
                     "inspect-data-source",
                     *[step.step_id for step in spreadsheet_steps],
+                    *[step.step_id for step in file_open_steps],
                 ],
                 reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
             ),
@@ -4559,6 +4585,39 @@ def _spreadsheet_app_open_step(
         reason=(
             "The user explicitly requested a spreadsheet app; open it while keeping "
             "analysis on reproducible local data tools."
+        ),
+    )
+
+
+def _data_file_open_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    source_hint: str,
+    depends_on: Iterable[str] = (),
+) -> ToolPlanStepSnapshot | None:
+    if not str(intent.inputs.get("spreadsheet_app_hint") or "").strip():
+        return None
+    clean_source_hint = str(source_hint or "").strip()
+    if not clean_source_hint:
+        return None
+    tool_name = _first_allowed(("desktop.open_path",), allowed)
+    if not tool_name:
+        return None
+    return _step(
+        intent,
+        "open-data-file",
+        "Open data file",
+        "file.desktop_access",
+        tool_name,
+        input_preview={"path": clean_source_hint},
+        depends_on=list(depends_on),
+        action="open_path",
+        risk_level="low",
+        approval_required=False,
+        reason=(
+            "Open the explicit local data file on the desktop so the requested spreadsheet app "
+            "path is observable while data.analyze keeps the reproducible analysis artifact."
         ),
     )
 

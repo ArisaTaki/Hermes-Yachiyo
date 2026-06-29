@@ -813,6 +813,7 @@ def _canonical_app_name(app_name: str) -> str:
 
 def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     app_requests = _data_analysis_spreadsheet_app_requests(decision, allowed)
+    file_open_requests = _data_analysis_file_open_requests(decision, allowed)
     data_analyze_step = next(
         (
             item
@@ -864,10 +865,12 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 analyze_request["continue_to_model"] = True
                 return [
                     *app_requests,
+                    *file_open_requests,
                     analyze_request,
                 ]
             return [
                 *app_requests,
+                *file_open_requests,
                 analyze_request,
                 *_artifact_reveal_tool_requests(
                     decision,
@@ -899,9 +902,9 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         )
         if _data_analysis_opens_spreadsheet_before_context(decision):
             if context_requests:
-                return [*app_requests, *context_requests]
-            return _mark_last_request_for_model_followup(app_requests)
-        return _append_model_followup_requests(context_requests, app_requests)
+                return [*app_requests, *file_open_requests, *context_requests]
+            return _mark_last_request_for_model_followup([*app_requests, *file_open_requests])
+        return _append_model_followup_requests(context_requests, [*app_requests, *file_open_requests])
     source_hint = str(inputs.get("data_source_hint") or "").strip()
     if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
         request = _request(
@@ -910,19 +913,19 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             planning_reason="planner_prefetch_data_source",
         )
         request["continue_to_model"] = True
-        return _append_model_followup_requests([request], app_requests)
+        return _append_model_followup_requests([request], [*app_requests, *file_open_requests])
     if source_hint:
-        return _mark_last_request_for_model_followup(app_requests)
+        return _mark_last_request_for_model_followup([*app_requests, *file_open_requests])
     source_scope = str(inputs.get("data_source_scope_hint") or "").strip()
     if source_scope and not _workspace_listable_data_scope(source_scope):
-        return _mark_last_request_for_model_followup(app_requests)
+        return _mark_last_request_for_model_followup([*app_requests, *file_open_requests])
     context_requests = _context_prefetch_tool_requests(
         decision,
         allowed,
         step_ids=("inspect-data-source",),
         planning_reason="planner_prefetch_data_source",
     )
-    return _append_model_followup_requests(context_requests, app_requests)
+    return _append_model_followup_requests(context_requests, [*app_requests, *file_open_requests])
 
 
 def _data_analysis_requires_model_followup(decision: Any) -> bool:
@@ -970,6 +973,35 @@ def _data_analysis_spreadsheet_app_requests(
             tool_name,
             _desktop_request_payload(tool_name, payload),
             planning_reason="planner_fallback_data_analysis_spreadsheet_app",
+        )
+    ]
+
+
+def _data_analysis_file_open_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    step = next(
+        (
+            item
+            for item in decision.plan.tool_plan.steps
+            if getattr(item, "step_id", "") == "open-data-file"
+        ),
+        None,
+    )
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name != "desktop.open_path" or tool_name not in allowed:
+        return []
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    path = str(payload.get("path") or "").strip()
+    if not path:
+        return []
+    return [
+        _request(
+            "desktop.open_path",
+            {"path": path},
+            planning_reason="planner_fallback_data_analysis_file_open",
         )
     ]
 

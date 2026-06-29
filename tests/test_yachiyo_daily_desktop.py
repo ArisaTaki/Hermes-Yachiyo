@@ -236,6 +236,29 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_open_spreadsheet_data_file() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
+        allowed_tools=["app.open", "desktop.open_path", "workspace.read"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Excel"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path",
+            "input": {"path": "~/Downloads/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_file_open",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_targets() -> None:
     cases = (
         ("PixelForge 导出按钮点一下", "导出"),
