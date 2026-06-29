@@ -1450,6 +1450,18 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert named_group_step.tool_name == "group.start"
     assert named_group_step.input_preview == {"target_name": "Research Team"}
 
+    current_page_group = RuntimePlanner().decision(
+        "运行研究群组，比较当前网页里的三个方案并输出报告",
+        allowed_tools=["group.run", "browser.extract_text", "artifact.write"],
+    )
+    assert current_page_group.selected_intent.kind == "multi_agent"
+    assert current_page_group.selected_intent.inputs == {
+        "target_name_hint": "研究",
+    }
+    current_page_group_step = _step_by_id(current_page_group, "group-multi_agent")
+    assert current_page_group_step.tool_name == "group.run"
+    assert current_page_group_step.input_preview == {"target_name": "研究"}
+
     single_agent_research = RuntimePlanner().decision(
         "研究 agent runtime 并总结",
         allowed_tools=["browser.open_url", "artifact.write"],
@@ -8842,6 +8854,29 @@ def test_runtime_planner_routes_explicit_reminder_to_schedule_capability() -> No
     assert step.tool_name == "reminders.create"
     assert step.input_preview == {"title": "买牛奶"}
     assert step.approval_required is True
+
+
+def test_runtime_planner_does_not_route_meeting_note_summary_to_schedule() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Obsidian，找到今天的会议笔记并总结成报告",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Obsidian"
+    assert decision.selected_intent.inputs["operation_hint"] == "open"
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "到今天的会议笔记并总结成报告",
+        "target": "搜索",
+    }
 
 
 def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> None:

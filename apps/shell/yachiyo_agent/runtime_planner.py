@@ -1373,6 +1373,8 @@ class TaskIntentRouter:
         ).strip()
         if scoped_action in {"new_reminder", "new_event"}:
             return _empty_intent("schedule", text)
+        if _looks_like_meeting_content_task(text):
+            return _empty_intent("schedule", text)
         score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
         if score <= 0:
             return _empty_intent("schedule", text)
@@ -6329,6 +6331,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         or bool(intent.inputs.get("target_name_hint"))
     ):
         score += 0.28
+        if _looks_like_explicit_group_run_request(text):
+            score += 0.24
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
         score += 0.06
     if intent.kind == "file_organization" and _looks_like_file_organization_request(text):
@@ -6439,6 +6443,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.14
     if intent.kind == "web_research" and external_info_lookup:
         score += 0.34
+    if intent.kind == "web_research" and _looks_like_explicit_group_run_request(text):
+        score -= 0.36
     if intent.kind == "web_research" and _looks_like_schedule_request(text):
         score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
@@ -8673,6 +8679,60 @@ def _looks_like_schedule_request(value: str) -> bool:
                 value,
                 ("今天", "明天", "后天", "上午", "下午", "晚上", "点", "时间", "日程"),
             )
+        )
+    )
+
+
+def _looks_like_meeting_content_task(value: str) -> bool:
+    text = _clean_prompt(value)
+    if not text:
+        return False
+    return bool(
+        _contains_any(
+            text,
+            (
+                "会议笔记",
+                "会议纪要",
+                "会议记录",
+                "会议内容",
+                "meeting note",
+                "meeting notes",
+                "meeting transcript",
+                "meeting minutes",
+            ),
+        )
+        and _contains_any(
+            text,
+            (
+                "打开",
+                "找到",
+                "查找",
+                "读取",
+                "总结",
+                "摘要",
+                "整理",
+                "报告",
+                "open",
+                "find",
+                "read",
+                "summarize",
+                "summary",
+                "report",
+            ),
+        )
+    )
+
+
+def _looks_like_explicit_group_run_request(value: str) -> bool:
+    text = _clean_prompt(value)
+    if not text:
+        return False
+    return bool(
+        re.search(r"(?:group|群组|小组|团队)", text, flags=re.IGNORECASE)
+        and re.search(
+            r"(?:运行|启动|执行|让|安排|委派|分配|指派|协作|run|start|execute|delegate|assign)",
+            text,
+            flags=re.IGNORECASE,
         )
     )
 
