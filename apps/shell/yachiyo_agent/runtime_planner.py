@@ -5843,6 +5843,12 @@ def _direct_communication_steps(
     steps: list[ToolPlanStepSnapshot] = []
     source_step_id = ""
     generated_body = _direct_message_requires_generated_body(direct_message)
+    if (
+        body_source == "current_page_link"
+        and not _first_allowed(("desktop.safe_shortcut",), allowed)
+        and _first_allowed(("browser.current_page",), allowed)
+    ):
+        generated_body = True
     if generated_body and body_source:
         context_steps = (
             _app_search_result_context_steps(

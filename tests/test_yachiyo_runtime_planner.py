@@ -10883,6 +10883,68 @@ def test_runtime_planner_tracks_context_communication_source_without_body() -> N
     assert _step_by_id(decision, "send-communication-message").approval_required is True
 
 
+def test_runtime_planner_uses_browser_current_page_for_link_delivery() -> None:
+    allowed_tools = [
+        "browser.current_page",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(
+        "把当前页面链接发给 Slack 的 yachiyo",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "current_page_link",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "yachiyo",
+            "body_source": "current_page_link",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    read_step = _step_by_id(decision, "read-communication-context")
+    assert read_step.capability_id == "browser.research"
+    assert read_step.tool_name == "browser.current_page"
+    assert _step_by_id(
+        decision,
+        "draft-communication-message",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        decision,
+        "draft-communication-message",
+    ).input_preview == {
+        "app_name": "Slack",
+        "body_source": "current_page_link",
+    }
+    assert planner_tool_requests(
+        "把当前页面链接发给 Slack 的 yachiyo",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_routes_generated_context_to_direct_communication() -> None:
     allowed_tools = [
         "browser.extract_text",
