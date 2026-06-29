@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from apps.shell.model_profiles import openai_compatible_chat_message
-from packages.security import redact_api_error_text
+from packages.security import contains_sensitive_text, redact_api_error_text
 
 BASE_URL_ENV = "OHA_YACHIYO_SMOKE_BASE_URL"
 MODEL_ENV = "OHA_YACHIYO_SMOKE_MODEL"
@@ -837,13 +837,37 @@ def run_stream_smoke(
     return summary
 
 
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _report_written(path: Path) -> None:
+    print(f"provider stream smoke report: {path}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run an opt-in OpenAI-compatible streaming smoke test without printing secrets."
     )
-    parser.add_argument("--base-url", default=os.getenv(BASE_URL_ENV, ""), help=f"Provider base URL, or {BASE_URL_ENV}.")
-    parser.add_argument("--model", default=os.getenv(MODEL_ENV, ""), help=f"Model name, or {MODEL_ENV}.")
-    parser.add_argument("--api-key", default=os.getenv(API_KEY_ENV, ""), help=f"API key, or {API_KEY_ENV}.")
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv(BASE_URL_ENV, ""),
+        help=f"Provider base URL, or {BASE_URL_ENV}.",
+    )
+    parser.add_argument(
+        "--model",
+        default=os.getenv(MODEL_ENV, ""),
+        help=f"Model name, or {MODEL_ENV}.",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv(API_KEY_ENV, ""),
+        help=f"API key, or {API_KEY_ENV}.",
+    )
     parser.add_argument("--prompt", default="", help="Optional user prompt for the smoke call.")
     parser.add_argument("--tool-call", action="store_true", help="Ask the provider to stream a workspace_read tool call.")
     parser.add_argument("--require-content", action="store_true", help="Fail if the provider streams no text content.")
@@ -887,6 +911,11 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Fail unless the tool-result follow-up stream emits this finish_reason. May be repeated.",
     )
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        help="Optional JSON evidence report path.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -915,13 +944,31 @@ def main(argv: list[str] | None = None) -> int:
             expect_tool_result_finish_reasons=args.expect_tool_result_finish_reason,
         )
     except ValueError as exc:
+        if args.report_json is not None:
+            _write_report(args.report_json, {"ok": False, "error": str(exc)})
+            _report_written(args.report_json)
         print(str(exc), file=sys.stderr)
         return 2
     except Exception as exc:
-        print(redact_api_error_text(str(exc), fallback="stream smoke failed"), file=sys.stderr)
+        message = redact_api_error_text(str(exc), fallback="stream smoke failed")
+        if args.report_json is not None:
+            _write_report(args.report_json, {"ok": False, "error": message})
+            _report_written(args.report_json)
+        print(message, file=sys.stderr)
         return 1
 
-    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    text = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    if contains_sensitive_text(text):
+        safe_summary = {"ok": False, "error": "smoke output still contains sensitive text"}
+        if args.report_json is not None:
+            _write_report(args.report_json, safe_summary)
+            _report_written(args.report_json)
+        print(json.dumps(safe_summary, sort_keys=True))
+        return 1
+    if args.report_json is not None:
+        _write_report(args.report_json, summary)
+        _report_written(args.report_json)
+    print(text)
     return 0 if summary["ok"] else 1
 
 

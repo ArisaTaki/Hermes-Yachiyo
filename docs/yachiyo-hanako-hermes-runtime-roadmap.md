@@ -215,6 +215,33 @@ task/run snapshots, and artifact readback shape are preserved at the shared
 entrypoints. It does not replace packaged renderer, native provider, or full
 `NativeRunEngine` evidence.
 
+Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
+`OHA_YACHIYO_SMOKE_*` credentials are configured, with:
+
+```bash
+python scripts/smoke_openai_compatible_stream.py \
+  --report-json tmp/provider-stream.json
+```
+
+This validates streaming provider compatibility, including text chunks,
+reasoning chunks when required, tool-call streaming, finish reasons, and
+synthetic tool-result follow-up. The report writer fails closed if the summary
+would contain sensitive provider text.
+
+Current opt-in Native Agent full-chain provider evidence is reproducible, when
+`OHA_YACHIYO_SMOKE_*` credentials are configured, with:
+
+```bash
+python scripts/smoke_native_agent_full_chain.py \
+  --report-json tmp/native-agent-full-chain.json
+```
+
+This exercises model profile readiness, workspace read, artifact write,
+multi-tool planning, Workflow child execution, terminal approval resume, and
+main Chat model-loop execution against a real OpenAI-compatible provider. The
+report writer uses the same redacted summary as stdout and fails closed if
+sensitive provider text would be emitted.
+
 Current opt-in advanced Workflow provider evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:
 

@@ -2465,6 +2465,66 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert "sk-stream" not in captured.out
 
 
+def test_stream_smoke_main_writes_report_json(monkeypatch, tmp_path, capsys):
+    report_path = tmp_path / "provider-stream.json"
+
+    def fake_run_stream_smoke(**_kwargs):
+        return {
+            "ok": True,
+            "chunk_count": 1,
+            "content_chars": 1,
+            "reasoning_chars": 0,
+            "finish_reasons": ["stop"],
+            "tool_call_count": 0,
+            "tool_calls": [],
+        }
+
+    monkeypatch.setattr(smoke, "run_stream_smoke", fake_run_stream_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--base-url",
+            "https://api.example.test/v1",
+            "--model",
+            "demo-model",
+            "--api-key",
+            "sk-stream-smoke-secret123456",
+            "--report-json",
+            str(report_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert output == report
+    assert report["ok"] is True
+    assert report["chunk_count"] == 1
+    assert "provider stream smoke report:" in captured.err
+    assert str(report_path) in captured.err
+    assert "sk-stream" not in captured.out
+    assert "sk-stream" not in report_path.read_text(encoding="utf-8")
+
+
+def test_stream_smoke_main_missing_args_writes_report_json(monkeypatch, tmp_path, capsys):
+    report_path = tmp_path / "provider-stream.json"
+    monkeypatch.delenv(smoke.BASE_URL_ENV, raising=False)
+    monkeypatch.delenv(smoke.MODEL_ENV, raising=False)
+    monkeypatch.delenv(smoke.API_KEY_ENV, raising=False)
+
+    exit_code = smoke.main(["--report-json", str(report_path)])
+
+    captured = capsys.readouterr()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert exit_code == 2
+    assert report["ok"] is False
+    assert "Missing base URL, model, API key" in report["error"]
+    assert "Missing base URL, model, API key" in captured.err
+    assert "provider stream smoke report:" in captured.err
+    assert str(report_path) in captured.err
+
+
 def test_stream_smoke_main_redacts_provider_errors(monkeypatch, capsys):
     leaked_secret = "sk-provider-error-smoke123456"
 
@@ -2488,3 +2548,80 @@ def test_stream_smoke_main_redacts_provider_errors(monkeypatch, capsys):
     assert exit_code == 1
     assert leaked_secret not in captured.err
     assert "[redacted]" in captured.err
+
+
+def test_stream_smoke_main_provider_error_writes_redacted_report_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    leaked_secret = "sk-provider-error-smoke123456"
+    report_path = tmp_path / "provider-stream.json"
+
+    def fake_run_stream_smoke(**_kwargs):
+        raise RuntimeError(f"provider rejected api_key={leaked_secret}")
+
+    monkeypatch.setattr(smoke, "run_stream_smoke", fake_run_stream_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--base-url",
+            "https://api.example.test/v1",
+            "--model",
+            "demo-model",
+            "--api-key",
+            leaked_secret,
+            "--report-json",
+            str(report_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report_text = report_path.read_text(encoding="utf-8")
+    report = json.loads(report_text)
+    assert exit_code == 1
+    assert leaked_secret not in captured.err
+    assert leaked_secret not in report_text
+    assert report["ok"] is False
+    assert "[redacted]" in report["error"]
+    assert "provider stream smoke report:" in captured.err
+    assert str(report_path) in captured.err
+
+
+def test_stream_smoke_main_sensitive_summary_writes_safe_report_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    secret = "sk-provider-summary-smoke123456"
+    report_path = tmp_path / "provider-stream.json"
+
+    def fake_run_stream_smoke(**_kwargs):
+        return {"ok": True, "api_key": secret}
+
+    monkeypatch.setattr(smoke, "run_stream_smoke", fake_run_stream_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--base-url",
+            "https://api.example.test/v1",
+            "--model",
+            "demo-model",
+            "--api-key",
+            secret,
+            "--report-json",
+            str(report_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report_text = report_path.read_text(encoding="utf-8")
+    output = json.loads(captured.out)
+    report = json.loads(report_text)
+    assert exit_code == 1
+    assert secret not in captured.out
+    assert secret not in report_text
+    assert output == report
+    assert report == {"ok": False, "error": "smoke output still contains sensitive text"}
+    assert "provider stream smoke report:" in captured.err
+    assert str(report_path) in captured.err
