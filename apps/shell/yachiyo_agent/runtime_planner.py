@@ -2315,6 +2315,24 @@ class RuntimePlanner:
             ):
                 app_name = scoped_type_app
                 type_target = dict(scoped_type_target)
+        defer_ambiguous_type_target = False
+        if (
+            (
+                type_target
+                and _type_target_needs_observation_choice(intent.user_goal, type_target)
+            )
+            or _ambiguous_type_target_requested(intent.user_goal)
+        ) and (ui_inspection is not None or screen_capture is not None):
+            ui_payload = dict(ui_inspection) if isinstance(ui_inspection, Mapping) else {}
+            if not str(ui_payload.get("role_filter") or "").strip():
+                ui_payload["role_filter"] = "text"
+            try:
+                ui_payload["limit"] = int(ui_payload.get("limit") or 80)
+            except (TypeError, ValueError):
+                ui_payload["limit"] = 80
+            ui_inspection = ui_payload
+            type_target = None
+            defer_ambiguous_type_target = True
         if app_name and type_target and not _explicit_app_open_request(intent.user_goal):
             mode = "focus"
         if (
@@ -2332,7 +2350,7 @@ class RuntimePlanner:
             app_search = {}
         foreground_compose_text = (
             ""
-            if type_target
+            if type_target or defer_ambiguous_type_target
             else str(
                 intent.inputs.get("foreground_compose_text_hint")
                 or _foreground_compose_text_hint(intent.user_goal)
@@ -2344,7 +2362,11 @@ class RuntimePlanner:
         safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
         safe_type_text = (
             ""
-            if type_target or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
+            if (
+                type_target
+                or defer_ambiguous_type_target
+                or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
+            )
             else (
                 foreground_compose_text
                 if safe_shortcut_action in {"new_note", "new_document"} and foreground_compose_text
@@ -2359,6 +2381,9 @@ class RuntimePlanner:
         foreground_search_submit = bool(
             intent.inputs.get("foreground_search_submit_hint")
         ) or _foreground_search_submit_hint(intent.user_goal)
+        if defer_ambiguous_type_target:
+            foreground_submit_action = ""
+            foreground_search_submit = False
         if (
             app_name
             and (foreground_submit_action or foreground_compose_text or foreground_paste)
@@ -2368,6 +2393,8 @@ class RuntimePlanner:
         if foreground_submit_action:
             click_target = None
         submit_action = submit_action_hint(intent.user_goal) or foreground_submit_action
+        if defer_ambiguous_type_target:
+            submit_action = ""
         if hotkey and not _contains_any(intent.user_goal, ("发送", "提交", "send", "submit")):
             submit_action = ""
         if click_target and not any((type_target, safe_type_text, app_search)):
@@ -13891,6 +13918,54 @@ def _click_target_needs_observation_choice(
         )
         or re.search(
             r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|should)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _type_target_needs_observation_choice(
+    text: str,
+    type_target: Mapping[str, Any] | None,
+) -> bool:
+    target = str((type_target or {}).get("target") or "")
+    value = f"{_clean_prompt(text)} {target}"
+    return bool(
+        re.search(
+            r"(?:最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪个|哪里|哪一个|哪项|哪条)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|should|possible)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _ambiguous_type_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        (
+            re.search(
+                r"(?:最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪个|哪里|哪一个|哪项|哪条)",
+                value,
+                flags=re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|should|possible)\b",
+                value,
+                flags=re.IGNORECASE,
+            )
+        )
+        and re.search(
+            r"(?:输入框|文本框|输入栏|字段|栏位|field|input|text box|text field)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        and re.search(
+            r"(?:输入|键入|填写|填入|写入|type|enter|fill|put)",
             value,
             flags=re.IGNORECASE,
         )

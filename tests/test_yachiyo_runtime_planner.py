@@ -3278,6 +3278,96 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "limit": 80,
     }
 
+    ambiguous_field_fill = RuntimePlanner().decision(
+        "打开 LedgerPro，先看看界面，然后在最像金额的输入框输入 100",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert ambiguous_field_fill.selected_intent.kind == "desktop_operation"
+    assert ambiguous_field_fill.selected_intent.inputs["app_name_hint"] == "LedgerPro"
+    assert [step.step_id for step in ambiguous_field_fill.plan.tool_plan.steps] == [
+        "inspect-app",
+    ]
+    assert _step_by_id(ambiguous_field_fill, "inspect-app").input_preview == {
+        "app_name": "LedgerPro",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert planner_tool_requests(
+        "打开 LedgerPro，先看看界面，然后在最像金额的输入框输入 100",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "text",
+                "limit": 80,
+                "app_name": "LedgerPro",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    ambiguous_search_field_fill = RuntimePlanner().decision(
+        "打开 PixelForge，先读取界面，把 revenue 输入到可能是搜索的输入框",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert [step.step_id for step in ambiguous_search_field_fill.plan.tool_plan.steps] == [
+        "inspect-app",
+    ]
+    assert _step_by_id(ambiguous_search_field_fill, "inspect-app").input_preview == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+
+    english_ambiguous_field_fill = RuntimePlanner().decision(
+        "open any app LedgerPro, inspect the UI, type 100 into the field closest to amount",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert [step.step_id for step in english_ambiguous_field_fill.plan.tool_plan.steps] == [
+        "inspect-app",
+    ]
+    assert _step_by_id(english_ambiguous_field_fill, "inspect-app").input_preview == {
+        "app_name": "LedgerPro",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+
     search_click_type_return = RuntimePlanner().decision(
         "打开 PixelForge，先读取界面，然后点击搜索框，输入 revenue，再按回车",
         allowed_tools=[

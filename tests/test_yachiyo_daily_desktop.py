@@ -591,6 +591,32 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_inpu
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 LedgerPro，先看看界面，然后在最像金额的输入框输入 100",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "text",
+                "limit": 80,
+                "app_name": "LedgerPro",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_create() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
