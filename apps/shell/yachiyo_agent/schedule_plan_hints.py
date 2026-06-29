@@ -123,7 +123,9 @@ def schedule_context_source_hint(text: str) -> str:
 
 def _looks_like_calendar_event(text: str) -> bool:
     lowered = str(text or "").lower()
-    return any(term in lowered for term in ("calendar", "event", "meeting", "日历", "日程", "会议"))
+    return any(term in lowered for term in ("calendar", "event", "meeting", "日历", "日程", "会议")) or (
+        "安排" in str(text or "") and _has_explicit_schedule_time(text)
+    )
 
 
 def _dynamic_schedule_source_request(text: str) -> bool:
@@ -214,6 +216,9 @@ def _calendar_body(text: str) -> str:
         r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<title_after_time>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<body_action_first>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<body_target_after>[^。！？!?]+?)\s*"
         r"(?:的)?(?:日历事件|日历日程|日程|事件|会议)$",
@@ -254,6 +259,7 @@ def _calendar_body(text: str) -> str:
             groups.get("body")
             or groups.get("body_calendar_short")
             or groups.get("body_target_after")
+            or groups.get("body_action_first")
             or groups.get("body_to_calendar_en")
             or groups.get("body_scheduled_en")
             or ""
@@ -261,6 +267,21 @@ def _calendar_body(text: str) -> str:
         if body:
             return body
     return ""
+
+
+def _has_explicit_schedule_time(text: str) -> bool:
+    value = _clean(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            rf"(?:{_CHINESE_DAY_MARKER_RE}|上午|早上|下午|晚上|今晚|中午|凌晨|"
+            r"\d{1,2}\s*点|\d{1,2}\s*[:：]\s*\d{1,2}|"
+            r"\b(?:today|tomorrow|tonight)\b|\bat\s+\d{1,2}(?::\d{2})?\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _local_iso_hint(text: str) -> str:

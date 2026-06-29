@@ -8961,6 +8961,12 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         value,
         flags=re.IGNORECASE,
     ):
+        if _looks_like_timed_schedule_request(value) and not re.search(
+            r"(?:agent|Agent|AI|智能体|代理|group|群组|小组|多\s*agent|多Agent)",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            return False
         return True
     if re.search(
         r"(?:two|three|multiple|several)\s+(?:agents?|ai\s+agents?)",
@@ -10319,6 +10325,22 @@ def _looks_like_schedule_request(value: str) -> bool:
     )
 
 
+def _looks_like_timed_schedule_request(value: str) -> bool:
+    text = _clean_prompt(value)
+    if not text or not _looks_like_schedule_request(text):
+        return False
+    return bool(
+        re.search(
+            r"(?:今天|今日|今晚|明天|明日|明晚|后天|下周[一二三四五六日天]|"
+            r"下星期[一二三四五六日天]|上午|早上|下午|晚上|中午|凌晨|"
+            r"\d{1,2}\s*点|\d{1,2}\s*[:：]\s*\d{1,2}|"
+            r"\b(?:today|tomorrow|tonight)\b|\bat\s+\d{1,2}(?::\d{2})?\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_meeting_content_task(value: str) -> bool:
     text = _clean_prompt(value)
     if not text:
@@ -10362,6 +10384,12 @@ def _looks_like_meeting_content_task(value: str) -> bool:
 def _looks_like_explicit_group_run_request(value: str) -> bool:
     text = _clean_prompt(value)
     if not text:
+        return False
+    if _looks_like_timed_schedule_request(text) and not re.search(
+        r"(?:agent|Agent|AI|智能体|代理|group|群组|小组|多\s*agent|多Agent)",
+        text,
+        flags=re.IGNORECASE,
+    ):
         return False
     return bool(
         re.search(r"(?:group|群组|小组|团队)", text, flags=re.IGNORECASE)

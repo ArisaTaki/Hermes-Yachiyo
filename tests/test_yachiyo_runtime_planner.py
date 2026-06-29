@@ -1951,6 +1951,7 @@ def test_planner_orchestration_requests_use_discovered_targets_without_keywords(
     assert len(team_coordination_request) == 1
     assert team_coordination_request[0]["orchestration_kind"] == "group_run"
     assert team_coordination_request[0]["input"]["target_name"] == ""
+    assert planner_orchestration_requests("安排下周一上午十点和团队复盘") == []
 
 
 def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> None:
@@ -10498,6 +10499,10 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability()
         "下周一上午十点安排项目复盘会议",
         allowed_tools=["calendar.create_event"],
     )
+    team_retro = RuntimePlanner().decision(
+        "安排下周一上午十点和团队复盘",
+        allowed_tools=["calendar.create_event", "group.run"],
+    )
 
     assert decision.selected_intent.kind == "schedule"
     step = _step_by_id(decision, "create-schedule-item")
@@ -10527,6 +10532,14 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability()
     assert next_week_step.tool_name == "calendar.create_event"
     assert next_week_step.input_preview == {
         "title": "项目复盘会议",
+        "start_at": next_monday_1000,
+        "end_at": next_monday_1100,
+    }
+    assert team_retro.selected_intent.kind == "schedule"
+    team_retro_step = _step_by_id(team_retro, "create-schedule-item")
+    assert team_retro_step.tool_name == "calendar.create_event"
+    assert team_retro_step.input_preview == {
+        "title": "和团队复盘",
         "start_at": next_monday_1000,
         "end_at": next_monday_1100,
     }
@@ -14872,6 +14885,22 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
             "tool": "calendar.create_event",
             "input": {
                 "title": "项目复盘会议",
+                "start_at": next_monday_1000,
+                "end_at": next_monday_1100,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "安排下周一上午十点和团队复盘",
+        allowed_tools=["calendar.create_event", "group.run"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "和团队复盘",
                 "start_at": next_monday_1000,
                 "end_at": next_monday_1100,
             },
