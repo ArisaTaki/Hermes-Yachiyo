@@ -6,41 +6,76 @@ import re
 from typing import Any
 
 
+FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
+    {
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+        "clipboard.read",
+        "data.analyze",
+        "desktop.ui_elements",
+        "screen.capture",
+        "workspace.read",
+    }
+)
+
+
 def latest_followup_content_snapshot(
     timeline: list[dict[str, Any]],
     observation_tools: list[str],
 ) -> dict[str, Any]:
-    wanted_tools = {str(tool or "").strip() for tool in observation_tools if str(tool or "").strip()}
-    if not wanted_tools:
-        wanted_tools = {
-            "browser.extract_text",
-            "browser.open_url_and_extract_text",
-            "clipboard.read",
-            "data.analyze",
-            "desktop.ui_elements",
-            "screen.capture",
-            "workspace.read",
-        }
+    wanted_tools = _wanted_followup_content_tools(observation_tools)
     for event in reversed(timeline):
-        if event.get("event") != "agent.tool.call":
-            continue
-        tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+        tool_name, result, input_preview = _followup_tool_event_parts(event)
         if tool_name not in wanted_tools:
             continue
-        result = event.get("result") if isinstance(event.get("result"), dict) else {}
-        input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
-        if tool_name == "desktop.ui_elements":
-            return desktop_ui_elements_content_snapshot(result, input_preview)
-        if tool_name == "screen.capture":
-            return screen_capture_content_snapshot(result, input_preview)
-        if tool_name in {"browser.extract_text", "browser.open_url_and_extract_text"}:
-            return browser_extract_text_content_snapshot(result, input_preview, source_tool=tool_name)
-        if tool_name == "clipboard.read":
-            return clipboard_read_content_snapshot(result, input_preview)
-        if tool_name == "data.analyze":
-            return data_analyze_content_snapshot(result, input_preview)
-        if tool_name == "workspace.read":
-            return workspace_read_content_snapshot(result, input_preview)
+        snapshot = followup_content_snapshot_for_tool_call(tool_name, result, input_preview)
+        if snapshot:
+            return snapshot
+    return {}
+
+
+def followup_content_snapshots(
+    timeline: list[dict[str, Any]],
+    observation_tools: list[str],
+    *,
+    max_snapshots: int = 6,
+) -> list[dict[str, Any]]:
+    wanted_tools = _wanted_followup_content_tools(observation_tools)
+    clean_max = max(1, int(max_snapshots or 6))
+    snapshots: list[dict[str, Any]] = []
+    seen_tools: set[str] = set()
+    for event in reversed(timeline):
+        tool_name, result, input_preview = _followup_tool_event_parts(event)
+        if tool_name not in wanted_tools or tool_name in seen_tools:
+            continue
+        snapshot = followup_content_snapshot_for_tool_call(tool_name, result, input_preview)
+        if not snapshot:
+            continue
+        snapshots.append(snapshot)
+        seen_tools.add(tool_name)
+        if len(snapshots) >= clean_max:
+            break
+    snapshots.reverse()
+    return snapshots
+
+
+def followup_content_snapshot_for_tool_call(
+    tool_name: str,
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    if tool_name == "desktop.ui_elements":
+        return desktop_ui_elements_content_snapshot(result, input_preview)
+    if tool_name == "screen.capture":
+        return screen_capture_content_snapshot(result, input_preview)
+    if tool_name in {"browser.extract_text", "browser.open_url_and_extract_text"}:
+        return browser_extract_text_content_snapshot(result, input_preview, source_tool=tool_name)
+    if tool_name == "clipboard.read":
+        return clipboard_read_content_snapshot(result, input_preview)
+    if tool_name == "data.analyze":
+        return data_analyze_content_snapshot(result, input_preview)
+    if tool_name == "workspace.read":
+        return workspace_read_content_snapshot(result, input_preview)
     return {}
 
 
@@ -340,6 +375,28 @@ def _add_failure_fields(snapshot: dict[str, Any], result: dict[str, Any]) -> Non
 
 def _compact_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in snapshot.items() if value not in ("", None, [])}
+
+
+def _wanted_followup_content_tools(observation_tools: list[str]) -> set[str]:
+    wanted_tools = {
+        str(tool or "").strip()
+        for tool in observation_tools
+        if str(tool or "").strip()
+    }
+    if not wanted_tools:
+        return set(FOLLOWUP_CONTENT_SNAPSHOT_TOOLS)
+    return wanted_tools & set(FOLLOWUP_CONTENT_SNAPSHOT_TOOLS)
+
+
+def _followup_tool_event_parts(
+    event: dict[str, Any],
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    if event.get("event") != "agent.tool.call":
+        return "", {}, {}
+    tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+    result = event.get("result") if isinstance(event.get("result"), dict) else {}
+    input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
+    return tool_name, result, input_preview
 
 
 def _artifact_manifest_preview(value: Any) -> list[dict[str, str]]:

@@ -450,9 +450,26 @@ function publicRunEventArtifactSummary(payload: Record<string, unknown>): string
 }
 
 function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>): string {
+  const snapshots = publicRunEventContentSnapshotRecords(payload);
+  return snapshots.map(publicRunEventContentSnapshotRecordSummary).filter(Boolean).join(' / ');
+}
+
+function publicRunEventContentSnapshotRecords(payload: Record<string, unknown>): Array<Record<string, unknown>> {
+  const snapshots = payload.content_snapshots;
+  if (Array.isArray(snapshots)) {
+    return snapshots.filter((snapshot): snapshot is Record<string, unknown> => (
+      Boolean(snapshot)
+      && typeof snapshot === 'object'
+      && !Array.isArray(snapshot)
+      && Object.keys(snapshot).length > 0
+    ));
+  }
   const snapshot = payload.content_snapshot;
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return '';
-  const record = snapshot as Record<string, unknown>;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return [];
+  return [snapshot as Record<string, unknown>];
+}
+
+function publicRunEventContentSnapshotRecordSummary(record: Record<string, unknown>): string {
   const textItemCount = publicRunEventPayloadNumberString(record, 'text_item_count');
   const elementCount = publicRunEventPayloadNumberString(record, 'element_count');
   const rows = publicRunEventPayloadNumberString(record, 'rows');

@@ -199,6 +199,9 @@ Exit evidence:
 
 - Planner decisions are visible in Chat task metadata and Studio run events.
 - Plans can continue to the model when the first tool is only prefetch context.
+- Model follow-up RunEvents preserve all supported observed context snapshots
+  in `content_snapshots` while keeping `content_snapshot` as the compatible
+  latest-snapshot field for older consumers.
 - Missing capabilities are explicit instead of hidden in a text-only apology.
 
 ## Phase 5 - Desktop Discover/Operate Layer

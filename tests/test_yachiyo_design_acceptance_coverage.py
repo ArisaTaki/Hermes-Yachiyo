@@ -1534,6 +1534,7 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "agent.plan.selection",
             "agent.model.followup_context",
             "runtimeTimelineContentSnapshotDetail",
+            "content_snapshots",
             "content_snapshot",
             "group.run.intent.selected",
             "group.run.plan.created",

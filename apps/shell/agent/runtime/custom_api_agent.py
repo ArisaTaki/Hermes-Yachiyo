@@ -19,7 +19,10 @@ from apps.shell.agent.runtime.desktop_intents import (
 from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
 )
-from apps.shell.agent.runtime.followup_content_snapshot import latest_followup_content_snapshot
+from apps.shell.agent.runtime.followup_content_snapshot import (
+    followup_content_snapshots,
+    latest_followup_content_snapshot,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
@@ -3270,9 +3273,12 @@ def _model_followup_context_payload(
     }
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
-    content_snapshot = latest_followup_content_snapshot(timeline, observation_tools)
+    content_snapshots = followup_content_snapshots(timeline, observation_tools)
+    content_snapshot = content_snapshots[-1] if content_snapshots else latest_followup_content_snapshot(timeline, observation_tools)
     if content_snapshot:
         payload["content_snapshot"] = content_snapshot
+    if content_snapshots:
+        payload["content_snapshots"] = content_snapshots
     for key in ("decision_id", "plan_id", "intent_kind"):
         value = str(selection_payload.get(key) or "").strip()
         if value:
@@ -3300,7 +3306,7 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
         artifact_instruction = (
             "artifact.write is not allowed, so provide the requested summary or report inline."
         )
-    snapshot_text = _followup_content_snapshot_message(payload.get("content_snapshot"))
+    snapshot_text = _followup_content_snapshots_message(payload)
     return (
         "Runtime follow-up context: source material has just been observed through "
         f"{observation_text}. Use the latest Tool result messages above as source material. "
@@ -3326,6 +3332,38 @@ def _followup_content_snapshot_message(value: Any) -> str:
         summary = str(value.get("summary") or value.get("error") or "").strip()
         if summary:
             return f"\n\nObservation status: {summary}\n\n"
+    return ""
+
+
+def _followup_content_snapshots_message(payload: dict[str, Any]) -> str:
+    raw_snapshots = payload.get("content_snapshots")
+    snapshots = [
+        item
+        for item in raw_snapshots
+        if isinstance(item, dict)
+    ] if isinstance(raw_snapshots, list) else []
+    if not snapshots:
+        return _followup_content_snapshot_message(payload.get("content_snapshot"))
+    if len(snapshots) == 1:
+        return _followup_content_snapshot_message(snapshots[0])
+    sections: list[str] = []
+    for index, snapshot in enumerate(snapshots, start=1):
+        body = _followup_content_snapshot_body(snapshot)
+        if not body:
+            continue
+        source_tool = str(snapshot.get("source_tool") or f"snapshot-{index}").strip()
+        sections.append(f"[{index}] {source_tool}\n{body}")
+    if not sections:
+        return ""
+    return "\n\nObserved context snapshots:\n\n" + "\n\n".join(sections) + "\n\n"
+
+
+def _followup_content_snapshot_body(value: dict[str, Any]) -> str:
+    text = str(value.get("text") or "").strip()
+    if text:
+        return text
+    if value.get("ok") is False:
+        return str(value.get("summary") or value.get("error") or "").strip()
     return ""
 
 

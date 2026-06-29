@@ -231,9 +231,29 @@ function runtimeTimelineContentSnapshotDetail(event: RuntimeTimelineEventSnapsho
   const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
+  const snapshots = runtimeTimelineContentSnapshotRecords(payload);
+  if (snapshots.length) {
+    return snapshots.map(runtimeTimelineContentSnapshotRecordDetail).filter(Boolean).join(' / ');
+  }
+  return '';
+}
+
+function runtimeTimelineContentSnapshotRecords(payload: Record<string, unknown>): Array<Record<string, unknown>> {
+  const snapshots = payload.content_snapshots;
+  if (Array.isArray(snapshots)) {
+    return snapshots.filter((snapshot): snapshot is Record<string, unknown> => (
+      Boolean(snapshot)
+      && typeof snapshot === 'object'
+      && !Array.isArray(snapshot)
+      && Object.keys(snapshot).length > 0
+    ));
+  }
   const snapshot = payload.content_snapshot;
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return '';
-  const record = snapshot as Record<string, unknown>;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return [];
+  return [snapshot as Record<string, unknown>];
+}
+
+function runtimeTimelineContentSnapshotRecordDetail(record: Record<string, unknown>): string {
   const textItemCount = runtimeTimelineRecordNumberString(record, 'text_item_count');
   const elementCount = runtimeTimelineRecordNumberString(record, 'element_count');
   const rows = runtimeTimelineRecordNumberString(record, 'rows');

@@ -982,6 +982,73 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
     assert "Artifacts: analysis-report.md (markdown), analysis-chart.png (chart)" in model_calls[0][-1]["content"]
 
 
+def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "workspace.read",
+            input_preview={"path": "data/sales.csv"},
+            result={
+                "ok": True,
+                "path": "data/sales.csv",
+                "content": "region,revenue\nEast,10\nWest,20",
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "data.analyze",
+            input_preview={"path": "data/sales.csv", "source_kind": "csv"},
+            result={
+                "ok": True,
+                "path": "data/sales.csv",
+                "source_kind": "csv",
+                "rows": 2,
+                "columns": ["region", "revenue"],
+                "artifact_paths": ["analysis-report.md"],
+                "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+            },
+        ),
+    ]
+
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "workspace.read",
+                "planning_reason": "planner_prefetch_data_source",
+                "continue_to_model": True,
+            },
+            {
+                "tool": "data.analyze",
+                "planning_reason": "planner_builtin_data_analysis",
+                "continue_to_model": True,
+            },
+        ],
+        {
+            "artifacts_expected": ["analysis-report.md"],
+            "decision_id": "decision-1",
+            "plan_id": "plan-1",
+            "intent_kind": "data_analysis",
+        },
+        allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
+        timeline=timeline,
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["planning_reason"] == "planner_model_followup_context"
+    assert payload["observation_tools"] == ["workspace.read", "data.analyze"]
+    assert payload["content_snapshot"]["source_tool"] == "data.analyze"
+    assert [snapshot["source_tool"] for snapshot in payload["content_snapshots"]] == [
+        "workspace.read",
+        "data.analyze",
+    ]
+    assert payload["content_snapshots"][0]["text"] == "region,revenue\nEast,10\nWest,20"
+    assert payload["content_snapshots"][1]["artifact_paths"] == ["analysis-report.md"]
+    assert "Observed context snapshots:" in message
+    assert "[1] workspace.read" in message
+    assert "[2] data.analyze" in message
+    assert "Data analysis result for data/sales.csv (csv)." in message
+
+
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

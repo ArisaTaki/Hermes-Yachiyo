@@ -3,6 +3,7 @@ from apps.shell.agent.runtime.followup_content_snapshot import (
     clipboard_read_content_snapshot,
     data_analyze_content_snapshot,
     desktop_ui_elements_content_snapshot,
+    followup_content_snapshots,
     latest_followup_content_snapshot,
     screen_capture_content_snapshot,
     workspace_read_content_snapshot,
@@ -265,6 +266,83 @@ def test_latest_followup_content_snapshot_reads_data_analysis_result() -> None:
     assert snapshot["columns"] == ["region", "revenue"]
     assert snapshot["artifact_paths"] == ["analysis-report.md"]
     assert "Data analysis result for data/sales.csv (csv)." in snapshot["text"]
+
+
+def test_followup_content_snapshots_preserve_multiple_observation_sources() -> None:
+    timeline = [
+        {
+            "event": "agent.tool.call",
+            "detail": "workspace.read",
+            "input_preview": {"path": "data/sales.csv"},
+            "result": {
+                "ok": True,
+                "path": "data/sales.csv",
+                "content": "region,revenue\nEast,10\nWest,20",
+            },
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "desktop.active_window",
+            "result": {"ok": True, "title": "ignored"},
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "input_preview": {"path": "data/sales.csv", "source_kind": "csv"},
+            "result": {
+                "ok": True,
+                "path": "data/sales.csv",
+                "source_kind": "csv",
+                "rows": 2,
+                "columns": ["region", "revenue"],
+                "artifact_paths": ["analysis-report.md"],
+            },
+        },
+    ]
+
+    snapshots = followup_content_snapshots(
+        timeline,
+        ["workspace.read", "desktop.active_window", "data.analyze"],
+    )
+
+    assert [snapshot["source_tool"] for snapshot in snapshots] == [
+        "workspace.read",
+        "data.analyze",
+    ]
+    assert snapshots[0]["text"] == "region,revenue\nEast,10\nWest,20"
+    assert snapshots[1]["artifact_paths"] == ["analysis-report.md"]
+    assert latest_followup_content_snapshot(timeline, ["workspace.read", "data.analyze"]) == snapshots[1]
+
+
+def test_followup_content_snapshots_keep_latest_per_tool() -> None:
+    snapshots = followup_content_snapshots(
+        [
+            {
+                "event": "agent.tool.call",
+                "detail": "workspace.read",
+                "input_preview": {"path": "old.csv"},
+                "result": {"ok": True, "path": "old.csv", "content": "old"},
+            },
+            {
+                "event": "agent.tool.call",
+                "detail": "workspace.read",
+                "input_preview": {"path": "latest.csv"},
+                "result": {"ok": True, "path": "latest.csv", "content": "latest"},
+            },
+        ],
+        ["workspace.read"],
+    )
+
+    assert snapshots == [
+        {
+            "source_tool": "workspace.read",
+            "ok": True,
+            "path": "latest.csv",
+            "text_length": 6,
+            "truncated": False,
+            "text": "latest",
+        }
+    ]
 
 
 def test_screen_capture_content_snapshot_preserves_recovery_details() -> None:

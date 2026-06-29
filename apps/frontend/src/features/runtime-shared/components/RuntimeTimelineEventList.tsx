@@ -66,7 +66,7 @@ export function RuntimeTimelineEventList({
           const payloadRecord = runtimeEventPayloadRecord(event);
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
-          const contentSnapshot = eventIsSecret ? null : runtimeEventContentSnapshot(payloadRecord);
+          const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
             event,
             payloadRecord,
@@ -127,11 +127,22 @@ export function RuntimeTimelineEventList({
                     {runStatusLabel(eventStatus)}
                   </em>
                 ) : null}
-                {contentSnapshot ? (
+                {contentSnapshots.length === 1 ? (
                   <RuntimeContentSnapshot
-                    snapshot={contentSnapshot}
+                    snapshot={contentSnapshots[0]}
                     testId={`${eventTestId}-content-snapshot`}
                   />
+                ) : null}
+                {contentSnapshots.length > 1 ? (
+                  <div className="run-content-snapshot-list" data-testid={`${eventTestId}-content-snapshots`}>
+                    {contentSnapshots.map((snapshot, snapshotIndex) => (
+                      <RuntimeContentSnapshot
+                        snapshot={snapshot}
+                        testId={`${eventTestId}-content-snapshot-${snapshotIndex + 1}`}
+                        key={`${defaultString(snapshot.source_tool) || 'snapshot'}-${snapshotIndex}`}
+                      />
+                    ))}
+                  </div>
                 ) : null}
                 {payload ? (
                   <ExpandableRuntimeContent
@@ -433,11 +444,21 @@ function runtimeEventPayloadRecord(event: RuntimeTimelineEventRecord): RuntimeTi
     : {};
 }
 
-function runtimeEventContentSnapshot(
+function runtimeEventContentSnapshots(
   payload: RuntimeTimelineEventRecord,
-): RuntimeTimelineEventRecord | null {
+): RuntimeTimelineEventRecord[] {
+  const snapshots = payload.content_snapshots;
+  if (Array.isArray(snapshots)) {
+    return snapshots
+      .filter((snapshot): snapshot is RuntimeTimelineEventRecord => (
+        Boolean(snapshot)
+        && typeof snapshot === 'object'
+        && !Array.isArray(snapshot)
+        && Object.keys(snapshot).length > 0
+      ));
+  }
   const snapshot = runtimeEventNestedRecord(payload, 'content_snapshot');
-  return snapshot && Object.keys(snapshot).length ? snapshot : null;
+  return snapshot && Object.keys(snapshot).length ? [snapshot] : [];
 }
 
 function runtimeContentSnapshotMeta(snapshot: RuntimeTimelineEventRecord): string {
