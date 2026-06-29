@@ -9848,11 +9848,19 @@ def _app_name_hint(text: str) -> str:
         r"(?:关闭|隐藏|最小化|退出)(?:窗口|应用|app|application)?",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)"
         r"(?:按|敲|tap|press|hit).{0,8}(?:回车|return|enter)",
+        r"(?:in|inside|within|using|with)\s+"
+        r"(?:(?:an?|the)\s+)?(?:app|application|software)\s+"
+        r"(?:called|named)\s+(?P<named_app_en_early>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
         r"^(?!(?:can|could|would|please|pls|search|find|open|launch|focus|start|"
         r"press|hit|tap|type|enter|click|send|submit)\b)"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:点击|点按|按|输入|搜索|查找|click|press|tap|type|enter|search)\b",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)(?:点击|点按)",
+        r"(?:^|[\s，,。])(?:在|用|通过)\s*(?:一个|一款|这个|那个)?"
+        r"(?:叫|名叫|名称是|名字是)\s*(?P<named_app_cn>[\w .·-]{1,40}?)"
+        r"\s*(?:的)?(?:应用(?:程序)?|软件)?(?:里|中|上|内)?"
+        r"(?:打开|启动|点击|点按|按|输入|搜索|查找|检索|找|播放|创建|新建|写|发送|分析|操作|帮|$)",
         r"(?:in|inside|within|using|with)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:\s+(?:to|and|then|click|press|type|search|open|create|write|play|analyze|analyse)|[.!?,]|$)",
         r"(?:^|[\s，,。])(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内|来|去|打开|启动|点击|点按|按|输入|搜索|查找|检索|找|播放|创建|新建|写|发送|分析|操作|帮|$)",
     ]
@@ -10125,6 +10133,14 @@ def _clean_app_name_hint(value: str) -> str:
     )
     if called_app_match:
         app = called_app_match.group("app")
+    english_called_app_match = re.match(
+        r"^(?:(?:an?|the)\s+)?(?:app|application|software)\s+"
+        r"(?:called|named)\s+(?P<app>.+?)$",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if english_called_app_match:
+        app = english_called_app_match.group("app")
     app = re.split(
         r"\s*(?:(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)\s*)?"
         r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
@@ -10927,6 +10943,9 @@ def _clean_dynamic_context_target_app(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
+    normalized_named_app = _clean_app_name_hint(app)
+    if normalized_named_app:
+        app = normalized_named_app
     if not app or context_source_hint(app) or _is_generic_foreground_app_label(app):
         return ""
     return _canonical_app_name_hint(app)

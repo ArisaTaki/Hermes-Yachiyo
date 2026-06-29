@@ -4381,6 +4381,74 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 
+def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_type_text",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        (
+            "在一个叫 SuperData Studio 的应用里输入 hello",
+            "app.focus_and_safe_type_text",
+            {"app_name": "SuperData Studio", "text": "hello"},
+            {},
+        ),
+        (
+            "in an app called SuperData Studio type hello",
+            "app.focus_and_safe_type_text",
+            {"app_name": "SuperData Studio", "text": "hello"},
+            {},
+        ),
+        (
+            "inside the app named SuperData Studio click Export button",
+            "app.focus_and_click_ui_element",
+            {
+                "app_name": "SuperData Studio",
+                "target": "Export",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            {"role_filter": "button", "limit": 80},
+        ),
+    )
+
+    for prompt, operation_tool, operation_input, verify_input in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": "SuperData Studio",
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "operate-foreground-ui").tool_name == operation_tool
+        assert _step_by_id(decision, "operate-foreground-ui").input_preview == operation_input
+        assert _step_by_id(decision, "verify-desktop-result").input_preview == verify_input
+        assert planner_execution_tool_requests(
+            planner_tool_requests(prompt, allowed_tools),
+            allowed_tools,
+        ) == [
+            _app_discovery_request("SuperData Studio"),
+            {
+                "protocol": "json_fallback",
+                "tool": operation_tool,
+                "input": operation_input,
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": verify_input,
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+
 def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
     cases = (
         ("把 Arc 打开", "Arc", "app.open"),

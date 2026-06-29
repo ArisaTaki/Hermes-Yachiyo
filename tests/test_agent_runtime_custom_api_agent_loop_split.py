@@ -12528,6 +12528,146 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
     assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
 
+def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_rules(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("named app scope should be handled by runtime planner")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found installed app: SuperData Studio",
+                    "data": {"matches": [{"name": "SuperData Studio"}]},
+                }
+            elif tool == "app.focus_and_safe_type_text":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Focused app and completed foreground action",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "foreground_action": "safe_type_text",
+                        "character_count": len(payload["text"]),
+                        "explicit_user_text": True,
+                    },
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Read foreground UI",
+                    "data": {"app_name": "SuperData Studio", "elements": []},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.focus_and_safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("named app scope should execute without calling the model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "在一个叫 SuperData Studio 的应用里输入 hello",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-named-app-scope",
+    )
+
+    assert result == "已切到 SuperData Studio 并输入文字（5 个字符）。"
+    assert tool_runs == [
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "SuperData Studio", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_safe_type_text",
+                "input": {"app_name": "SuperData Studio", "text": "hello"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+    ]
+    selection_events = [
+        event for event in timeline if event["event"] == "agent.plan.selection"
+    ]
+    assert selection_events[0]["selection_source"] == "runtime_planner"
+    assert selection_events[0]["selected_tools"] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
