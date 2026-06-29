@@ -326,20 +326,52 @@ def run_workflow_full_chain_smoke(*, base_url: str, model: str, api_key: str) ->
     )
 
 
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        help="Optional JSON evidence report path.",
+    )
+    args = parser.parse_args(argv)
     try:
         base_url, model, api_key = _required_env()
         summary = run_workflow_full_chain_smoke(base_url=base_url, model=model, api_key=api_key)
     except Exception as exc:
         summary = sanitize_sensitive_value({"ok": False, "error": redact_sensitive_text(exc, limit=500)})
+        if args.report_json is not None:
+            _write_report(args.report_json, summary)
+            print(
+                f"native workflow full-chain smoke report: {args.report_json}",
+                file=sys.stderr,
+            )
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
         return 1
     text = json.dumps(summary, ensure_ascii=False, sort_keys=True)
     if contains_sensitive_text(text):
-        print(json.dumps({"ok": False, "error": "smoke output still contains sensitive text"}, sort_keys=True))
+        safe_summary = {"ok": False, "error": "smoke output still contains sensitive text"}
+        if args.report_json is not None:
+            _write_report(args.report_json, safe_summary)
+            print(
+                f"native workflow full-chain smoke report: {args.report_json}",
+                file=sys.stderr,
+            )
+        print(json.dumps(safe_summary, sort_keys=True))
         return 1
+    if args.report_json is not None:
+        _write_report(args.report_json, summary)
+        print(
+            f"native workflow full-chain smoke report: {args.report_json}",
+            file=sys.stderr,
+        )
     print(text)
     return 0 if _is_ok(summary.get("ok")) else 1
 

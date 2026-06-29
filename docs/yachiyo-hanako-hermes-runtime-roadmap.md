@@ -194,6 +194,20 @@ task/run snapshots, and artifact readback shape are preserved at the shared
 entrypoints. It does not replace packaged renderer, native provider, or full
 `NativeRunEngine` evidence.
 
+Current opt-in advanced Workflow provider evidence is reproducible, when
+`OHA_YACHIYO_SMOKE_*` credentials are configured, with:
+
+```bash
+python scripts/smoke_native_workflow_full_chain.py \
+  --report-json tmp/native-workflow-full-chain.json
+```
+
+This exercises advanced Workflow orchestration with real OpenAI-compatible
+model calls, including child workflow execution, condition routing, approval
+pause/resume, parallel/loop nodes, artifact output, and workflow budget
+boundary evidence. The report writer uses the same redacted summary as stdout
+and fails closed if sensitive provider text would be emitted.
+
 ## Phase 0 - 基线审计与保护网
 
 Confirm that existing Chat, Agent Studio, Groups, Workflow, Run Timeline,
