@@ -941,12 +941,14 @@ class ToolBroker:
                 ),
                 action_step=(
                     "click_ui_element",
-                    lambda: desktop.click_ui_element(
+                    lambda expected_app_name: desktop.click_ui_element(
                         target,
                         role_filter=role_filter,
                         limit=limit,
                         click_count=click_count,
+                        expected_app_name=expected_app_name,
                     ),
+                    True,
                 ),
             ),
         )
@@ -968,12 +970,14 @@ class ToolBroker:
                 setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
                 action_step=(
                     "click_ui_element",
-                    lambda: desktop.click_ui_element(
+                    lambda expected_app_name: desktop.click_ui_element(
                         target,
                         role_filter=role_filter,
                         limit=limit,
                         click_count=click_count,
+                        expected_app_name=expected_app_name,
                     ),
+                    True,
                 ),
             ),
         )
@@ -998,12 +1002,14 @@ class ToolBroker:
                 ),
                 action_step=(
                     "type_into_ui_element",
-                    lambda: desktop.type_into_ui_element(
+                    lambda expected_app_name: desktop.type_into_ui_element(
                         target,
                         text,
                         role_filter=role_filter,
                         limit=limit,
+                        expected_app_name=expected_app_name,
                     ),
+                    True,
                 ),
             ),
         )
@@ -1025,12 +1031,14 @@ class ToolBroker:
                 setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
                 action_step=(
                     "type_into_ui_element",
-                    lambda: desktop.type_into_ui_element(
+                    lambda expected_app_name: desktop.type_into_ui_element(
                         target,
                         text,
                         role_filter=role_filter,
                         limit=limit,
+                        expected_app_name=expected_app_name,
                     ),
+                    True,
                 ),
             ),
         )
@@ -1235,7 +1243,7 @@ class ToolBroker:
         app_name: str,
         *,
         setup_steps: tuple[tuple[str, Any], ...],
-        action_step: tuple[str, Any],
+        action_step: tuple[Any, ...],
     ) -> dict[str, Any]:
         clean_app_name = str(app_name or "").strip()
         step_results: dict[str, dict[str, Any]] = {}
@@ -1273,7 +1281,7 @@ class ToolBroker:
                     "fallback_result": dict(step_results),
                 }
 
-        action_name, action = action_step
+        action_name, action, *action_options = action_step
         expected_app_name = _foreground_expected_app_name(clean_app_name, step_results)
         active_window_result = desktop.active_window()
         step_results["active_window"] = active_window_result
@@ -1312,7 +1320,7 @@ class ToolBroker:
                 "fallback_result": dict(step_results),
             }
 
-        action_result = action()
+        action_result = action(expected_app_name) if action_options else action()
         action_data = action_result.get("data") if isinstance(action_result.get("data"), dict) else {}
         data = dict(action_data)
         if clean_app_name:

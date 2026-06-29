@@ -1026,12 +1026,14 @@ def click_ui_element(
     role_filter: str = "",
     limit: Any = 80,
     click_count: Any = 1,
+    expected_app_name: str = "",
 ) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.click_ui_element")
     clean_target = _clean_required(target, "target")
     clean_filter = str(role_filter or "").strip()
     clean_count = _clean_click_count(click_count)
+    clean_expected_app = str(expected_app_name or "").strip()
     observed = ui_elements(role_filter=clean_filter, limit=limit)
     observed_data = observed.get("data") if isinstance(observed.get("data"), dict) else {}
     if not observed.get("ok"):
@@ -1050,6 +1052,29 @@ def click_ui_element(
         return _with_permission_metadata("desktop.click_ui_element", payload)
 
     elements = observed_data.get("elements") if isinstance(observed_data.get("elements"), list) else []
+    observed_app_name = str(observed_data.get("app_name") or "").strip()
+    if clean_expected_app and not _app_name_matches_expected(clean_expected_app, observed_app_name):
+        return {
+            "ok": False,
+            "action": "desktop.click_ui_element",
+            "summary": "Foreground app changed before clicking UI element",
+            "error": "foreground_app_mismatch",
+            "data": {
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "click_count": clean_count,
+                "expected_app_name": clean_expected_app,
+                "observed_app_name": observed_app_name,
+                "app_name": observed_app_name,
+                "title": str(observed_data.get("title") or ""),
+                "observed_count": len(elements),
+                "candidates": _candidate_ui_element_previews(elements),
+                "recommended_tools": ["app.focus", "desktop.active_window", "screen.capture"],
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {"observe": observed},
+        }
     matches = _matching_ui_elements(elements, clean_target, clean_filter)
     if not matches:
         recovery_actions = _ui_element_not_found_recovery_actions(
@@ -1129,12 +1154,14 @@ def type_into_ui_element(
     *,
     role_filter: str = "",
     limit: Any = 80,
+    expected_app_name: str = "",
 ) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_into_ui_element")
     clean_target = _clean_required(target, "target")
     clean_text = _clean_required(text, "text")
     clean_filter = str(role_filter or "").strip() or "text"
+    clean_expected_app = str(expected_app_name or "").strip()
     observed = ui_elements(role_filter=clean_filter, limit=limit)
     observed_data = observed.get("data") if isinstance(observed.get("data"), dict) else {}
     if not observed.get("ok"):
@@ -1153,6 +1180,29 @@ def type_into_ui_element(
         return _with_permission_metadata("desktop.type_into_ui_element", payload)
 
     elements = observed_data.get("elements") if isinstance(observed_data.get("elements"), list) else []
+    observed_app_name = str(observed_data.get("app_name") or "").strip()
+    if clean_expected_app and not _app_name_matches_expected(clean_expected_app, observed_app_name):
+        return {
+            "ok": False,
+            "action": "desktop.type_into_ui_element",
+            "summary": "Foreground app changed before typing into UI element",
+            "error": "foreground_app_mismatch",
+            "data": {
+                "target": clean_target,
+                "role_filter": clean_filter,
+                "character_count": len(clean_text),
+                "expected_app_name": clean_expected_app,
+                "observed_app_name": observed_app_name,
+                "app_name": observed_app_name,
+                "title": str(observed_data.get("title") or ""),
+                "observed_count": len(elements),
+                "candidates": _candidate_ui_element_previews(elements),
+                "recommended_tools": ["app.focus", "desktop.active_window", "screen.capture"],
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {"observe": observed},
+        }
     matches = _matching_ui_elements(elements, clean_target, clean_filter)
     if not matches:
         return {
@@ -2592,6 +2642,19 @@ def _installed_app_match_score(query_name: str, candidate_name: str) -> int:
 
 def _compact_app_match_name(value: str) -> str:
     return re.sub(r"[\W_]+", "", str(value or "").strip().casefold())
+
+
+def _app_name_without_bundle_suffix(value: str) -> str:
+    clean_value = str(value or "").strip()
+    return clean_value[:-4] if clean_value.casefold().endswith(".app") else clean_value
+
+
+def _app_name_matches_expected(expected: str, actual: str) -> bool:
+    clean_expected = _app_name_without_bundle_suffix(expected)
+    clean_actual = _app_name_without_bundle_suffix(actual)
+    if not clean_expected or not clean_actual:
+        return False
+    return _installed_app_match_score(clean_expected, clean_actual) >= 80
 
 
 def _app_match_tokens(value: str) -> list[str]:

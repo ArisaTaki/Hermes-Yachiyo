@@ -2461,13 +2461,16 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
         lambda app_name: calls.append(("focus", app_name))
         or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
     )
-    monkeypatch.setattr(
-        desktop_mod,
-        "click_ui_element",
-        lambda target, *, role_filter="", limit=80, click_count=1: calls.append(
-            ("click_ui", target, role_filter, limit, click_count)
-        )
-        or {
+    def fake_click_ui_element(
+        target,
+        *,
+        role_filter="",
+        limit=80,
+        click_count=1,
+        expected_app_name="",
+    ):
+        calls.append(("click_ui", target, role_filter, limit, click_count, expected_app_name))
+        return {
             "ok": True,
             "action": "desktop.click_ui_element",
             "data": {
@@ -2478,8 +2481,9 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
                 "click_count": click_count,
                 "role_filter": role_filter,
             },
-        },
-    )
+        }
+
+    monkeypatch.setattr(desktop_mod, "click_ui_element", fake_click_ui_element)
 
     result = broker.app_open_and_click_ui_element(
         "Google Chrome",
@@ -2492,7 +2496,7 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
     assert calls == [
         ("open", "Google Chrome"),
         ("focus", "Google Chrome"),
-        ("click_ui", "Sign in", "button", 20, 2),
+        ("click_ui", "Sign in", "button", 20, 2, "Google Chrome"),
     ]
     assert result["ok"] is True
     assert result["action"] == "app.open_and_click_ui_element"
@@ -2534,13 +2538,16 @@ def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_acti
         lambda app_name: calls.append(("focus", app_name))
         or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
     )
-    monkeypatch.setattr(
-        desktop_mod,
-        "type_into_ui_element",
-        lambda target, text, *, role_filter="", limit=80: calls.append(
-            ("type_into_ui", target, text, role_filter, limit)
-        )
-        or {
+    def fake_type_into_ui_element(
+        target,
+        text,
+        *,
+        role_filter="",
+        limit=80,
+        expected_app_name="",
+    ):
+        calls.append(("type_into_ui", target, text, role_filter, limit, expected_app_name))
+        return {
             "ok": True,
             "action": "desktop.type_into_ui_element",
             "data": {
@@ -2549,8 +2556,9 @@ def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_acti
                 "character_count": len(text),
                 "role_filter": role_filter,
             },
-        },
-    )
+        }
+
+    monkeypatch.setattr(desktop_mod, "type_into_ui_element", fake_type_into_ui_element)
 
     result = broker.app_open_and_type_into_ui_element(
         "Google Chrome",
@@ -2563,7 +2571,7 @@ def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_acti
     assert calls == [
         ("open", "Google Chrome"),
         ("focus", "Google Chrome"),
-        ("type_into_ui", "Address", "github.com", "text", 20),
+        ("type_into_ui", "Address", "github.com", "text", 20, "Google Chrome"),
     ]
     assert result["ok"] is True
     assert result["action"] == "app.open_and_type_into_ui_element"
@@ -5262,6 +5270,56 @@ def test_desktop_click_ui_element_returns_candidates_without_blind_click(
     assert result["data"]["recovery_actions"] == result["recovery_actions"]
 
 
+def test_desktop_click_ui_element_stops_when_expected_app_mismatches(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "QQ UI elements",
+        "data": {
+            "app_name": "QQ",
+            "title": "QQ",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXButton",
+                    "name": "关闭按钮",
+                    "enabled": True,
+                    "center": {"x": 44, "y": 55},
+                }
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_click",
+        lambda *args, **kwargs: pytest.fail("should not click a mismatched foreground app"),
+    )
+
+    result = desktop_mod.click_ui_element(
+        "关闭按钮",
+        role_filter="button",
+        expected_app_name="TextEdit",
+    )
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.click_ui_element"
+    assert result["error"] == "foreground_app_mismatch"
+    assert result["summary"] == "Foreground app changed before clicking UI element"
+    assert result["data"]["expected_app_name"] == "TextEdit"
+    assert result["data"]["observed_app_name"] == "QQ"
+    assert result["data"]["recommended_tools"] == [
+        "app.focus",
+        "desktop.active_window",
+        "screen.capture",
+    ]
+    assert result["fallback_result"] == {"observe": observed}
+
+
 def test_desktop_click_ui_element_permission_failure_returns_recovery_targets(
     monkeypatch,
 ) -> None:
@@ -5416,6 +5474,57 @@ def test_desktop_type_into_ui_element_returns_candidates_without_blind_typing(
             "center": {"x": 44, "y": 55},
         }
     ]
+
+
+def test_desktop_type_into_ui_element_stops_when_expected_app_mismatches(
+    monkeypatch,
+) -> None:
+    observed = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": "QQ UI elements",
+        "data": {
+            "app_name": "QQ",
+            "title": "QQ",
+            "elements": [
+                {
+                    "depth": 0,
+                    "role": "AXTextField",
+                    "name": "搜索",
+                    "enabled": True,
+                    "center": {"x": 44, "y": 55},
+                }
+            ],
+        },
+    }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "ui_elements", lambda role_filter="", limit=80: observed)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_click",
+        lambda *args, **kwargs: pytest.fail("should not focus a mismatched foreground app"),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_send_desktop_text",
+        lambda *args, **kwargs: pytest.fail("should not type into a mismatched foreground app"),
+    )
+
+    result = desktop_mod.type_into_ui_element(
+        "搜索",
+        "hello",
+        expected_app_name="TextEdit",
+    )
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.type_into_ui_element"
+    assert result["error"] == "foreground_app_mismatch"
+    assert result["summary"] == "Foreground app changed before typing into UI element"
+    assert result["data"]["expected_app_name"] == "TextEdit"
+    assert result["data"]["observed_app_name"] == "QQ"
+    assert result["data"]["character_count"] == 5
+    assert result["fallback_result"] == {"observe": observed}
 
 
 def test_desktop_type_into_ui_element_permission_failure_returns_recovery_targets(
