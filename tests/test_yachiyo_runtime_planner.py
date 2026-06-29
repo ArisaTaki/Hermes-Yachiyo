@@ -720,6 +720,8 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     assert latest_local_data.selected_intent.inputs["data_source_kind"] == "text_table"
     assert _step_by_id(latest_local_data, "inspect-data-source").input_preview == {
         "path": "data",
+        "pattern": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
+        "file_type": "text_table",
     }
 
     assert current_page_price_table.selected_intent.kind == "data_analysis"
@@ -1312,6 +1314,14 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "输出一份数据分析",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    csv_scoped_decision = RuntimePlanner().decision(
+        "分析 Downloads 里的 csv 并输出图表和报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    xlsx_scoped_decision = RuntimePlanner().decision(
+        "分析桌面上的 xlsx 并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert scoped_decision.selected_intent.kind == "data_analysis"
     assert scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
@@ -1325,6 +1335,20 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     assert "context_source" not in desktop_scoped_decision.selected_intent.inputs
     assert _step_by_id(desktop_scoped_decision, "inspect-data-source").input_preview == {
         "path": "Desktop"
+    }
+    assert csv_scoped_decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert csv_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert _step_by_id(csv_scoped_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+    }
+    assert xlsx_scoped_decision.selected_intent.inputs["data_source_kind"] == "xlsx"
+    assert xlsx_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
+    assert _step_by_id(xlsx_scoped_decision, "inspect-data-source").input_preview == {
+        "path": "Desktop",
+        "pattern": "*.xlsx",
+        "file_type": "xlsx",
     }
     assert generic_decision.selected_intent.kind == "data_analysis"
     assert generic_decision.selected_intent.missing_inputs == ["data_source"]
@@ -3385,6 +3409,11 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
     assert current_page.plan.tool_plan.artifacts_expected == ["research-summary.md"]
 
     assert current_page_table.selected_intent.kind == "data_analysis"
+    assert current_page_table.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "current_page_content",
+    }
     assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
         "read-data-context",
         "analyze-data-context",
@@ -12341,6 +12370,10 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         "找一下 Downloads 里最新的 csv，分析趋势并输出 markdown 报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    xlsx_requests = planner_tool_requests(
+        "分析桌面上的 xlsx 并输出报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert scoped_requests == [
         {
@@ -12352,11 +12385,21 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "continue_to_model": True,
         }
     ]
+    assert xlsx_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Desktop", "pattern": "*.xlsx", "file_type": "xlsx"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
     assert latest_csv_requests == [
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads"},
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,

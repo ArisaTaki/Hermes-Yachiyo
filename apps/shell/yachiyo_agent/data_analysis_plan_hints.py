@@ -85,6 +85,9 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     context_kind = _context_data_source_kind_hint(lowered_text)
     if context_kind:
         return context_kind
+    scoped_format_kind = _scoped_data_source_kind_hint(lowered_text)
+    if scoped_format_kind:
+        return scoped_format_kind
     if any(
         marker in lowered_text
         for marker in ("价格表", "销售表", "数据表", "明细表", "报表", "price table", "pricing table")
@@ -131,6 +134,48 @@ def _context_data_source_kind_hint(lowered_text: str) -> str:
         ):
             return kind
     return ""
+
+
+def _scoped_data_source_kind_hint(lowered_text: str) -> str:
+    source_scope = (
+        r"(?:downloads?|download\s+folder|desktop|documents?|folder|directory|"
+        r"下载(?:文件夹|目录)?|桌面|文档|目录|文件夹|文件|数据源|数据集|"
+        r"[a-z0-9_.-]+\s*目录|[a-z0-9_.-]+\s*文件夹)"
+    )
+    format_map = (
+        ("jsonl", "jsonl"),
+        ("json", "json"),
+        ("parquet", "parquet"),
+        ("csv", "csv"),
+        ("tsv", "tsv"),
+        ("xlsx", "xlsx"),
+        ("xls", "xls"),
+        ("excel", "xlsx"),
+    )
+    for token, kind in format_map:
+        token_pattern = rf"\b{re.escape(token)}\b" if token.isascii() else re.escape(token)
+        for match in re.finditer(token_pattern, lowered_text, flags=re.IGNORECASE):
+            if _format_token_is_output_target(lowered_text, match.start()):
+                continue
+            before = lowered_text[: match.start()]
+            after = lowered_text[match.end() :]
+            if re.search(source_scope, before[-80:], flags=re.IGNORECASE):
+                return kind
+            if re.search(source_scope, after[:80], flags=re.IGNORECASE):
+                return kind
+    return ""
+
+
+def _format_token_is_output_target(lowered_text: str, token_start: int) -> bool:
+    prefix = lowered_text[max(0, token_start - 18) : token_start]
+    return bool(
+        re.search(
+            r"(?:(?:输出|导出|保存|生成|写|整理|做|转)(?:成|为)?|另存为|"
+            r"output|export|save|write|generate|convert\s+to)\s*$",
+            prefix,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def data_analysis_artifacts_expected(

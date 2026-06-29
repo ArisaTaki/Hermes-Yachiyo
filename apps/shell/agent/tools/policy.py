@@ -1005,7 +1005,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "type": "string",
                 "description": (
                     "Optional semantic file type hint such as screenshot, pdf, invoice, "
-                    "image, document, spreadsheet, archive, audio, or video."
+                    "image, document, spreadsheet, csv, tsv, xlsx, json, jsonl, "
+                    "parquet, archive, audio, or video."
                 ),
             },
         },

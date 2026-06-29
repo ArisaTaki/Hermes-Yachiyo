@@ -205,7 +205,14 @@ class TaskIntentRouter:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
         if context_source:
             inputs["context_source"] = context_source
-        if source_scope and not source_hint:
+        if (
+            source_scope
+            and not source_hint
+            and not (
+                context_source
+                and source_scope == _artifact_output_location_hint(text)
+            )
+        ):
             inputs["data_source_scope_hint"] = source_scope
         communication_target = _data_analysis_communication_target_hint(text)
         if communication_target:
@@ -1638,6 +1645,7 @@ class RuntimePlanner:
         source_hint = str(intent.inputs.get("data_source_hint") or "").strip()
         context_source = str(intent.inputs.get("context_source") or "").strip()
         source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
+        source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
         spreadsheet_app_step = _spreadsheet_app_open_step(intent, allowed)
         if context_source and not source_hint:
             spreadsheet_first_steps = (
@@ -1825,7 +1833,10 @@ class RuntimePlanner:
                 "Inspect data source",
                 "file.workspace_read",
                 _first_allowed(inspect_tool_candidates, allowed),
-                input_preview={"path": source_hint or source_scope} if source_hint or source_scope else {},
+                input_preview=_data_source_inspect_input_preview(
+                    source_hint or source_scope,
+                    source_kind,
+                ),
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),
@@ -5279,6 +5290,42 @@ def _file_scope_input_preview(
     if file_pattern_hint:
         preview["pattern"] = file_pattern_hint
     return preview
+
+
+def _data_source_inspect_input_preview(path: str, source_kind: str) -> dict[str, str]:
+    preview: dict[str, str] = {}
+    clean_path = str(path or "").strip()
+    if clean_path:
+        preview["path"] = clean_path
+    pattern = _data_source_pattern_hint(source_kind)
+    if pattern and not _looks_like_specific_data_source_path(clean_path):
+        preview["pattern"] = pattern
+        preview["file_type"] = str(source_kind or "").strip()
+    return preview
+
+
+def _data_source_pattern_hint(source_kind: str) -> str:
+    return {
+        "csv": "*.csv",
+        "tsv": "*.tsv",
+        "xlsx": "*.xlsx",
+        "xls": "*.xls",
+        "jsonl": "*.jsonl",
+        "json": "*.json",
+        "parquet": "*.parquet",
+        "text": "*.txt",
+        "text_table": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
+    }.get(str(source_kind or "").strip().lower(), "")
+
+
+def _looks_like_specific_data_source_path(path: str) -> bool:
+    return bool(
+        re.search(
+            r"\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|txt|md|markdown)$",
+            str(path or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _file_apply_input_preview(

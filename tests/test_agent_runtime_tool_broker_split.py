@@ -144,6 +144,7 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
     workdir.mkdir()
     (workdir / "Screen Shot 1.png").write_text("png", encoding="utf-8")
     (workdir / "receipt.pdf").write_text("pdf", encoding="utf-8")
+    (workdir / "sales.csv").write_text("region,revenue\nEast,10\n", encoding="utf-8")
     (workdir / "notes.txt").write_text("text", encoding="utf-8")
     (workdir / "nested").mkdir()
     broker = ToolBroker(
@@ -161,6 +162,7 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
         file_type="screenshot",
     )
     invoices = broker.workspace_list(".", file_type="invoice")
+    csv_files = broker.workspace_list(".", file_type="csv")
 
     assert screenshots["ok"] is True
     assert screenshots["entries"] == [{"name": "Screen Shot 1.png", "type": "file"}]
@@ -170,9 +172,11 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
         "expanded_patterns": ["*.png", "*.jpg", "*.jpeg", "*.heic", "*.gif", "*.webp"],
     }
     assert screenshots["matched_count"] == 1
-    assert screenshots["total_entries"] == 4
+    assert screenshots["total_entries"] == 5
     assert invoices["entries"] == [{"name": "receipt.pdf", "type": "file"}]
     assert invoices["filter"]["file_type"] == "invoice"
+    assert csv_files["entries"] == [{"name": "sales.csv", "type": "file"}]
+    assert csv_files["filter"]["expanded_patterns"] == ["*.csv"]
 
 
 def test_tool_broker_artifact_write_redacts_secrets(tmp_path: Path) -> None:
