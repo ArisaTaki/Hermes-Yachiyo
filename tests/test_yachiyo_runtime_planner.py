@@ -11212,6 +11212,81 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
         },
     ]
 
+    app_scoped_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.submit_foreground",
+    ]
+    app_scoped_result = RuntimePlanner().decision(
+        "把 Slack 搜索 yachiyo 的结果发给 Alice",
+        allowed_tools=app_scoped_tools,
+    )
+    assert app_scoped_result.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in app_scoped_result.plan.tool_plan.steps] == [
+        "discover-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-communication-context",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(
+        app_scoped_result,
+        "focus-app-search-field",
+    ).input_preview == {"app_name": "Slack", "action": "find"}
+    assert _step_by_id(
+        app_scoped_result,
+        "type-app-search-query",
+    ).input_preview == {"app_name": "Slack", "text": "yachiyo"}
+    assert planner_tool_requests(
+        "把 Slack 搜索 yachiyo 的结果发给 Alice",
+        allowed_tools=app_scoped_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "Slack", "text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Slack", "role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+
     for prompt, expected_app, expected_query, expected_recipient in (
         (
             "把 Notion 搜索 release plan 的结果发给 Alice",

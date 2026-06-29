@@ -5191,6 +5191,11 @@ def _app_search_result_context_steps(
     steps: list[ToolPlanStepSnapshot] = []
     depends_on: list[str] = []
     source_mode = str(direct_message.get("source_app_mode") or "focus").strip() or "focus"
+    source_app_scoped_shortcut_tool = (
+        _first_allowed(app_foreground_tool_candidates(source_mode, "safe_shortcut"), allowed)
+        if source_app
+        else None
+    )
     if source_app:
         discover_tool = _first_allowed(("desktop.list_apps", "desktop.running_apps"), allowed)
         discover_input = (
@@ -5215,35 +5220,51 @@ def _app_search_result_context_steps(
             ("app.open", "app.focus") if source_mode == "open" else ("app.focus", "app.open")
         )
         source_tool = _first_allowed(source_tool_candidates, allowed)
-        steps.append(
-            _step(
-                intent,
-                "open-app-search-source",
-                "Open or focus source app",
-                "desktop.app_control",
-                source_tool,
-                input_preview={"app_name": source_app},
-                depends_on=depends_on,
-                action="open_app" if source_tool == "app.open" else "focus_app",
-                reason="Prepare the source app before using its in-app search.",
-            )
-        )
-        depends_on = ["open-app-search-source"]
-        if source_tool == "app.open" and "app.focus" in (allowed or set()):
+        if source_tool:
             steps.append(
                 _step(
                     intent,
-                    "focus-app-search-source",
-                    "Focus source app",
+                    "open-app-search-source",
+                    "Open or focus source app",
                     "desktop.app_control",
-                    "app.focus",
+                    source_tool,
+                    input_preview={"app_name": source_app},
+                    depends_on=depends_on,
+                    action="open_app" if source_tool == "app.open" else "focus_app",
+                    reason="Prepare the source app before using its in-app search.",
+                )
+            )
+            depends_on = ["open-app-search-source"]
+            if source_tool == "app.open" and "app.focus" in (allowed or set()):
+                steps.append(
+                    _step(
+                        intent,
+                        "focus-app-search-source",
+                        "Focus source app",
+                        "desktop.app_control",
+                        "app.focus",
+                        input_preview={"app_name": source_app},
+                        depends_on=depends_on,
+                        action="focus_app",
+                        reason="Focus the source app after opening it.",
+                    )
+                )
+                depends_on = ["focus-app-search-source"]
+        elif not source_app_scoped_shortcut_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "open-app-search-source",
+                    "Open or focus source app",
+                    "desktop.app_control",
+                    None,
                     input_preview={"app_name": source_app},
                     depends_on=depends_on,
                     action="focus_app",
-                    reason="Focus the source app after opening it.",
+                    reason="Prepare the source app before using its in-app search.",
                 )
             )
-            depends_on = ["focus-app-search-source"]
+            depends_on = ["open-app-search-source"]
     elif source_scope == "foreground":
         discover_tool = _first_allowed(("desktop.running_apps", "desktop.active_window"), allowed)
         steps.append(
@@ -5263,10 +5284,7 @@ def _app_search_result_context_steps(
     shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
     shortcut_input = {"action": "find"}
     if not shortcut_tool and source_app:
-        shortcut_tool = _first_allowed(
-            app_foreground_tool_candidates(source_mode, "safe_shortcut"),
-            allowed,
-        )
+        shortcut_tool = source_app_scoped_shortcut_tool
         if shortcut_tool:
             shortcut_input = {"app_name": source_app, "action": "find"}
     type_tool, type_input = _safe_type_text_operation_preview(
