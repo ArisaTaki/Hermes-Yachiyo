@@ -153,6 +153,11 @@ blocked chain. Discovery and verification steps remain planned when their
 tools are still available, so Agent Studio can show what was discoverable
 without pretending the unsafe or unavailable operation ran.
 
+The execution broker also propagates foreground focus failures from combined
+`app.*_and_*` tools as `blocking_condition(s)`, `retryable`, `recovery_actions`,
+and step-level fallback evidence. That keeps failed desktop actions replayable
+in Run Timeline instead of collapsing into a generic tool failure.
+
 The Electron desktop shell now also starts a loopback-only native runtime
 bridge and injects its URL/token into the Python backend. `app.focus` can use
 that bridge as an additional `electron_native_bridge` strategy after local

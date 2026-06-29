@@ -2724,10 +2724,38 @@ def test_tool_broker_app_foreground_action_stops_when_active_app_changes(
     assert result["action"] == "app.focus_and_safe_shortcut"
     assert result["error"] == "foreground_app_mismatch"
     assert result["summary"] == "Could not verify target app is foreground before foreground action"
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["blocking_conditions"] == ["foreground_focus_unavailable"]
+    assert result["retryable"] is True
     assert result["data"]["app_name"] == "Slack"
     assert result["data"]["expected_app_name"] == "Slack"
     assert result["data"]["active_app_name"] == "QQ"
     assert result["data"]["foreground_action"] == "safe_shortcut"
+    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["data"]["retryable"] is True
+    assert result["recovery_actions"] == [
+        {
+            "label": "重新打开Slack",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "查看前台窗口",
+            "tool": "desktop.active_window",
+            "input": {},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "截图确认前台",
+            "tool": "screen.capture",
+            "input": {"reason": "verify foreground app after focus failure"},
+            "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+    ]
     assert list(result["fallback_result"]) == ["focus", "active_window"]
 
 
@@ -2767,12 +2795,20 @@ def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
     assert result["action"] == "app.focus_and_safe_shortcut"
     assert result["error"] == "app_focus_not_verified"
     assert result["summary"] == "Could not verify app focus before foreground action"
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["blocking_conditions"] == ["foreground_focus_unavailable"]
+    assert result["retryable"] is True
     assert result["data"] == {
         "app_name": "Slack",
         "focus_verified": False,
         "focus_status": "not_frontmost",
         "frontmost_app": "Codex",
+        "blocking_condition": "foreground_focus_unavailable",
+        "retryable": True,
     }
+    assert result["recovery_actions"][0]["tool"] == "app.open"
+    assert result["recovery_actions"][1]["tool"] == "desktop.active_window"
+    assert result["recovery_actions"][2]["tool"] == "screen.capture"
     assert list(result["fallback_result"]) == ["focus"]
 
 

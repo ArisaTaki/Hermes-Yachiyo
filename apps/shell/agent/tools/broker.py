@@ -1610,13 +1610,20 @@ class ToolBroker:
                 data = dict(result_data)
                 if clean_app_name:
                     data["app_name"] = clean_app_name
+                condition = _foreground_blocking_condition(result)
+                data.setdefault("blocking_condition", condition)
+                data.setdefault("retryable", True)
                 return {
                     **result,
                     "ok": False,
                     "action": tool_name,
                     "summary": "Could not verify app focus before foreground action",
                     "error": "app_focus_not_verified",
+                    "blocking_condition": condition,
+                    "blocking_conditions": _foreground_blocking_conditions(result, condition),
+                    "retryable": True,
                     "data": data,
+                    "recovery_actions": _foreground_focus_recovery_actions(clean_app_name),
                     "fallback_used": fallback_used,
                     "fallback_result": dict(step_results),
                 }
@@ -1659,6 +1666,9 @@ class ToolBroker:
             data["expected_app_name"] = expected_app_name
             data["active_app_name"] = active_app_name
             data["foreground_action"] = action_name
+            condition = _foreground_blocking_condition(active_window_result)
+            data.setdefault("blocking_condition", condition)
+            data.setdefault("retryable", True)
             return {
                 **active_window_result,
                 "ok": False,
@@ -1668,7 +1678,14 @@ class ToolBroker:
                     str(active_window_result.get("error") or "")
                     or "foreground_app_mismatch"
                 ),
+                "blocking_condition": condition,
+                "blocking_conditions": _foreground_blocking_conditions(
+                    active_window_result,
+                    condition,
+                ),
+                "retryable": True,
                 "data": data,
+                "recovery_actions": _foreground_focus_recovery_actions(clean_app_name),
                 "fallback_used": fallback_used,
                 "fallback_result": dict(step_results),
             }
@@ -1913,3 +1930,53 @@ def _foreground_focus_not_verified(step_name: str, result: dict[str, Any]) -> bo
         return False
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     return data.get("focus_verified") is False
+
+
+def _foreground_blocking_condition(result: Mapping[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return str(
+        result.get("blocking_condition")
+        or data.get("blocking_condition")
+        or "foreground_focus_unavailable"
+    ).strip()
+
+
+def _foreground_blocking_conditions(result: Mapping[str, Any], condition: str) -> list[str]:
+    values = _clean_string_list(result.get("blocking_conditions"))
+    if condition and condition not in values:
+        values.append(condition)
+    return values
+
+
+def _foreground_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
+    clean_name = str(app_name or "").strip()
+    actions: list[dict[str, Any]] = []
+    if clean_name:
+        actions.append(
+            {
+                "label": f"重新打开{clean_name}",
+                "tool": "app.open",
+                "input": {"app_name": clean_name},
+                "permission_target": "foreground_focus",
+                "risk_level": "low",
+            }
+        )
+    actions.extend(
+        [
+            {
+                "label": "查看前台窗口",
+                "tool": "desktop.active_window",
+                "input": {},
+                "permission_target": "foreground_focus",
+                "risk_level": "low",
+            },
+            {
+                "label": "截图确认前台",
+                "tool": "screen.capture",
+                "input": {"reason": "verify foreground app after focus failure"},
+                "permission_target": "foreground_focus",
+                "risk_level": "low",
+            },
+        ]
+    )
+    return actions
