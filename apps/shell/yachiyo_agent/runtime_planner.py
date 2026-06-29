@@ -4403,7 +4403,7 @@ class RuntimePlanner:
                 "apply-file-organization",
                 "Apply file organization",
                 "file.organization",
-                _first_allowed(("terminal.run",), allowed),
+                _first_allowed(_file_apply_tool_candidates(operation_hint), allowed),
                 input_preview=_file_apply_input_preview(
                     location_hint,
                     operation_hint,
@@ -5671,6 +5671,13 @@ def _file_apply_input_preview(
     if destination_hint:
         preview["destination"] = destination_hint
     return preview
+
+
+def _file_apply_tool_candidates(operation_hint: str) -> tuple[str, ...]:
+    operation = str(operation_hint or "").strip()
+    if operation in {"organize", "archive", "move"}:
+        return ("file.organize", "terminal.run")
+    return ("terminal.run",)
 
 
 def _context_source_capability_id(source: str, tool_name: str | None, fallback: str) -> str:
@@ -8946,6 +8953,7 @@ def _file_location_hint(text: str) -> str:
         ("download folder", "Downloads"),
         ("下载文件夹", "Downloads"),
         ("下载目录", "Downloads"),
+        ("下载", "Downloads"),
         ("desktop", "Desktop"),
         ("桌面", "Desktop"),
         ("documents", "Documents"),
@@ -8992,6 +9000,22 @@ def _normalize_file_destination(target: str) -> str:
     ).strip()
     value = value.rstrip("/\\。.,，；;")
     if not value:
+        return ""
+    generic = {
+        "a",
+        "a folder",
+        "one folder",
+        "new folder",
+        "folder",
+        "directory",
+        "dir",
+        "一个",
+        "一个新",
+        "一个新的",
+        "一个文件夹",
+        "新文件夹",
+    }
+    if value.casefold() in generic:
         return ""
     if value.startswith(("~/", "/")) or re.match(r"^[A-Za-z]:[\\/]", value):
         return value

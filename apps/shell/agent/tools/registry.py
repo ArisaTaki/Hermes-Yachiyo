@@ -98,6 +98,19 @@ def _workspace_write_patch(
     )
 
 
+def _file_organize(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
+    return broker.file_organize(
+        str(payload.get("path") or "."),
+        operation=str(payload.get("operation") or "organize"),
+        file_type=str(payload.get("file_type") or ""),
+        pattern=str(payload.get("pattern") or ""),
+        destination=str(payload.get("destination") or ""),
+        conflict_strategy=str(payload.get("conflict_strategy") or "keep_both"),
+        limit=payload.get("limit", 200),
+        approved=approved,
+    )
+
+
 def _terminal_run(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
     return broker.terminal_run(
         str(payload.get("command") or ""),
@@ -835,6 +848,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "workspace.list": _workspace_list,
     "workspace.read": _workspace_read,
     "workspace.write_patch": _workspace_write_patch,
+    "file.organize": _file_organize,
     "terminal.run": _terminal_run,
     "artifact.write": _artifact_write,
     "data.analyze": _data_analyze,

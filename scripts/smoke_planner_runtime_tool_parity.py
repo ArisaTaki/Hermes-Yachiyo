@@ -119,6 +119,19 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "file_organize_invoices",
+        "category": "orchestrator",
+        "prompt": "把下载里的发票整理到一个文件夹",
+        "expected_intent": "file_organization",
+        "expected_plan_tools": [
+            "workspace.list",
+            "artifact.write",
+            "file.organize",
+        ],
+        "expected_request_tools": ["workspace.list"],
+        "approval_required": ["file.organize"],
+    },
+    {
         "id": "explicit_terminal_command",
         "category": "coding",
         "prompt": "run ls -la in terminal",

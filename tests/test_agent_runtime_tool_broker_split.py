@@ -179,6 +179,86 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
     assert csv_files["filter"]["expanded_patterns"] == ["*.csv"]
 
 
+def test_tool_broker_file_organize_requires_approval_and_moves_matching_files(
+    tmp_path: Path,
+) -> None:
+    workdir = tmp_path / "home"
+    downloads = workdir / "Downloads"
+    downloads.mkdir(parents=True)
+    (downloads / "june-invoice.pdf").write_text("invoice", encoding="utf-8")
+    (downloads / "notes.txt").write_text("notes", encoding="utf-8")
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["Downloads"],
+        },
+        tmp_path / "artifacts",
+        approvals={"file.organize": True},
+    )
+
+    approval = broker.call(
+        "file.organize",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "invoice",
+            "destination": "Invoices",
+        },
+    )
+
+    assert approval["approval_required"] is True
+    assert approval["tool"] == "file.organize"
+    assert (downloads / "june-invoice.pdf").exists()
+    assert not (downloads / "Invoices").exists()
+    result = broker.call(
+        "file.organize",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "invoice",
+            "destination": "Invoices",
+        },
+        approved=True,
+    )
+    assert result["ok"] is True
+    assert result["moved"] == [
+        {
+            "from": "Downloads/june-invoice.pdf",
+            "to": "Downloads/Invoices/june-invoice.pdf",
+        }
+    ]
+    assert result["matched_count"] == 1
+    assert result["moved_count"] == 1
+    assert (downloads / "Invoices" / "june-invoice.pdf").exists()
+    assert (downloads / "notes.txt").exists()
+
+
+def test_tool_broker_file_organize_rejects_paths_outside_writable_scope(
+    tmp_path: Path,
+) -> None:
+    workdir = tmp_path / "home"
+    downloads = workdir / "Downloads"
+    downloads.mkdir(parents=True)
+    (downloads / "june-invoice.pdf").write_text("invoice", encoding="utf-8")
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["Documents"],
+        },
+        tmp_path / "artifacts",
+    )
+
+    try:
+        broker.file_organize("Downloads", operation="organize", approved=True)
+    except Exception as exc:
+        assert "工作区范围" in str(exc)
+    else:
+        raise AssertionError("file_organize should reject source outside writable scopes")
+    assert (downloads / "june-invoice.pdf").exists()
+
+
 def test_tool_broker_artifact_write_redacts_secrets(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     broker = ToolBroker({}, artifact_root)

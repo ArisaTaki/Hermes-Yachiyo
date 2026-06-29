@@ -163,6 +163,37 @@ def test_write_patch_payload_validation_requires_patch_and_matching_hash_aliases
         )
 
 
+def test_file_organize_tool_is_high_risk_and_validates_payload() -> None:
+    assert "file.organize" in HIGH_RISK_AGENT_TOOLS
+    assert TOOL_FUNCTION_NAMES["file.organize"] == "file_organize"
+
+    ToolDescriptorRegistry.validate_payload(
+        "file.organize",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "invoice",
+            "destination": "Invoices",
+            "conflict_strategy": "keep_both",
+            "limit": 50,
+        },
+    )
+    with pytest.raises(AgentRuntimeError, match="operation"):
+        ToolDescriptorRegistry.validate_payload(
+            "file.organize",
+            {"path": "Downloads", "operation": "delete"},
+        )
+    with pytest.raises(AgentRuntimeError, match="conflict_strategy"):
+        ToolDescriptorRegistry.validate_payload(
+            "file.organize",
+            {
+                "path": "Downloads",
+                "operation": "organize",
+                "conflict_strategy": "overwrite",
+            },
+        )
+
+
 def test_memory_payload_validation_rejects_invalid_scope_and_kind() -> None:
     with pytest.raises(AgentRuntimeError, match="scope"):
         ToolDescriptorRegistry.validate_payload(
@@ -210,6 +241,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "desktop.type_into_ui_element": True,
         "browser.click": True,
         "browser.type_text": True,
+        "file.organize": True,
         "terminal.run": True,
         "workspace.write_patch": True,
     }
@@ -225,7 +257,8 @@ def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools(
     assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(HIGH_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
-    assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
+    assert allowed_tools & set(HIGH_RISK_AGENT_TOOLS) == {"file.organize"}
+    assert policy["approval_required"]["file.organize"] is True
 
 
 def test_runtime_policy_compiler_projects_tool_workspace_and_agent_runtime() -> None:

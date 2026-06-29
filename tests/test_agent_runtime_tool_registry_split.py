@@ -96,6 +96,40 @@ def test_tool_broker_call_passes_workspace_list_filters(tmp_path) -> None:
     }
 
 
+def test_tool_broker_call_dispatches_file_organize(tmp_path) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    (downloads / "receipt.pdf").write_text("receipt", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    approval = dispatch_tool_call(
+        broker,
+        "file.organize",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "invoice",
+            "destination": "Invoices",
+        },
+    )
+    result = dispatch_tool_call(
+        broker,
+        "file.organize",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "invoice",
+            "destination": "Invoices",
+        },
+        approved=True,
+    )
+
+    assert approval["approval_required"] is True
+    assert result["ok"] is True
+    assert result["moved_count"] == 1
+    assert (downloads / "Invoices" / "receipt.pdf").exists()
+
+
 def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> None:
     (tmp_path / "sales.csv").write_text(
         "region,revenue\nEast,10\nWest,20\nEast,30\n",

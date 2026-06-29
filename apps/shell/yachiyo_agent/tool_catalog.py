@@ -225,6 +225,8 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
         return "future_task"
     if tool_name.startswith("workspace."):
         return "workspace"
+    if tool_name.startswith("file."):
+        return "file.organization"
     if tool_name.startswith("browser."):
         return "browser_control"
     if tool_name.startswith("terminal."):

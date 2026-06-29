@@ -9,7 +9,7 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     evidence = smoke.run_smoke()
 
     assert evidence["ok"] is True
-    assert evidence["case_count"] == 10
+    assert evidence["case_count"] == 11
     case_by_id = {case["id"]: case for case in evidence["cases"]}
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
@@ -50,6 +50,13 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["system_settings_bluetooth"]["request_tools"] == [
         "system.settings_open"
     ]
+    assert case_by_id["file_organize_invoices"]["plan_tools"] == [
+        "workspace.list",
+        "artifact.write",
+        "file.organize",
+    ]
+    assert case_by_id["file_organize_invoices"]["request_tools"] == ["workspace.list"]
+    assert case_by_id["file_organize_invoices"]["approval_required_tools"] == []
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"
     ]

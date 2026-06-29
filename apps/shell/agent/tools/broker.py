@@ -6,7 +6,7 @@ import fnmatch
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
@@ -73,6 +73,43 @@ _WORKSPACE_LIST_FILE_TYPE_PATTERNS: dict[str, tuple[str, ...]] = {
     "video": ("*.mp4", "*.mov", "*.m4v", "*.avi", "*.mkv"),
 }
 
+_FILE_ORGANIZE_GENERIC_DESTINATIONS = {
+    "a folder",
+    "folder",
+    "directory",
+    "dir",
+    "one folder",
+    "new folder",
+    "一个",
+    "一个文件夹",
+    "新文件夹",
+    "文件夹",
+    "目录",
+}
+_FILE_ORGANIZE_TOP_LEVEL_DESTINATIONS = {
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Pictures",
+    "Movies",
+    "Music",
+}
+_FILE_ORGANIZE_DEFAULT_DESTINATIONS = {
+    "invoice": "Invoices",
+    "pdf": "PDFs",
+    "screenshot": "Screenshots",
+    "image": "Images",
+    "document": "Documents",
+    "spreadsheet": "Spreadsheets",
+    "csv": "Spreadsheets",
+    "tsv": "Spreadsheets",
+    "xlsx": "Spreadsheets",
+    "xls": "Spreadsheets",
+    "archive": "Archives",
+    "audio": "Audio",
+    "video": "Video",
+}
+
 
 def _workspace_list_patterns(pattern: str, file_type: str) -> list[str]:
     patterns = _expand_workspace_list_pattern(pattern)
@@ -125,6 +162,61 @@ def _workspace_list_entry_matches(name: str, patterns: list[str]) -> bool:
         return True
     lowered = name.casefold()
     return any(fnmatch.fnmatchcase(lowered, pattern.casefold()) for pattern in patterns)
+
+
+def _join_workspace_rel(*parts: str) -> str:
+    clean_parts = [str(part or "").strip().strip("/\\") for part in parts if str(part or "").strip()]
+    if not clean_parts:
+        return "."
+    return str(PurePosixPath(clean_parts[0]).joinpath(*clean_parts[1:]))
+
+
+def _file_organize_clean_destination(value: str) -> str:
+    destination = str(value or "").strip().strip("\"'`“”‘’")
+    destination = re.sub(
+        r"\s*(?:folder|directory|dir|文件夹|目录|中|里|内|下)\s*$",
+        "",
+        destination,
+        flags=re.IGNORECASE,
+    ).strip()
+    if destination.casefold() in _FILE_ORGANIZE_GENERIC_DESTINATIONS:
+        return ""
+    return destination.rstrip("/\\。.,，；;")
+
+
+def _file_organize_default_destination(file_type: str) -> str:
+    return _FILE_ORGANIZE_DEFAULT_DESTINATIONS.get(file_type.strip().casefold(), "Organized Files")
+
+
+def _file_organize_category_folder(path: Path) -> str:
+    suffix = path.suffix.casefold()
+    if suffix in {".png", ".jpg", ".jpeg", ".heic", ".gif", ".webp"}:
+        return "Images"
+    if suffix == ".pdf":
+        return "PDFs"
+    if suffix in {".csv", ".tsv", ".xls", ".xlsx", ".numbers"}:
+        return "Spreadsheets"
+    if suffix in {".doc", ".docx", ".pages", ".rtf", ".txt", ".md", ".markdown"}:
+        return "Documents"
+    if suffix in {".zip", ".rar", ".7z", ".tar", ".gz"}:
+        return "Archives"
+    if suffix in {".mp3", ".wav", ".aac", ".m4a", ".flac"}:
+        return "Audio"
+    if suffix in {".mp4", ".mov", ".m4v", ".avi", ".mkv"}:
+        return "Video"
+    return "Other Files"
+
+
+def _file_organize_unique_target(target: Path) -> Path:
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    for index in range(2, 1000):
+        candidate = target.with_name(f"{stem} {index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise AgentRuntimeError("目标文件名冲突过多，已停止移动文件")
 
 
 def _normalized_app_name(value: Any) -> str:
@@ -514,6 +606,167 @@ class ToolBroker:
             "sha256_before": before_sha256,
             "sha256_after": after_sha256,
         }
+
+    def file_organize(
+        self,
+        path: str = ".",
+        *,
+        operation: str = "organize",
+        file_type: str = "",
+        pattern: str = "",
+        destination: str = "",
+        conflict_strategy: str = "keep_both",
+        limit: int = 200,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        clean_operation = str(operation or "organize").strip().casefold()
+        if clean_operation not in {"organize", "archive", "move"}:
+            return {
+                "ok": False,
+                "tool": "file.organize",
+                "operation": clean_operation,
+                "error": "file.organize 当前只支持 organize、archive 或 move，不执行删除或去重。",
+            }
+        clean_conflict_strategy = str(conflict_strategy or "keep_both").strip().casefold()
+        if clean_conflict_strategy not in {"keep_both", "skip"}:
+            return {
+                "ok": False,
+                "tool": "file.organize",
+                "error": "conflict_strategy 只能是 keep_both 或 skip",
+            }
+        try:
+            clean_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise AgentRuntimeError("file.organize 参数 limit 必须是 1-500 的整数") from exc
+        if clean_limit < 1 or clean_limit > 500:
+            raise AgentRuntimeError("file.organize 参数 limit 必须是 1-500 的整数")
+
+        source_rel = _safe_rel_path(path or ".")
+        source = self._resolve_workspace_path(source_rel, write=True)
+        if not source.exists():
+            return {"ok": False, "path": source_rel, "error": "路径不存在"}
+        if not source.is_dir():
+            return {"ok": False, "path": source_rel, "error": "file.organize 只能整理目录"}
+
+        clean_file_type = str(file_type or "").strip()
+        clean_pattern = str(pattern or "").strip()
+        clean_destination = _file_organize_clean_destination(destination)
+        input_preview = {
+            "path": source_rel,
+            "operation": clean_operation,
+            "file_type": clean_file_type,
+            "pattern": clean_pattern,
+            "destination": clean_destination,
+            "conflict_strategy": clean_conflict_strategy,
+            "limit": clean_limit,
+        }
+        if not approved:
+            return {
+                "ok": False,
+                "approval_required": True,
+                "tool": "file.organize",
+                "input_preview": input_preview,
+            }
+
+        patterns = _workspace_list_patterns(clean_pattern, clean_file_type)
+        moved: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        matched = 0
+        for child in sorted(source.iterdir(), key=lambda item: item.name.lower()):
+            if child.is_dir():
+                continue
+            if child.is_symlink() or not child.is_file():
+                skipped.append(
+                    {
+                        "path": self._workspace_display_path(child),
+                        "reason": "unsupported_file_type",
+                    }
+                )
+                continue
+            if patterns and not _workspace_list_entry_matches(child.name, patterns):
+                continue
+            matched += 1
+            if matched > clean_limit:
+                skipped.append(
+                    {
+                        "path": self._workspace_display_path(child),
+                        "reason": "limit_exceeded",
+                    }
+                )
+                continue
+            destination_rel = self._file_organize_destination_rel(
+                source_rel=source_rel,
+                source_child=child,
+                destination=clean_destination,
+                file_type=clean_file_type,
+            )
+            destination_dir = self._resolve_workspace_path(destination_rel, write=True)
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            target = destination_dir / child.name
+            if target.resolve() == child.resolve():
+                skipped.append(
+                    {
+                        "path": self._workspace_display_path(child),
+                        "reason": "already_in_destination",
+                    }
+                )
+                continue
+            if target.exists() and clean_conflict_strategy == "skip":
+                skipped.append(
+                    {
+                        "path": self._workspace_display_path(child),
+                        "reason": "target_exists",
+                    }
+                )
+                continue
+            final_target = _file_organize_unique_target(target)
+            child.rename(final_target)
+            moved.append(
+                {
+                    "from": self._workspace_display_path(child),
+                    "to": self._workspace_display_path(final_target),
+                }
+            )
+        return {
+            "ok": True,
+            "tool": "file.organize",
+            "operation": clean_operation,
+            "path": source_rel,
+            "file_type": clean_file_type,
+            "pattern": clean_pattern,
+            "destination": clean_destination,
+            "matched_count": matched,
+            "moved_count": len(moved),
+            "skipped_count": len(skipped),
+            "moved": moved,
+            "skipped": skipped,
+            "summary": f"Moved {len(moved)} file(s) from {source_rel}.",
+        }
+
+    def _file_organize_destination_rel(
+        self,
+        *,
+        source_rel: str,
+        source_child: Path,
+        destination: str,
+        file_type: str,
+    ) -> str:
+        if destination:
+            if "/" in destination or destination in _FILE_ORGANIZE_TOP_LEVEL_DESTINATIONS:
+                return _safe_rel_path(destination)
+            return _safe_rel_path(_join_workspace_rel(source_rel, destination))
+        folder = _file_organize_default_destination(file_type)
+        if not file_type:
+            folder = _file_organize_category_folder(source_child)
+        return _safe_rel_path(_join_workspace_rel(source_rel, folder))
+
+    def _workspace_display_path(self, target: Path) -> str:
+        try:
+            rel = target.resolve().relative_to(self.workdir.resolve())
+        except ValueError:
+            return str(target)
+        text = rel.as_posix()
+        return text or "."
 
     def terminal_run(
         self,
@@ -1614,6 +1867,7 @@ class ToolBroker:
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         if not approved and self.approvals.get(name) and name not in {
+            "file.organize",
             "terminal.run",
             "workspace.write_patch",
         }:

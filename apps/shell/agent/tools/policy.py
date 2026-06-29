@@ -24,6 +24,7 @@ TOOL_FUNCTION_NAMES = {
     "workspace.list": "workspace_list",
     "workspace.read": "workspace_read",
     "workspace.write_patch": "workspace_write_patch",
+    "file.organize": "file_organize",
     "terminal.run": "terminal_run",
     "artifact.write": "artifact_write",
     "data.analyze": "data_analyze",
@@ -106,7 +107,7 @@ TOOL_FUNCTION_NAMES = {
 }
 TOOL_NAME_ALIASES = {value: key for key, value in TOOL_FUNCTION_NAMES.items()}
 KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
-HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
+HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch", "file.organize"}
 MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 SAFE_SHORTCUT_ACTIONS = (
@@ -384,6 +385,26 @@ class ToolDescriptor:
                     raise AgentRuntimeError(
                         "workspace.write_patch 参数 expected_sha256 与 base_sha256 不一致"
                     )
+        if self.name == "file.organize":
+            for key in ("path", "operation", "file_type", "pattern", "destination", "conflict_strategy"):
+                if key in payload and not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError(f"file.organize 参数 {key} 必须是字符串")
+            operation = str(payload.get("operation") or "organize").strip().lower()
+            if operation not in {"organize", "archive", "move"}:
+                raise AgentRuntimeError(
+                    "file.organize 参数 operation 必须是 organize、archive 或 move"
+                )
+            conflict_strategy = str(
+                payload.get("conflict_strategy") or "keep_both"
+            ).strip().lower()
+            if conflict_strategy not in {"keep_both", "skip"}:
+                raise AgentRuntimeError(
+                    "file.organize 参数 conflict_strategy 必须是 keep_both 或 skip"
+                )
+            if "limit" in payload:
+                value = payload.get("limit")
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 500:
+                    raise AgentRuntimeError("file.organize 参数 limit 必须是 1-500 的整数")
         if self.name == "skill.read":
             value = str(payload.get("skill_id") or payload.get("name") or "").strip()
             if not value:
@@ -1041,6 +1062,48 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "base_sha256": {"type": "string", "description": "Alias for expected_sha256."},
         },
         required=("path",),
+    ),
+    "file.organize": ToolDescriptor(
+        name="file.organize",
+        description=(
+            "Move matching files inside configured writable workspace scopes into a target "
+            "folder or type-based folders. Requires user approval and does not delete files."
+        ),
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Relative source directory path inside writable scopes.",
+            },
+            "operation": {
+                "type": "string",
+                "enum": ["organize", "archive", "move"],
+                "description": "File organization operation. Delete/dedupe is intentionally unsupported.",
+            },
+            "file_type": {
+                "type": "string",
+                "description": "Optional semantic file type filter such as invoice, pdf, screenshot, image, document, spreadsheet, archive, audio, or video.",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "Optional glob filter such as *.pdf or *.{png,jpg}.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "Optional destination directory. Simple names are created under path; top-level Desktop/Documents/Downloads/Pictures/Movies/Music are workspace-relative.",
+            },
+            "conflict_strategy": {
+                "type": "string",
+                "enum": ["keep_both", "skip"],
+                "description": "How to handle existing destination filenames. Defaults to keep_both.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500,
+                "description": "Maximum matching files to move. Defaults to 200.",
+            },
+        },
+        required=("path", "operation"),
     ),
     "terminal.run": ToolDescriptor(
         name="terminal.run",
@@ -2390,11 +2453,22 @@ class RuntimePolicyCompiler:
                 *future_task_tools,
                 "artifact.write",
             ]
-        elif category in {"research", "design", "office", "orchestrator"}:
+        elif category in {"research", "design"}:
             tools = [
                 "workspace.list",
                 "workspace.read",
                 "data.analyze",
+                *daily_tools,
+                *memory_tools,
+                *future_task_tools,
+                "artifact.write",
+            ]
+        elif category in {"office", "orchestrator"}:
+            tools = [
+                "workspace.list",
+                "workspace.read",
+                "data.analyze",
+                "file.organize",
                 *daily_tools,
                 *memory_tools,
                 *future_task_tools,

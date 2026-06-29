@@ -1957,6 +1957,29 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     }
 
 
+def test_runtime_planner_prefers_structured_file_organize_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "把下载里的发票整理到一个文件夹",
+        allowed_tools=["workspace.list", "artifact.write", "file.organize", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "organize",
+        "file_type_hint": "invoice",
+    }
+    apply_step = _step_by_id(decision, "apply-file-organization")
+    assert apply_step.tool_name == "file.organize"
+    assert apply_step.input_preview == {
+        "path": "Downloads",
+        "operation": "organize",
+        "file_type": "invoice",
+    }
+    assert apply_step.approval_required is True
+    assert decision.plan.tool_plan.missing_capabilities == []
+
+
 def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:
     allowed_tools = ["workspace.list", "artifact.write", "terminal.run"]
     decision = RuntimePlanner().decision(

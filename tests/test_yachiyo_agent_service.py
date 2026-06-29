@@ -385,7 +385,7 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     ]
     assert metadata["yachiyo_route_to_studio"] is True
     assert metadata["yachiyo_plan_tools"] == [
-        "desktop.list_apps",
+        "desktop.inspect_app",
         "app.open_and_click_ui_element",
         "desktop.ui_elements",
     ]
@@ -420,7 +420,7 @@ def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -
     assert task.metadata["yachiyo_runtime_planner"] is True
     assert task.metadata["yachiyo_intent_kind"] == "desktop_operation"
     assert task.metadata["yachiyo_plan_tools"] == [
-        "desktop.list_apps",
+        "desktop.inspect_app",
         "app.open_and_click_ui_element",
         "desktop.ui_elements",
     ]
