@@ -3463,24 +3463,85 @@ def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) ->
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.example.Slack")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Slack|true|false|Codex",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Slack")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.focus"
+    assert result["error"] == "app_focus_not_verified"
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is True
+    assert result["fallback_result"]["action"] == "app.open"
+    assert result["data"]["app_name"] == "Slack"
+    assert result["data"]["launch_verified"] is True
+    assert result["data"]["focus_fallback"] == "app.open"
+    assert result["data"]["focus_verified"] is False
+    assert result["data"]["focus_status"] == "not_frontmost"
+    assert result["data"]["frontmost_app"] == "Codex"
+    assert result["data"]["focus_attempts"] == [
+        {
+            "strategy": "applescript_system_events",
+            "ok": False,
+            "error": "Not authorized to send Apple events to Slack.",
+        },
+        {
+            "strategy": "appkit_nsrunningapplication",
+            "ok": True,
+            "focus_verified": False,
+            "focus_status": "not_frontmost",
+            "frontmost_app": "Codex",
+            "appkit_activate_result": "true",
+        },
+    ]
+    assert result["permission_targets"] == ["foreground_focus"]
+    assert open_calls[0][0] == ["open", "-a", "Slack"]
+    assert osascript_calls == [["Slack"], ["Slack"]]
+
+
+def test_app_focus_uses_appkit_fallback_when_applescript_does_not_verify(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.example.Slack")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Slack|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Slack|true|true|Slack",
+            "stderr": "",
+        },
+    )
 
     result = desktop_mod.app_focus("Slack")
 
     assert result["ok"] is True
     assert result["action"] == "app.focus"
-    assert result["permission_error"] is False
+    assert result["summary"] == "Focused Slack via AppKit"
     assert result["fallback_used"] is True
-    assert result["fallback_result"]["action"] == "app.open"
-    assert result["data"] == {
-        "app_name": "Slack",
-        "launch_verified": True,
-        "launch_status": "running",
-        "focus_fallback": "app.open",
-        "focus_verified": True,
-        "focus_status": "open_fallback",
-    }
-    assert open_calls[0][0] == ["open", "-a", "Slack"]
-    assert osascript_calls == [["Slack"], ["Slack"]]
+    assert result["data"]["focus_verified"] is True
+    assert result["data"]["focus_status"] == "frontmost"
+    assert result["data"]["frontmost_app"] == "Slack"
+    assert result["data"]["appkit_activate_result"] == "true"
+    assert result["data"]["focus_attempts"][-1]["strategy"] == "appkit_nsrunningapplication"
 
 
 def test_app_focus_verifies_frontmost_process(monkeypatch) -> None:
@@ -3511,12 +3572,22 @@ def test_app_focus_verifies_frontmost_process(monkeypatch) -> None:
 def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.example.Slack")
     monkeypatch.setattr(
         desktop_mod,
         "_run_osascript",
         lambda script, args=None: {
             "ok": True,
             "stdout": "focused|Slack|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Slack|true|false|Codex",
             "stderr": "",
         },
     )
@@ -3530,6 +3601,23 @@ def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
     assert result["data"]["focus_verified"] is False
     assert result["data"]["focus_status"] == "not_frontmost"
     assert result["data"]["frontmost_app"] == "Codex"
+    assert result["data"]["focus_attempts"] == [
+        {
+            "strategy": "applescript_system_events",
+            "ok": True,
+            "focus_verified": False,
+            "focus_status": "not_frontmost",
+            "frontmost_app": "Codex",
+        },
+        {
+            "strategy": "appkit_nsrunningapplication",
+            "ok": True,
+            "focus_verified": False,
+            "focus_status": "not_frontmost",
+            "frontmost_app": "Codex",
+            "appkit_activate_result": "true",
+        },
+    ]
     assert result["data"]["recommended_tools"] == [
         "desktop.running_apps",
         "desktop.active_window",

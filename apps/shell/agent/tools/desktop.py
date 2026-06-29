@@ -2407,6 +2407,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
         return _unsupported("app.focus")
     clean_name = _clean_required(app_name, "app_name")
     resolved_name = _resolve_installed_app_name(clean_name) or clean_name
+    focus_attempts: list[dict[str, Any]] = []
     result = _run_osascript(
         """
         on run argv
@@ -2436,21 +2437,52 @@ def app_focus(app_name: str) -> dict[str, Any]:
         [resolved_name],
     )
     if not result["ok"]:
+        focus_attempts.append(_app_focus_attempt("applescript_system_events", result))
         fallback = app_open(clean_name)
+        appkit_data: dict[str, Any] = {}
         if fallback.get("ok"):
             fallback_data = fallback.get("data") if isinstance(fallback.get("data"), dict) else {}
+            appkit_result = _appkit_activate_app(resolved_name, bundle_id=_app_bundle_id(resolved_name))
+            appkit_data = _parse_appkit_focus_output(appkit_result.get("stdout"), resolved_name)
+            focus_attempts.append(_app_focus_attempt("appkit_nsrunningapplication", appkit_result, appkit_data))
+            if appkit_data.get("focus_verified") is True:
+                return {
+                    "ok": True,
+                    "action": "app.focus",
+                    "summary": f"Focused {resolved_name} via AppKit",
+                    "data": {
+                        "app_name": clean_name,
+                        **fallback_data,
+                        **appkit_data,
+                        **_app_resolution_metadata(clean_name, resolved_name),
+                        "focus_fallback": "app.open_then_appkit",
+                        "focus_attempts": focus_attempts,
+                    },
+                    "permission_error": False,
+                    "fallback_used": True,
+                    "fallback_result": {"open": fallback, "appkit": appkit_result},
+                }
             return {
-                "ok": True,
+                "ok": False,
                 "action": "app.focus",
-                "summary": f"Focused {clean_name} via app.open fallback",
+                "summary": f"Could not verify {resolved_name} is foreground after app.open fallback",
+                "error": "app_focus_not_verified",
                 "data": {
                     "app_name": clean_name,
                     **fallback_data,
                     **_app_resolution_metadata(clean_name, str(fallback_data.get("app_name") or resolved_name)),
                     "focus_fallback": "app.open",
-                    "focus_verified": fallback_data.get("launch_verified"),
-                    "focus_status": "open_fallback",
+                    "focus_verified": False,
+                    "focus_status": "not_frontmost",
+                    "frontmost_app": appkit_data.get("frontmost_app") or "",
+                    "focus_attempts": focus_attempts,
+                    "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
                 },
+                "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
+                "missing_permissions": ["foreground_focus"],
+                "permission_targets": ["foreground_focus"],
+                "recovery_hints": _permission_recovery_hints_for_targets(["foreground_focus"]),
+                "recovery_actions": _app_focus_recovery_actions(resolved_name),
                 "permission_error": False,
                 "fallback_used": True,
                 "fallback_result": fallback,
@@ -2463,6 +2495,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
         payload["fallback_result"] = fallback
         return payload
     focus_data = _parse_app_focus_output(result.get("stdout"), resolved_name)
+    focus_attempts.append(_app_focus_attempt("applescript_system_events", result, focus_data))
     focus_verified = focus_data.get("focus_verified") is True
     data = {
         **focus_data,
@@ -2477,6 +2510,22 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": resolved_name != clean_name,
         }
+    appkit_result = _appkit_activate_app(resolved_name, bundle_id=_app_bundle_id(resolved_name))
+    appkit_data = _parse_appkit_focus_output(appkit_result.get("stdout"), resolved_name)
+    focus_attempts.append(_app_focus_attempt("appkit_nsrunningapplication", appkit_result, appkit_data))
+    if appkit_data.get("focus_verified") is True:
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {resolved_name} via AppKit",
+            "data": {
+                **data,
+                **appkit_data,
+                "focus_attempts": focus_attempts,
+            },
+            "permission_error": False,
+            "fallback_used": True,
+        }
     return {
         "ok": False,
         "action": "app.focus",
@@ -2484,6 +2533,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "error": "app_focus_not_verified",
         "data": {
             **data,
+            "focus_attempts": focus_attempts,
             "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
         },
         "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
@@ -4620,6 +4670,26 @@ def _run_osascript(script: str, args: list[str] | None = None) -> dict[str, Any]
     }
 
 
+def _run_jxa(script: str, args: list[str] | None = None) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["osascript", "-l", "JavaScript", "-e", script, *(args or [])],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("jxa", exc)
+    if result.returncode != 0:
+        return _failed("jxa", result)
+    return {
+        "ok": True,
+        "stdout": str(result.stdout or "").strip(),
+        "stderr": str(result.stderr or "").strip(),
+    }
+
+
 def _desktop_platform() -> str:
     system = platform.system()
     if system == "Darwin":
@@ -4748,6 +4818,114 @@ def _parse_app_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any
         "focus_status": "frontmost" if focus_verified else "not_frontmost",
         "frontmost_app": frontmost_app,
     }
+
+
+def _app_bundle_id(app_name: str) -> str:
+    clean_name = str(app_name or "").strip()
+    if not clean_name:
+        return ""
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            return id of application appName
+        end run
+        """,
+        [clean_name],
+    )
+    if not result.get("ok"):
+        return ""
+    return str(result.get("stdout") or "").strip()
+
+
+def _appkit_activate_app(app_name: str, *, bundle_id: str = "") -> dict[str, Any]:
+    return _run_jxa(
+        """
+        function run(argv) {
+            ObjC.import("AppKit");
+            const requestedName = String(argv[0] || "");
+            const requestedBundleId = String(argv[1] || "");
+            const workspace = $.NSWorkspace.sharedWorkspace;
+            const apps = workspace.runningApplications;
+            let target = null;
+            for (let index = 0; index < apps.count; index += 1) {
+                const app = apps.objectAtIndex(index);
+                const localizedName = app.localizedName ? ObjC.unwrap(app.localizedName) : "";
+                const bundleId = app.bundleIdentifier ? ObjC.unwrap(app.bundleIdentifier) : "";
+                if (
+                    (requestedBundleId && bundleId === requestedBundleId)
+                    || localizedName === requestedName
+                ) {
+                    target = app;
+                    break;
+                }
+            }
+            const frontBefore = workspace.frontmostApplication;
+            const frontBeforeName = frontBefore && frontBefore.localizedName ? ObjC.unwrap(frontBefore.localizedName) : "";
+            if (!target) {
+                return "appkit|" + requestedName + "|missing|false|" + frontBeforeName;
+            }
+            const activateResult = target.activateWithOptions(
+                $.NSApplicationActivateAllWindows | $.NSApplicationActivateIgnoringOtherApps
+            );
+            delay(0.2);
+            const frontAfter = workspace.frontmostApplication;
+            const frontAfterName = frontAfter && frontAfter.localizedName ? ObjC.unwrap(frontAfter.localizedName) : "";
+            return "appkit|" + requestedName + "|" + activateResult + "|" + target.active + "|" + frontAfterName;
+        }
+        """,
+        [app_name, str(bundle_id or "").strip()],
+    )
+
+
+def _parse_appkit_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any]:
+    parts = str(value or "").strip().split("|", 4)
+    app_name = parts[1] if len(parts) > 1 and parts[1] else fallback_app_name
+    activate_result = parts[2] if len(parts) > 2 else ""
+    active_text = parts[3] if len(parts) > 3 else ""
+    frontmost_app = parts[4] if len(parts) > 4 else ""
+    focus_verified = active_text.strip().lower() == "true" or (
+        bool(app_name)
+        and bool(frontmost_app)
+        and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
+    )
+    return {
+        "app_name": app_name,
+        "focus_verified": focus_verified,
+        "focus_status": "frontmost" if focus_verified else "not_frontmost",
+        "frontmost_app": frontmost_app,
+        "appkit_activate_result": activate_result,
+    }
+
+
+def _app_focus_attempt(
+    strategy: str,
+    result: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    attempt: dict[str, Any] = {
+        "strategy": strategy,
+        "ok": bool(result.get("ok")),
+    }
+    if data:
+        attempt.update(
+            {
+                key: data[key]
+                for key in (
+                    "focus_verified",
+                    "focus_status",
+                    "frontmost_app",
+                    "appkit_activate_result",
+                )
+                if key in data
+            }
+        )
+    if result.get("error"):
+        attempt["error"] = str(result.get("error") or "")
+    stderr = str(result.get("stderr") or "").strip()
+    if stderr:
+        attempt["stderr"] = stderr[:500]
+    return attempt
 
 
 def _app_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
