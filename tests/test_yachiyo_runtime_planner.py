@@ -9814,8 +9814,23 @@ def test_runtime_planner_falls_back_to_future_task_for_timed_reminders() -> None
 def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability() -> None:
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
+    next_monday = date.today() + timedelta(days=7 - date.today().weekday())
+    next_monday_1000 = f"{next_monday.isoformat()}T10:00"
+    next_monday_1100 = f"{next_monday.isoformat()}T11:00"
     decision = RuntimePlanner().decision(
         "明天下午三点日历上加一个开会",
+        allowed_tools=["calendar.create_event"],
+    )
+    time_first_create = RuntimePlanner().decision(
+        "明天下午三点创建一个项目评审日程",
+        allowed_tools=["calendar.create_event"],
+    )
+    create_first = RuntimePlanner().decision(
+        "创建一个明天下午三点的项目评审日历事件",
+        allowed_tools=["calendar.create_event"],
+    )
+    next_week_meeting = RuntimePlanner().decision(
+        "下周一上午十点安排项目复盘会议",
         allowed_tools=["calendar.create_event"],
     )
 
@@ -9826,6 +9841,22 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability()
         "title": "开会",
         "start_at": tomorrow_1500,
         "end_at": tomorrow_1600,
+    }
+    for calendar_decision in (time_first_create, create_first):
+        assert calendar_decision.selected_intent.kind == "schedule"
+        calendar_step = _step_by_id(calendar_decision, "create-schedule-item")
+        assert calendar_step.tool_name == "calendar.create_event"
+        assert calendar_step.input_preview == {
+            "title": "项目评审",
+            "start_at": tomorrow_1500,
+            "end_at": tomorrow_1600,
+        }
+    next_week_step = _step_by_id(next_week_meeting, "create-schedule-item")
+    assert next_week_step.tool_name == "calendar.create_event"
+    assert next_week_step.input_preview == {
+        "title": "项目复盘会议",
+        "start_at": next_monday_1000,
+        "end_at": next_monday_1100,
     }
 
 
@@ -13862,6 +13893,9 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
+    next_monday = date.today() + timedelta(days=7 - date.today().weekday())
+    next_monday_1000 = f"{next_monday.isoformat()}T10:00"
+    next_monday_1100 = f"{next_monday.isoformat()}T11:00"
     tomorrow_0900_epoch = datetime.fromisoformat(tomorrow_0900).timestamp()
 
     assert planner_tool_requests(
@@ -13922,6 +13956,54 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
                 "title": "开会",
                 "start_at": tomorrow_1500,
                 "end_at": tomorrow_1600,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "明天下午三点创建一个项目评审日程",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "项目评审",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "创建一个明天下午三点的项目评审日历事件",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "项目评审",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "下周一上午十点安排项目复盘会议",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "项目复盘会议",
+                "start_at": next_monday_1000,
+                "end_at": next_monday_1100,
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",

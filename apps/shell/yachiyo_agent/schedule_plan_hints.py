@@ -11,6 +11,10 @@ from .capture_plan_hints import context_source_hint
 
 
 _LOCAL_ISO_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}"
+_CHINESE_DAY_MARKER_RE = (
+    r"今天|今日|今晚|明天|明日|明晚|后天|"
+    r"下周[一二三四五六日天]|下星期[一二三四五六日天]"
+)
 
 
 def schedule_tool_preview(
@@ -202,6 +206,18 @@ def _calendar_body(text: str) -> str:
     value = _clean(text)
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?P<time_first>(?:(?:{_CHINESE_DAY_MARKER_RE})\s*)?"
+        r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
+        r"(?:\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*点"
+        r"(?:(?:半)|(?:\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*分?)?)"
+        r"\s*(?:帮我)?\s*"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<title_after_time>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<body_target_after>[^。！？!?]+?)\s*"
+        r"(?:日历事件|日历日程|日程|事件|会议)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:日历事件|日程|日历日程|calendar event)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -230,9 +246,14 @@ def _calendar_body(text: str) -> str:
         groups = match.groupdict()
         if groups.get("time_first") and groups.get("title_after_calendar"):
             return _strip_schedule_prefix(f"{groups['time_first']} {groups['title_after_calendar']}")
+        if groups.get("time_first") and groups.get("title_after_time"):
+            return _strip_schedule_prefix(
+                f"{groups['time_first']} {_strip_calendar_target_suffix(groups['title_after_time'])}"
+            )
         body = _strip_schedule_prefix(
             groups.get("body")
             or groups.get("body_calendar_short")
+            or groups.get("body_target_after")
             or groups.get("body_to_calendar_en")
             or groups.get("body_scheduled_en")
             or ""
@@ -249,6 +270,7 @@ def _local_iso_hint(text: str) -> str:
 
 def _strip_schedule_prefix(value: str) -> str:
     title = _clean(value)
+    title = re.sub(r"^(?:的|这个|该)\s*", "", title)
     title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我)\s*", "", title)
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
@@ -260,10 +282,19 @@ def _strip_schedule_prefix(value: str) -> str:
     return title
 
 
+def _strip_calendar_target_suffix(value: str) -> str:
+    return re.sub(
+        r"\s*(?:日历事件|日历日程|日程|事件)$",
+        "",
+        _clean(value),
+        flags=re.IGNORECASE,
+    ).strip()
+
+
 _SCHEDULE_TIME_PATTERNS = (
     re.compile(
         r"(?P<full>"
-        r"(?:(?:今天|今日|今晚|明天|明日|明晚|后天)\s*)?"
+        rf"(?:(?:{_CHINESE_DAY_MARKER_RE})\s*)?"
         r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
         r"(?P<hour>\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*点"
         r"(?:(?P<half>半)|(?P<minute>\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*分?)?"
@@ -271,7 +302,7 @@ _SCHEDULE_TIME_PATTERNS = (
     ),
     re.compile(
         r"(?P<full>"
-        r"(?:(?:今天|今日|今晚|明天|明日|明晚|后天)\s*)?"
+        rf"(?:(?:{_CHINESE_DAY_MARKER_RE})\s*)?"
         r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
         r"(?P<hour>\d{1,2})\s*[:：]\s*(?P<minute>\d{1,2})"
         r")"
@@ -336,7 +367,7 @@ def _datetime_from_schedule_match(match: re.Match[str]) -> datetime | None:
         hour += 12
     if any(marker in full for marker in ("上午", "早上", "凌晨")) and hour == 12:
         hour = 0
-    target_date = date.today() + timedelta(days=_chinese_day_offset(full))
+    target_date = _target_date_for_chinese_schedule_text(full)
     return datetime.combine(target_date, time(hour=hour, minute=minute))
 
 
@@ -392,6 +423,31 @@ def _chinese_day_offset(value: str) -> int:
     if any(marker in value for marker in ("明天", "明日", "明晚")):
         return 1
     return 0
+
+
+def _target_date_for_chinese_schedule_text(value: str) -> date:
+    text = str(value or "")
+    weekday_match = re.search(r"(?:下周|下星期)([一二三四五六日天])", text)
+    if weekday_match:
+        target_weekday = _CHINESE_WEEKDAY_INDEX.get(weekday_match.group(1))
+        if target_weekday is not None:
+            today = date.today()
+            days_until_next_monday = 7 - today.weekday()
+            next_monday = today + timedelta(days=days_until_next_monday)
+            return next_monday + timedelta(days=target_weekday)
+    return date.today() + timedelta(days=_chinese_day_offset(text))
+
+
+_CHINESE_WEEKDAY_INDEX = {
+    "一": 0,
+    "二": 1,
+    "三": 2,
+    "四": 3,
+    "五": 4,
+    "六": 5,
+    "日": 6,
+    "天": 6,
+}
 
 
 _CHINESE_DIGITS = {
