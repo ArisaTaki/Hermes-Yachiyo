@@ -1180,7 +1180,8 @@ def clean_target(value: str) -> str:
 
 def clean_type_target(value: str, *, app_name: str = "") -> str:
     raw_field_suffix = re.search(
-        r"(?:^|并|然后|再|接着|之后|后|,|，)\s*(?:在|向|到|in|inside|into)?\s*"
+        r"(?:^|并|然后|再|接着|之后|后|,|，)\s*"
+        r"(?:把|将)?\s*(?:在|向|到|in|inside|into)?\s*"
         r"(?P<field>搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"search box|search field|message field|address bar|input field|text box)$",
         clean(value),
@@ -1208,6 +1209,12 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
     ).strip()
     target = re.sub(
         r"^(?:(?:在|通过)\s*|用\s+|(?:in|inside|within|using|with)\s+)",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    target = re.sub(
+        r"^(?:并|然后|再|接着|之后|后)?\s*(?:把|将)\s*",
         "",
         target,
         flags=re.IGNORECASE,

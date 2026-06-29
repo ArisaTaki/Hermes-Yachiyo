@@ -3058,6 +3058,54 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    open_inspect_then_type = RuntimePlanner().decision(
+        "打开任意 app PixelForge，先看看有哪些控件，再把搜索框输入 revenue",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert open_inspect_then_type.selected_intent.kind == "desktop_operation"
+    assert open_inspect_then_type.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert [step.step_id for step in open_inspect_then_type.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "submit-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(open_inspect_then_type, "inspect-app").input_preview == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(open_inspect_then_type, "operate-foreground-ui").input_preview == {
+        "app_name": "PixelForge",
+        "target": "搜索",
+        "text": "revenue",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "打开任意 app PixelForge，先看看有哪些控件，再把搜索框输入 revenue",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.open_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
 
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(

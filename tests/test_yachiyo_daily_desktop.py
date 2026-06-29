@@ -412,6 +412,60 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_input() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开任意 app PixelForge，先看看有哪些控件，再把搜索框输入 revenue",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_type_into_ui_element",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "text",
+                "limit": 80,
+                "app_name": "PixelForge",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "搜索",
+                "text": "revenue",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_targets() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "PixelForge 用户名输入框输入 alice",
