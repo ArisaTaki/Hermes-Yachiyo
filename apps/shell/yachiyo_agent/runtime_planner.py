@@ -2738,7 +2738,7 @@ class RuntimePlanner:
             )
             return steps
         if screen_capture is not None and not safe_click and not any(
-            item for item in (hotkey, type_target, safe_type_text, submit_action) if item
+            item for item in (click_target, hotkey, type_target, safe_type_text, submit_action) if item
         ):
             capture_payload = {
                 key: screen_capture[key]
@@ -10588,7 +10588,7 @@ def _clean_app_name_hint(value: str) -> str:
         app = english_called_app_match.group("app")
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?"
-        r"(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
+        r"(?:任意(?:的)?|(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?))\s*"
         r"(?:新\s*)?(?:应用(?:程序)?|软件)?"
         r"(?:\s*(?:叫|名叫|名称是|名字是))?\s*",
         "",
@@ -10597,7 +10597,7 @@ def _clean_app_name_hint(value: str) -> str:
     ).strip(" .，,。")
     app = re.sub(
         r"^(?:(?:an?|the)\s+)?"
-        r"(?:(?:new|unknown|unmentioned|unfamiliar)\s+)+"
+        r"(?:(?:any|new|unknown|unmentioned|unfamiliar)\s+)+"
         r"(?:(?:app|application|software)\s+)?"
         r"(?:(?:called|named)\s+)?",
         "",
@@ -10613,7 +10613,7 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     )[0].strip(" .，,。")
     app = re.sub(
-        r"^(?:一个|一款|这个|那个)?(?:(?:我)?(?:没|没有)提过的|从未提过的|新的|未知的)?"
+        r"^(?:一个|一款|这个|那个)?(?:任意(?:的)?|(?:(?:我)?(?:没|没有)提过的|从未提过的|新的|未知的))?"
         r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)"
         r"(?:\s*(?:叫|名叫|名称是|名字是|called|named))?\s*",
         "",
@@ -13912,9 +13912,9 @@ def _app_search_scope_pattern(app_name: str) -> str:
         return ""
     return (
         r"(?:(?:一个|一款|这个|那个)?"
-        r"(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)?\s*"
+        r"(?:任意(?:的)?|(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?))?\s*"
         r"(?:新\s*)?(?:应用(?:程序)?|软件)?\s*"
-        r"|(?:(?:an?|the)\s+)?(?:(?:new|unknown|unmentioned|unfamiliar)\s+)*"
+        r"|(?:(?:an?|the)\s+)?(?:(?:any|new|unknown|unmentioned|unfamiliar)\s+)*"
         r"(?:(?:app|application|software)\s+)?(?:(?:called|named)\s+)?)?"
         + re.escape(app)
     )

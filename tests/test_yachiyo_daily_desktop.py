@@ -366,6 +366,52 @@ def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_t
         ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_click() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在 PixelForge 里查看界面，然后点击 Export 按钮",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "PixelForge",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "Export",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_targets() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "PixelForge 用户名输入框输入 alice",

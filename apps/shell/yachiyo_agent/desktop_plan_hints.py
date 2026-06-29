@@ -1586,7 +1586,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app = called_app_match.group("app").strip()
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?"
-        r"(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
+        r"(?:任意(?:的)?|(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?))\s*"
         r"(?:新\s*)?(?:应用(?:程序)?|软件)?"
         r"(?:\s*(?:叫|名叫|名称是|名字是))?\s*",
         "",
@@ -1595,7 +1595,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
     ).strip(" .，,。")
     app = re.sub(
         r"^(?:(?:an?|the)\s+)?"
-        r"(?:(?:new|unknown|unmentioned|unfamiliar)\s+)+"
+        r"(?:(?:any|new|unknown|unmentioned|unfamiliar)\s+)+"
         r"(?:(?:app|application|software)\s+)?"
         r"(?:(?:called|named)\s+)?",
         "",

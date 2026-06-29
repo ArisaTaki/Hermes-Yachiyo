@@ -2951,6 +2951,80 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    inspect_then_click = RuntimePlanner().decision(
+        "在 PixelForge 里查看界面，然后点击 Export 按钮",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert inspect_then_click.selected_intent.kind == "desktop_operation"
+    assert inspect_then_click.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert [step.step_id for step in inspect_then_click.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(inspect_then_click, "inspect-app").input_preview == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert _step_by_id(inspect_then_click, "operate-foreground-ui").input_preview == {
+        "app_name": "PixelForge",
+        "target": "Export",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "在 PixelForge 里查看界面，然后点击 Export 按钮",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    open_inspect_then_click = RuntimePlanner().decision(
+        "打开 SuperData Studio，先读取界面里有哪些按钮，然后点击导出",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert open_inspect_then_click.selected_intent.kind == "desktop_operation"
+    assert open_inspect_then_click.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+    assert [step.step_id for step in open_inspect_then_click.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(open_inspect_then_click, "inspect-app").input_preview == {
+        "app_name": "SuperData Studio",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    assert _step_by_id(open_inspect_then_click, "operate-foreground-ui").input_preview == {
+        "app_name": "SuperData Studio",
+        "target": "导出",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+
     type_tools = [
         "desktop.inspect_app",
         "desktop.list_apps",
@@ -8974,6 +9048,8 @@ def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
         ("打开一个没提过的新应用 PixelForge", "PixelForge"),
         ("打开一个没有提过的应用 Linear", "Linear"),
         ("打开一个从未提过的应用叫 Raycast", "Raycast"),
+        ("打开任意 app PixelForge", "PixelForge"),
+        ("open any app PixelForge", "PixelForge"),
         ("打开未知应用 Linear", "Linear"),
         ("打开一个叫 Linear 的应用", "Linear"),
         ("打开文件夹", "Finder"),
