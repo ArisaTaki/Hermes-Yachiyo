@@ -2632,6 +2632,8 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "recovery_retry_artifact_kind",
             "retry_tool",
             "recovery_retry_tool",
+            "followup_tool",
+            "recovery_followup_tool",
         ):
             value = str(raw_action.get(text_key) or "").strip()
             if value:
@@ -2641,6 +2643,8 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "recovery_retry_input",
             "retry_input_schema",
             "recovery_retry_input_schema",
+            "followup_input",
+            "recovery_followup_input",
         ):
             value = raw_action.get(dict_key)
             if isinstance(value, dict):

@@ -118,8 +118,18 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
                     "recovery_retry_artifact_tool": "screen.capture",
                     "retry_artifact_kind": "image",
                     "recovery_retry_artifact_kind": "image",
+                    "followup_tool": "desktop.type_text",
+                    "recovery_followup_tool": "desktop.type_text",
+                    "followup_input": {
+                        "text_source": "original_request",
+                        "character_count": 5,
+                    },
+                    "recovery_followup_input": {
+                        "text_source": "original_request",
+                        "character_count": 5,
+                    },
                     "required_retry_fields": ["x", "y"],
-                    "recommended_tools": ["screen.capture", "desktop.click"],
+                    "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
                     "target": "Send",
                 }
             ]
@@ -145,8 +155,18 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
             "recovery_retry_artifact_tool": "screen.capture",
             "retry_artifact_kind": "image",
             "recovery_retry_artifact_kind": "image",
+            "followup_tool": "desktop.type_text",
+            "recovery_followup_tool": "desktop.type_text",
+            "followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
+            "recovery_followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
             "required_retry_fields": ["x", "y"],
-            "recommended_tools": ["screen.capture", "desktop.click"],
+            "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
         }
     ]
 
