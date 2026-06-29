@@ -879,6 +879,63 @@ def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> Non
         "transform": "report",
     }
 
+    email_decision = RuntimePlanner().decision(
+        "分析 data/sales.csv 并发邮件给 Alice 说明本周业绩",
+        allowed_tools=allowed_tools,
+    )
+
+    assert email_decision.selected_intent.kind == "data_analysis"
+    assert email_decision.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "Alice",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "email",
+    }
+    assert [step.step_id for step in email_decision.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    ]
+    assert _step_by_id(email_decision, "open-or-focus-app").input_preview == {
+        "app_name": "Mail"
+    }
+    assert _step_by_id(email_decision, "focus-communication-recipient-search").input_preview == {
+        "action": "new_message"
+    }
+    assert _step_by_id(email_decision, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+    }
+
+
+def test_runtime_planner_preserves_scoped_data_source_for_analysis_delivery() -> None:
+    decision = RuntimePlanner().decision(
+        "分析 Downloads 里的 sales.csv 并把本周业绩发给张三",
+        allowed_tools=["data.analyze", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_hint"] == "Downloads/sales.csv"
+    assert decision.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "张三",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+    }
+    assert _step_by_id(decision, "analyze-data-file").input_preview["path"] == (
+        "Downloads/sales.csv"
+    )
+    assert _step_by_id(decision, "draft-analysis-communication").input_preview == {
+        "recipient": "张三",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+    }
+
 
 def test_runtime_planner_routes_context_data_analysis_to_communication() -> None:
     allowed_tools = [
@@ -12660,6 +12717,53 @@ def test_planner_tool_requests_continues_after_builtin_data_analysis_for_communi
             "protocol": "json_fallback",
             "tool": "data.analyze",
             "input": _data_analysis_preview("sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    scoped_requests = planner_tool_requests(
+        "分析 Downloads 里的 sales.csv 并把本周业绩发给张三",
+        allowed_tools=["data.analyze", "artifact.write"],
+    )
+
+    assert scoped_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview(
+                "Downloads/sales.csv",
+                "csv",
+                requested_outputs=["analysis_report"],
+            ),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    email_requests = planner_tool_requests(
+        "分析 data/sales.csv 并发邮件给 Alice 说明本周业绩",
+        allowed_tools=[
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert email_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview(
+                "data/sales.csv",
+                "csv",
+                requested_outputs=["analysis_report"],
+            ),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
             "continue_to_model": True,

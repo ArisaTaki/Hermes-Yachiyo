@@ -197,8 +197,16 @@ class TaskIntentRouter:
         if score <= 0:
             return _empty_intent("data_analysis", text)
         spreadsheet_app_hint = _spreadsheet_ui_app_hint(text)
+        source_scope_is_output = bool(
+            source_scope and source_scope == _artifact_output_location_hint(text)
+        )
+        scoped_source_hint = (
+            source_hint
+            if source_scope_is_output
+            else _scoped_data_source_path(source_hint, source_scope)
+        )
         inputs = {
-            "data_source_hint": source_hint,
+            "data_source_hint": scoped_source_hint,
             "data_source_kind": data_source_kind_hint(source_hint, text),
         }
         if spreadsheet_app_hint:
@@ -222,7 +230,9 @@ class TaskIntentRouter:
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
         ]
         if communication_target:
-            if str(communication_target.get("app_name") or "").strip():
+            if str(communication_target.get("app_name") or "").strip() or (
+                str(communication_target.get("channel") or "").strip() == "email"
+            ):
                 preferred_capabilities.append("desktop.app_control")
             preferred_capabilities.append("communication.compose")
         preferred_capabilities = list(dict.fromkeys(preferred_capabilities))
@@ -5343,6 +5353,20 @@ def _data_source_inspect_input_preview(path: str, source_kind: str) -> dict[str,
     return preview
 
 
+def _scoped_data_source_path(source_hint: str, source_scope: str) -> str:
+    clean_source = str(source_hint or "").strip()
+    clean_scope = str(source_scope or "").strip()
+    if (
+        clean_source
+        and clean_scope
+        and not re.match(r"^(?:~|/|\.{1,2}/)", clean_source)
+        and "/" not in clean_source
+        and "\\" not in clean_source
+    ):
+        return f"{clean_scope.rstrip('/')}/{clean_source}"
+    return clean_source
+
+
 def _data_source_pattern_hint(source_kind: str) -> str:
     return {
         "csv": "*.csv",
@@ -6397,8 +6421,11 @@ def _append_analysis_communication_steps(
     if not artifact_path:
         return steps
     app_name = str(target.get("app_name") or "").strip()
+    channel = str(target.get("channel") or "").strip()
     transform = str(target.get("content_transform_hint") or "").strip()
     mode = str(target.get("mode") or "focus").strip() or "focus"
+    if not app_name:
+        app_name = _default_communication_app_for_channel(channel, mode, allowed)
     if not app_name:
         draft_input = {
             "recipient": recipient,
@@ -6452,12 +6479,15 @@ def _append_analysis_communication_steps(
         )
         focus_depends_on = ["open-or-focus-app"]
         focus_tool = shortcut_tool
-        focus_input = {"action": "find"}
+        focus_input = {"action": _communication_recipient_focus_action(channel)}
         focus_capability = "communication.compose"
         focus_reason = "Open foreground recipient search with a generic safe shortcut."
     else:
         focus_tool = app_shortcut_tool
-        focus_input = {"app_name": app_name, "action": "find"}
+        focus_input = {
+            "app_name": app_name,
+            "action": _communication_recipient_focus_action(channel),
+        }
         focus_capability = "communication.compose"
         focus_reason = "Open the app's recipient search after the analysis artifact is available."
 
@@ -7522,14 +7552,7 @@ def _communication_file_context_hint(
         return {}
     source_scope = str(data_source_scope_hint(text, metadata) or "").strip()
     source_kind = data_source_kind_hint(source_hint, text)
-    path = source_hint
-    if (
-        source_scope
-        and not re.match(r"^(?:~|/|\.{1,2}/)", source_hint)
-        and "/" not in source_hint
-        and "\\" not in source_hint
-    ):
-        path = f"{source_scope.rstrip('/')}/{source_hint}"
+    path = _scoped_data_source_path(source_hint, source_scope)
     hint = _data_source_inspect_input_preview(path, source_kind)
     if source_kind:
         hint.setdefault("source_kind", source_kind)
@@ -7677,6 +7700,9 @@ def _web_research_communication_target_hint(text: str) -> dict[str, str]:
     }
     if app_name:
         hint["app_name"] = app_name
+    channel = _data_analysis_delivery_channel_hint(value)
+    if channel:
+        hint["channel"] = channel
     transform = _communication_content_transform_hint(value)
     if transform:
         hint["content_transform_hint"] = transform
@@ -7726,6 +7752,9 @@ def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
     }
     if app_name:
         hint["app_name"] = app_name
+    channel = _data_analysis_delivery_channel_hint(value)
+    if channel:
+        hint["channel"] = channel
     transform = _communication_content_transform_hint(value)
     if transform:
         hint["content_transform_hint"] = transform
@@ -7758,9 +7787,12 @@ def _data_delivery_send_requested(text: str) -> bool:
             "发到",
             "发送给",
             "发送到",
+            "发邮件",
+            "发送邮件",
             "分享给",
             "转发给",
             "send ",
+            "email ",
             "share ",
         ),
     )
@@ -7817,12 +7849,19 @@ def _data_analysis_action_requested(text: str) -> bool:
 
 def _data_analysis_delivery_target_text(text: str) -> str:
     value = _clean_prompt(text)
+    recipient_stop = (
+        r"(?=(?:\s*(?:并|然后|再|之后|后)?\s*"
+        r"(?:说明|说|附上|备注|告诉|解释|汇报|概括)|[，,。；;！!？?]|$))"
+    )
     patterns = (
         r"(?:然后|并|再|之后|后|同时)?\s*(?:把|将)?"
         r"(?:生成的|这份|这个|分析的|分析)?"
         r"(?:数据分析)?(?:报告|结果|图表报告|图表|csv|CSV|汇总|分析结果|产物|文件)?"
-        r"\s*(?:发给|发送给|发到|发送到|分享给|转发给)\s*"
-        r"(?P<target>[^，,。；;！!？?\n]+)",
+        r"\s*"
+        r"(?:(?:发|发送|分享|转发)\s*"
+        r"(?:邮件|电子邮件|消息|微信|email|e-mail|mail|message)?\s*"
+        r"(?:给|到|发给|发送给|向|对)|(?:发给|发送给|发到|发送到|分享给|转发给))\s*"
+        rf"(?P<target>[^，,。；;！!？?\n]+?){recipient_stop}",
         r"(?:send|share)\s+(?:the\s+)?"
         r"(?:(?:analysis|data)\s+)?(?:report|result|results|artifact|chart|csv|table|summary)?"
         r"\s*(?:to|with)\s+(?P<target>[^.!?,;\n]+)",
@@ -7840,6 +7879,18 @@ def _data_analysis_delivery_target_text(text: str) -> str:
         ).strip()
         if target:
             return target
+    return ""
+
+
+def _data_analysis_delivery_channel_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(
+        r"(?:发|发送|写|撰写|起草|草拟)\s*(?:一封|封)?\s*(?:邮件|电子邮件)"
+        r"|(?:send|email|mail)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "email"
     return ""
 
 
