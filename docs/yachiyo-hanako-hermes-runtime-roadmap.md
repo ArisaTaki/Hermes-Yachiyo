@@ -103,6 +103,14 @@ path. The evidence records whether focus was actually verified and how many
 menu-level or control-like UI roles were observed, so current environment
 limits remain visible instead of being hidden behind a passing smoke.
 
+Current opt-in real desktop interaction evidence is reproducible with
+`python scripts/smoke_real_desktop_interaction.py`; on an unlocked macOS
+session it opens a previously stopped Calculator, types a value, reads the
+named app UI tree, clicks a semantic accessibility control, and verifies the
+visible result changed before cleaning up. It fails before mutation when the
+desktop session is locked or the app was already running, and the RC verifier
+only enables it with `--run-real-desktop-interaction-smoke`.
+
 Current planner/runtime tool parity evidence is reproducible with
 `python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder

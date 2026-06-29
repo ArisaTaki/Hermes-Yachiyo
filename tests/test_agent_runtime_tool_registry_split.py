@@ -3772,6 +3772,50 @@ def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
     ]
 
 
+def test_app_focus_reports_locked_desktop_session_without_permission_error(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Calculator|false|",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Calculator|true|false|loginwindow",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is False
+    assert result["error"] == "desktop_session_locked"
+    assert result["permission_error"] is False
+    assert "missing_permissions" not in result
+    assert "permission_targets" not in result
+    assert result["data"]["frontmost_app"] == "loginwindow"
+    assert result["data"]["desktop_session_locked"] is True
+    assert result["data"]["retryable"] is True
+    assert result["recovery_actions"] == [
+        {
+            "label": "解锁后重试Calculator",
+            "tool": "app.focus",
+            "input": {"app_name": "Calculator"},
+            "permission_target": "desktop_session_unlocked",
+            "risk_level": "low",
+        }
+    ]
+
+
 def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None:
     osascript_calls = []
 
@@ -4053,6 +4097,41 @@ def test_desktop_active_window_permission_failure_returns_recovery_targets(monke
             "in macOS System Settings > Privacy & Security > Accessibility."
         ),
     ]
+
+
+def test_desktop_active_window_reports_locked_desktop_session(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": False,
+            "error": "no frontmost application process",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": "loginwindow",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.active_window()
+
+    assert result["ok"] is False
+    assert result["error"] == "desktop_session_locked"
+    assert result["permission_error"] is False
+    assert "missing_permissions" not in result
+    assert result["data"] == {
+        "frontmost_app": "loginwindow",
+        "desktop_session_locked": True,
+        "blocking_condition": "desktop_session_locked",
+        "retryable": True,
+    }
+    assert result["recovery_actions"][0]["tool"] == "desktop.active_window"
 
 
 def test_desktop_permissions_reports_ready_state(monkeypatch) -> None:

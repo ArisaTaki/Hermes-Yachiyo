@@ -379,6 +379,12 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "findings": [],
         "run_requested": False,
     }
+    assert report["real_desktop_interaction_smoke"] == {
+        "status": "skipped",
+        "evidence": {},
+        "findings": [],
+        "run_requested": False,
+    }
     assert report["real_desktop_ui_inspection_smoke"] == {
         "status": "skipped",
         "evidence": {},
@@ -939,6 +945,83 @@ def test_release_candidate_verifier_fails_when_real_desktop_ui_inspection_smoke_
         {
             "path": str(tmp_path / "scripts/smoke_real_desktop_ui_inspection.py"),
             "message": "named UI tree was not readable",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_real_desktop_interaction_smoke_when_requested(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_interaction_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "real_desktop_interaction_smoke",
+            "skipped": False,
+            "platform": "Darwin",
+            "app_name": "Calculator",
+            "before_values": ["42"],
+            "after_values": ["-42"],
+            "checks": {
+                "type_ok": True,
+                "click_ok": True,
+                "signed_value_visible": True,
+            },
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_interaction_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop interaction smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_interaction_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["evidence"]["after_values"] == ["-42"]
+    assert section["findings"] == []
+
+
+def test_release_candidate_verifier_reports_locked_real_desktop_interaction(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_interaction_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "real_desktop_interaction_smoke",
+            "stage": "session_preflight",
+            "error": "desktop_session_locked",
+            "checks": {"desktop_session_ready": False},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_interaction_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "real desktop interaction smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_interaction_smoke"]
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "desktop_session_locked"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_real_desktop_interaction.py"),
+            "message": "desktop_session_locked",
         }
     ]
 

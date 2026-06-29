@@ -818,6 +818,17 @@ def active_window() -> dict[str, Any]:
     """
     result = _run_osascript(script)
     if not result["ok"]:
+        appkit_frontmost = _appkit_frontmost_app_name()
+        frontmost_app = str(appkit_frontmost.get("app_name") or "")
+        if _desktop_session_is_locked(frontmost_app):
+            return _desktop_session_locked_result(
+                "desktop.active_window",
+                data={"frontmost_app": frontmost_app},
+                fallback_result={
+                    "system_events": result,
+                    "appkit": appkit_frontmost,
+                },
+            )
         return _with_permission_metadata(
             "desktop.active_window",
             {**result, "action": "desktop.active_window", "summary": "desktop.active_window failed"},
@@ -2651,22 +2662,37 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     "fallback_used": True,
                     "fallback_result": {"open": fallback, "appkit": appkit_result},
                 }
+            failed_data = {
+                "app_name": clean_name,
+                **fallback_data,
+                **_app_resolution_metadata(
+                    clean_name,
+                    str(fallback_data.get("app_name") or resolved_name),
+                ),
+                "focus_fallback": "app.open",
+                "focus_verified": False,
+                "focus_status": "not_frontmost",
+                "frontmost_app": appkit_data.get("frontmost_app") or "",
+                "focus_attempts": focus_attempts,
+                "recommended_tools": [
+                    "desktop.running_apps",
+                    "desktop.active_window",
+                    "screen.capture",
+                ],
+            }
+            if _desktop_session_is_locked(failed_data["frontmost_app"]):
+                return _desktop_session_locked_result(
+                    "app.focus",
+                    app_name=resolved_name,
+                    data=failed_data,
+                    fallback_result={"open": fallback, "appkit": appkit_result},
+                )
             return {
                 "ok": False,
                 "action": "app.focus",
                 "summary": f"Could not verify {resolved_name} is foreground after app.open fallback",
                 "error": "app_focus_not_verified",
-                "data": {
-                    "app_name": clean_name,
-                    **fallback_data,
-                    **_app_resolution_metadata(clean_name, str(fallback_data.get("app_name") or resolved_name)),
-                    "focus_fallback": "app.open",
-                    "focus_verified": False,
-                    "focus_status": "not_frontmost",
-                    "frontmost_app": appkit_data.get("frontmost_app") or "",
-                    "focus_attempts": focus_attempts,
-                    "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
-                },
+                "data": failed_data,
                 "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
                 "missing_permissions": ["foreground_focus"],
                 "permission_targets": ["foreground_focus"],
@@ -2715,16 +2741,29 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": True,
         }
+    failed_data = {
+        **data,
+        "frontmost_app": appkit_data.get("frontmost_app") or data.get("frontmost_app") or "",
+        "focus_attempts": focus_attempts,
+        "recommended_tools": [
+            "desktop.running_apps",
+            "desktop.active_window",
+            "screen.capture",
+        ],
+    }
+    if _desktop_session_is_locked(failed_data["frontmost_app"]):
+        return _desktop_session_locked_result(
+            "app.focus",
+            app_name=resolved_name,
+            data=failed_data,
+            fallback_result={"appkit": appkit_result},
+        )
     return {
         "ok": False,
         "action": "app.focus",
         "summary": f"Could not verify {resolved_name} is foreground",
         "error": "app_focus_not_verified",
-        "data": {
-            **data,
-            "focus_attempts": focus_attempts,
-            "recommended_tools": ["desktop.running_apps", "desktop.active_window", "screen.capture"],
-        },
+        "data": failed_data,
         "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
         "missing_permissions": ["foreground_focus"],
         "permission_targets": ["foreground_focus"],
@@ -5065,6 +5104,67 @@ def _appkit_activate_app(app_name: str, *, bundle_id: str = "") -> dict[str, Any
         """,
         [app_name, str(bundle_id or "").strip()],
     )
+
+
+def _appkit_frontmost_app_name() -> dict[str, Any]:
+    result = _run_jxa(
+        """
+        ObjC.import("AppKit");
+        const frontmost = $.NSWorkspace.sharedWorkspace.frontmostApplication;
+        frontmost && frontmost.localizedName ? ObjC.unwrap(frontmost.localizedName) : "";
+        """
+    )
+    return {
+        "ok": result.get("ok") is True,
+        "app_name": str(result.get("stdout") or "").strip(),
+        **({"error": str(result.get("error") or "")} if result.get("error") else {}),
+    }
+
+
+def _desktop_session_is_locked(frontmost_app: Any) -> bool:
+    return _compact_app_match_name(str(frontmost_app or "")) == "loginwindow"
+
+
+def _desktop_session_locked_result(
+    action: str,
+    *,
+    app_name: str = "",
+    data: dict[str, Any] | None = None,
+    fallback_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    clean_app = str(app_name or "").strip()
+    retry_tool = "app.focus" if clean_app else "desktop.active_window"
+    retry_input = {"app_name": clean_app} if clean_app else {}
+    payload: dict[str, Any] = {
+        "ok": False,
+        "action": action,
+        "summary": "macOS desktop session is locked",
+        "error": "desktop_session_locked",
+        "data": {
+            **dict(data or {}),
+            "desktop_session_locked": True,
+            "blocking_condition": "desktop_session_locked",
+            "retryable": True,
+        },
+        "recommended_tools": [retry_tool],
+        "recovery_hints": [
+            "Unlock the active macOS user session, then retry the foreground desktop action."
+        ],
+        "recovery_actions": [
+            {
+                "label": f"解锁后重试{clean_app}" if clean_app else "解锁后重新检查前台窗口",
+                "tool": retry_tool,
+                "input": retry_input,
+                "permission_target": "desktop_session_unlocked",
+                "risk_level": "low",
+            }
+        ],
+        "permission_error": False,
+        "fallback_used": fallback_result is not None,
+    }
+    if fallback_result is not None:
+        payload["fallback_result"] = fallback_result
+    return payload
 
 
 def _parse_appkit_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any]:

@@ -52,6 +52,9 @@ from scripts.smoke_real_desktop_discovery import (
 from scripts.smoke_real_desktop_app_open import (
     run_smoke as run_real_desktop_app_open_smoke,
 )
+from scripts.smoke_real_desktop_interaction import (
+    run_smoke as run_real_desktop_interaction_smoke,
+)
 from scripts.smoke_real_desktop_ui_inspection import (
     run_smoke as run_real_desktop_ui_inspection_smoke,
 )
@@ -1992,6 +1995,43 @@ def verify_real_desktop_ui_inspection_smoke(root: Path) -> tuple[list[Finding], 
     return [
         Finding(
             root / "scripts/smoke_real_desktop_ui_inspection.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_real_desktop_interaction_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_real_desktop_interaction_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_real_desktop_interaction.py",
+                f"real desktop interaction smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "real_desktop_interaction_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_real_desktop_interaction.py",
+                "real desktop interaction smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "real_desktop_interaction_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "real desktop interaction smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_real_desktop_interaction.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4082,6 +4122,7 @@ def verify_release_candidate(
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     run_real_desktop_app_open_smoke: bool = False,
+    run_real_desktop_interaction_smoke: bool = False,
     run_real_desktop_ui_inspection_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: ManualChecksJsonInput = None,
@@ -4144,6 +4185,12 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_app_open_smoke,
+        },
+        "real_desktop_interaction_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_interaction_smoke,
         },
         "real_desktop_ui_inspection_smoke": {
             "status": "pending",
@@ -4344,6 +4391,12 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_app_open_smoke,
+        }
+        report["real_desktop_interaction_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_interaction_smoke,
         }
         report["real_desktop_ui_inspection_smoke"] = {
             "status": "skipped",
@@ -4549,6 +4602,30 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+        }
+
+    if run_real_desktop_interaction_smoke:
+        real_interaction_findings, real_interaction_evidence = (
+            verify_real_desktop_interaction_smoke(root)
+        )
+        _print_findings("real desktop interaction smoke", real_interaction_findings)
+        failed = failed or bool(real_interaction_findings)
+        report["real_desktop_interaction_smoke"] = {
+            "status": "failed" if real_interaction_findings else "passed",
+            "evidence": real_interaction_evidence,
+            "findings": _finding_report(real_interaction_findings),
+            "run_requested": run_real_desktop_interaction_smoke,
+        }
+    else:
+        print(
+            "real desktop interaction smoke: skipped; pass "
+            "--run-real-desktop-interaction-smoke to type, click, and verify a real app"
+        )
+        report["real_desktop_interaction_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_real_desktop_interaction_smoke,
         }
 
     tool_parity_smoke_findings, tool_parity_smoke_evidence = (
@@ -5211,6 +5288,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run opt-in real macOS desktop app discovery -> app.open -> app.status smoke.",
     )
     parser.add_argument(
+        "--run-real-desktop-interaction-smoke",
+        action="store_true",
+        help="Run opt-in real macOS desktop type -> inspect -> click -> verify smoke.",
+    )
+    parser.add_argument(
         "--run-real-desktop-ui-inspection-smoke",
         action="store_true",
         help="Run opt-in real macOS named-app UI tree inspection smoke.",
@@ -5375,6 +5457,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         run_real_desktop_app_open_smoke=args.run_real_desktop_app_open_smoke,
+        run_real_desktop_interaction_smoke=(
+            args.run_real_desktop_interaction_smoke
+        ),
         run_real_desktop_ui_inspection_smoke=(
             args.run_real_desktop_ui_inspection_smoke
         ),

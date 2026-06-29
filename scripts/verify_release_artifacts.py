@@ -731,6 +731,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the opt-in real desktop UI inspection smoke",
     ),
     (
+        "python scripts/verify_release_candidate.py --source-only --run-real-desktop-interaction-smoke",
+        "release packaging docs must document the opt-in real desktop interaction smoke",
+    ),
+    (
+        "`desktop_session_locked`",
+        "release packaging docs must document locked-session interaction evidence",
+    ),
+    (
         "`focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`",
         "release packaging docs must document real desktop UI inspection smoke evidence fields",
     ),
@@ -1415,6 +1423,22 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--run-real-desktop-ui-inspection-smoke",
         "release candidate verifier CLI must expose opt-in real desktop UI inspection smoke",
+    ),
+    (
+        '"real_desktop_interaction_smoke"',
+        "release candidate verifier must archive opt-in real desktop interaction smoke evidence",
+    ),
+    (
+        "verify_real_desktop_interaction_smoke",
+        "release candidate verifier must expose opt-in real desktop interaction smoke verification",
+    ),
+    (
+        "run_real_desktop_interaction_smoke",
+        "release candidate verifier must run the opt-in real desktop interaction smoke helper",
+    ),
+    (
+        "--run-real-desktop-interaction-smoke",
+        "release candidate verifier CLI must expose opt-in real desktop interaction smoke",
     ),
     (
         '"planner_runtime_tool_parity_smoke"',
