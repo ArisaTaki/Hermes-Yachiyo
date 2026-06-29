@@ -10329,6 +10329,67 @@ def test_runtime_planner_routes_direct_context_communication_send_sequence() -> 
         "paste-communication-message",
     ).input_preview == {"action": "paste"}
 
+    app_scoped_clipboard_tools = [
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    app_scoped_clipboard = RuntimePlanner().decision(
+        "读取剪贴板内容并发给 Slack 的 yachiyo",
+        allowed_tools=app_scoped_clipboard_tools,
+    )
+
+    assert app_scoped_clipboard.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(
+        app_scoped_clipboard,
+        "paste-communication-message",
+    ).tool_name == "app.focus_and_safe_shortcut"
+    assert _step_by_id(
+        app_scoped_clipboard,
+        "paste-communication-message",
+    ).input_preview == {"app_name": "Slack", "action": "paste"}
+    assert planner_tool_requests(
+        "读取剪贴板内容并发给 Slack 的 yachiyo",
+        app_scoped_clipboard_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "Slack", "text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "paste"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
+
 
 def test_runtime_planner_routes_file_context_communication_without_app_alias() -> None:
     decision = RuntimePlanner().decision(

@@ -5958,14 +5958,20 @@ def _direct_communication_steps(
         ]
     )
     if body_source in {"clipboard", "selection", "current_page_link"} and not generated_body:
+        paste_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+        paste_input = {"action": "paste"}
+        if not paste_tool and app_name:
+            paste_tool = app_shortcut_tool
+            if str(paste_tool or "").startswith("app."):
+                paste_input = {"app_name": app_name, "action": "paste"}
         steps.append(
             _step(
                 intent,
                 "paste-communication-message",
                 "Paste communication message",
                 "communication.compose",
-                _first_allowed(("desktop.safe_shortcut",), allowed),
-                input_preview={"action": "paste"},
+                paste_tool,
+                input_preview=paste_input,
                 depends_on=["submit-communication-recipient-search"],
                 action="paste",
                 reason="Paste the requested clipboard-backed context into the message draft.",
