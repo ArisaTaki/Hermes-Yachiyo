@@ -833,9 +833,10 @@ def media_app_query_search_plan(
         return []
 
     type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
-    submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    submit_tool = _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
     if not type_tool or not submit_tool:
         return []
+    submit_payload = {"action": "confirm"} if submit_tool == "desktop.submit_foreground" else {}
 
     discovery_step = []
     discover_tool = _first_allowed(("desktop.list_apps",), allowed)
@@ -851,7 +852,7 @@ def media_app_query_search_plan(
             *discovery_step,
             (app_search_tool, {"app_name": app_name, "action": "find"}),
             (type_tool, {"text": query}),
-            (submit_tool, {}),
+            (submit_tool, submit_payload),
         ]
         play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
         if play_tool:
@@ -868,7 +869,7 @@ def media_app_query_search_plan(
         (app_tool, {"app_name": app_name}),
         (shortcut_tool, {"action": "find"}),
         (type_tool, {"text": query}),
-        (submit_tool, {}),
+        (submit_tool, submit_payload),
     ]
     play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
     if play_tool:

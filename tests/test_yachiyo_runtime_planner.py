@@ -7871,6 +7871,29 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
     ]
     assert decision.plan.tool_plan.missing_capabilities == []
 
+    submit_foreground_decision = RuntimePlanner().decision(
+        "用 Spotify 播放 city pop",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "media.music_app_open_and_play",
+        ],
+    )
+
+    assert submit_foreground_decision.selected_intent.kind == "media_playback"
+    assert submit_foreground_decision.selected_intent.inputs["query"] == "city pop"
+    assert [step.tool_name for step in submit_foreground_decision.plan.tool_plan.steps] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "media.music_app_open_and_play",
+    ]
+    assert _step_by_id(
+        submit_foreground_decision,
+        "submit-media-search",
+    ).input_preview == {"action": "confirm"}
+
 
 def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
     cases = (
@@ -11639,6 +11662,47 @@ def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+    submit_foreground_requests = planner_desktop_tool_requests(
+        "用 Spotify 播放 city pop",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "media.music_app_open_and_play",
+        ],
+    )
+
+    assert submit_foreground_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "city pop"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
