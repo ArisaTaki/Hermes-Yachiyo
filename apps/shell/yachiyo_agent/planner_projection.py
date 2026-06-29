@@ -204,6 +204,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         "target_action": target_action,
         "body_source": "model_generated_content",
     }
+    container_action = str(inputs.get("target_container_action_hint") or "").strip()
+    if container_action:
+        payload["container_action"] = container_action
     if context_source:
         payload["context_source"] = context_source
     return payload

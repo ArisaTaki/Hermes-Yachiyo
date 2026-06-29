@@ -1391,6 +1391,7 @@ def test_planner_selection_payload_surfaces_followup_app_write_target() -> None:
         "app_name": "Obsidian",
         "target_action": "app_paste",
         "body_source": "model_generated_content",
+        "container_action": "new_note",
         "context_source": "current_page_content",
     }
 
@@ -3533,7 +3534,6 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
 
     for prompt in (
-        "把当前网页总结一下并保存到 Obsidian 新笔记",
         "把当前网页摘要写进 Obsidian",
         "把当前网页内容整理一下写进 Obsidian",
     ):
@@ -3564,6 +3564,66 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         assert decision.plan.tool_plan.artifacts_expected == []
         assert planner_tool_requests(prompt, allowed) == [page_prefetch]
         assert planner_direct_tool_requests(prompt, allowed) == [page_prefetch]
+
+    new_note = RuntimePlanner().decision(
+        "把当前网页总结一下并保存到 Obsidian 新笔记",
+        allowed_tools=allowed,
+    )
+
+    assert new_note.selected_intent.kind == "report_generation"
+    assert new_note.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "target_app_hint": "Obsidian",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_note",
+    }
+    assert _step_by_id(new_note, "prepare-report-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "container_action": "new_note",
+        "body_source": "model_generated_content",
+    }
+    assert planner_tool_requests(
+        "把当前网页总结一下并保存到 Obsidian 新笔记",
+        allowed,
+    ) == [page_prefetch]
+    assert planner_direct_tool_requests(
+        "把当前网页总结一下并保存到 Obsidian 新笔记",
+        allowed,
+    ) == [page_prefetch]
+
+    new_page = RuntimePlanner().decision(
+        "把当前网页摘要写进 Notion 新页面",
+        allowed_tools=allowed,
+    )
+
+    assert new_page.selected_intent.kind == "report_generation"
+    assert new_page.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "target_app_hint": "Notion",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    english_new_page = RuntimePlanner().decision(
+        "write current page summary into Notion new page",
+        allowed_tools=allowed,
+    )
+    english_new_note = RuntimePlanner().decision(
+        "save current page summary to Obsidian new note",
+        allowed_tools=allowed,
+    )
+    assert english_new_page.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "target_app_hint": "Notion",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert english_new_note.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "target_app_hint": "Obsidian",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_note",
+    }
 
     clipboard = RuntimePlanner().decision(
         "把剪贴板内容整理成待办并写进 Obsidian",

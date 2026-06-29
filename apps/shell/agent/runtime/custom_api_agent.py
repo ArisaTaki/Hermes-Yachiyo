@@ -3456,7 +3456,8 @@ def _model_followup_target_payload(
     kind = str(target.get("kind") or "").strip()
     if kind != "app_write" or not app_name:
         return {}
-    write_tools = _model_followup_app_write_tool_names(allowed)
+    container_action = _model_followup_container_action(target)
+    write_tools = _model_followup_app_write_tool_names(allowed, container_action)
     verify_tools = [
         tool
         for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
@@ -3471,23 +3472,47 @@ def _model_followup_target_payload(
         "recommended_tools": write_tools,
         "verify_tools": verify_tools,
     }
+    if container_action:
+        payload["container_action"] = container_action
     context_source = str(target.get("context_source") or "").strip()
     if context_source:
         payload["context_source"] = context_source
     return payload
 
 
-def _model_followup_app_write_tool_names(allowed: set[str]) -> list[str]:
+def _model_followup_app_write_tool_names(
+    allowed: set[str],
+    container_action: str = "",
+) -> list[str]:
+    tools = _model_followup_container_tool_names(allowed) if container_action else []
+    if container_action and not tools:
+        return []
     if "app.focus_and_safe_type_text" in allowed:
-        return ["app.focus_and_safe_type_text"]
+        return [*tools, "app.focus_and_safe_type_text"]
     if "app.open_and_safe_type_text" in allowed:
-        return ["app.open_and_safe_type_text"]
+        return [*tools, "app.open_and_safe_type_text"]
     focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
     if focus_tool and "desktop.safe_type_text" in allowed:
-        return [focus_tool, "desktop.safe_type_text"]
+        return [*tools, focus_tool, "desktop.safe_type_text"]
     if focus_tool and "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
-        return ["clipboard.write", focus_tool, "desktop.safe_shortcut"]
+        return [*tools, "clipboard.write", focus_tool, "desktop.safe_shortcut"]
     return []
+
+
+def _model_followup_container_tool_names(allowed: set[str]) -> list[str]:
+    if "app.focus_and_safe_shortcut" in allowed:
+        return ["app.focus_and_safe_shortcut"]
+    if "app.open_and_safe_shortcut" in allowed:
+        return ["app.open_and_safe_shortcut"]
+    focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if focus_tool and "desktop.safe_shortcut" in allowed:
+        return [focus_tool, "desktop.safe_shortcut"]
+    return []
+
+
+def _model_followup_container_action(target: Mapping[str, Any]) -> str:
+    action = str(target.get("container_action") or "").strip()
+    return action if action in {"new_note", "new_document"} else ""
 
 
 def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
@@ -3499,19 +3524,27 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
     if not bool(target.get("write_allowed")):
         return (
             f"The user requested the transformed content be written into {app_name}, "
-            "but no allowed foreground text insertion tool is available. Explain the missing "
-            "capability instead of claiming the app was updated."
+            "but no allowed target-container creation or foreground text insertion tool is "
+            "available. Explain the missing capability instead of claiming the app was updated."
         )
     tools = _string_list(target.get("recommended_tools"))
     verify_tools = _string_list(target.get("verify_tools"))
+    container_action = _model_followup_container_action(target)
     tool_text = ", ".join(tools) or "the allowed desktop text insertion tools"
     verify_text = (
         f" Verify with {', '.join(verify_tools)} after writing."
         if verify_tools
         else ""
     )
+    container_text = (
+        f" First create the requested target container with {container_action}, then insert "
+        "the generated transformed content. "
+        if container_action
+        else " "
+    )
     return (
         f"The user requested the transformed content be written into {app_name}. "
+        f"{container_text}"
         "After deriving the final transformed text, call desktop tools next instead of only "
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
@@ -3564,6 +3597,15 @@ def _model_followup_app_write_requests(
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     planning_reason = "planner_followup_app_write"
     source = "runtime_planner"
+    container_requests = _model_followup_container_requests(
+        app_name,
+        _model_followup_container_action(target),
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if _model_followup_container_action(target) and not container_requests:
+        return []
     verify_request = (
         _request_like(
             "desktop.ui_elements",
@@ -3576,6 +3618,7 @@ def _model_followup_app_write_requests(
     )
     if "app.focus_and_safe_type_text" in allowed:
         requests = [
+            *container_requests,
             _request_like(
                 "app.focus_and_safe_type_text",
                 {"app_name": app_name, "text": content},
@@ -3586,6 +3629,7 @@ def _model_followup_app_write_requests(
         return [*requests, *([verify_request] if verify_request else [])]
     if "app.open_and_safe_type_text" in allowed:
         requests = [
+            *container_requests,
             _request_like(
                 "app.open_and_safe_type_text",
                 {"app_name": app_name, "text": content},
@@ -3597,6 +3641,7 @@ def _model_followup_app_write_requests(
     focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
     if focus_tool and "desktop.safe_type_text" in allowed:
         requests = [
+            *container_requests,
             _request_like(
                 focus_tool,
                 {"app_name": app_name},
@@ -3613,6 +3658,7 @@ def _model_followup_app_write_requests(
         return [*requests, *([verify_request] if verify_request else [])]
     if focus_tool and "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
         requests = [
+            *container_requests,
             _request_like(
                 "clipboard.write",
                 {"text": content},
@@ -3633,6 +3679,53 @@ def _model_followup_app_write_requests(
             ),
         ]
         return [*requests, *([verify_request] if verify_request else [])]
+    return []
+
+
+def _model_followup_container_requests(
+    app_name: str,
+    container_action: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    if not container_action:
+        return []
+    if "app.focus_and_safe_shortcut" in allowed:
+        return [
+            _request_like(
+                "app.focus_and_safe_shortcut",
+                {"app_name": app_name, "action": container_action},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+    if "app.open_and_safe_shortcut" in allowed:
+        return [
+            _request_like(
+                "app.open_and_safe_shortcut",
+                {"app_name": app_name, "action": container_action},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+    focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if focus_tool and "desktop.safe_shortcut" in allowed:
+        return [
+            _request_like(
+                focus_tool,
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                "desktop.safe_shortcut",
+                {"action": container_action},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
     return []
 
 

@@ -1125,6 +1125,11 @@ class TaskIntentRouter:
         if target_app:
             inputs["target_app_hint"] = target_app
             inputs["target_action_hint"] = "app_paste"
+            container_action = str(
+                transform_target.get("target_container_action_hint") or ""
+            ).strip()
+            if container_action:
+                inputs["target_container_action_hint"] = container_action
         if file_context:
             inputs["file_context_hint"] = file_context
         output_target = _task_output_target_hint(text)
@@ -4104,6 +4109,9 @@ class RuntimePlanner:
             depends_on = [step.step_id for step in context_steps]
             target_app = str(intent.inputs.get("target_app_hint") or "").strip()
             if target_app:
+                container_action = str(
+                    intent.inputs.get("target_container_action_hint") or ""
+                ).strip()
                 return [
                     *context_steps,
                     _step(
@@ -4120,6 +4128,11 @@ class RuntimePlanner:
                             "target_action": str(
                                 intent.inputs.get("target_action_hint") or "app_paste"
                             ).strip(),
+                            **(
+                                {"container_action": container_action}
+                                if container_action
+                                else {}
+                            ),
                             "body_source": "model_generated_content",
                         },
                         depends_on=depends_on,
@@ -10087,6 +10100,8 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
     source = _dynamic_context_source_hint(value)
     if not source and _browser_current_page_hint(value):
         source = "current_page_content"
+    if not source and re.search(r"\bcurrent\s+page\b|当前网页|当前页面", value, flags=re.IGNORECASE):
+        source = "current_page_content"
     if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
         return {}
     app_name = _non_notes_dynamic_context_target_app(value)
@@ -10094,11 +10109,38 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
         return {}
     if _normalize_artifact_output_location(app_name):
         return {}
+    container_action = _dynamic_context_target_container_action_hint(value)
     return {
         "context_source": source,
         "target_app_hint": app_name,
         "target_action_hint": "app_paste",
+        **(
+            {"target_container_action_hint": container_action}
+            if container_action
+            else {}
+        ),
     }
+
+
+def _dynamic_context_target_container_action_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(
+        r"(?:新笔记|新建笔记|创建笔记|新备忘录|新建备忘录|创建备忘录|"
+        r"\bnew\s+note\b|\bcreate\s+(?:a\s+)?new\s+note\b|\bmake\s+(?:a\s+)?new\s+note\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "new_note"
+    if re.search(
+        r"(?:新页面|新建页面|创建页面|新文档|新建文档|创建文档|新文件|新建文件|创建文件|"
+        r"\bnew\s+(?:page|document|file)\b|"
+        r"\bcreate\s+(?:a\s+)?new\s+(?:page|document|file)\b|"
+        r"\bmake\s+(?:a\s+)?new\s+(?:page|document|file)\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "new_document"
+    return ""
 
 
 def _dynamic_context_transform_requested(text: str) -> bool:
@@ -10263,8 +10305,10 @@ def _dynamic_context_transfer_app_name_hint(text: str) -> str:
         r"(?:粘贴到|粘贴在|贴到|输入到|输入进|填到|填入|填写到|放到)\s*"
         r"(?P<app>[\w .·-]{1,40}?)(?:$|[。！？!?，,])",
         r"(?:写进|写入|写到|保存到|记录到|记到|放到)\s*"
-        r"(?P<app>[\w .·-]{1,40}?)(?:\s*(?:新笔记|笔记|便签|页面|文档|"
-        r"note|page|document))?(?:$|[。！？!?，,])",
+        r"(?P<app>[\w .·-]{1,40}?)(?:\s*(?:新笔记|新备忘录|新便签|"
+        r"新页面|新文档|新文件|笔记|备忘录|便签|页面|文档|文件|"
+        r"new\s+note|new\s+page|new\s+document|new\s+file|"
+        r"note|page|document|file))?(?:$|[。！？!?，,])",
         r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
         r"(?:粘贴|贴|输入|填入|填写|写进|写入|写到|保存|记录|记下)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?\s*"
@@ -10315,6 +10359,18 @@ def _clean_dynamic_context_target_app(value: str) -> str:
     ).strip(" .，,。")
     app = re.sub(
         r"\s*(?:(?:search|input|text)\s+(?:box|field)|search\s+bar|address\s+bar|url\s+bar|location\s+bar)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"\s*(?:new\s+)?(?:note|page|document|file)$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"\s*(?:新笔记|新备忘录|新便签|新页面|新文档|新文件|笔记|备忘录|便签|页面|文档|文件)$",
         "",
         app,
         flags=re.IGNORECASE,

@@ -1257,11 +1257,13 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
                 "app_name": "Obsidian",
                 "target_action": "app_paste",
                 "body_source": "model_generated_content",
+                "container_action": "new_note",
                 "context_source": "current_page_content",
             },
         },
         allowed_tools=[
             "browser.extract_text",
+            "app.focus_and_safe_shortcut",
             "app.focus_and_safe_type_text",
             "desktop.ui_elements",
         ],
@@ -1282,19 +1284,28 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
         "target_action": "app_paste",
         "body_source": "model_generated_content",
         "write_allowed": True,
-        "recommended_tools": ["app.focus_and_safe_type_text"],
+        "recommended_tools": ["app.focus_and_safe_shortcut", "app.focus_and_safe_type_text"],
         "verify_tools": ["desktop.ui_elements"],
+        "container_action": "new_note",
         "context_source": "current_page_content",
     }
     assert "written into Obsidian" in message
+    assert "new_note" in message
     assert "app.focus_and_safe_type_text" in message
     assert "Do not write the raw observed source" in message
 
     assert custom_api_agent_module._model_followup_app_write_requests(
         "整理后的摘要",
         payload["followup_target"],
-        ["app.focus_and_safe_type_text", "desktop.ui_elements"],
+        ["app.focus_and_safe_shortcut", "app.focus_and_safe_type_text", "desktop.ui_elements"],
     ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_app_write",
+        },
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_type_text",
@@ -1390,6 +1401,7 @@ def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app()
                 "allowed_tools": [
                     "browser.extract_text",
                     "browser.current_page",
+                    "app.focus_and_safe_shortcut",
                     "app.focus_and_safe_type_text",
                     "desktop.ui_elements",
                 ]
@@ -1435,10 +1447,15 @@ def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app()
         "browser.extract_text"
     ]
     assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
         "desktop.ui_elements",
     ]
     assert tool_runs[1]["tool_requests"][0]["input"] == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert tool_runs[1]["tool_requests"][1]["input"] == {
         "app_name": "Obsidian",
         "text": generated,
     }
@@ -1446,7 +1463,9 @@ def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app()
         event for event in timeline if event["event"] == "agent.model.followup_context"
     )
     assert followup["followup_target"]["app_name"] == "Obsidian"
+    assert followup["followup_target"]["container_action"] == "new_note"
     assert followup["followup_target"]["recommended_tools"] == [
+        "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text"
     ]
     assert any(
