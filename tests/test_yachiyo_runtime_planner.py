@@ -1395,6 +1395,14 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "整理 Downloads 里的发票文件",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    screenshot_decision = RuntimePlanner().decision(
+        "把 Downloads 里的截图整理到 Screenshots 文件夹",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+    pdf_decision = RuntimePlanner().decision(
+        "把桌面上的 pdf 整理到 Documents",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
     assert organize_decision.selected_intent.kind == "file_organization"
     assert organize_decision.selected_intent.inputs == {
         "location_hint": "Downloads",
@@ -1405,8 +1413,37 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     assert invoice_decision.selected_intent.inputs == {
         "location_hint": "Downloads",
         "operation_hint": "organize",
+        "file_type_hint": "invoice",
     }
     assert _step_by_id(invoice_decision, "apply-file-organization").approval_required is True
+    assert screenshot_decision.selected_intent.kind == "file_organization"
+    assert screenshot_decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "organize",
+        "file_type_hint": "screenshot",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination_hint": "Screenshots",
+    }
+    assert _step_by_id(screenshot_decision, "inspect-file-scope").input_preview == {
+        "path": "Downloads",
+        "file_type": "screenshot",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }
+    assert _step_by_id(screenshot_decision, "apply-file-organization").input_preview == {
+        "path": "Downloads",
+        "operation": "organize",
+        "file_type": "screenshot",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination": "Screenshots",
+    }
+    assert pdf_decision.selected_intent.kind == "file_organization"
+    assert pdf_decision.selected_intent.inputs == {
+        "location_hint": "Desktop",
+        "operation_hint": "organize",
+        "file_type_hint": "pdf",
+        "file_pattern_hint": "*.pdf",
+        "destination_hint": "Documents",
+    }
 
 
 def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:
@@ -1421,6 +1458,10 @@ def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> Non
     )
     trash = RuntimePlanner().decision(
         "move duplicate files from Downloads to Trash",
+        allowed_tools=allowed_tools,
+    )
+    screenshot_cleanup = RuntimePlanner().decision(
+        "删除下载文件夹里的重复截图",
         allowed_tools=allowed_tools,
     )
 
@@ -1453,6 +1494,20 @@ def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> Non
     assert trash.selected_intent.inputs == {
         "location_hint": "Downloads",
         "operation_hint": "delete_duplicates",
+        "destination_hint": "Trash",
+    }
+    assert screenshot_cleanup.selected_intent.kind == "file_organization"
+    assert screenshot_cleanup.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "delete_duplicates",
+        "file_type_hint": "screenshot",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }
+    assert _step_by_id(screenshot_cleanup, "apply-file-organization").input_preview == {
+        "path": "Downloads",
+        "operation": "delete_duplicates",
+        "file_type": "screenshot",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
     }
 
 
@@ -1492,6 +1547,10 @@ def test_runtime_planner_routes_file_inventory_without_apply_approval() -> None:
         "create a file inventory for Downloads",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    screenshot_inventory = RuntimePlanner().decision(
+        "查一下 Downloads 里有哪些截图",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run", "screen.capture"],
+    )
 
     assert decision.selected_intent.kind == "file_organization"
     assert decision.selected_intent.inputs == {
@@ -1514,6 +1573,19 @@ def test_runtime_planner_routes_file_inventory_without_apply_approval() -> None:
     assert english.selected_intent.kind == "file_organization"
     assert english.selected_intent.inputs["operation_hint"] == "inventory"
     assert english.plan.tool_plan.approvals_required == []
+    assert screenshot_inventory.selected_intent.kind == "file_organization"
+    assert screenshot_inventory.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "inventory",
+        "file_type_hint": "screenshot",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }
+    assert _step_by_id(screenshot_inventory, "inspect-file-scope").input_preview == {
+        "path": "Downloads",
+        "file_type": "screenshot",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }
+    assert screenshot_inventory.plan.tool_plan.approvals_required == []
 
 
 def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes() -> None:

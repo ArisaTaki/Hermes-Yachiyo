@@ -1235,7 +1235,21 @@ class TaskIntentRouter:
             score = 0.16
         if score <= 0:
             return _empty_intent("file_organization", text)
+        location_hint = _file_location_hint(text)
         operation_hint = _file_operation_hint(text)
+        file_type_hint = _file_type_hint(text)
+        file_pattern_hint = _file_pattern_hint(file_type_hint)
+        destination_hint = _file_destination_hint(text, source_hint=location_hint)
+        inputs: dict[str, Any] = {
+            "location_hint": location_hint,
+            "operation_hint": operation_hint,
+        }
+        if file_type_hint:
+            inputs["file_type_hint"] = file_type_hint
+        if file_pattern_hint:
+            inputs["file_pattern_hint"] = file_pattern_hint
+        if destination_hint:
+            inputs["destination_hint"] = destination_hint
         inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
         destructive = operation_hint in {
             "delete",
@@ -1249,7 +1263,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.88, 0.42 + score),
             description="Inspect files, produce a file organization plan, and apply explicit changes only after approval.",
-            inputs={"location_hint": _file_location_hint(text), "operation_hint": operation_hint},
+            inputs=inputs,
             expected_outputs=(
                 ["duplicate_file_report", "report"]
                 if operation_hint == "duplicate_inventory"
@@ -1259,7 +1273,7 @@ class TaskIntentRouter:
             ),
             required_capabilities=["file.organization"],
             preferred_capabilities=["file.workspace_read", "artifact.write", "desktop.app_control"],
-            missing_inputs=[] if _file_location_hint(text) else ["file_location"],
+            missing_inputs=[] if location_hint else ["file_location"],
             risk_level="low" if inventory_only else ("high" if destructive else "medium"),
         )
 
@@ -4076,6 +4090,9 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         location_hint = str(intent.inputs.get("location_hint") or "").strip()
         operation_hint = str(intent.inputs.get("operation_hint") or "").strip()
+        file_type_hint = str(intent.inputs.get("file_type_hint") or "").strip()
+        file_pattern_hint = str(intent.inputs.get("file_pattern_hint") or "").strip()
+        destination_hint = str(intent.inputs.get("destination_hint") or "").strip()
         inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
         duplicate_inventory = operation_hint == "duplicate_inventory"
         artifact_path = "file-organization-plan.md"
@@ -4104,7 +4121,11 @@ class RuntimePlanner:
                 "Inspect file scope",
                 "file.organization",
                 _first_allowed(("workspace.list", "desktop.reveal_path", "desktop.open_path"), allowed),
-                input_preview={"path": location_hint} if location_hint else {},
+                input_preview=_file_scope_input_preview(
+                    location_hint,
+                    file_type_hint,
+                    file_pattern_hint,
+                ),
                 reason="List or reveal the requested file scope before planning changes.",
             ),
             _step(
@@ -4128,7 +4149,13 @@ class RuntimePlanner:
                 "Apply file organization",
                 "file.organization",
                 _first_allowed(("terminal.run",), allowed),
-                input_preview=_file_apply_input_preview(location_hint, operation_hint),
+                input_preview=_file_apply_input_preview(
+                    location_hint,
+                    operation_hint,
+                    file_type_hint,
+                    file_pattern_hint,
+                    destination_hint,
+                ),
                 action="apply_file_changes",
                 risk_level="high",
                 approval_required=True,
@@ -5239,12 +5266,39 @@ def _dynamic_context_ui_transfer_steps(
     return steps
 
 
-def _file_apply_input_preview(location_hint: str, operation_hint: str) -> dict[str, str]:
+def _file_scope_input_preview(
+    location_hint: str,
+    file_type_hint: str,
+    file_pattern_hint: str,
+) -> dict[str, str]:
+    preview: dict[str, str] = {}
+    if location_hint:
+        preview["path"] = location_hint
+    if file_type_hint:
+        preview["file_type"] = file_type_hint
+    if file_pattern_hint:
+        preview["pattern"] = file_pattern_hint
+    return preview
+
+
+def _file_apply_input_preview(
+    location_hint: str,
+    operation_hint: str,
+    file_type_hint: str = "",
+    file_pattern_hint: str = "",
+    destination_hint: str = "",
+) -> dict[str, str]:
     preview: dict[str, str] = {}
     if location_hint:
         preview["path"] = location_hint
     if operation_hint:
         preview["operation"] = operation_hint
+    if file_type_hint:
+        preview["file_type"] = file_type_hint
+    if file_pattern_hint:
+        preview["pattern"] = file_pattern_hint
+    if destination_hint:
+        preview["destination"] = destination_hint
     return preview
 
 
@@ -8294,6 +8348,132 @@ def _file_location_hint(text: str) -> str:
     return ""
 
 
+def _file_destination_hint(text: str, *, source_hint: str = "") -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    patterns = (
+        re.compile(
+            r"(?:整理|分类|移动|搬|挪|归档|复制|放|放入|放进|移到|移入)"
+            r".{0,24}?(?:到|至|进|入)\s*(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:to|into|under|inside)\s+(?:the\s+)?(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(value)
+        if not match:
+            continue
+        destination = _normalize_file_destination(match.group("target"))
+        if destination and destination != source_hint:
+            return destination
+    return ""
+
+
+def _normalize_file_destination(target: str) -> str:
+    value = str(target or "").strip().strip("\"'`“”‘’")
+    value = re.sub(
+        r"\s*(?:folder|directory|dir|文件夹|目录|中|里|内|下)\s*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = value.rstrip("/\\。.,，；;")
+    if not value:
+        return ""
+    if value.startswith(("~/", "/")) or re.match(r"^[A-Za-z]:[\\/]", value):
+        return value
+    normalized = re.sub(r"\s+", " ", value).strip().lower()
+    aliases = {
+        "download": "Downloads",
+        "downloads": "Downloads",
+        "desktop": "Desktop",
+        "documents": "Documents",
+        "document": "Documents",
+        "docs": "Documents",
+        "screenshots": "Screenshots",
+        "screenshot": "Screenshots",
+        "screen shots": "Screenshots",
+        "pictures": "Pictures",
+        "picture": "Pictures",
+        "images": "Pictures",
+        "image": "Pictures",
+        "movies": "Movies",
+        "videos": "Movies",
+        "video": "Movies",
+        "music": "Music",
+        "audio": "Music",
+        "下载": "Downloads",
+        "桌面": "Desktop",
+        "文档": "Documents",
+        "文稿": "Documents",
+        "截图": "Screenshots",
+        "截屏": "Screenshots",
+        "图片": "Pictures",
+        "照片": "Pictures",
+        "影片": "Movies",
+        "视频": "Movies",
+        "音乐": "Music",
+        "音频": "Music",
+    }
+    return aliases.get(normalized, value)
+
+
+def _file_type_hint(text: str) -> str:
+    lowered = _text_before_file_destination(text).lower()
+    file_types = (
+        (("screenshot", "screenshots", "screen shot", "screen shots", "截图", "截屏"), "screenshot"),
+        (("image", "images", "photo", "photos", "picture", "pictures", "图片", "照片", "图像"), "image"),
+        (("pdf",), "pdf"),
+        (("invoice", "invoices", "receipt", "receipts", "发票", "票据", "收据"), "invoice"),
+        (("docx", "word", ".doc", ".docx", "word 文档", "文档文件", "文档资料"), "document"),
+        (("spreadsheet", "spreadsheets", "xlsx", "xls", "csv", "tsv", "表格", "电子表格"), "spreadsheet"),
+        (("archive", "archives", "zip", "rar", "7z", "压缩包", "归档包"), "archive"),
+        (("audio", "music", "mp3", "wav", "音频", "音乐"), "audio"),
+        (("video", "movie", ".mp4", ".mov", ".m4v", ".avi", ".mkv", "视频", "影片"), "video"),
+    )
+    for markers, file_type in file_types:
+        if _contains_any(lowered, markers):
+            return file_type
+    return ""
+
+
+def _text_before_file_destination(text: str) -> str:
+    value = str(text or "")
+    patterns = (
+        re.compile(
+            r"(?:整理|分类|移动|搬|挪|归档|复制|放|放入|放进|移到|移入)"
+            r".{0,24}?(?:到|至|进|入)\s*(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:to|into|under|inside)\s+(?:the\s+)?(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(value)
+        if match:
+            return value[: match.start("target")]
+    return value
+
+
+def _file_pattern_hint(file_type: str) -> str:
+    return {
+        "screenshot": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "image": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "pdf": "*.pdf",
+        "document": "*.{doc,docx,pages,rtf,txt,md}",
+        "spreadsheet": "*.{csv,tsv,xls,xlsx,numbers}",
+        "archive": "*.{zip,rar,7z,tar,gz}",
+        "audio": "*.{mp3,wav,aac,m4a,flac}",
+        "video": "*.{mp4,mov,m4v,avi,mkv}",
+    }.get(file_type, "")
+
+
 def _report_file_context_hint(text: str) -> dict[str, str]:
     if not _contains_any(
         text,
@@ -8361,6 +8541,7 @@ def _report_file_pattern(file_type: str) -> str:
 
 
 def _looks_like_file_organization_request(text: str) -> bool:
+    file_type = _file_type_hint(text)
     file_scope = _contains_any(
         text,
         [
@@ -8382,6 +8563,45 @@ def _looks_like_file_organization_request(text: str) -> bool:
     )
     if not file_scope:
         return False
+    inventory_query = _contains_any(
+        text,
+        [
+            "inventory",
+            "file list",
+            "list files",
+            "show files",
+            "find files",
+            "what files",
+            "which files",
+            "清单",
+            "列表",
+            "列出",
+            "盘点",
+            "查一下",
+            "查看",
+            "有哪些",
+            "有什么",
+            "哪些文件",
+            "什么文件",
+        ],
+    )
+    explicit_file_inventory_scope = _contains_any(
+        text,
+        [
+            "file",
+            "files",
+            "folder",
+            "folders",
+            "directory",
+            "downloads",
+            "documents",
+            "文件",
+            "文件夹",
+            "目录",
+            "下载",
+            "文档",
+        ],
+    )
     file_operation = _contains_any(
         text,
         [
@@ -8406,7 +8626,11 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "废纸篓",
         ],
     )
-    return file_operation or _file_duplicate_hint(text)
+    return (
+        file_operation
+        or _file_duplicate_hint(text)
+        or (inventory_query and (explicit_file_inventory_scope or bool(file_type)))
+    )
 
 
 def _file_duplicate_hint(text: str) -> bool:
@@ -8423,6 +8647,12 @@ def _file_duplicate_hint(text: str) -> bool:
             "重复项",
             "重复的文件",
             "相同文件",
+            "重复截图",
+            "重复图片",
+            "重复照片",
+            "重复文档",
+            "重复 pdf",
+            "重复PDF",
         ],
     )
 
@@ -8665,10 +8895,20 @@ def _file_operation_hint(text: str) -> str:
             "inventory",
             "file list",
             "list files",
+            "show files",
+            "find files",
+            "what files",
+            "which files",
             "清单",
             "列表",
             "列出",
             "盘点",
+            "查一下",
+            "查看",
+            "有哪些",
+            "有什么",
+            "哪些文件",
+            "什么文件",
         ],
     ):
         return "inventory"
