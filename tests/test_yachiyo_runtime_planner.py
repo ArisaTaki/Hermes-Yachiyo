@@ -5389,6 +5389,65 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
 
 
+def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    markdown = RuntimePlanner().decision(
+        "打开一个能写 markdown 的应用，新建文档标题为周报",
+        allowed_tools=allowed_tools,
+    )
+
+    assert markdown.selected_intent.kind == "desktop_operation"
+    assert markdown.selected_intent.inputs["app_name_hint"] == ""
+    assert markdown.selected_intent.inputs["operation_hint"] == "discover_apps"
+    assert markdown.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "markdown",
+    }
+    assert markdown.selected_intent.inputs["app_capability_hint"] == {
+        "query": "markdown",
+        "description": "markdown",
+    }
+    assert [step.step_id for step in markdown.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state"
+    ]
+    assert _step_by_id(markdown, "discover_apps-desktop-state").input_preview == {
+        "query": "markdown",
+        "limit": 20,
+    }
+    assert planner_tool_requests("打开一个能写 markdown 的应用，新建文档标题为周报", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "markdown", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    code = RuntimePlanner().decision(
+        "打开一个能写代码的应用，新建文件 hello.py",
+        allowed_tools=allowed_tools,
+    )
+    image = RuntimePlanner().decision(
+        "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
+        allowed_tools=allowed_tools,
+    )
+
+    assert code.selected_intent.inputs["app_name_hint"] == ""
+    assert code.selected_intent.inputs["app_capability_hint"]["query"] == "code"
+    assert _step_by_id(code, "discover_apps-desktop-state").input_preview["query"] == "code"
+    assert image.selected_intent.inputs["app_name_hint"] == ""
+    assert image.selected_intent.inputs["app_capability_hint"]["query"] == "image"
+    assert _step_by_id(image, "discover_apps-desktop-state").input_preview["query"] == "image"
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",

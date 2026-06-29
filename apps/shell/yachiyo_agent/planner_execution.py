@@ -320,6 +320,10 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
             decision,
             step_id,
             tool_name,
+        ) or _desktop_discovery_step_needs_model_followup(
+            decision,
+            step_id,
+            tool_name,
         ):
             request["continue_to_model"] = True
         requests.append(request)
@@ -674,6 +678,10 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
             decision,
             step_id,
             tool_name,
+        ) or _desktop_discovery_step_needs_model_followup(
+            decision,
+            step_id,
+            tool_name,
         ):
             request["continue_to_model"] = True
         requests.append(request)
@@ -765,6 +773,21 @@ def _desktop_observation_step_needs_model_followup(
             flags=re.IGNORECASE,
         )
     )
+
+
+def _desktop_discovery_step_needs_model_followup(
+    decision: Any,
+    step_id: str,
+    tool_name: str,
+) -> bool:
+    if tool_name != "desktop.list_apps":
+        return False
+    if step_id not in {"discover-desktop-state", "discover_apps-desktop-state"}:
+        return False
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if not isinstance(inputs, Mapping):
+        return False
+    return isinstance(inputs.get("app_capability_hint"), Mapping)
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

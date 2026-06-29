@@ -391,6 +391,12 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        app_capability = _app_capability_discovery_hint(text)
+        if app_capability:
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": str(app_capability.get("query") or "").strip(),
+            }
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = None
         context_source = context_source_hint(text)
@@ -619,10 +625,10 @@ class TaskIntentRouter:
             or dynamic_context_transfer.get("app_name")
             or app_type_scope.get("app_name")
             or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
-            or _app_name_hint(text)
+            or ("" if app_capability else _app_name_hint(text))
             or ""
         ).strip()
-        direct_app_name_hint = _app_name_hint(text)
+        direct_app_name_hint = "" if app_capability else _app_name_hint(text)
         if (
             direct_app_name_hint
             and _is_generic_foreground_app_label(app_name_hint)
@@ -688,7 +694,7 @@ class TaskIntentRouter:
         if foreground_app_search:
             app_name_hint = ""
             app_search = foreground_app_search
-        elif not (
+        elif not app_capability and not (
             app_click_scope
             or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
         ):
@@ -833,6 +839,8 @@ class TaskIntentRouter:
             inputs["hotkey_hint"] = hotkey
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
+        if app_capability:
+            inputs["app_capability_hint"] = app_capability
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
         if finder_operation_mode:
             inputs["operation_mode_hint"] = finder_operation_mode
@@ -2156,6 +2164,9 @@ class RuntimePlanner:
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
+        app_capability = intent.inputs.get("app_capability_hint")
+        if not isinstance(app_capability, Mapping):
+            app_capability = {}
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = {}
         app_search = intent.inputs.get("app_search_hint")
@@ -2567,7 +2578,10 @@ class RuntimePlanner:
             desktop_discovery
             and not app_name
             and not app_search
-            and not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
+            and (
+                app_capability
+                or not any(item for item in (hotkey, type_target, safe_type_text, submit_action) if item)
+            )
         ):
             action = str(desktop_discovery.get("action") or "").strip()
             tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
@@ -10560,6 +10574,8 @@ def _url_hint(text: str) -> str:
 
 
 def _app_name_hint(text: str) -> str:
+    if _app_capability_discovery_hint(text):
+        return ""
     if re.fullmatch(
         r"(?:press|hit|tap)\s+(?:the\s+)?(?:enter|return|"
         r"(?:command|cmd|control|ctrl|option|alt|shift)(?:\s*[+ ]\s*\w+)?)",
@@ -16445,6 +16461,93 @@ def _desktop_discovery_hint(text: str) -> dict[str, Any] | None:
     if _looks_like_installed_apps_request(value, lowered):
         return {"action": "discover_apps"}
     return None
+
+
+def _app_capability_discovery_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    patterns = (
+        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        r"(?:一个|一款|任意|任何|可用)?\s*"
+        r"(?:能|可以|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
+        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
+        r"(?:有没有|有无|是否有|装了|安装了|有没有安装).{0,12}"
+        r"(?:能|可以|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
+        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
+        r"\b(?:open|launch|start|find|use)\s+"
+        r"(?:(?:an?|any|some|available)\s+)?"
+        r"(?:app|application|tool|program)\s+"
+        r"(?:that\s+can|to|for)\s+(?P<capability_en>[^.!?,]{1,60})",
+        r"\b(?:open|launch|start|find|use)\s+"
+        r"(?:(?:an?|any|some|available)\s+)?"
+        r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
+        r"presentation|slide|note|mail|calendar)[\w\s-]{0,30}?"
+        r"(?:app|application|tool|program|editor)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        query = _app_capability_discovery_query(raw)
+        if query:
+            return {
+                "query": query,
+                "description": _clean_app_capability_description(raw),
+            }
+    return {}
+
+
+def _app_capability_discovery_query(value: str) -> str:
+    description = _clean_app_capability_description(value)
+    lowered = description.lower()
+    if not description:
+        return ""
+    if "markdown" in lowered:
+        return "markdown"
+    if _contains_any(description, ("代码", "编程", "开发", "code", "coding", "programming")):
+        return "code"
+    if _contains_any(description, ("图片", "图像", "照片", "绘图", "设计", "image", "photo", "picture", "design")):
+        return "image"
+    if _contains_any(description, ("表格", "数据表", "spreadsheet", "sheet", "csv")):
+        return "spreadsheet"
+    if _contains_any(description, ("演示", "幻灯片", "presentation", "slide")):
+        return "presentation"
+    if _contains_any(description, ("笔记", "备忘录", "note", "notes")):
+        return "notes"
+    if _contains_any(description, ("邮件", "email", "mail")):
+        return "mail"
+    if _contains_any(description, ("日历", "calendar")):
+        return "calendar"
+    if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
+        return "document"
+    return description[:40].strip()
+
+
+def _clean_app_capability_description(value: str) -> str:
+    description = _clean_prompt(value)
+    description = re.sub(
+        r"^(?:用来|用于|可以|能够|能|处理|编辑|写|创建|新建|打开|查看|分析|生成|输出|"
+        r"to|for|can|edit|write|create|open|view|analy[sz]e|generate|produce)\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    description = re.split(
+        r"(?:并|然后|再|接着|之后|后|标题|名称|大小|尺寸|\b(?:and|then|with|titled|named)\b)",
+        description,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
+    return description
 
 
 def _desktop_discovery_tool_preview(

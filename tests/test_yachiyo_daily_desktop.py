@@ -145,6 +145,41 @@ def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_
         assert requests[1]["input"] == {"app_name": app_name}
 
 
+def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开一个能写 markdown 的应用，新建文档标题为周报",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "markdown", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开 https://example.com 然后点击 More information 链接",
