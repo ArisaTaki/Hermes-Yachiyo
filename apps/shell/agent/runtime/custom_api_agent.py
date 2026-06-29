@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections.abc import Iterable, Mapping
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.approval_tool_sets import (
@@ -474,6 +475,82 @@ class RuntimeCustomApiAgentLoop:
             if not tool_requests:
                 if not content.strip():
                     raise self._error_type("Native Agent 模型返回了空回复")
+                auto_app_write_requests = _model_followup_app_write_requests(
+                    content,
+                    _latest_model_followup_target(timeline),
+                    allowed_tools,
+                )
+                if auto_app_write_requests:
+                    messages.append({"role": "assistant", "content": content})
+                    self._record_auto_model_followup_app_write_plan(
+                        auto_app_write_requests,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._record_desktop_permission_preflight(
+                        auto_app_write_requests,
+                        broker,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._record_desktop_tool_policy_decisions(
+                        auto_app_write_requests,
+                        allowed_tools=allowed_tools,
+                        agent=agent,
+                        run_id=run_id,
+                    )
+                    tool_timeline_start = len(timeline)
+                    try:
+                        self._run_tool_requests(
+                            auto_app_write_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=iteration + 1,
+                            run_id=run_id,
+                            budget=budget,
+                        )
+                    except AgentApprovalRequired as exc:
+                        pending_approval = (
+                            exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
+                        )
+                        planned_tool = str(
+                            pending_approval.get("tool")
+                            or auto_app_write_requests[0].get("tool")
+                            or ""
+                        )
+                        planned_input = (
+                            pending_approval.get("input")
+                            if isinstance(pending_approval.get("input"), dict)
+                            else auto_app_write_requests[0].get("input") or {}
+                        )
+                        approval_request = self._planned_request_for_tool(
+                            auto_app_write_requests,
+                            planned_tool,
+                        )
+                        self._record_desktop_intent_approval_required(
+                            planned_tool,
+                            planned_input,
+                            pending_approval=exc.pending_approval,
+                            timeline=timeline,
+                            run_id=run_id,
+                            source=self._approval_event_source(approval_request, planned_tool),
+                            planning_reason=self._approval_event_planning_reason(
+                                approval_request,
+                                planned_tool,
+                            ),
+                        )
+                        raise
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        auto_app_write_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
                 result_text, truncated = self._limit_model_output(content)
                 return self._model_output_text_factory(
                     result_text,
@@ -653,6 +730,38 @@ class RuntimeCustomApiAgentLoop:
         )
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.model.followup_context", payload)
+
+    def _record_auto_model_followup_app_write_plan(
+        self,
+        tool_requests: list[dict[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "").strip()
+            if not tool_name:
+                continue
+            payload = {
+                "tool": tool_name,
+                "status": "planned",
+                "source": str(request.get("source") or "runtime_planner"),
+                "planning_reason": str(
+                    request.get("planning_reason") or "planner_followup_app_write"
+                ),
+                "input_preview": (
+                    request.get("input") if isinstance(request.get("input"), dict) else {}
+                ),
+            }
+            timeline.append(
+                self._timeline(
+                    "agent.desktop.intent_planned",
+                    tool_name,
+                    **payload,
+                )
+            )
+            if run_id and self._append_run_event is not None:
+                self._append_run_event(run_id, "agent.desktop.intent_planned", payload)
 
     @staticmethod
     def _planned_request_for_tool(
@@ -3281,6 +3390,9 @@ def _model_followup_context_payload(
         "observation_tools": observation_tools,
         "artifact_write_allowed": "artifact.write" in allowed,
     }
+    followup_target = _model_followup_target_payload(selection_payload, allowed)
+    if followup_target:
+        payload["followup_target"] = followup_target
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
     content_snapshots = followup_content_snapshots(timeline, observation_tools)
@@ -3301,7 +3413,11 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
     artifact_write_allowed = bool(payload.get("artifact_write_allowed"))
     observation_tools = _string_list(payload.get("observation_tools"))
     observation_text = ", ".join(observation_tools) or "runtime observation tools"
-    if artifact_write_allowed and artifacts:
+    followup_target = payload.get("followup_target") if isinstance(payload.get("followup_target"), dict) else {}
+    target_instruction = _model_followup_target_instruction(followup_target)
+    if target_instruction:
+        artifact_instruction = target_instruction
+    elif artifact_write_allowed and artifacts:
         artifact_instruction = (
             "The user requested a durable output. Call artifact.write next with "
             f"path {artifacts[0]!r} and content derived from the observed context. "
@@ -3325,6 +3441,215 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
         "missing permission, capability, or fallback without asking the user to manually repeat a "
         "tool-capable action."
     )
+
+
+def _model_followup_target_payload(
+    selection_payload: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    app_name = str(target.get("app_name") or "").strip()
+    kind = str(target.get("kind") or "").strip()
+    if kind != "app_write" or not app_name:
+        return {}
+    write_tools = _model_followup_app_write_tool_names(allowed)
+    verify_tools = [
+        tool
+        for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+        if tool in allowed
+    ]
+    payload: dict[str, Any] = {
+        "kind": "app_write",
+        "app_name": app_name,
+        "target_action": str(target.get("target_action") or "app_paste").strip(),
+        "body_source": "model_generated_content",
+        "write_allowed": bool(write_tools),
+        "recommended_tools": write_tools,
+        "verify_tools": verify_tools,
+    }
+    context_source = str(target.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    return payload
+
+
+def _model_followup_app_write_tool_names(allowed: set[str]) -> list[str]:
+    if "app.focus_and_safe_type_text" in allowed:
+        return ["app.focus_and_safe_type_text"]
+    if "app.open_and_safe_type_text" in allowed:
+        return ["app.open_and_safe_type_text"]
+    focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if focus_tool and "desktop.safe_type_text" in allowed:
+        return [focus_tool, "desktop.safe_type_text"]
+    if focus_tool and "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
+        return ["clipboard.write", focus_tool, "desktop.safe_shortcut"]
+    return []
+
+
+def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
+    if not isinstance(target, Mapping):
+        return ""
+    app_name = str(target.get("app_name") or "").strip()
+    if str(target.get("kind") or "").strip() != "app_write" or not app_name:
+        return ""
+    if not bool(target.get("write_allowed")):
+        return (
+            f"The user requested the transformed content be written into {app_name}, "
+            "but no allowed foreground text insertion tool is available. Explain the missing "
+            "capability instead of claiming the app was updated."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    tool_text = ", ".join(tools) or "the allowed desktop text insertion tools"
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after writing."
+        if verify_tools
+        else ""
+    )
+    return (
+        f"The user requested the transformed content be written into {app_name}. "
+        "After deriving the final transformed text, call desktop tools next instead of only "
+        f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
+        "text input. Do not write the raw observed source when the user asked for summary, "
+        f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _latest_model_followup_target(timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(timeline):
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event") or "").strip() != "agent.model.followup_context":
+            continue
+        if not _followup_event_has_readable_source(event):
+            return {}
+        target = event.get("followup_target")
+        if isinstance(target, dict):
+            return dict(target)
+    return {}
+
+
+def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
+    snapshots: list[dict[str, Any]] = []
+    raw_snapshots = event.get("content_snapshots")
+    if isinstance(raw_snapshots, list):
+        snapshots.extend(item for item in raw_snapshots if isinstance(item, dict))
+    raw_snapshot = event.get("content_snapshot")
+    if isinstance(raw_snapshot, dict):
+        snapshots.append(raw_snapshot)
+    if not snapshots:
+        return False
+    return any(
+        snapshot.get("ok") is not False
+        and bool(str(snapshot.get("text") or "").strip())
+        for snapshot in snapshots
+    )
+
+
+def _model_followup_app_write_requests(
+    generated_content: str,
+    target: Mapping[str, Any] | None,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or not isinstance(target, Mapping):
+        return []
+    app_name = str(target.get("app_name") or "").strip()
+    if str(target.get("kind") or "").strip() != "app_write" or not app_name:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planning_reason = "planner_followup_app_write"
+    source = "runtime_planner"
+    verify_request = (
+        _request_like(
+            "desktop.ui_elements",
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if "desktop.ui_elements" in allowed
+        else None
+    )
+    if "app.focus_and_safe_type_text" in allowed:
+        requests = [
+            _request_like(
+                "app.focus_and_safe_type_text",
+                {"app_name": app_name, "text": content},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    if "app.open_and_safe_type_text" in allowed:
+        requests = [
+            _request_like(
+                "app.open_and_safe_type_text",
+                {"app_name": app_name, "text": content},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if focus_tool and "desktop.safe_type_text" in allowed:
+        requests = [
+            _request_like(
+                focus_tool,
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                "desktop.safe_type_text",
+                {"text": content},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    if focus_tool and "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
+        requests = [
+            _request_like(
+                "clipboard.write",
+                {"text": content},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                focus_tool,
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                "desktop.safe_shortcut",
+                {"action": "paste"},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    return []
+
+
+def _request_like(
+    tool_name: str,
+    payload: dict[str, Any],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    return {
+        "protocol": "json_fallback",
+        "tool": tool_name,
+        "input": payload,
+        "source": source,
+        "planning_reason": planning_reason,
+    }
 
 
 def _followup_content_snapshot_message(value: Any) -> str:

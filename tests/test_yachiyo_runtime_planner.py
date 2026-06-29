@@ -1365,6 +1365,36 @@ def test_planner_selection_payload_surfaces_outputs_for_studio_replay() -> None:
     assert payload["open_question_count"] == 0
 
 
+def test_planner_selection_payload_surfaces_followup_app_write_target() -> None:
+    prompt = "把当前网页总结一下并保存到 Obsidian 新笔记"
+    allowed_tools = [
+        "browser.extract_text",
+        "browser.current_page",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+
+    assert payload["intent_kind"] == "report_generation"
+    assert payload["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "context_source": "current_page_content",
+    }
+
+
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:
     decision = RuntimePlanner().decision(
         "分析 sales.csv 并输出报告",

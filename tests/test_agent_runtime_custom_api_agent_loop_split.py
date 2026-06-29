@@ -1241,6 +1241,224 @@ def test_model_followup_context_payload_preserves_multiple_content_snapshots() -
     assert "Data analysis result for data/sales.csv (csv)." in message
 
 
+def test_model_followup_context_instructs_generated_app_write() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "browser.extract_text",
+                "planning_reason": "planner_prefetch_report_context",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "report_generation",
+            "followup_target": {
+                "kind": "app_write",
+                "app_name": "Obsidian",
+                "target_action": "app_paste",
+                "body_source": "model_generated_content",
+                "context_source": "current_page_content",
+            },
+        },
+        allowed_tools=[
+            "browser.extract_text",
+            "app.focus_and_safe_type_text",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "browser.extract_text",
+                input_preview={},
+                result={"ok": True, "text": "Raw current page text"},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "write_allowed": True,
+        "recommended_tools": ["app.focus_and_safe_type_text"],
+        "verify_tools": ["desktop.ui_elements"],
+        "context_source": "current_page_content",
+    }
+    assert "written into Obsidian" in message
+    assert "app.focus_and_safe_type_text" in message
+    assert "Do not write the raw observed source" in message
+
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "整理后的摘要",
+        payload["followup_target"],
+        ["app.focus_and_safe_type_text", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "Obsidian", "text": "整理后的摘要"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_app_write",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_app_write",
+        },
+    ]
+    assert custom_api_agent_module._latest_model_followup_target(
+        [
+            _timeline(
+                "agent.model.followup_context",
+                "planner_prefetch_report_context",
+                followup_target=payload["followup_target"],
+                content_snapshot={
+                    "source_tool": "browser.extract_text",
+                    "ok": False,
+                    "summary": "Screen Recording permission is missing.",
+                },
+            )
+        ]
+    ) == {}
+
+
+def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "把当前网页总结一下并保存到 Obsidian 新笔记"}]
+    generated = "整理后的摘要\n- 八千代支持读取网页并写入目标应用"
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "browser.extract_text":
+                result = {
+                    "ok": True,
+                    "text": "Raw page text about Yachiyo runtime.",
+                }
+            elif tool_name == "app.focus_and_safe_type_text":
+                result = {
+                    "ok": True,
+                    "app_name": input_preview.get("app_name"),
+                    "text": input_preview.get("text"),
+                }
+            else:
+                result = {"ok": True}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "browser.extract_text",
+                    "browser.current_page",
+                    "app.focus_and_safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": generated},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-followup-app-write",
+    )
+
+    assert "Obsidian" in str(result)
+    assert "输入文字" in str(result)
+    assert [request["tool"] for request in tool_runs[0]["tool_requests"]] == [
+        "browser.extract_text"
+    ]
+    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1]["tool_requests"][0]["input"] == {
+        "app_name": "Obsidian",
+        "text": generated,
+    }
+    followup = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup["followup_target"]["app_name"] == "Obsidian"
+    assert followup["followup_target"]["recommended_tools"] == [
+        "app.focus_and_safe_type_text"
+    ]
+    assert any(
+        event["event"] == "agent.desktop.intent_planned"
+        and event["detail"] == "app.focus_and_safe_type_text"
+        and event["planning_reason"] == "planner_followup_app_write"
+        for event in timeline
+    )
+    assert len(model_calls) == 1
+    assert "written into Obsidian" in model_calls[0][-1]["content"]
+
+
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

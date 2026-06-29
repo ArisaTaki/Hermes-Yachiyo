@@ -178,10 +178,34 @@ def planner_selection_payload(
     intent_kind = str(getattr(intent, "kind", "") or "").strip()
     if intent_kind:
         payload["intent_kind"] = intent_kind
+    followup_target = _selection_followup_target_payload(decision)
+    if followup_target:
+        payload["followup_target"] = followup_target
     route_to_studio = getattr(plan, "route_to_studio", None)
     if isinstance(route_to_studio, bool):
         payload["route_to_studio"] = route_to_studio
     payload.update(_selection_entrypoint_payload(metadata))
+    return payload
+
+
+def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if not isinstance(inputs, Mapping):
+        return {}
+    target_app = str(inputs.get("target_app_hint") or "").strip()
+    target_action = str(inputs.get("target_action_hint") or "").strip()
+    context_source = str(inputs.get("context_source") or "").strip()
+    if not target_app or target_action != "app_paste":
+        return {}
+    payload: dict[str, Any] = {
+        "kind": "app_write",
+        "app_name": target_app,
+        "target_action": target_action,
+        "body_source": "model_generated_content",
+    }
+    if context_source:
+        payload["context_source"] = context_source
     return payload
 
 
