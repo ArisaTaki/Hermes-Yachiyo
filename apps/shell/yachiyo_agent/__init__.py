@@ -68,6 +68,7 @@ from .contracts import (
 from .desktop_permissions import (
     clear_desktop_permission_probe_cache,
     desktop_permission_missing_by_capability,
+    desktop_runtime_blocking_conditions_by_capability,
 )
 from .daily_desktop import (
     daily_desktop_allowed_tools,
@@ -145,6 +146,7 @@ __all__ = [
     "desktop_action_risk_snapshots",
     "desktop_execution_capability_snapshots",
     "desktop_permission_missing_by_capability",
+    "desktop_runtime_blocking_conditions_by_capability",
     "DESKTOP_EXECUTION_CAPABILITY_IDS",
     "DesktopActionRiskSnapshot",
     "DesktopExecutionCapabilitySnapshot",

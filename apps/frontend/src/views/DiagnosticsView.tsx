@@ -409,6 +409,9 @@ export function DiagnosticsView() {
   const initialCommand = normalizeDiagnosticCommand(currentParam('command'));
   const permissionTargets = diagnosticPermissionTargets(currentParam('permission_targets'));
   const permissionTargetSummary = diagnosticPermissionTargetSummary(permissionTargets);
+  const runtimeBlockingConditions = diagnosticRuntimeBlockingConditions(currentParam('blocking_conditions'));
+  const runtimeBlockingSummary = diagnosticRuntimeBlockingSummary(runtimeBlockingConditions);
+  const runtimeBlockingHintSummary = diagnosticRuntimeBlockingHintSummary(runtimeBlockingConditions);
   const desktopTools = diagnosticDesktopTools(currentParam('desktop_tools'));
   const desktopToolSummary = diagnosticDesktopToolSummary(desktopTools);
   const [selectedCommand, setSelectedCommand] = useState(initialCommand || DIAGNOSTIC_ACTIONS[0].command);
@@ -935,6 +938,11 @@ export function DiagnosticsView() {
                 Chat 提示的恢复目标：{permissionTargetSummary}
               </p>
             ) : null}
+            {runtimeBlockingSummary ? (
+              <p className="section-caption diagnostic-blocking-caption" data-testid="diagnostics-runtime-blockers">
+                运行条件阻塞：{runtimeBlockingSummary}
+              </p>
+            ) : null}
             {desktopToolSummary ? (
               <p className="section-caption diagnostic-targeted-caption" data-testid="diagnostics-desktop-tools">
                 相关桌面工具：{desktopToolSummary}
@@ -944,6 +952,11 @@ export function DiagnosticsView() {
           <div className="diagnostic-result-actions">
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-screen-probe" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
             <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
+            {runtimeBlockingConditions.has('desktop_session_locked') ? (
+              <button type="button" className="hy-btn hy-btn-ghost diagnostic-targeted-action" data-testid="diagnostics-retry-active-window" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>
+                解锁后重试活动窗口
+              </button>
+            ) : null}
             <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'screen_recording')} data-testid="diagnostics-open-screen-recording-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('screen_recording')}>屏幕录制权限</button>
             <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'accessibility')} data-testid="diagnostics-open-accessibility-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('accessibility')}>辅助功能权限</button>
             <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'automation')} data-testid="diagnostics-open-automation-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('automation')}>自动化权限</button>
@@ -962,6 +975,13 @@ export function DiagnosticsView() {
             <span>{activeWindowProbe ? `${activeWindowProbe.app_name || '—'} · ${activeWindowProbe.title || '无标题'}` : '未探测'}</span>
             <small>{activeWindowProbe?.pid ? `pid ${activeWindowProbe.pid}` : ''}{activeWindowProbe?.queried_at ? ` · ${formatShortDateTime(activeWindowProbe.queried_at)}` : ''}</small>
           </article>
+          {runtimeBlockingSummary ? (
+            <article className="diagnostic-probe-card diagnostic-runtime-blocker-card" data-testid="diagnostics-runtime-blocker-card">
+              <strong>{runtimeBlockingSummary}</strong>
+              <span>{runtimeBlockingHintSummary || '处理运行条件后重试桌面探测。'}</span>
+              <small>这不是权限缺失；无需反复打开系统权限设置。</small>
+            </article>
+          ) : null}
         </div>
       </section>
 
@@ -1003,6 +1023,14 @@ const diagnosticPermissionLabels: Record<DiagnosticPermissionAction, string> = {
   screen_recording: '屏幕录制权限',
 };
 
+const diagnosticRuntimeBlockingLabels: Record<string, string> = {
+  desktop_session_locked: '桌面会话已锁定',
+};
+
+const diagnosticRuntimeBlockingHints: Record<string, string> = {
+  desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台窗口、点击或输入操作。',
+};
+
 function diagnosticPermissionTargets(value: string): Set<DiagnosticPermissionAction> {
   const targets = new Set<DiagnosticPermissionAction>();
   value.split(',').forEach((item) => {
@@ -1033,6 +1061,23 @@ function diagnosticPermissionTargetAction(token: string): DiagnosticPermissionAc
 
 function diagnosticPermissionTargetSummary(targets: Set<DiagnosticPermissionAction>): string {
   return Array.from(targets).map((target) => diagnosticPermissionLabels[target]).join('、');
+}
+
+function diagnosticRuntimeBlockingConditions(value: string): Set<string> {
+  const conditions = new Set<string>();
+  value.split(',').forEach((item) => {
+    const condition = item.trim();
+    if (condition) conditions.add(condition);
+  });
+  return conditions;
+}
+
+function diagnosticRuntimeBlockingSummary(conditions: Set<string>): string {
+  return Array.from(conditions).map((condition) => diagnosticRuntimeBlockingLabels[condition] || condition).join('、');
+}
+
+function diagnosticRuntimeBlockingHintSummary(conditions: Set<string>): string {
+  return Array.from(conditions).map((condition) => diagnosticRuntimeBlockingHints[condition]).filter(Boolean).join(' ');
 }
 
 function diagnosticDesktopTools(value: string): string[] {

@@ -78,6 +78,7 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     available: bool = False
     platform: str = ""
     missing_permissions: list[str] = Field(default_factory=list)
+    blocking_conditions: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
     available_tools: list[str] = Field(default_factory=list)
     degraded_tools: list[str] = Field(default_factory=list)

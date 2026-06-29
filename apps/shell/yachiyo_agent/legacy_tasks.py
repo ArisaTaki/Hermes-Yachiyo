@@ -6,7 +6,10 @@ from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
-from .desktop_permissions import desktop_permission_missing_by_capability
+from .desktop_permissions import (
+    desktop_permission_missing_by_capability,
+    desktop_runtime_blocking_conditions_by_capability,
+)
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import planner_run_event_payloads, runtime_planner_decision
 from .policy import desktop_execution_capability_snapshots
@@ -69,6 +72,10 @@ class LegacyRuntimePort:
             missing_permissions = desktop_permission_missing_by_capability()
         except Exception:
             missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        try:
+            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
+        except Exception:
+            blocking_conditions = {}
         return {
             "ok": True,
             "status": "ready",
@@ -78,6 +85,7 @@ class LegacyRuntimePort:
                 **desktop_execution_capability_snapshots(
                     registered_tools=known_tools,
                     missing_permissions=missing_permissions,
+                    blocking_conditions=blocking_conditions,
                 ),
             },
         }

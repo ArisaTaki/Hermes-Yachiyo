@@ -18,6 +18,7 @@ const DIAGNOSTIC_OUTPUT = 'Diagnostics copy smoke output\\nNative runtime ready'
 const SCREENSHOT_PERMISSION_MESSAGE = '屏幕录制权限不足，请在系统设置中授权 Oha-Yachiyo 后重启 Bridge。';
 
 const bridgeState = {
+  activeWindowRequests: 0,
   screenRequests: 0,
   diagnosticRequests: [],
 };
@@ -92,6 +93,16 @@ function screenshotPayload() {
     width: SCREENSHOT_WIDTH,
     height: SCREENSHOT_HEIGHT,
     captured_at: new Date().toISOString(),
+  };
+}
+
+function activeWindowPayload() {
+  bridgeState.activeWindowRequests += 1;
+  return {
+    app_name: 'Calculator',
+    title: 'Calculator',
+    pid: 4242,
+    queried_at: new Date().toISOString(),
   };
 }
 
@@ -201,6 +212,10 @@ async function startMockBridge() {
             },
           });
         }
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/system/active-window') {
+        sendJson(response, 200, activeWindowPayload());
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/native-agent/diagnostic-command') {
@@ -321,14 +336,25 @@ async function main() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) console.error('[renderer]', message);
   });
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/diagnostics');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/diagnostics?blocking_conditions=desktop_session_locked&permission_targets=automation&desktop_tools=desktop.active_window');
   await waitFor(win, () => {
     const button = document.querySelector('[data-testid="diagnostics-screen-probe"]');
     const card = document.querySelector('[data-testid="diagnostics-screen-probe-card"]');
     const summary = document.querySelector('[data-testid="diagnostics-screen-probe-summary"]');
-    return button && !button.disabled && card && summary?.textContent.includes('未探测');
+    const blockers = document.querySelector('[data-testid="diagnostics-runtime-blockers"]');
+    const blockerCard = document.querySelector('[data-testid="diagnostics-runtime-blocker-card"]');
+    const retry = document.querySelector('[data-testid="diagnostics-retry-active-window"]');
+    return button && !button.disabled && card && summary?.textContent.includes('未探测')
+      && blockers?.textContent.includes('桌面会话已锁定')
+      && blockerCard?.textContent.includes('无需反复打开系统权限设置')
+      && retry && !retry.disabled;
   }, 'diagnostics screenshot controls');
   console.log('[electron-smoke] diagnostics screenshot controls loaded');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"diagnostics-retry-active-window\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="diagnostics-status"]')?.textContent.includes('当前活动窗口：Calculator')
+  ), 'diagnostics runtime blocker retry action');
+  console.log('[electron-smoke] diagnostics runtime blocker retry verified');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"diagnostics-screen-probe\\"]').click()", true);
   await waitFor(win, () => {
     const status = document.querySelector('[data-testid="diagnostics-status"]');

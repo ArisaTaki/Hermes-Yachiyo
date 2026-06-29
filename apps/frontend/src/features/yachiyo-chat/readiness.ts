@@ -46,6 +46,14 @@ const permissionRecoveryHints: Record<string, string> = {
   unsupported_platform: '当前平台暂不支持桌面执行；这些桌面工具会保持不可用。',
 };
 
+const blockingConditionLabels: Record<string, string> = {
+  desktop_session_locked: '桌面会话已锁定',
+};
+
+const blockingConditionRecoveryHints: Record<string, string> = {
+  desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台窗口、点击或输入操作。',
+};
+
 export function chatDesktopPermissionNotice(
   readiness: YachiyoReadinessSnapshot | null | undefined,
 ): Pick<
@@ -53,25 +61,41 @@ export function chatDesktopPermissionNotice(
   'kind' | 'title' | 'detail' | 'action_label' | 'action_view' | 'action_params'
 > | null {
   const missing = missingDesktopPermissionIssues(readiness);
+  const blocking = desktopRuntimeBlockingIssues(readiness);
   const toolReadiness = desktopToolReadinessSummary(readiness);
-  if (!missing.length && !toolReadiness.degraded.length && !toolReadiness.unavailable.length) return null;
+  if (
+    !missing.length
+    && !blocking.length
+    && !toolReadiness.degraded.length
+    && !toolReadiness.unavailable.length
+  ) return null;
   const labels = missing.map((issue) => issue.label);
-  const hints = missing.map((issue) => issue.recovery_hint).filter(Boolean);
+  const blockerLabels = blocking.map((issue) => issue.label);
+  const hints = [
+    ...missing.map((issue) => issue.recovery_hint),
+    ...blocking.map((issue) => issue.recovery_hint),
+  ].filter(Boolean);
   const details = [
     labels.length ? `${labels.join('、')} 未就绪。` : '',
+    blockerLabels.length ? `${blockerLabels.join('、')} 正在阻塞桌面执行。` : '',
     toolReadiness.degraded.length ? `降级可用：${formatDesktopToolList(toolReadiness.degraded)}。` : '',
     toolReadiness.unavailable.length ? `暂不可用：${formatDesktopToolList(toolReadiness.unavailable)}。` : '',
-    hints.join(' ') || '打开「诊断」中的桌面权限检查，按提示授权后再试。',
+    hints.join(' ') || '打开「诊断」中的桌面能力检查，按提示处理后再试。',
   ].filter(Boolean);
   const actionParams: Record<string, string> = {
     command: 'native doctor',
     return_to: 'chat',
   };
   if (missing.length) actionParams.permission_targets = missing.map((issue) => issue.token).join(',');
+  if (blocking.length) actionParams.blocking_conditions = blocking.map((issue) => issue.token).join(',');
   if (toolReadiness.tools.length) actionParams.desktop_tools = toolReadiness.tools.join(',');
   return {
     kind: 'warn',
-    title: missing.length ? '桌面执行权限未就绪' : '桌面执行能力需检查',
+    title: missing.length
+      ? '桌面执行权限未就绪'
+      : blocking.length
+        ? '桌面运行条件需处理'
+        : '桌面执行能力需检查',
     detail: details.join(''),
     action_label: '打开诊断',
     action_view: 'diagnostics',
@@ -101,6 +125,28 @@ export function missingDesktopPermissionIssues(
         token,
         label: permissionLabels[token] || token,
         recovery_hint: permissionRecoveryHints[token] || `请在诊断页检查 ${permissionLabels[token] || token}。`,
+      });
+    });
+  });
+  return Array.from(issues.values());
+}
+
+export function desktopRuntimeBlockingIssues(
+  readiness: YachiyoReadinessSnapshot | null | undefined,
+): Array<{ token: string; label: string; recovery_hint: string }> {
+  const capabilities = readiness?.capabilities;
+  if (!capabilities || typeof capabilities !== 'object') return [];
+  const issues = new Map<string, { token: string; label: string; recovery_hint: string }>();
+  desktopCapabilityIds.forEach((capabilityId) => {
+    const capability = capabilitySnapshot(capabilities[capabilityId]);
+    (capability?.blocking_conditions || []).forEach((condition) => {
+      const token = String(condition || '').trim();
+      if (!token) return;
+      if (issues.has(token)) return;
+      issues.set(token, {
+        token,
+        label: blockingConditionLabels[token] || token,
+        recovery_hint: blockingConditionRecoveryHints[token] || `请在诊断页检查 ${blockingConditionLabels[token] || token}。`,
       });
     });
   });

@@ -47,6 +47,7 @@ export type DesktopExecutionCapabilitySnapshot = {
   available?: boolean;
   platform?: string;
   missing_permissions?: string[];
+  blocking_conditions?: string[];
   tools?: string[];
   available_tools?: string[];
   degraded_tools?: string[];

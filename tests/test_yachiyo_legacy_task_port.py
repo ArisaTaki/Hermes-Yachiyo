@@ -2111,6 +2111,10 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
         "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
         lambda: {},
     )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
 
     readiness = LegacyRuntimePort(runtime).readiness()
     capabilities = readiness["capabilities"]
@@ -2142,6 +2146,10 @@ def test_legacy_runtime_port_readiness_reports_desktop_permission_gaps(monkeypat
             "foreground_input": ["accessibility"],
         },
     )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
 
     readiness = LegacyRuntimePort(runtime).readiness()
     capabilities = readiness["capabilities"]
@@ -2150,6 +2158,34 @@ def test_legacy_runtime_port_readiness_reports_desktop_permission_gaps(monkeypat
     assert capabilities["screen_capture"]["available"] is False
     assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
     assert capabilities["foreground_input"]["available"] is False
+    assert runtime.calls == [("list_runnables", None)]
+
+
+def test_legacy_runtime_port_readiness_reports_desktop_runtime_blockers(monkeypatch) -> None:
+    runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {
+            "desktop_execution": ["desktop_session_locked"],
+            "active_window": ["desktop_session_locked"],
+        },
+    )
+
+    readiness = LegacyRuntimePort(runtime).readiness()
+    capabilities = readiness["capabilities"]
+
+    assert capabilities["desktop_execution"]["available"] is False
+    assert capabilities["desktop_execution"]["missing_permissions"] == []
+    assert capabilities["desktop_execution"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
+    assert capabilities["active_window"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
     assert runtime.calls == [("list_runnables", None)]
 
 

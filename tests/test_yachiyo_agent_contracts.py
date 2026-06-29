@@ -805,6 +805,7 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         available=True,
         platform="macos",
         missing_permissions=["accessibility"],
+        blocking_conditions=["desktop_session_locked"],
         tools=["desktop.type_text"],
         risk_default="medium",
         diagnostic_route="/ui/native-agent/diagnostics/cache",
@@ -816,6 +817,7 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         "available",
         "platform",
         "missing_permissions",
+        "blocking_conditions",
         "tools",
         "available_tools",
         "degraded_tools",
@@ -824,6 +826,7 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         "diagnostic_route",
     ]
     assert payload["available"] is True
+    assert payload["blocking_conditions"] == ["desktop_session_locked"]
     assert payload["risk_default"] == "medium"
     with pytest.raises(ValidationError):
         DesktopExecutionCapabilitySnapshot(
@@ -1046,6 +1049,38 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
     assert capabilities["media_control"]["degraded_tools"] == [
         "media.music_app_open_and_play",
     ]
+
+
+def test_desktop_execution_capability_policy_applies_runtime_blockers() -> None:
+    capabilities = desktop_execution_capability_snapshots(
+        platform_name="Darwin",
+        registered_tools={
+            "desktop.active_window",
+            "desktop.permissions",
+            "desktop.click",
+            "desktop.type_text",
+            "app.open",
+            "app.focus",
+        },
+        blocking_conditions={
+            "desktop_execution": ["desktop_session_locked"],
+            "foreground_input": ["desktop_session_locked"],
+        },
+    )
+
+    assert capabilities["desktop_execution"]["available"] is False
+    assert capabilities["desktop_execution"]["missing_permissions"] == []
+    assert capabilities["desktop_execution"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
+    assert capabilities["desktop_execution"]["available_tools"] == []
+    assert "desktop.click" in capabilities["desktop_execution"]["unavailable_tools"]
+    assert capabilities["foreground_input"]["available"] is False
+    assert capabilities["foreground_input"]["missing_permissions"] == []
+    assert capabilities["foreground_input"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
+    assert "desktop.type_text" in capabilities["foreground_input"]["unavailable_tools"]
 
 
 def test_desktop_execution_capability_policy_models_foreground_activation_gap() -> None:

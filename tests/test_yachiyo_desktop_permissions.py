@@ -19,6 +19,49 @@ def test_desktop_permission_probe_marks_non_macos_unsupported() -> None:
         platform_name="Linux",
         use_cache=False,
     ) == {"desktop_execution": ["unsupported_platform"]}
+    assert desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Linux",
+        use_cache=False,
+    ) == {}
+
+
+def test_desktop_runtime_blocker_probe_reports_locked_macos_session(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: True)
+
+    blocking = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+        use_cache=False,
+    )
+
+    assert blocking["desktop_execution"] == ["desktop_session_locked"]
+    assert blocking["active_window"] == ["desktop_session_locked"]
+    assert blocking["foreground_input"] == ["desktop_session_locked"]
+    assert "screen_capture" not in blocking
+
+
+def test_desktop_runtime_blocker_probe_uses_cached_copies(monkeypatch) -> None:
+    calls = {"locked": 0}
+
+    def fake_locked() -> bool:
+        calls["locked"] += 1
+        return True
+
+    monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", fake_locked)
+
+    first = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+    )
+    second = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+    )
+
+    assert calls["locked"] == 1
+    assert first == second
+    first["desktop_execution"].append("mutated")
+    third = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+    )
+    assert third["desktop_execution"] == ["desktop_session_locked"]
 
 
 def test_desktop_permission_probe_aggregates_macos_permission_gaps(monkeypatch) -> None:

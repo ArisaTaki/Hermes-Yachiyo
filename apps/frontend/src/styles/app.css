@@ -3135,6 +3135,10 @@ button:hover {
   color: oklch(82% 0.12 86);
 }
 
+.diagnostic-blocking-caption {
+  color: oklch(79% 0.16 36);
+}
+
 .diagnostic-result-actions .diagnostic-targeted-action {
   border-color: oklch(78% 0.14 86 / 0.46);
   background: oklch(78% 0.14 86 / 0.12);

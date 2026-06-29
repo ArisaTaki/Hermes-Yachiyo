@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 PERMISSION_PROBE_CACHE_TTL_SECONDS = 30.0
 
 _PERMISSION_CACHE: tuple[str, float, dict[str, list[str]]] | None = None
+_RUNTIME_BLOCKER_CACHE: tuple[str, float, dict[str, list[str]]] | None = None
 
 
 def desktop_permission_missing_by_capability(
@@ -68,11 +69,48 @@ def cached_desktop_permission_missing_by_capability(
     return _copy_missing(cached)
 
 
+def desktop_runtime_blocking_conditions_by_capability(
+    *,
+    platform_name: str | None = None,
+    use_cache: bool = True,
+) -> dict[str, list[str]]:
+    """Return non-permission runtime blockers keyed by desktop capability id."""
+
+    global _RUNTIME_BLOCKER_CACHE
+
+    platform_id = _desktop_platform(platform_name)
+    if platform_id != "macos":
+        return {}
+
+    now = time.monotonic()
+    if use_cache and _RUNTIME_BLOCKER_CACHE is not None:
+        cache_platform, cache_time, cached = _RUNTIME_BLOCKER_CACHE
+        if cache_platform == platform_id and now - cache_time <= PERMISSION_PROBE_CACHE_TTL_SECONDS:
+            return _copy_missing(cached)
+
+    blocking: dict[str, list[str]] = {}
+    if _macos_desktop_session_locked():
+        for capability_id in (
+            "desktop_execution",
+            "active_window",
+            "app_control",
+            "media_control",
+            "foreground_activation",
+            "foreground_input",
+        ):
+            _add_missing(blocking, capability_id, "desktop_session_locked")
+
+    if use_cache:
+        _RUNTIME_BLOCKER_CACHE = (platform_id, now, _copy_missing(blocking))
+    return _copy_missing(blocking)
+
+
 def clear_desktop_permission_probe_cache() -> None:
     """Clear the readiness permission cache after explicit diagnostic changes."""
 
-    global _PERMISSION_CACHE
+    global _PERMISSION_CACHE, _RUNTIME_BLOCKER_CACHE
     _PERMISSION_CACHE = None
+    _RUNTIME_BLOCKER_CACHE = None
 
 
 def _probe_screen_capture(missing: dict[str, list[str]]) -> None:
@@ -285,6 +323,28 @@ def _env_value(name: str) -> str:
 
 def _command_exists(command: str) -> bool:
     return shutil.which(command) is not None
+
+
+def _macos_desktop_session_locked() -> bool:
+    if not _command_exists("ioreg"):
+        return False
+    try:
+        result = subprocess.run(
+            ["ioreg", "-n", "Root", "-d1"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except Exception:
+        return False
+    output = "\n".join(
+        part.strip()
+        for part in (result.stdout, result.stderr)
+        if isinstance(part, str) and part.strip()
+    )
+    normalized = output.replace(" ", "").lower()
+    return "cgssessionscreenislocked\"=yes" in normalized or "cgssessionscreenislocked=yes" in normalized
 
 
 def _looks_like_permission_error(value: Any) -> bool:

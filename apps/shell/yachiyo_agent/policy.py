@@ -753,6 +753,7 @@ def desktop_execution_capability_snapshots(
     registered_tools: Iterable[str] | None = None,
     platform_name: str | None = None,
     missing_permissions: Mapping[str, Iterable[str]] | None = None,
+    blocking_conditions: Mapping[str, Iterable[str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Return public readiness entries for desktop execution capabilities."""
 
@@ -760,6 +761,7 @@ def desktop_execution_capability_snapshots(
     supported = platform_id == "macos"
     registered = {str(tool or "").strip() for tool in registered_tools or []}
     missing_by_capability = missing_permissions or {}
+    blocking_by_capability = blocking_conditions or {}
     capability_models: dict[str, DesktopExecutionCapabilitySnapshot] = {}
     child_availability: dict[str, bool] = {}
     child_available_tools: dict[str, list[str]] = {}
@@ -771,8 +773,9 @@ def desktop_execution_capability_snapshots(
             continue
         tools = list(DESKTOP_CAPABILITY_TOOLS[capability_id])
         missing = _missing_permissions(missing_by_capability, capability_id)
+        blocking = _missing_permissions(blocking_by_capability, capability_id)
         available = supported and bool(tools) and all(tool in registered for tool in tools)
-        available = available and not missing
+        available = available and not missing and not blocking
         available_tools, degraded_tools, unavailable_tools = _capability_tool_availability(
             capability_id,
             tools,
@@ -780,6 +783,10 @@ def desktop_execution_capability_snapshots(
             supported=supported,
             missing_by_capability=missing_by_capability,
         )
+        if blocking:
+            available_tools = []
+            degraded_tools = []
+            unavailable_tools = tools
         child_availability[capability_id] = available
         child_available_tools[capability_id] = available_tools
         child_degraded_tools[capability_id] = degraded_tools
@@ -788,6 +795,7 @@ def desktop_execution_capability_snapshots(
             available=available,
             platform=platform_id,
             missing_permissions=missing,
+            blocking_conditions=blocking,
             tools=tools,
             available_tools=available_tools,
             degraded_tools=degraded_tools,
@@ -797,6 +805,7 @@ def desktop_execution_capability_snapshots(
         )
 
     root_missing = _missing_permissions(missing_by_capability, "desktop_execution")
+    root_blocking = _missing_permissions(blocking_by_capability, "desktop_execution")
     root_available_tools = _ordered_unique(
         tool
         for capability_id in DESKTOP_EXECUTION_CAPABILITY_IDS
@@ -828,14 +837,20 @@ def desktop_execution_capability_snapshots(
         and tool not in root_diagnostic_tools
     )
     capability_models["desktop_execution"] = DesktopExecutionCapabilitySnapshot(
-        available=supported and any(child_availability.values()) and not root_missing,
+        available=supported
+        and any(child_availability.values())
+        and not root_missing
+        and not root_blocking,
         platform=platform_id,
         missing_permissions=root_missing,
+        blocking_conditions=root_blocking,
         tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"]),
-        available_tools=[] if root_missing else _ordered_unique([*root_diagnostic_tools, *root_available_tools]),
-        degraded_tools=[] if root_missing else root_degraded_tools,
+        available_tools=[]
+        if root_missing or root_blocking
+        else _ordered_unique([*root_diagnostic_tools, *root_available_tools]),
+        degraded_tools=[] if root_missing or root_blocking else root_degraded_tools,
         unavailable_tools=list(DESKTOP_CAPABILITY_TOOLS["desktop_execution"])
-        if root_missing
+        if root_missing or root_blocking
         else root_unavailable_tools,
         risk_default=DESKTOP_CAPABILITY_RISK_DEFAULTS["desktop_execution"],
         diagnostic_route=DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES["desktop_execution"],
