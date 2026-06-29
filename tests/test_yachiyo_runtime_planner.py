@@ -10004,6 +10004,10 @@ def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> Non
         "把当前网页内容整理成笔记",
         allowed_tools=allowed_tools,
     )
+    page_summary_decision = RuntimePlanner().decision(
+        "把当前网页总结一下，保存到备忘录",
+        allowed_tools=allowed_tools,
+    )
 
     assert decision.selected_intent.kind == "information_capture"
     assert decision.selected_intent.inputs == {
@@ -10029,6 +10033,14 @@ def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> Non
         "source": "current_page_content",
     }
     assert _step_by_id(page_decision, "read-note-context").tool_name == "browser.extract_text"
+    assert page_summary_decision.selected_intent.kind == "information_capture"
+    assert page_summary_decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "current_page_content",
+    }
+    assert _step_by_id(page_summary_decision, "read-note-context").tool_name == (
+        "browser.extract_text"
+    )
 
 
 def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
@@ -15092,6 +15104,19 @@ def test_planner_tool_requests_prefetches_context_note_for_model_loop() -> None:
         {
             "protocol": "json_fallback",
             "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把当前网页总结一下，保存到备忘录",
+        allowed_tools=["notes.create", "browser.extract_text"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_information_capture_context",

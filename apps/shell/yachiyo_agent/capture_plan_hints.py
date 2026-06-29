@@ -11,7 +11,7 @@ def capture_note_hint(prompt: str) -> dict[str, Any]:
     text = _clean(prompt)
     if not text or not _looks_like_note_request(text):
         return {}
-    source = context_source_hint(text)
+    source = context_source_hint(text) or _note_context_source_hint(text)
     if source:
         return {"action": "create_note_from_context", "source": source}
     body = note_body(text)
@@ -74,7 +74,11 @@ def note_body(text: str) -> str:
             or groups.get("body_en")
             or ""
         )
-        if body and not context_source_hint(body) and not _looks_like_placeholder_note_body(body):
+        if (
+            body
+            and not (context_source_hint(body) or _note_context_source_hint(body))
+            and not _looks_like_placeholder_note_body(body)
+        ):
             return body
     return ""
 
@@ -197,6 +201,54 @@ def context_source_hint(text: str) -> str:
     ):
         return "visible_text"
     return ""
+
+
+def _note_context_source_hint(text: str) -> str:
+    lowered = text.lower()
+    if _looks_like_current_page_content_reference(lowered):
+        return "current_page_content"
+    return ""
+
+
+def _looks_like_current_page_content_reference(text: str) -> bool:
+    page_terms = (
+        "current page",
+        "current webpage",
+        "this page",
+        "this webpage",
+        "当前网页",
+        "当前页面",
+        "当前页",
+        "这个网页",
+        "这个页面",
+        "本页",
+    )
+    content_terms = (
+        "summarize",
+        "summary",
+        "recap",
+        "extract",
+        "read",
+        "content",
+        "text",
+        "report",
+        "analysis",
+        "总结",
+        "摘要",
+        "概括",
+        "整理",
+        "提取",
+        "读取",
+        "读一下",
+        "内容",
+        "正文",
+        "文本",
+        "文字",
+        "报告",
+        "分析",
+        "调研",
+    )
+    return _contains_any(text, page_terms) and _contains_any(text, content_terms)
 
 
 def _looks_like_note_request(text: str) -> bool:
