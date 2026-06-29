@@ -35,7 +35,11 @@ from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY, dispatch_too
 
 
 @pytest.fixture(autouse=True)
-def _clear_plugin_tools():
+def _clear_plugin_tools(monkeypatch):
+    if hasattr(desktop_mod, "_desktop_runtime_blocking_conditions"):
+        monkeypatch.setattr(desktop_mod, "_desktop_runtime_blocking_conditions", lambda **_kwargs: {})
+    if hasattr(desktop_mod, "_desktop_session_locked_by_runtime_probe"):
+        monkeypatch.setattr(desktop_mod, "_desktop_session_locked_by_runtime_probe", lambda: False)
     clear_restricted_tool_plugins()
     yield
     clear_restricted_tool_plugins()
@@ -4243,6 +4247,59 @@ def test_app_focus_reports_locked_desktop_session_without_permission_error(monke
     ]
 
 
+def test_app_focus_reports_locked_desktop_session_from_runtime_probe(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(desktop_mod, "_desktop_session_locked_by_runtime_probe", lambda: True)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Calculator|false|Codex|true|0",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Calculator|true|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_launchservices_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"focused|{app_name}|false|Codex|true|0",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_dock_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"dock|{app_name}|clicked|false|Codex|true|0|计算器",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is False
+    assert result["error"] == "desktop_session_locked"
+    assert result["blocking_condition"] == "desktop_session_locked"
+    assert result["permission_error"] is False
+    assert result["data"]["desktop_session_locked"] is True
+    assert result["data"]["desktop_session_locked_by_runtime_probe"] is True
+    assert result["data"]["frontmost_app"] == "Codex"
+
+
 def test_app_focus_does_not_report_locked_when_system_events_saw_unlocked_frontmost(
     monkeypatch,
 ) -> None:
@@ -4698,6 +4755,47 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
     ]
     assert result["data"]["recovery_actions"] == result["recovery_actions"]
     assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
+
+
+def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_desktop_runtime_blocking_conditions",
+        lambda **_kwargs: {"foreground_activation": ["desktop_session_locked"]},
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["ok"] is True
+    assert result["permission_error"] is False
+    assert result["runtime_blocked"] is True
+    assert result["data"]["ready"] is False
+    assert result["blocking_conditions"] == ["desktop_session_locked"]
+    assert result["runtime_blocking_conditions"] == {
+        "foreground_activation": ["desktop_session_locked"]
+    }
+    assert result["affected_tools"][:2] == ["app.focus", "desktop.inspect_app"]
+    assert result["summary"].startswith("Desktop runtime blockers: desktop_session_locked")
+    assert result["recovery_hints"] == [
+        (
+            "Unlock the active macOS user session, then rerun desktop.permissions "
+            "or retry the foreground desktop action."
+        )
+    ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "解锁后重新检查桌面权限",
+            "tool": "desktop.permissions",
+            "input": {},
+            "permission_target": "desktop_session_unlocked",
+            "risk_level": "low",
+        }
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
 
 
 def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypatch) -> None:

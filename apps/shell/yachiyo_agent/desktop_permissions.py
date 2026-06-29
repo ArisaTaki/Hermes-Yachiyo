@@ -113,6 +113,23 @@ def desktop_runtime_blocking_conditions_by_capability(
     return _copy_missing(blocking)
 
 
+def cached_desktop_runtime_blocking_conditions_by_capability(
+    *,
+    platform_name: str | None = None,
+) -> dict[str, list[str]]:
+    """Return cached runtime desktop blockers without running fresh probes."""
+
+    platform_id = _desktop_platform(platform_name)
+    if platform_id != "macos" or _RUNTIME_BLOCKER_CACHE is None:
+        return {}
+    cache_platform, cache_time, cached = _RUNTIME_BLOCKER_CACHE
+    if cache_platform != platform_id:
+        return {}
+    if time.monotonic() - cache_time > PERMISSION_PROBE_CACHE_TTL_SECONDS:
+        return {}
+    return _copy_missing(cached)
+
+
 def clear_desktop_permission_probe_cache() -> None:
     """Clear the readiness permission cache after explicit diagnostic changes."""
 

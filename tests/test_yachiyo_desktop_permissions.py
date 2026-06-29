@@ -191,6 +191,37 @@ def test_desktop_runtime_blocker_probe_marks_foreground_activation_gap(monkeypat
     ) == {"foreground_activation": ["foreground_focus_unavailable"]}
 
 
+def test_cached_desktop_runtime_blockers_returns_cached_copy(monkeypatch) -> None:
+    desktop_permissions_mod.clear_desktop_permission_probe_cache()
+    monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: False)
+
+    calls = {"count": 0}
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        calls["count"] += 1
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|false|Codex|Codex|com.openai.codex"
+        raise AssertionError(script)
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
+
+    first = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+        use_cache=True,
+    )
+    cached = desktop_permissions_mod.cached_desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+    )
+    cached["foreground_activation"].append("mutated")
+    second_cached = desktop_permissions_mod.cached_desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+    )
+
+    assert first == {"foreground_activation": ["foreground_focus_unavailable"]}
+    assert second_cached == {"foreground_activation": ["foreground_focus_unavailable"]}
+    assert calls["count"] == 1
+
+
 def test_desktop_permission_probe_keeps_browser_available_when_cdp_is_reachable(monkeypatch) -> None:
     monkeypatch.setattr(
         desktop_permissions_mod,

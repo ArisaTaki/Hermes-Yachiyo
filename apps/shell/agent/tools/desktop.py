@@ -1311,14 +1311,33 @@ def permissions() -> dict[str, Any]:
         return _error("desktop.permissions", exc)
 
     clean_missing = _clean_missing_permissions_by_capability(missing_by_capability)
+    runtime_blockers = _desktop_runtime_blocking_conditions(use_cache=True)
     missing_targets = _ordered_unique(
         target for targets in clean_missing.values() for target in targets
     )
-    affected_tools = _affected_tools_for_missing_permissions(clean_missing)
-    ready = not missing_targets
-    summary = _desktop_permissions_summary(missing_targets, affected_tools)
-    recovery_hints = _permission_recovery_hints_for_targets(missing_targets)
-    recovery_actions = _permission_recovery_actions_for_targets(missing_targets)
+    blocking_conditions = _ordered_unique(
+        condition for conditions in runtime_blockers.values() for condition in conditions
+    )
+    affected_tools = _ordered_unique(
+        [
+            *_affected_tools_for_missing_permissions(clean_missing),
+            *_affected_tools_for_missing_permissions(runtime_blockers),
+        ]
+    )
+    ready = not missing_targets and not blocking_conditions
+    summary = _desktop_permissions_summary(
+        missing_targets,
+        affected_tools,
+        blocking_conditions=blocking_conditions,
+    )
+    recovery_hints = [
+        *_permission_recovery_hints_for_targets(missing_targets),
+        *_runtime_blocking_recovery_hints_for_conditions(blocking_conditions),
+    ]
+    recovery_actions = [
+        *_permission_recovery_actions_for_targets(missing_targets),
+        *_runtime_blocking_recovery_actions_for_conditions(blocking_conditions),
+    ]
     return {
         "ok": True,
         "action": "desktop.permissions",
@@ -1327,17 +1346,22 @@ def permissions() -> dict[str, Any]:
             "ready": ready,
             "missing_permissions": clean_missing,
             "permission_targets": missing_targets,
+            "runtime_blocking_conditions": runtime_blockers,
+            "blocking_conditions": blocking_conditions,
             "affected_tools": affected_tools,
             "recovery_actions": recovery_actions,
             "diagnostic_route": "/yachiyo/readiness",
         },
         "missing_permissions": missing_targets,
         "permission_targets": missing_targets,
+        "runtime_blocking_conditions": runtime_blockers,
+        "blocking_conditions": blocking_conditions,
         "affected_tools": affected_tools,
         "recovery_hints": recovery_hints,
         "recovery_actions": recovery_actions,
         "diagnostic_route": "/yachiyo/readiness",
-        "permission_error": not ready,
+        "runtime_blocked": bool(blocking_conditions),
+        "permission_error": bool(missing_targets),
         "fallback_used": False,
     }
 
@@ -1352,14 +1376,33 @@ def permission_preflight() -> dict[str, Any]:
     clean_missing = _clean_missing_permissions_by_capability(
         cached_desktop_permission_missing_by_capability()
     )
+    runtime_blockers = _desktop_runtime_blocking_conditions(use_cache=True, cached_only=True)
     missing_targets = _ordered_unique(
         target for targets in clean_missing.values() for target in targets
     )
-    affected_tools = _affected_tools_for_missing_permissions(clean_missing)
-    ready = not missing_targets
-    summary = _desktop_permissions_summary(missing_targets, affected_tools)
-    recovery_hints = _permission_recovery_hints_for_targets(missing_targets)
-    recovery_actions = _permission_recovery_actions_for_targets(missing_targets)
+    blocking_conditions = _ordered_unique(
+        condition for conditions in runtime_blockers.values() for condition in conditions
+    )
+    affected_tools = _ordered_unique(
+        [
+            *_affected_tools_for_missing_permissions(clean_missing),
+            *_affected_tools_for_missing_permissions(runtime_blockers),
+        ]
+    )
+    ready = not missing_targets and not blocking_conditions
+    summary = _desktop_permissions_summary(
+        missing_targets,
+        affected_tools,
+        blocking_conditions=blocking_conditions,
+    )
+    recovery_hints = [
+        *_permission_recovery_hints_for_targets(missing_targets),
+        *_runtime_blocking_recovery_hints_for_conditions(blocking_conditions),
+    ]
+    recovery_actions = [
+        *_permission_recovery_actions_for_targets(missing_targets),
+        *_runtime_blocking_recovery_actions_for_conditions(blocking_conditions),
+    ]
     return {
         "ok": True,
         "action": "desktop.permission_preflight",
@@ -1368,17 +1411,22 @@ def permission_preflight() -> dict[str, Any]:
             "ready": ready,
             "missing_permissions": clean_missing,
             "permission_targets": missing_targets,
+            "runtime_blocking_conditions": runtime_blockers,
+            "blocking_conditions": blocking_conditions,
             "affected_tools": affected_tools,
             "recovery_actions": recovery_actions,
             "diagnostic_route": "/yachiyo/readiness",
         },
         "missing_permissions": missing_targets,
         "permission_targets": missing_targets,
+        "runtime_blocking_conditions": runtime_blockers,
+        "blocking_conditions": blocking_conditions,
         "affected_tools": affected_tools,
         "recovery_hints": recovery_hints,
         "recovery_actions": recovery_actions,
         "diagnostic_route": "/yachiyo/readiness",
-        "permission_error": not ready,
+        "runtime_blocked": bool(blocking_conditions),
+        "permission_error": bool(missing_targets),
         "fallback_used": False,
     }
 
@@ -3025,10 +3073,14 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     "screen.capture",
                 ],
             }
-            if _focus_failure_indicates_locked_session(
+            locked_by_observation = _focus_failure_indicates_locked_session(
                 failed_data["frontmost_app"],
                 focus_attempts,
-            ):
+            )
+            locked_by_runtime_probe = _desktop_session_locked_by_runtime_probe()
+            if locked_by_observation or locked_by_runtime_probe:
+                if locked_by_runtime_probe:
+                    failed_data["desktop_session_locked_by_runtime_probe"] = True
                 return _desktop_session_locked_result(
                     "app.focus",
                     app_name=resolved_name,
@@ -3204,10 +3256,14 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "screen.capture",
         ],
     }
-    if _focus_failure_indicates_locked_session(
+    locked_by_observation = _focus_failure_indicates_locked_session(
         failed_data["frontmost_app"],
         focus_attempts,
-    ):
+    )
+    locked_by_runtime_probe = _desktop_session_locked_by_runtime_probe()
+    if locked_by_observation or locked_by_runtime_probe:
+        if locked_by_runtime_probe:
+            failed_data["desktop_session_locked_by_runtime_probe"] = True
         return _desktop_session_locked_result(
             "app.focus",
             app_name=resolved_name,
@@ -5683,6 +5739,38 @@ def _desktop_session_is_locked(frontmost_app: Any) -> bool:
     return _compact_app_match_name(str(frontmost_app or "")) == "loginwindow"
 
 
+def _desktop_runtime_blocking_conditions(
+    *,
+    use_cache: bool = True,
+    cached_only: bool = False,
+) -> dict[str, list[str]]:
+    try:
+        from apps.shell.yachiyo_agent.desktop_permissions import (
+            cached_desktop_runtime_blocking_conditions_by_capability,
+            desktop_runtime_blocking_conditions_by_capability,
+        )
+    except Exception:
+        return {}
+    try:
+        if cached_only:
+            raw_blockers = cached_desktop_runtime_blocking_conditions_by_capability()
+        else:
+            raw_blockers = desktop_runtime_blocking_conditions_by_capability(
+                use_cache=use_cache,
+            )
+    except Exception:
+        return {}
+    return _clean_missing_permissions_by_capability(raw_blockers)
+
+
+def _desktop_session_locked_by_runtime_probe() -> bool:
+    blockers = _desktop_runtime_blocking_conditions(use_cache=False)
+    return any(
+        "desktop_session_locked" in conditions
+        for conditions in blockers.values()
+    )
+
+
 def _focus_failure_indicates_locked_session(
     frontmost_app: Any,
     focus_attempts: list[dict[str, Any]],
@@ -6949,16 +7037,27 @@ def _affected_tools_for_missing_permissions(
 def _desktop_permissions_summary(
     missing_targets: list[str],
     affected_tools: list[str],
+    *,
+    blocking_conditions: list[str] | None = None,
 ) -> str:
-    if not missing_targets:
+    blockers = list(blocking_conditions or [])
+    if not missing_targets and not blockers:
         return "Desktop execution permissions are ready."
-    targets = ", ".join(missing_targets[:6])
-    target_suffix = "..." if len(missing_targets) > 6 else ""
+    parts: list[str] = []
+    if missing_targets:
+        targets = ", ".join(missing_targets[:6])
+        target_suffix = "..." if len(missing_targets) > 6 else ""
+        parts.append(f"Missing desktop permissions: {targets}{target_suffix}")
+    if blockers:
+        conditions = ", ".join(blockers[:6])
+        condition_suffix = "..." if len(blockers) > 6 else ""
+        parts.append(f"Desktop runtime blockers: {conditions}{condition_suffix}")
     if not affected_tools:
-        return f"Missing desktop permissions: {targets}{target_suffix}"
+        return ". ".join(parts)
     tools = ", ".join(affected_tools[:6])
     tool_suffix = "..." if len(affected_tools) > 6 else ""
-    return f"Missing desktop permissions: {targets}{target_suffix}. Affected tools: {tools}{tool_suffix}"
+    parts.append(f"Affected tools: {tools}{tool_suffix}")
+    return ". ".join(parts)
 
 
 def _permission_recovery_actions_for_targets(targets: list[str]) -> list[dict[str, Any]]:
@@ -6985,6 +7084,57 @@ def _permission_recovery_actions_for_targets(targets: list[str]) -> list[dict[st
                 }
             )
     return actions
+
+
+def _runtime_blocking_recovery_actions_for_conditions(
+    conditions: list[str],
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    if "desktop_session_locked" in conditions:
+        actions.append(
+            {
+                "label": "解锁后重新检查桌面权限",
+                "tool": "desktop.permissions",
+                "input": {},
+                "permission_target": "desktop_session_unlocked",
+                "risk_level": "low",
+            }
+        )
+    if "foreground_focus_unavailable" in conditions:
+        actions.extend(
+            [
+                {
+                    "label": "查看前台窗口",
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "permission_target": "foreground_focus",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "截图确认前台",
+                    "tool": "screen.capture",
+                    "input": {"reason": "verify foreground app after focus blocker"},
+                    "permission_target": "foreground_focus",
+                    "risk_level": "low",
+                },
+            ]
+        )
+    return actions
+
+
+def _runtime_blocking_recovery_hints_for_conditions(conditions: list[str]) -> list[str]:
+    hints: list[str] = []
+    if "desktop_session_locked" in conditions:
+        hints.append(
+            "Unlock the active macOS user session, then rerun desktop.permissions "
+            "or retry the foreground desktop action."
+        )
+    if "foreground_focus_unavailable" in conditions:
+        hints.append(
+            "The current runtime can observe apps but cannot bring the target app "
+            "to the foreground; inspect active_window/screen evidence before retrying."
+        )
+    return hints
 
 
 def _ordered_unique(values: Any) -> list[str]:

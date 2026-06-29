@@ -140,10 +140,13 @@ process is launched but still cannot become frontmost, the evidence preserves
 remaining host-level foreground limitation.
 
 Readiness now separates foreground activation runtime blockers from permission
-gaps. `foreground_focus_unavailable` is reported through capability and
-tool-level `blocking_conditions`, so Chat, Bubble, AgentTaskCard, Diagnostics,
-and Agent Studio can show that `app.open` still works while `app.focus` and
-foreground-input tools are currently blocked.
+gaps. `desktop.permissions` and `desktop.permission_preflight` expose
+`runtime_blocking_conditions` and flattened `blocking_conditions` separately
+from `permission_targets`. `foreground_focus_unavailable` and
+`desktop_session_locked` are reported through capability and tool-level
+metadata, so Chat, Bubble, AgentTaskCard, Diagnostics, and Agent Studio can
+show that `app.open` still works while `app.focus` and foreground-input tools
+are currently blocked.
 
 The Runtime Planner now consumes those readiness blockers before execution:
 blocked foreground operation steps are marked `unavailable`, the affected
@@ -317,19 +320,35 @@ python scripts/verify_release_candidate.py --source-only \
   --report-json tmp/source-only-electron-bridge-rc.json
 ```
 
+The low-risk real app open gate can also be included in source-only mode:
+
+```bash
+python scripts/verify_release_candidate.py --source-only \
+  --run-real-desktop-app-open-smoke \
+  --report-json tmp/source-only-real-app-open-after-runtime-blockers.json
+```
+
 This passed the current source release guards, data-analysis artifact smoke,
 browser planner artifact smoke, desktop planner discovery smoke, real desktop
-discovery smoke, Electron native bridge auth/status smoke when requested,
+discovery smoke, real desktop app open smoke when requested, Electron native
+bridge auth/status smoke when requested,
 planner/runtime tool parity smoke, approval policy gate smoke, approval resume
 timeline smoke, runtime approval resume smoke, Yachiyo route approval smoke,
 and GroupRun timeline smoke. It intentionally skipped opt-in or
-artifact-dependent gates: real app open/UI inspection/interaction, real
-Electron focus-app bridge attempts, built artifacts, DMG
+artifact-dependent gates: real desktop UI inspection/interaction, real Electron
+focus-app bridge attempts, built artifacts, DMG
 launch/screen/UI/native-file checks, real provider smoke, UI smokes, and manual
 release-candidate checks. Passing this baseline proves the source-level
 planner/runtime contracts are currently coherent; it is not release parity
 until the skipped packaged, provider, real desktop, and manual evidence is
 supplied.
+
+Latest local real UI inspection and interaction attempts on June 30, 2026
+opened Calculator successfully but stopped at `app.focus` because macOS
+reported `desktop_session_locked`. The interaction smoke failed before any
+typing or clicking and cleaned up Calculator, which is the intended guarded
+behavior until the foreground session is unlocked and the smoke can prove the
+full type -> inspect -> click -> verify loop.
 
 Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:
