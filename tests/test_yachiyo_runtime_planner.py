@@ -6478,6 +6478,43 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "text": "文件传输助手",
     }
 
+    app_scoped_content_report = RuntimePlanner().decision(
+        "在 Slack 搜索 yachiyo，然后总结当前结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "artifact.write",
+        ],
+    )
+    assert app_scoped_content_report.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in app_scoped_content_report.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-desktop-content",
+        "write-desktop-content-artifact",
+    ]
+    assert _step_by_id(
+        app_scoped_content_report,
+        "focus-app-search-field",
+    ).input_preview == {"app_name": "Slack", "action": "find"}
+    assert _step_by_id(
+        app_scoped_content_report,
+        "type-app-search-query",
+    ).input_preview == {"app_name": "Slack", "text": "yachiyo"}
+    assert _step_by_id(
+        app_scoped_content_report,
+        "read-desktop-content",
+    ).input_preview == {
+        "role_filter": "text",
+        "limit": 120,
+        "app_name": "Slack",
+    }
+
     leading = RuntimePlanner().decision(
         "Finder 找下载文件",
         allowed_tools=[

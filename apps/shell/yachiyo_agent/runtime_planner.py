@@ -3033,57 +3033,66 @@ class RuntimePlanner:
         ):
             prepare_mode = _app_search_prepare_mode(intent.user_goal, mode) if app_search else mode
             prepare_tool = _first_allowed(app_control_tool_candidates(prepare_mode), allowed)
-            steps.append(
-                _step(
-                    intent,
-                    "open-or-focus-app",
-                    "Open or focus app",
-                    "desktop.app_control",
-                    prepare_tool,
-                    input_preview={"app_name": app_name},
-                    depends_on=["discover-desktop-state"],
-                    reason="Resolve the requested app by name at runtime.",
+            scoped_search_focus_tool = (
+                _first_allowed(
+                    app_foreground_tool_candidates(prepare_mode, "safe_shortcut"),
+                    allowed,
                 )
+                if app_search
+                else None
             )
-            focus_tool = _first_allowed(("app.focus",), allowed)
-            if (
-                prepare_tool == "app.open"
-                and focus_tool
-                and (
-                    not app_search
-                    or _contains_any(
-                        intent.user_goal,
-                        ["打开", "启动", "开启", "open ", "launch ", "start "],
-                    )
-                )
-                and any(
-                    item
-                    for item in (
-                        app_search,
-                        click_target,
-                        type_target,
-                        safe_type_text,
-                        hotkey,
-                        primary_safe_shortcut,
-                        safe_key,
-                        safe_scroll,
-                        safe_click,
-                    )
-                    if item
-                )
-            ):
+            if prepare_tool or not scoped_search_focus_tool:
                 steps.append(
                     _step(
                         intent,
-                        "focus-opened-app",
-                        "Focus opened app",
+                        "open-or-focus-app",
+                        "Open or focus app",
                         "desktop.app_control",
-                        focus_tool,
+                        prepare_tool,
                         input_preview={"app_name": app_name},
-                        depends_on=["open-or-focus-app"],
-                        reason="Bring the opened app to the foreground before running the generic desktop operation.",
+                        depends_on=["discover-desktop-state"],
+                        reason="Resolve the requested app by name at runtime.",
                     )
                 )
+                focus_tool = _first_allowed(("app.focus",), allowed)
+                if (
+                    prepare_tool == "app.open"
+                    and focus_tool
+                    and (
+                        not app_search
+                        or _contains_any(
+                            intent.user_goal,
+                            ["打开", "启动", "开启", "open ", "launch ", "start "],
+                        )
+                    )
+                    and any(
+                        item
+                        for item in (
+                            app_search,
+                            click_target,
+                            type_target,
+                            safe_type_text,
+                            hotkey,
+                            primary_safe_shortcut,
+                            safe_key,
+                            safe_scroll,
+                            safe_click,
+                        )
+                        if item
+                    )
+                ):
+                    steps.append(
+                        _step(
+                            intent,
+                            "focus-opened-app",
+                            "Focus opened app",
+                            "desktop.app_control",
+                            focus_tool,
+                            input_preview={"app_name": app_name},
+                            depends_on=["open-or-focus-app"],
+                            reason="Bring the opened app to the foreground before running the generic desktop operation.",
+                        )
+                    )
         inspect_preflight_step_id = ""
         if (
             app_name
@@ -3190,19 +3199,27 @@ class RuntimePlanner:
                 and not focus_step_added
             ):
                 prepare_mode = _app_search_prepare_mode(intent.user_goal, mode)
-                steps.append(
-                    _step(
-                        intent,
-                        "open-or-focus-app",
-                        "Open or focus app",
-                        "desktop.app_control",
-                        _first_allowed(app_control_tool_candidates(prepare_mode), allowed),
-                        input_preview={"app_name": app_name},
-                        depends_on=[app_search_prepare_step_id],
-                        reason="Resolve the requested app by name after preserving the dynamic search query.",
-                    )
+                prepare_tool = _first_allowed(app_control_tool_candidates(prepare_mode), allowed)
+                scoped_search_focus_tool = _first_allowed(
+                    app_foreground_tool_candidates(prepare_mode, "safe_shortcut"),
+                    allowed,
                 )
-                app_search_prepare_step_id = "open-or-focus-app"
+                if prepare_tool or not scoped_search_focus_tool:
+                    steps.append(
+                        _step(
+                            intent,
+                            "open-or-focus-app",
+                            "Open or focus app",
+                            "desktop.app_control",
+                            prepare_tool,
+                            input_preview={"app_name": app_name},
+                            depends_on=[app_search_prepare_step_id],
+                            reason="Resolve the requested app by name after preserving the dynamic search query.",
+                        )
+                    )
+                    app_search_prepare_step_id = "open-or-focus-app"
+                elif app_search_prepare_step_id == "open-or-focus-app":
+                    app_search_prepare_step_id = "discover-desktop-state"
             search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
             if not search_focus_tool and app_name:
                 search_focus_tool = _first_allowed(
