@@ -7136,7 +7136,12 @@ def _append_analysis_communication_steps(
         allowed,
     )
     app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
-    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    type_tool, recipient_type_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload={"text": recipient},
+    )
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     communication_steps: list[ToolPlanStepSnapshot] = []
@@ -7174,6 +7179,12 @@ def _append_analysis_communication_steps(
     }
     if transform:
         draft_input["transform"] = transform
+    draft_tool, draft_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload=draft_input,
+    )
     communication_steps.extend(
         [
             _step(
@@ -7193,7 +7204,7 @@ def _append_analysis_communication_steps(
                 "Type communication recipient",
                 "communication.compose",
                 type_tool,
-                input_preview={"text": recipient},
+                input_preview=recipient_type_input,
                 depends_on=["focus-communication-recipient-search"],
                 action="type",
                 reason="Type only the explicit recipient from the user prompt.",
@@ -7214,7 +7225,7 @@ def _append_analysis_communication_steps(
                 "draft-analysis-communication-message",
                 "Draft analysis communication message",
                 "communication.compose",
-                type_tool,
+                draft_tool,
                 input_preview=draft_input,
                 depends_on=["submit-communication-recipient-search"],
                 action="draft_message",

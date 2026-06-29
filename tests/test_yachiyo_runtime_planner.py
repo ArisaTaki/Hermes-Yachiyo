@@ -1002,6 +1002,50 @@ def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> Non
         "transform": "report",
     }
 
+    app_scoped_slack_decision = RuntimePlanner().decision(
+        "把 data/metrics.xlsx 分析成图表报告，然后发给 Slack 的 yachiyo",
+        allowed_tools=[
+            "data.analyze",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert app_scoped_slack_decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(
+        app_scoped_slack_decision,
+        "focus-communication-recipient-search",
+    ).tool_name == "app.focus_and_safe_shortcut"
+    assert _step_by_id(
+        app_scoped_slack_decision,
+        "type-communication-recipient",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_slack_decision,
+        "type-communication-recipient",
+    ).input_preview == {
+        "app_name": "Slack",
+        "text": "yachiyo",
+    }
+    assert _step_by_id(
+        app_scoped_slack_decision,
+        "draft-analysis-communication-message",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_slack_decision,
+        "draft-analysis-communication-message",
+    ).input_preview == {
+        "app_name": "Slack",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "transform": "report",
+    }
+
     email_decision = RuntimePlanner().decision(
         "分析 data/sales.csv 并发邮件给 Alice 说明本周业绩",
         allowed_tools=allowed_tools,
@@ -14891,6 +14935,36 @@ def test_planner_tool_requests_continues_after_builtin_data_analysis_for_communi
             "protocol": "json_fallback",
             "tool": "data.analyze",
             "input": _data_analysis_preview("sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    app_scoped_delivery_requests = planner_tool_requests(
+        "把 data/metrics.xlsx 分析成图表报告，然后发给 Slack 的 yachiyo",
+        allowed_tools=[
+            "data.analyze",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert app_scoped_delivery_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview(
+                "data/metrics.xlsx",
+                "xlsx",
+                requested_outputs=["chart", "report"],
+                artifact_paths=["analysis-report.md", "analysis-chart.png"],
+            ),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
             "continue_to_model": True,
