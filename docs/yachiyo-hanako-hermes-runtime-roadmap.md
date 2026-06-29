@@ -75,10 +75,16 @@ Current Browser/Web planner artifact evidence is reproducible with
 selects browser tools and expected artifacts, while real browser/CDP execution
 remains covered by later UI or opt-in integration smoke evidence.
 
-Current desktop discovery/operate planner evidence is reproducible with
-`python scripts/smoke_desktop_planner_discovery.py`; this proves arbitrary app
-names and app-scoped click/type requests plan through `desktop.list_apps`,
-app foreground tools, verification steps, and Studio-routable events.
+Current desktop discovery/operate planner evidence is reproducible with:
+
+```bash
+python scripts/smoke_desktop_planner_discovery.py \
+  --report-json tmp/desktop-planner-discovery.json
+```
+
+This proves arbitrary app names and app-scoped click/type requests plan through
+`desktop.list_apps`, app foreground tools, verification steps, and
+Studio-routable events.
 
 Current real desktop discovery evidence is reproducible with
 `python scripts/smoke_real_desktop_discovery.py`; on macOS this runs the real
@@ -117,13 +123,17 @@ lights preserve that condition separately from `permission_targets`, show the
 localized blocker and recovery hint, and keep executable recovery actions
 available without claiming that the user must grant another macOS permission.
 
-Current planner/runtime tool parity evidence is reproducible with
-`python scripts/smoke_planner_runtime_tool_parity.py --report-json tmp/planner-runtime-tool-parity.json`;
-this proves representative
-planner-selected desktop, data-analysis, browser, media, terminal, and reminder
-tools are present in the runtime tool registry, dispatch table, main Chat
-policy, model descriptors, and approval map. It does not replace packaged-app
-or OS-permission execution smoke evidence.
+Current planner/runtime tool parity evidence is reproducible with:
+
+```bash
+python scripts/smoke_planner_runtime_tool_parity.py \
+  --report-json tmp/planner-runtime-tool-parity.json
+```
+
+This proves representative planner-selected desktop, data-analysis, browser,
+media, terminal, and reminder tools are present in the runtime tool registry,
+dispatch table, main Chat policy, model descriptors, and approval map. It does
+not replace packaged-app or OS-permission execution smoke evidence.
 
 Current approval/policy source evidence is reproducible with
 `python scripts/smoke_approval_policy_gate.py`; this proves planner-facing

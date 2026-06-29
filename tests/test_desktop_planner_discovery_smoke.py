@@ -66,3 +66,18 @@ def test_desktop_planner_discovery_smoke_cli_outputs_json(capsys):
     assert output["ok"] is True
     assert output["mode"] == "desktop_planner_discovery_smoke"
     assert output["case_count"] == len(smoke.DESKTOP_PLANNER_CASES)
+
+
+def test_desktop_planner_discovery_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "desktop-planner-discovery.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "desktop_planner_discovery_smoke"
+    assert "desktop planner discovery smoke report:" in captured.err
+    assert str(report_path) in captured.err
