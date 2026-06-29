@@ -2257,6 +2257,17 @@ class RuntimePlanner:
         if operation_mode_hint in {"open", "focus"}:
             mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
+        if (
+            click_target
+            and _click_target_needs_observation_choice(intent.user_goal, click_target)
+            and (ui_inspection is not None or screen_capture is not None)
+        ):
+            if ui_inspection is None:
+                ui_inspection = {
+                    "role_filter": str(click_target.get("role_filter") or ""),
+                    "limit": 80,
+                }
+            click_target = None
         app_click_scope = _app_first_click_scope_hint(intent.user_goal)
         scoped_click_app = str(app_click_scope.get("app_name") or "").strip()
         scoped_click_target = app_click_scope.get("click_target")
@@ -13808,6 +13819,8 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
 def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
     if _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         return {}
+    if _looks_like_find_visible_target_action(text):
+        return {}
     field_query = ""
     app = str(app_name or "").strip()
     foreground_query = _foreground_find_query_hint(text)
@@ -13843,6 +13856,45 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
         "query": query,
         "target": "搜索" if _contains_any(text, ("搜索", "查找", "检索", "找")) else "Search",
     }
+
+
+def _looks_like_find_visible_target_action(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:找到|找|定位|选择|选中).{1,80}"
+            r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?.{0,12}"
+            r"(?:点击|点一下|点按|单击|打开|进入)$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:find|locate|choose|select)\b.{1,80}"
+            r"\b(?:click|press|tap|open)\b(?:\s+(?:it|that|them))?[.!?]?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _click_target_needs_observation_choice(
+    text: str,
+    click_target: Mapping[str, Any] | None,
+) -> bool:
+    target = str((click_target or {}).get("target") or "")
+    value = f"{_clean_prompt(text)} {target}"
+    return bool(
+        re.search(
+            r"(?:最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪个|哪里|哪一个|哪项|哪条)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|should)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_app_search_followup_app(app_name: str) -> bool:

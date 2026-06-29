@@ -752,13 +752,15 @@ def _desktop_observation_step_needs_model_followup(
     return bool(
         re.search(
             r"(?:判断|决定|分析|识别|告诉|说明|总结|摘要|下一步|该点哪里|该点哪个|"
-            r"能否|能不能|可以点|是否可以|是否能|如果能|如果可以)",
+            r"能否|能不能|可以点|是否可以|是否能|如果能|如果可以|"
+            r"最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪一个|哪项|哪条)",
             prompt,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:judge|decide|analy[sz]e|identify|tell|explain|summari[sz]e|"
-            r"determine|whether|what|which|where|can|should|next)\b",
+            r"determine|whether|what|which|where|can|should|next|closest|similar|"
+            r"related|matching|appropriate|suitable|possible)\b",
             prompt,
             flags=re.IGNORECASE,
         )

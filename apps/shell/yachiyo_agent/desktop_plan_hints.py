@@ -162,6 +162,11 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
     ):
         return None
     patterns = (
+        r"(?:找到|找|定位|选择|选中)\s*(?P<target_find>[^。！？!?，,]+?)"
+        r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?\s*"
+        r"(?:并|然后|再|之后|后)?\s*(?:双击|点击|点一下|点按|单击|打开|进入)$",
+        r"(?:find|locate|choose|select)\s+(?:the\s+)?(?P<target_find_en>[^.!?,]+?)\s*"
+        r"(?:and\s+then|then|and)?\s*(?:click|press|tap|open)\s+(?:it|that|them)?$",
         r"(?P<target_post>[^。！？!?，,]{1,60}?)(?:按钮|控件|元素|菜单项|菜单|复选框)?\s*(?:双击|点击|点一下|点按|单击)$",
         r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*(?P<target>[^。！？!?，,]+)",
         r"(?:double\s+click|click|press|tap)\s+(?:the\s+)?(?P<target_en>[^.!?,]+)",
@@ -174,6 +179,8 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
             match.groupdict().get("target")
             or match.groupdict().get("target_post")
             or match.groupdict().get("target_en")
+            or match.groupdict().get("target_find")
+            or match.groupdict().get("target_find_en")
             or ""
         )
         target = clean_target(raw_target)

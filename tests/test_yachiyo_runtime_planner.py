@@ -3025,6 +3025,95 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "limit": 80,
     }
 
+    find_then_click = RuntimePlanner().decision(
+        "打开 SuperData Studio，先看看界面，找到导出按钮并点击",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert find_then_click.selected_intent.kind == "desktop_operation"
+    assert find_then_click.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+    assert [step.step_id for step in find_then_click.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(find_then_click, "inspect-app").input_preview == {
+        "app_name": "SuperData Studio",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert _step_by_id(find_then_click, "operate-foreground-ui").input_preview == {
+        "app_name": "SuperData Studio",
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "打开 SuperData Studio，先看看界面，找到导出按钮并点击",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    ambiguous_find_then_click = RuntimePlanner().decision(
+        "打开 SuperData Studio，先看看界面，然后点击最像导出的按钮",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert ambiguous_find_then_click.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in ambiguous_find_then_click.plan.tool_plan.steps] == [
+        "inspect-app",
+    ]
+    assert _step_by_id(ambiguous_find_then_click, "inspect-app").input_preview == {
+        "app_name": "SuperData Studio",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert planner_tool_requests(
+        "打开 SuperData Studio，先看看界面，然后点击最像导出的按钮",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "SuperData Studio",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
     type_tools = [
         "desktop.inspect_app",
         "desktop.list_apps",

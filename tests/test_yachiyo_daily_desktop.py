@@ -411,6 +411,75 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 SuperData Studio，先看看界面，找到导出按钮并点击",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "SuperData Studio",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "SuperData Studio",
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 SuperData Studio，先看看界面，然后点击最像导出的按钮",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "SuperData Studio",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_input() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
