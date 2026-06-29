@@ -11342,7 +11342,10 @@ def _app_scoped_create_text_hint(text: str) -> str:
     if not _looks_like_app_scoped_create_followup(followup):
         return ""
     patterns = (
-        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
+        r"(?P<text>[^。！？!?，,]+?)"
+        r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片))?"
+        r"(?:$|[。！？!?，,])",
         r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片)",
@@ -11369,8 +11372,9 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
     value = _clean_prompt(text)
     return bool(
         re.search(
-            r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份)?\s*"
+            r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
             r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
+            r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
             r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|项目|任务|卡片)",
             value,
             flags=re.IGNORECASE,
@@ -13443,6 +13447,8 @@ def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
     safe_shortcut = safe_shortcut_hint(followup)
     app_name = str(parsed.get("app_name") or "").strip()
     canonical_app_name = _canonical_app_name_hint(app_name)
+    if safe_shortcut is None and _looks_like_app_scoped_create_followup(followup):
+        safe_shortcut = safe_shortcut_hint(f"打开 {followup}")
     if safe_shortcut is None:
         default_new_action = _app_default_new_item_shortcut_action(canonical_app_name, followup)
         if default_new_action:
@@ -13550,6 +13556,7 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"new\s+(?:ticket|issue|task|card|bug|bug\s*ticket)|"
         r"create\s+(?:a\s+)?(?:new\s+)?(?:ticket|issue|task|card|bug|bug\s*ticket)|"
         r"new\s+workspace|create\s+(?:a\s+)?new\s+workspace|create\s+workspace|"
+        r"(?:create|make)\s+(?:a\s+)?new\s+(?:note|page|document|file|project|task|card)|"
         r"new\s+message|new\s+chat|new\s+conversation|compose\s+message|compose\s+email|"
         r"new\s+email|new\s+mail|write\s+email|write\s+mail|"
         r"open\s+dev\s*tools|show\s+dev\s*tools|dev\s*tools|developer\s+tools).*)"

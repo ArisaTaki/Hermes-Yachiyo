@@ -9330,6 +9330,76 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         },
     ]
 
+    titled_container_variants = (
+        (
+            "打开 Obsidian 新建一篇标题为周报的文档",
+            "Obsidian",
+            "new_document",
+            "周报",
+            "app.open_and_safe_shortcut",
+        ),
+        (
+            "打开 Obsidian 新建一篇标题为周报的笔记",
+            "Obsidian",
+            "new_note",
+            "周报",
+            "app.open_and_safe_shortcut",
+        ),
+        (
+            "在 Pages 新建一份标题为项目计划的文档",
+            "Pages",
+            "new_document",
+            "项目计划",
+            "app.focus_and_safe_shortcut",
+        ),
+        (
+            "Obsidian create a new document titled weekly report",
+            "Obsidian",
+            "new_document",
+            "weekly report",
+            "app.focus_and_safe_shortcut",
+        ),
+    )
+    titled_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    for prompt, app_name, action, title_text, expected_tool in titled_container_variants:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=titled_allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": app_name,
+            "operation_hint": "safe_shortcut",
+            "safe_shortcut_hint": {"action": action},
+            "foreground_compose_text_hint": title_text,
+        }
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "operate-foreground-ui").tool_name == expected_tool
+        assert _step_by_id(decision, "operate-foreground-ui").input_preview == {
+            "app_name": app_name,
+            "action": action,
+        }
+        assert _step_by_id(
+            decision,
+            "operate-foreground-ui-followup-type",
+        ).input_preview == {"text": title_text}
+        assert [request["tool"] for request in planner_direct_tool_requests(
+            prompt,
+            titled_allowed_tools,
+        )] == [
+            "desktop.list_apps",
+            expected_tool,
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+
     topic_note = RuntimePlanner().decision(
         "打开 Obsidian，创建一篇关于本周业绩的笔记",
         allowed_tools=[
