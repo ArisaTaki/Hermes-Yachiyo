@@ -2655,7 +2655,7 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
     text = clean(value)
     lowered = text.lower()
     if not re.search(
-        r"(?:打开|启动|开启|切到|聚焦|写下|写入|记录下|记下|"
+        r"(?:打开|启动|开启|切到|聚焦|写下|写入|记录下|记下|在|用|通过|"
         r"\b(?:open|launch|start|focus|switch|type|enter|write)\b)",
         text,
         flags=re.IGNORECASE,

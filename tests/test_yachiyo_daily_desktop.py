@@ -235,6 +235,45 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在 Obsidian 新建一篇关于 Oha Yachiyo 的笔记",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Obsidian", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Oha Yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_open_spreadsheet_data_file() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(

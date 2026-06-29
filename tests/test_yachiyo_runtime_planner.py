@@ -7100,6 +7100,31 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         "text": "本周业绩"
     }
 
+    app_scoped_topic_note = RuntimePlanner().decision(
+        "在 Obsidian 新建一篇关于 Oha Yachiyo 的笔记",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_scoped_topic_note.selected_intent.kind == "desktop_operation"
+    assert app_scoped_topic_note.selected_intent.inputs == {
+        "app_name_hint": "Obsidian",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+        "foreground_compose_text_hint": "Oha Yachiyo",
+    }
+    assert _step_by_id(app_scoped_topic_note, "operate-foreground-ui").input_preview == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(
+        app_scoped_topic_note,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "Oha Yachiyo"}
+
 
 def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() -> None:
     decision = RuntimePlanner().decision(
