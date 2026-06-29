@@ -518,6 +518,33 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
     ]
 
     assert planner_first_daily_desktop_entrypoint_requests(
+        "打开一个我没提过的新应用 PixelForge 然后截图给我看",
+        allowed_tools=["desktop.list_apps", "app.open", "screen.capture"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    assert planner_first_daily_desktop_entrypoint_requests(
         "把当前屏幕截图发给微信文件传输助手",
         allowed_tools=[
             "screen.capture",

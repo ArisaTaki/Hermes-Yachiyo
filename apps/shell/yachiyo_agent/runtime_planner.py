@@ -10576,6 +10576,24 @@ def _clean_app_name_hint(value: str) -> str:
     )
     if english_called_app_match:
         app = english_called_app_match.group("app")
+    app = re.sub(
+        r"^(?:一个|一款|这个|那个)?"
+        r"(?:我(?:没|没有)提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
+        r"(?:新\s*)?(?:应用(?:程序)?|软件)?"
+        r"(?:\s*(?:叫|名叫|名称是|名字是))?\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"^(?:(?:an?|the)\s+)?"
+        r"(?:(?:new|unknown|unmentioned|unfamiliar)\s+)+"
+        r"(?:(?:app|application|software)\s+)?"
+        r"(?:(?:called|named)\s+)?",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.split(
         r"\s*(?:(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)\s*)?"
         r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"

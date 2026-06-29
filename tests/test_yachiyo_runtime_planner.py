@@ -4594,18 +4594,24 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
     cases = (
         (
             "在一个叫 SuperData Studio 的应用里输入 hello",
+            "SuperData Studio",
+            "operate-foreground-ui",
             "app.focus_and_safe_type_text",
             {"app_name": "SuperData Studio", "text": "hello"},
             {},
         ),
         (
             "in an app called SuperData Studio type hello",
+            "SuperData Studio",
+            "operate-foreground-ui",
             "app.focus_and_safe_type_text",
             {"app_name": "SuperData Studio", "text": "hello"},
             {},
         ),
         (
             "inside the app named SuperData Studio click Export button",
+            "SuperData Studio",
+            "operate-foreground-ui",
             "app.focus_and_click_ui_element",
             {
                 "app_name": "SuperData Studio",
@@ -4618,23 +4624,23 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
         ),
     )
 
-    for prompt, operation_tool, operation_input, verify_input in cases:
+    for prompt, expected_app, step_id, operation_tool, operation_input, verify_input in cases:
         decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
         assert decision.selected_intent.kind == "desktop_operation"
-        assert decision.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app
         assert _step_by_id(decision, "discover-desktop-state").input_preview == {
-            "query": "SuperData Studio",
+            "query": expected_app,
             "limit": 20,
         }
-        assert _step_by_id(decision, "operate-foreground-ui").tool_name == operation_tool
-        assert _step_by_id(decision, "operate-foreground-ui").input_preview == operation_input
+        assert _step_by_id(decision, step_id).tool_name == operation_tool
+        assert _step_by_id(decision, step_id).input_preview == operation_input
         assert _step_by_id(decision, "verify-desktop-result").input_preview == verify_input
         assert planner_execution_tool_requests(
             planner_tool_requests(prompt, allowed_tools),
             allowed_tools,
         ) == [
-            _app_discovery_request("SuperData Studio"),
+            _app_discovery_request(expected_app),
             {
                 "protocol": "json_fallback",
                 "tool": operation_tool,
@@ -5167,6 +5173,41 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert _step_by_id(named_unknown_app_no_comma, "open-or-focus-app").input_preview == {
         "app_name": "PixelForge",
     }
+
+    descriptor_ui_cases = (
+        (
+            "在我没提过的 SuperData Studio 里读取有哪些按钮",
+            "SuperData Studio",
+            {"role_filter": "button", "limit": 80, "app_name": "SuperData Studio"},
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "launch a new app named Orbit Notes and read its UI",
+            "Orbit Notes",
+            {"role_filter": "", "limit": 80},
+            {"limit": 80},
+        ),
+    )
+
+    for prompt, expected_app_name, expected_hint, expected_read_preview in descriptor_ui_cases:
+        descriptor_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.ui_elements"],
+        )
+
+        assert descriptor_decision.selected_intent.kind == "desktop_operation"
+        assert descriptor_decision.selected_intent.inputs["app_name_hint"] == expected_app_name
+        assert descriptor_decision.selected_intent.inputs["ui_inspection_hint"] == expected_hint
+        assert _step_by_id(descriptor_decision, "discover-desktop-state").input_preview == {
+            "query": expected_app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(descriptor_decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app_name,
+        }
+        assert _step_by_id(descriptor_decision, "read-foreground-ui").input_preview == (
+            expected_read_preview
+        )
 
 
 def test_runtime_planner_prefers_inspect_app_for_app_scoped_ui_inspection() -> None:
@@ -8881,12 +8922,16 @@ def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
         ("可以帮我打开 Word 吗", "Word"),
         ("open Raycast app please?", "Raycast"),
         ("launch SuperData Studio application", "SuperData Studio"),
+        ("launch a new app named Orbit Notes", "Orbit Notes"),
+        ("open an unknown app called PixelForge", "PixelForge"),
         ("打开微信应用", "微信"),
         ("启动 Obsidian 软件", "Obsidian"),
         ("打开我电脑上的 Obsidian 并新建一篇今天的日志", "Obsidian"),
         ("打开一个我电脑上叫 Raycast 的应用", "Raycast"),
         ("帮我打开 Pixelmator", "Pixelmator"),
         ("打开一个我没提过的应用叫 Raycast", "Raycast"),
+        ("打开一个我没提过的新应用 PixelForge", "PixelForge"),
+        ("打开未知应用 Linear", "Linear"),
         ("打开一个叫 Linear 的应用", "Linear"),
         ("打开文件夹", "Finder"),
         ("open a folder", "Finder"),

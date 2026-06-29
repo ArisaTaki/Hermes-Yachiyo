@@ -1555,6 +1555,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(r"^(?:在|用|通过)\s*", "", app, flags=re.IGNORECASE).strip()
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE)
     app = re.sub(
         r"\s*(?:里|里面|中|上|内)(?:的)?$",
@@ -1583,6 +1584,24 @@ def _clean_ui_app_name_hint(value: str) -> str:
     )
     if called_app_match:
         app = called_app_match.group("app").strip()
+    app = re.sub(
+        r"^(?:一个|一款|这个|那个)?"
+        r"(?:我(?:没|没有)提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
+        r"(?:新\s*)?(?:应用(?:程序)?|软件)?"
+        r"(?:\s*(?:叫|名叫|名称是|名字是))?\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"^(?:(?:an?|the)\s+)?"
+        r"(?:(?:new|unknown|unmentioned|unfamiliar)\s+)+"
+        r"(?:(?:app|application|software)\s+)?"
+        r"(?:(?:called|named)\s+)?",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     app = re.sub(
         r"\s*(?:有哪些|有什么|有啥|有哪个|有哪几个|visible|shown|available|there)?\s*"
         r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作|"
@@ -1629,6 +1648,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "foreground",
         "my",
         "me",
+        "its",
         "the",
         "this",
         "and",
