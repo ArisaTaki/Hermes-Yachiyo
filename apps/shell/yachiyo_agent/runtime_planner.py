@@ -166,10 +166,13 @@ class TaskIntentRouter:
         current_page_context = _looks_like_current_page_data_context_source(text)
         visible_context = _looks_like_visible_data_context_source(text)
         desktop_visible_context = _looks_like_desktop_visible_data_context_source(text)
+        app_search_result_source = _data_analysis_app_search_result_source_hint(text)
         if desktop_visible_context:
             context_source = "visible_text"
             if source_scope == "Desktop" and not source_hint:
                 source_scope = ""
+        elif app_search_result_source and not context_source:
+            context_source = "app_search_result"
         elif not context_source and current_page_context:
             context_source = "current_page_content"
         elif (
@@ -182,7 +185,7 @@ class TaskIntentRouter:
             text,
             ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
         )
-        has_source = bool(source_hint or source_scope or context_source)
+        has_source = bool(source_hint or source_scope or context_source or app_search_result_source)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
         if (
@@ -212,12 +215,19 @@ class TaskIntentRouter:
         )
         inputs = {
             "data_source_hint": scoped_source_hint,
-            "data_source_kind": data_source_kind_hint(source_hint, text),
+            "data_source_kind": (
+                "text_table"
+                if app_search_result_source
+                and data_source_kind_hint(source_hint, text) == "unknown"
+                else data_source_kind_hint(source_hint, text)
+            ),
         }
         if spreadsheet_app_hint:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
         if context_source:
             inputs["context_source"] = context_source
+        if app_search_result_source:
+            inputs["app_search_result_hint"] = app_search_result_source
         if (
             source_scope
             and not source_hint
@@ -241,6 +251,10 @@ class TaskIntentRouter:
             "data.analysis",
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
         ]
+        if app_search_result_source:
+            preferred_capabilities.extend(
+                ["desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"]
+            )
         if app_write_target:
             preferred_capabilities.append("desktop.app_control")
         if communication_target:
@@ -259,12 +273,22 @@ class TaskIntentRouter:
             description="Analyze structured data and produce a report or artifact.",
             inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
-            required_capabilities=[
-                "file.workspace_read",
-                "terminal.execution",
-                "artifact.write",
-                *(["desktop.app_control"] if app_write_target else []),
-            ],
+            required_capabilities=(
+                [
+                    "desktop.app_discovery",
+                    "desktop.ui_operation",
+                    "terminal.execution",
+                    "artifact.write",
+                    *(["desktop.app_control"] if app_write_target else []),
+                ]
+                if app_search_result_source
+                else [
+                    "file.workspace_read",
+                    "terminal.execution",
+                    "artifact.write",
+                    *(["desktop.app_control"] if app_write_target else []),
+                ]
+            ),
             preferred_capabilities=preferred_capabilities,
             missing_inputs=[] if has_source else ["data_source"],
             risk_level="medium",
@@ -5381,6 +5405,19 @@ def _data_analysis_context_source_steps(
     allowed: set[str] | None,
     source: str,
 ) -> list[ToolPlanStepSnapshot]:
+    if source == "app_search_result":
+        app_search_result = intent.inputs.get("app_search_result_hint")
+        if not isinstance(app_search_result, Mapping):
+            app_search_result = _data_analysis_app_search_result_source_hint(
+                intent.user_goal
+            )
+        return _app_search_result_context_steps(
+            intent,
+            allowed,
+            app_search_result,
+            step_prefix="data",
+            capability_id="data.analysis",
+        )
     if (
         source in {"current_page_content", "visible_text"}
         and _contains_any(
@@ -8135,6 +8172,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.38
     if (
         intent.kind == "data_analysis"
+        and str(intent.inputs.get("context_source") or "").strip() == "app_search_result"
+        and isinstance(intent.inputs.get("app_search_result_hint"), Mapping)
+    ):
+        score += 0.46
+    if (
+        intent.kind == "data_analysis"
         and isinstance(intent.inputs.get("communication_target_hint"), Mapping)
     ):
         score += 0.34
@@ -8771,6 +8814,45 @@ def _data_source_or_output_mentioned(text: str) -> bool:
             "spreadsheet",
         ),
     )
+
+
+def _data_analysis_app_search_result_source_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _data_analysis_action_requested(value):
+        return {}
+
+    foreground_search = _foreground_app_search_hint(value)
+    if foreground_search:
+        query = _clean_app_search_query(str(foreground_search.get("query") or ""))
+        if query:
+            return {
+                "source_scope": "foreground",
+                "source_app_search_query": query,
+            }
+
+    parsed = _leading_app_search_hint(value)
+    app_name = str(parsed.get("app_name") or "").strip()
+    query = _clean_app_search_query(str(parsed.get("query") or ""))
+    if not app_name:
+        app_name = _app_name_hint(value)
+    if app_name and not query:
+        app_search = _app_search_hint(value, app_name)
+        app_name = str(app_search.get("app_name") or app_name).strip()
+        query = _clean_app_search_query(str(app_search.get("query") or ""))
+    if (
+        not app_name
+        or not query
+        or _invalid_app_scoped_followup_app(app_name)
+        or _is_generic_foreground_app_label(app_name)
+        or _is_browser_or_search_app_name(app_name)
+    ):
+        return {}
+
+    return {
+        "source_app_name": app_name,
+        "source_app_mode": _app_search_result_source_mode(value),
+        "source_app_search_query": query,
+    }
 
 
 def _data_analysis_action_requested(text: str) -> bool:

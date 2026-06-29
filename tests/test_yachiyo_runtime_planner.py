@@ -583,6 +583,97 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
     }
 
 
+def test_runtime_planner_treats_app_search_results_as_data_analysis_context() -> None:
+    app_result_analysis = RuntimePlanner().decision(
+        "把 Slack 搜索 revenue 的结果做成数据分析报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert app_result_analysis.selected_intent.kind == "data_analysis"
+    assert app_result_analysis.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "app_search_result",
+        "app_search_result_hint": {
+            "source_app_name": "Slack",
+            "source_app_mode": "focus",
+            "source_app_search_query": "revenue",
+        },
+    }
+    assert app_result_analysis.selected_intent.missing_inputs == []
+    assert [step.step_id for step in app_result_analysis.plan.tool_plan.steps] == [
+        "discover-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(app_result_analysis, "focus-app-search-field").input_preview == {
+        "app_name": "Slack",
+        "action": "find",
+    }
+    assert _step_by_id(app_result_analysis, "type-app-search-query").input_preview == {
+        "app_name": "Slack",
+        "text": "revenue",
+    }
+    assert _step_by_id(app_result_analysis, "read-data-context").input_preview == {
+        "role_filter": "text",
+        "limit": 120,
+        "app_name": "Slack",
+    }
+    assert _step_by_id(app_result_analysis, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md"],
+        "body_source": "app_search_result",
+    }
+
+    chart_result_analysis = RuntimePlanner().decision(
+        "在当前应用搜索 revenue，然后分析结果生成图表报告",
+        allowed_tools=[
+            "desktop.active_window",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert chart_result_analysis.selected_intent.kind == "data_analysis"
+    assert chart_result_analysis.selected_intent.inputs["context_source"] == "app_search_result"
+    assert chart_result_analysis.selected_intent.inputs["app_search_result_hint"] == {
+        "source_scope": "foreground",
+        "source_app_search_query": "revenue",
+    }
+    assert chart_result_analysis.selected_intent.expected_outputs == ["chart", "report"]
+    assert [step.step_id for step in chart_result_analysis.plan.tool_plan.steps] == [
+        "discover-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(chart_result_analysis, "discover-app-search-source").tool_name == (
+        "desktop.active_window"
+    )
+    assert _step_by_id(chart_result_analysis, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png"],
+        "body_source": "app_search_result",
+    }
+
+
 def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     decision = RuntimePlanner().decision(
         "把当前窗口里的表格复制出来，分析并输出报告",
