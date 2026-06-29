@@ -8706,6 +8706,87 @@ def test_runtime_planner_routes_direct_context_communication_send_sequence() -> 
     }
 
 
+def test_runtime_planner_routes_file_context_communication_without_app_alias() -> None:
+    decision = RuntimePlanner().decision(
+        "把 Downloads 里的 sales.csv 发给张三并说明本周业绩",
+        allowed_tools=["workspace.read", "workspace.list", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "file",
+        "file_context_hint": {
+            "path": "Downloads/sales.csv",
+            "source_kind": "csv",
+        },
+        "direct_message_hint": {
+            "recipient": "张三",
+            "body_source": "file",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "draft-communication-from-context",
+    ]
+    assert _step_by_id(decision, "read-communication-context").tool_name == "workspace.read"
+    assert _step_by_id(decision, "read-communication-context").input_preview == {
+        "path": "Downloads/sales.csv"
+    }
+    draft_step = _step_by_id(decision, "draft-communication-from-context")
+    assert draft_step.tool_name == "artifact.write"
+    assert draft_step.input_preview == {"body_source": "file"}
+    assert draft_step.approval_required is True
+
+
+def test_runtime_planner_prefetches_file_before_direct_email_plan() -> None:
+    decision = RuntimePlanner().decision(
+        "把 data/sales.csv 发邮件给 Alice，说明本周业绩",
+        allowed_tools=[
+            "workspace.read",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "file",
+        "file_context_hint": {
+            "path": "data/sales.csv",
+            "source_kind": "csv",
+        },
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body_source": "file",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "email",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(decision, "read-communication-context").input_preview == {
+        "path": "data/sales.csv"
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {"app_name": "Mail"}
+    assert _step_by_id(decision, "draft-communication-message").input_preview == {
+        "body_source": "file"
+    }
+    assert _step_by_id(decision, "send-communication-message").approval_required is True
+
+
 def test_runtime_planner_infers_known_communication_surface_for_context_send() -> None:
     allowed_tools = [
         "app.focus",
@@ -13953,6 +14034,19 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把 Downloads 里的 sales.csv 发给张三并说明本周业绩",
+        allowed_tools=["workspace.read", "workspace.list", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.read",
+            "input": {"path": "Downloads/sales.csv"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,

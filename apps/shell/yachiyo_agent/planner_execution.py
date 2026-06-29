@@ -1205,7 +1205,7 @@ def _direct_communication_requires_model_body(direct_hint: Mapping[str, Any]) ->
     transform = str(direct_hint.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"app_search_result", "current_page_content", "visible_text"}
+    return body_source in {"app_search_result", "current_page_content", "visible_text", "file"}
 
 
 def _direct_communication_context_tool_requests(

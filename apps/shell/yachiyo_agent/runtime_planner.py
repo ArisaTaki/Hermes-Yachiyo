@@ -1375,7 +1375,11 @@ class TaskIntentRouter:
         if scoped_action == "new_message":
             return _empty_intent("communication", text)
         app_search_result_hint = _app_search_result_communication_hint(text)
-        direct_hint = app_search_result_hint or _direct_communication_candidate_hint(text)
+        file_context_hint = _communication_file_context_hint(text, metadata)
+        direct_hint = app_search_result_hint or _direct_communication_candidate_hint(
+            text,
+            metadata,
+        )
         if not direct_hint and click_target_hint(text) and _app_name_hint(text):
             return _empty_intent("communication", text)
         if _foreground_submit_action_hint(text) and not direct_hint:
@@ -1383,7 +1387,7 @@ class TaskIntentRouter:
         source = (
             "app_search_result"
             if app_search_result_hint
-            else _communication_context_source_hint(text)
+            else ("file" if file_context_hint else _communication_context_source_hint(text))
         )
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
@@ -1391,6 +1395,8 @@ class TaskIntentRouter:
         if score <= 0:
             return _empty_intent("communication", text)
         inputs = {"context_source": source} if source else {}
+        if source == "file" and file_context_hint:
+            inputs["file_context_hint"] = file_context_hint
         transform = _communication_content_transform_hint(text)
         if transform:
             inputs["content_transform_hint"] = transform
@@ -4800,6 +4806,39 @@ def _context_source_steps(
             )
         ]
 
+    if source == "file":
+        file_context = intent.inputs.get("file_context_hint")
+        if not isinstance(file_context, Mapping):
+            return []
+        path = str(file_context.get("path") or "").strip()
+        if not path:
+            return []
+        pattern = str(file_context.get("pattern") or "").strip()
+        file_type = str(file_context.get("file_type") or "").strip()
+        tool_candidates = (
+            ("workspace.list", "workspace.read")
+            if pattern and not _looks_like_specific_data_source_path(path)
+            else ("workspace.read", "workspace.list")
+        )
+        tool_name = _first_allowed(tool_candidates, allowed)
+        input_preview: dict[str, str] = {"path": path}
+        if tool_name == "workspace.list":
+            if pattern:
+                input_preview["pattern"] = pattern
+            if file_type:
+                input_preview["file_type"] = file_type
+        return [
+            _step(
+                intent,
+                f"read-{step_prefix}-context",
+                "Read file context",
+                _context_source_capability_id(source, tool_name, capability_id),
+                tool_name,
+                input_preview=input_preview,
+                reason="Read or list the explicit local file context before using it in the task.",
+            )
+        ]
+
     return []
 
 
@@ -5364,6 +5403,8 @@ def _context_source_capability_id(source: str, tool_name: str | None, fallback: 
             return "desktop.app_discovery"
     if source == "visible_text":
         return "desktop.app_discovery"
+    if source == "file":
+        return "file.workspace_read"
     return fallback
 
 
@@ -5395,6 +5436,7 @@ def _direct_communication_steps(
                 "current_page_link",
                 "current_page_content",
                 "visible_text",
+                "file",
             }
         )
     ):
@@ -5540,7 +5582,12 @@ def _direct_communication_steps(
         )
         send_depends_on = ["paste-communication-message"]
     else:
-        draft_input = {"text": body} if body else {"body_source": body_source}
+        if generated_body and body_source:
+            draft_input = {"body_source": body_source}
+            if body:
+                draft_input["instruction"] = body
+        else:
+            draft_input = {"text": body} if body else {"body_source": body_source}
         if transform:
             draft_input["transform"] = transform
         steps.append(
@@ -5645,7 +5692,7 @@ def _direct_message_requires_generated_body(direct_message: Mapping[str, Any]) -
     transform = str(direct_message.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"app_search_result", "current_page_content", "visible_text"}
+    return body_source in {"app_search_result", "current_page_content", "visible_text", "file"}
 
 
 def _current_page_find_steps(
@@ -7459,9 +7506,34 @@ def _communication_context_source_hint(text: str) -> str:
     source = _task_context_source_hint(text)
     if source:
         return source
+    if _communication_file_context_hint(text):
+        return "file"
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
     return ""
+
+
+def _communication_file_context_hint(
+    text: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    source_hint = str(data_source_hint(text, metadata) or "").strip()
+    if not source_hint:
+        return {}
+    source_scope = str(data_source_scope_hint(text, metadata) or "").strip()
+    source_kind = data_source_kind_hint(source_hint, text)
+    path = source_hint
+    if (
+        source_scope
+        and not re.match(r"^(?:~|/|\.{1,2}/)", source_hint)
+        and "/" not in source_hint
+        and "\\" not in source_hint
+    ):
+        path = f"{source_scope.rstrip('/')}/{source_hint}"
+    hint = _data_source_inspect_input_preview(path, source_kind)
+    if source_kind:
+        hint.setdefault("source_kind", source_kind)
+    return hint
 
 
 def _communication_content_transform_hint(text: str) -> str:
@@ -10740,7 +10812,13 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     return {"browser_action": "open_url", "url_hint": url}
 
 
-def _direct_communication_candidate_hint(text: str) -> dict[str, str]:
+def _direct_communication_candidate_hint(
+    text: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    file_context = _communication_file_context_hint(text, metadata)
+    if file_context:
+        return _direct_file_context_communication_hint(text, file_context)
     source = _communication_context_source_hint(text)
     if source:
         direct_context_hint = _direct_context_communication_hint(text, source)
@@ -10750,6 +10828,86 @@ def _direct_communication_candidate_hint(text: str) -> dict[str, str]:
     if str(generic_hint.get("channel") or "").strip() == "email":
         return generic_hint
     return _direct_paste_communication_hint(text) or _direct_communication_hint(text) or generic_hint
+
+
+def _direct_file_context_communication_hint(
+    text: str,
+    file_context: Mapping[str, Any],
+) -> dict[str, str]:
+    if not file_context:
+        return {}
+    value = _clean_prompt(text)
+    if not value or not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
+        return {}
+    tail = _communication_tail_after_data_source(value)
+    candidates = [tail]
+    if tail != value:
+        candidates.append(value)
+    recipient_stop = (
+        r"(?=(?:\s*(?:并|然后|再|之后|后)\s*(?:说明|说|附上|备注|告诉|解释)|"
+        r"\s*(?:说明|说|附上|备注|告诉|解释)|[，,。；;！!？?]|$))"
+    )
+    patterns = (
+        rf"^(?:[，,。；;\s]+)?(?:(?:并|然后|再|之后|后)\s*)?"
+        rf"(?:请|帮我|麻烦)?(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
+        rf"(?:(?:发送|发出|发消息|发)\s*(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)?\s*"
+        rf"(?:给|到|发给|发送给|向|对)|(?:发给|发送给|发到|发送到))\s*"
+        rf"(?P<target>[^，,。；;！!？?]+?){recipient_stop}",
+        rf"^(?:[，,。；;\s]+)?(?:(?:并|然后|再|之后|后)\s*)?"
+        rf"(?:请|帮我|麻烦)?(?:(?:发送|发出|发消息|发)\s*"
+        rf"(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)?\s*"
+        rf"(?:给|到|发给|发送给|向|对)|(?:发给|发送给|发到|发送到))\s*"
+        rf"(?P<target>[^，,。；;！!？?]+?){recipient_stop}",
+        r"^(?:\s+)?(?:send|email|message)\s+(?:it|this|the\s+file)?\s*"
+        r"(?:to|for)\s+(?P<target>[^.!?,]+?)(?:\s+(?:saying|about|with|and)\b.*)?$",
+    )
+    for candidate in candidates:
+        for pattern in patterns:
+            match = re.search(pattern, candidate, flags=re.IGNORECASE)
+            if not match:
+                continue
+            groups = match.groupdict()
+            app_name = _canonical_app_name_hint(groups.get("app") or "")
+            if _is_generic_communication_app_label(groups.get("app") or ""):
+                app_name = ""
+            target = _clean_communication_hint_text(groups.get("target") or "")
+            recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
+            if target and (not app_name or not recipient):
+                split_app, split_recipient = _split_communication_surface_and_recipient(target)
+                app_name = app_name or split_app
+                recipient = recipient or split_recipient or _clean_communication_recipient_text(target)
+            if not app_name and recipient:
+                app_name = _communication_surface_for_recipient_hint(recipient)
+            if not recipient:
+                continue
+            channel = _canonical_communication_channel(groups.get("channel") or "")
+            hint = {
+                "recipient": recipient,
+                "body_source": "file",
+                "mode": _communication_app_mode(value),
+                "send_action": (
+                    "draft" if _looks_like_communication_draft_request(value) else "send"
+                ),
+            }
+            if app_name:
+                hint["app_name"] = app_name
+            if channel:
+                hint["channel"] = channel
+            return hint
+    return {}
+
+
+def _communication_tail_after_data_source(text: str) -> str:
+    value = _clean_prompt(text)
+    source_hint = str(data_source_hint(value) or "").strip()
+    candidates = [source_hint]
+    if "/" in source_hint or "\\" in source_hint:
+        candidates.append(re.split(r"[/\\]", source_hint)[-1])
+    for candidate in sorted({item for item in candidates if item}, key=len, reverse=True):
+        match = re.search(re.escape(candidate), value, flags=re.IGNORECASE)
+        if match:
+            return value[match.end() :].strip()
+    return value
 
 
 def _direct_paste_communication_hint(text: str) -> dict[str, str]:
