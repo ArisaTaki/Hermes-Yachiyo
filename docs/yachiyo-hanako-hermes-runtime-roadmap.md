@@ -162,6 +162,21 @@ and exits without starting the full backend or opening a desktop target app.
 The release verifier exposes the same opt-in gate with
 `--run-electron-native-bridge-smoke`.
 
+Focused Electron bridge evidence is reproducible with:
+
+```bash
+python scripts/smoke_electron_native_bridge.py \
+  --focus-app Calculator \
+  --report-json tmp/electron-native-bridge-focus-calculator.json
+```
+
+When `--focus-app` is present, the smoke records the target app's pre-run
+status, requires the Electron endpoint to verify `focus_verified=true` before
+passing, and cleans up the app only if the smoke launched it. Failed foreground
+activation remains useful evidence: it includes each native strategy attempted,
+the observed frontmost app, window count, `foreground_focus_unavailable`, and
+the cleanup result.
+
 Current opt-in real desktop interaction evidence is reproducible with:
 
 ```bash

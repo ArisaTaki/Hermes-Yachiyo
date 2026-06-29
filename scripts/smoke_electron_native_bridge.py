@@ -23,6 +23,11 @@ SMOKE_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE"
 SMOKE_APP_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE_APP"
 DEFAULT_TIMEOUT_SECONDS = 45
 
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from apps.shell.agent.tools import desktop as desktop_tools
+
 
 def _run_compile() -> dict[str, Any]:
     result = subprocess.run(
@@ -62,6 +67,45 @@ def _parse_smoke_output(stdout: str) -> dict[str, Any] | None:
             "raw_payload": raw_payload,
         }
     return None
+
+
+def _data(result: dict[str, Any]) -> dict[str, Any]:
+    return result.get("data") if isinstance(result.get("data"), dict) else {}
+
+
+def _status_running(result: dict[str, Any]) -> bool | None:
+    if result.get("ok") is not True:
+        return None
+    data = _data(result)
+    running = data.get("running")
+    return running if isinstance(running, bool) else None
+
+
+def _cleanup_focus_app(app_name: str, *, before_running: bool | None) -> dict[str, Any]:
+    if not app_name:
+        return {"requested": False, "attempted": False, "ok": True}
+    if before_running is not False:
+        return {
+            "requested": True,
+            "attempted": False,
+            "ok": True,
+            "reason": (
+                "app_was_already_running"
+                if before_running is True
+                else "initial_running_state_unknown"
+            ),
+        }
+    quit_result = desktop_tools.app_quit(app_name)
+    final_status = desktop_tools.app_status(app_name)
+    final_running = _status_running(final_status)
+    return {
+        "requested": True,
+        "attempted": True,
+        "ok": quit_result.get("ok") is True and final_running is False,
+        "result": quit_result,
+        "final_status": final_status,
+        "final_running": final_running,
+    }
 
 
 def run_smoke(
@@ -106,6 +150,11 @@ def run_smoke(
         "ELECTRON_ENABLE_LOGGING": "1",
     }
     clean_focus_app = str(focus_app or "").strip()
+    before_status: dict[str, Any] | None = None
+    before_running: bool | None = None
+    if clean_focus_app:
+        before_status = desktop_tools.app_status(clean_focus_app)
+        before_running = _status_running(before_status)
     if clean_focus_app:
         env[SMOKE_APP_ENV] = clean_focus_app
     process = subprocess.run(
@@ -124,21 +173,26 @@ def run_smoke(
             "mode": "electron_native_bridge_smoke",
             "error": "smoke_output_not_found",
         }
+    cleanup = _cleanup_focus_app(clean_focus_app, before_running=before_running)
     checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
     payload.update(
         {
             "ok": payload.get("ok") is True and process.returncode == 0,
             "electron_returncode": process.returncode,
             "compile": compile_result or {"skipped": not compile_electron},
+            "focus_before_status": before_status or {},
+            "focus_cleanup": cleanup,
             "stdout_tail": process.stdout[-4000:],
             "stderr_tail": process.stderr[-4000:],
             "checks": {
                 **checks,
                 "electron_process_ok": process.returncode == 0,
                 "smoke_output_found": _parse_smoke_output(process.stdout) is not None,
+                "focus_cleanup_ok": cleanup.get("ok") is True,
             },
         }
     )
+    payload["ok"] = payload.get("ok") is True and cleanup.get("ok") is True
     return payload
 
 

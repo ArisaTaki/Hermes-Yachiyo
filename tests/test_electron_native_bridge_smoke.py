@@ -16,6 +16,15 @@ def test_electron_native_bridge_smoke_runs_compiled_electron(monkeypatch, tmp_pa
     monkeypatch.setattr(smoke, "ELECTRON_MAIN", electron_main)
     monkeypatch.setattr(smoke, "FRONTEND_DIR", tmp_path)
     calls = []
+    status_calls = []
+
+    def fake_status(app_name):
+        status_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": False},
+        }
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
@@ -25,10 +34,23 @@ def test_electron_native_bridge_smoke_runs_compiled_electron(monkeypatch, tmp_pa
             "ok": True,
             "mode": "electron_native_bridge_smoke",
             "native_runtime_url": "http://127.0.0.1:54321",
+            "focus_app": "Calculator",
+            "focus_result": {
+                "status_code": 200,
+                "payload": {
+                    "ok": True,
+                    "data": {
+                        "app_name": "Calculator",
+                        "focus_verified": True,
+                    },
+                },
+            },
             "checks": {
                 "native_bridge_started": True,
                 "unauthenticated_rejected": True,
                 "authenticated_status_ok": True,
+                "focus_attempted": True,
+                "focus_verified": True,
             },
         }
         return SimpleNamespace(
@@ -38,6 +60,16 @@ def test_electron_native_bridge_smoke_runs_compiled_electron(monkeypatch, tmp_pa
         )
 
     monkeypatch.setattr(smoke.subprocess, "run", fake_run)
+    monkeypatch.setattr(smoke.desktop_tools, "app_status", fake_status)
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.quit",
+            "data": {"app_name": app_name, "quit_verified": True},
+        },
+    )
 
     result = smoke.run_smoke(focus_app="Calculator")
 
@@ -45,6 +77,11 @@ def test_electron_native_bridge_smoke_runs_compiled_electron(monkeypatch, tmp_pa
     assert result["electron_returncode"] == 0
     assert result["checks"]["electron_process_ok"] is True
     assert result["checks"]["smoke_output_found"] is True
+    assert result["checks"]["focus_cleanup_ok"] is True
+    assert result["focus_before_status"]["data"]["running"] is False
+    assert result["focus_cleanup"]["attempted"] is True
+    assert result["focus_cleanup"]["final_running"] is False
+    assert status_calls == ["Calculator", "Calculator"]
     assert calls[0][0] == ["npm", "exec", "tsc", "--", "-p", "tsconfig.electron.json"]
     assert calls[1][0] == [str(electron_bin), str(electron_main)]
     assert calls[1][1]["env"][smoke.SMOKE_ENV] == "1"

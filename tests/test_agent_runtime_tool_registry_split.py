@@ -3765,6 +3765,10 @@ def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) ->
     assert result["data"]["focus_verified"] is False
     assert result["data"]["focus_status"] == "not_frontmost"
     assert result["data"]["frontmost_app"] == "Codex"
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["retryable"] is True
+    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["data"]["retryable"] is True
     assert result["data"]["focus_attempts"] == [
         {
             "strategy": "applescript_system_events",
@@ -4120,6 +4124,10 @@ def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
         "screen.capture",
     ]
     assert result["recommended_tools"] == ["app.open", "desktop.active_window", "screen.capture"]
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["retryable"] is True
+    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["data"]["retryable"] is True
     assert result["missing_permissions"] == ["foreground_focus"]
     assert result["permission_targets"] == ["foreground_focus"]
     assert result["recovery_hints"] == [
@@ -4231,7 +4239,10 @@ def test_app_focus_does_not_report_locked_when_system_events_saw_unlocked_frontm
     assert result["data"]["frontmost_app"] == "loginwindow"
     assert result["data"]["focus_attempts"][0]["frontmost_app"] == "Codex"
     assert result["data"]["focus_attempts"][1]["frontmost_app"] == "loginwindow"
-    assert "blocking_condition" not in result
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["retryable"] is True
+    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["data"]["retryable"] is True
     assert result["missing_permissions"] == ["foreground_focus"]
     assert result["permission_targets"] == ["foreground_focus"]
 

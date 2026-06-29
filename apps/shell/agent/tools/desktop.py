@@ -3004,6 +3004,8 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 "frontmost_app": latest_observation.get("frontmost_app")
                 or appkit_data.get("frontmost_app")
                 or "",
+                "blocking_condition": "foreground_focus_unavailable",
+                "retryable": True,
                 "focus_attempts": focus_attempts,
                 "recommended_tools": [
                     "desktop.running_apps",
@@ -3026,6 +3028,8 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 "action": "app.focus",
                 "summary": f"Could not verify {resolved_name} is foreground after app.open fallback",
                 "error": "app_focus_not_verified",
+                "blocking_condition": "foreground_focus_unavailable",
+                "retryable": True,
                 "data": failed_data,
                 "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
                 "missing_permissions": ["foreground_focus"],
@@ -3179,6 +3183,8 @@ def app_focus(app_name: str) -> dict[str, Any]:
         or appkit_data.get("frontmost_app")
         or data.get("frontmost_app")
         or "",
+        "blocking_condition": "foreground_focus_unavailable",
+        "retryable": True,
         "focus_attempts": focus_attempts,
         "recommended_tools": [
             "desktop.running_apps",
@@ -3201,6 +3207,8 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "action": "app.focus",
         "summary": f"Could not verify {resolved_name} is foreground",
         "error": "app_focus_not_verified",
+        "blocking_condition": "foreground_focus_unavailable",
+        "retryable": True,
         "data": failed_data,
         "recommended_tools": ["app.open", "desktop.active_window", "screen.capture"],
         "missing_permissions": ["foreground_focus"],

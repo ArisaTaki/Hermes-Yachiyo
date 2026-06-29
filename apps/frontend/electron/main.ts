@@ -148,6 +148,10 @@ type NativeFocusSnapshot = {
   frontmost_app: string;
   process_visible?: boolean;
   window_count?: number;
+  appkit_activate_result?: string;
+  launchservices_returncode?: number;
+  blocking_condition?: string;
+  retryable?: boolean;
   native_bridge: 'electron_main';
   native_attempts: Array<Record<string, unknown>>;
 };
@@ -158,6 +162,11 @@ type NativeToolResult = {
   summary: string;
   data: Record<string, unknown>;
   error?: string;
+  blocking_condition?: string;
+  retryable?: boolean;
+  missing_permissions?: string[];
+  permission_targets?: string[];
+  recovery_hints?: string[];
   permission_error: boolean;
   fallback_used: boolean;
 };
@@ -453,66 +462,21 @@ function compactAppName(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[\W_]+/gu, '');
 }
 
-function parseNativeFocusSnapshot(
-  value: string,
-  fallbackAppName: string,
-  nativeAttempts: Array<Record<string, unknown>>,
-): NativeFocusSnapshot {
-  const parts = value.trim().split('|', 6);
-  const appName = parts[1] || fallbackAppName;
-  const frontmostText = parts[2] || '';
-  const frontmostApp = parts[3] || '';
-  const focusVerified = frontmostText.toLocaleLowerCase() === 'true'
-    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
-  const snapshot: NativeFocusSnapshot = {
-    app_name: appName,
-    focus_verified: focusVerified,
-    focus_status: focusVerified ? 'frontmost' : 'not_frontmost',
-    frontmost_app: frontmostApp,
-    native_bridge: 'electron_main',
-    native_attempts: nativeAttempts,
+function nativeFocusAttempt(
+  strategy: string,
+  result: NativeCommandResult,
+): Record<string, unknown> {
+  return {
+    strategy,
+    ok: result.exitCode === 0,
+    exit_code: result.exitCode,
+    timed_out: result.timedOut,
+    stderr: result.stderr || undefined,
   };
-  const processVisible = parseNativeBoolean(parts[4]);
-  if (processVisible !== undefined) snapshot.process_visible = processVisible;
-  const windowCount = parseNativeInteger(parts[5]);
-  if (windowCount !== undefined) snapshot.window_count = windowCount;
-  return snapshot;
 }
 
-async function electronNativeFocusApp(appName: string): Promise<NativeToolResult> {
-  if (process.platform !== 'darwin') {
-    return {
-      ok: false,
-      action: 'electron.native.desktop.focus',
-      summary: 'electron.native.desktop.focus is not supported on this platform yet.',
-      error: 'unsupported_platform',
-      data: { platform: process.platform },
-      permission_error: false,
-      fallback_used: false,
-    };
-  }
-  const cleanAppName = appName.trim();
-  if (!cleanAppName) {
-    return {
-      ok: false,
-      action: 'electron.native.desktop.focus',
-      summary: 'electron.native.desktop.focus failed',
-      error: 'app_name_required',
-      data: {},
-      permission_error: false,
-      fallback_used: false,
-    };
-  }
-  const attempts: Array<Record<string, unknown>> = [];
-  const openResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
-  attempts.push({
-    strategy: 'electron_open_a',
-    ok: openResult.exitCode === 0,
-    exit_code: openResult.exitCode,
-    timed_out: openResult.timedOut,
-    stderr: openResult.stderr || undefined,
-  });
-  const verifyScript = `
+function nativeSystemEventsFocusScript(): string {
+  return `
 on run argv
   set appName to item 1 of argv
   try
@@ -553,14 +517,153 @@ on run argv
   return "focused|" & appName & "|" & (targetFrontmost as text) & "|" & frontName & "|" & (targetVisible as text) & "|" & (targetWindowCount as text)
 end run
 `;
+}
+
+function nativeAppKitFocusScript(): string {
+  return `
+function run(argv) {
+  ObjC.import("AppKit");
+  const requestedName = String(argv[0] || "");
+  const workspace = $.NSWorkspace.sharedWorkspace;
+  const apps = workspace.runningApplications;
+  let target = null;
+  for (let index = 0; index < apps.count; index += 1) {
+    const app = apps.objectAtIndex(index);
+    const localizedName = app.localizedName ? ObjC.unwrap(app.localizedName) : "";
+    if (localizedName === requestedName) {
+      target = app;
+      break;
+    }
+  }
+  const frontBefore = workspace.frontmostApplication;
+  const frontBeforeName = frontBefore && frontBefore.localizedName ? ObjC.unwrap(frontBefore.localizedName) : "";
+  if (!target) {
+    return "appkit|" + requestedName + "|missing|false|" + frontBeforeName;
+  }
+  const activateResult = target.activateWithOptions(
+    $.NSApplicationActivateAllWindows | $.NSApplicationActivateIgnoringOtherApps
+  );
+  delay(0.2);
+  const frontAfter = workspace.frontmostApplication;
+  const frontAfterName = frontAfter && frontAfter.localizedName ? ObjC.unwrap(frontAfter.localizedName) : "";
+  return "appkit|" + requestedName + "|" + activateResult + "|" + target.active + "|" + frontAfterName;
+}
+`;
+}
+
+function parseNativeFocusSnapshot(
+  value: string,
+  fallbackAppName: string,
+  nativeAttempts: Array<Record<string, unknown>>,
+): NativeFocusSnapshot {
+  const parts = value.trim().split('|', 6);
+  const appName = parts[1] || fallbackAppName;
+  const frontmostText = parts[2] || '';
+  const frontmostApp = parts[3] || '';
+  const focusVerified = frontmostText.toLocaleLowerCase() === 'true'
+    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
+  const snapshot: NativeFocusSnapshot = {
+    app_name: appName,
+    focus_verified: focusVerified,
+    focus_status: focusVerified ? 'frontmost' : 'not_frontmost',
+    frontmost_app: frontmostApp,
+    native_bridge: 'electron_main',
+    native_attempts: nativeAttempts,
+  };
+  const processVisible = parseNativeBoolean(parts[4]);
+  if (processVisible !== undefined) snapshot.process_visible = processVisible;
+  const windowCount = parseNativeInteger(parts[5]);
+  if (windowCount !== undefined) snapshot.window_count = windowCount;
+  return snapshot;
+}
+
+function parseNativeAppKitFocusSnapshot(
+  value: string,
+  fallbackAppName: string,
+  nativeAttempts: Array<Record<string, unknown>>,
+): NativeFocusSnapshot {
+  const parts = value.trim().split('|', 5);
+  const appName = parts[1] || fallbackAppName;
+  const activateResult = parts[2] || '';
+  const activeText = parts[3] || '';
+  const frontmostApp = parts[4] || '';
+  const focusVerified = activeText.toLocaleLowerCase() === 'true'
+    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
+  return {
+    app_name: appName,
+    focus_verified: focusVerified,
+    focus_status: focusVerified ? 'frontmost' : 'not_frontmost',
+    frontmost_app: frontmostApp,
+    appkit_activate_result: activateResult,
+    native_bridge: 'electron_main',
+    native_attempts: nativeAttempts,
+  };
+}
+
+function nativeFocusToolResult(snapshot: NativeFocusSnapshot): NativeToolResult {
+  if (snapshot.focus_verified) {
+    return {
+      ok: true,
+      action: 'electron.native.desktop.focus',
+      summary: `Focused ${snapshot.app_name} via Electron native bridge`,
+      data: snapshot,
+      permission_error: false,
+      fallback_used: snapshot.native_attempts.length > 2,
+    };
+  }
+  const data = {
+    ...snapshot,
+    blocking_condition: 'foreground_focus_unavailable',
+    retryable: true,
+  };
+  return {
+    ok: false,
+    action: 'electron.native.desktop.focus',
+    summary: `Could not verify ${snapshot.app_name} is foreground via Electron native bridge`,
+    error: 'app_focus_not_verified',
+    blocking_condition: 'foreground_focus_unavailable',
+    retryable: true,
+    data,
+    missing_permissions: ['foreground_focus'],
+    permission_targets: ['foreground_focus'],
+    recovery_hints: [
+      'Allow the current Oha-Yachiyo runtime to bring target apps to the foreground. Check Automation and Accessibility permissions in macOS System Settings > Privacy & Security.',
+    ],
+    permission_error: false,
+    fallback_used: snapshot.native_attempts.length > 2,
+  };
+}
+
+async function electronNativeFocusApp(appName: string): Promise<NativeToolResult> {
+  if (process.platform !== 'darwin') {
+    return {
+      ok: false,
+      action: 'electron.native.desktop.focus',
+      summary: 'electron.native.desktop.focus is not supported on this platform yet.',
+      error: 'unsupported_platform',
+      data: { platform: process.platform },
+      permission_error: false,
+      fallback_used: false,
+    };
+  }
+  const cleanAppName = appName.trim();
+  if (!cleanAppName) {
+    return {
+      ok: false,
+      action: 'electron.native.desktop.focus',
+      summary: 'electron.native.desktop.focus failed',
+      error: 'app_name_required',
+      data: {},
+      permission_error: false,
+      fallback_used: false,
+    };
+  }
+  const attempts: Array<Record<string, unknown>> = [];
+  const openResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
+  attempts.push(nativeFocusAttempt('electron_open_a', openResult));
+  const verifyScript = nativeSystemEventsFocusScript();
   const verifyResult = await runNativeCommand('/usr/bin/osascript', ['-e', verifyScript, cleanAppName], 5000);
-  attempts.push({
-    strategy: 'electron_system_events_verify',
-    ok: verifyResult.exitCode === 0,
-    exit_code: verifyResult.exitCode,
-    timed_out: verifyResult.timedOut,
-    stderr: verifyResult.stderr || undefined,
-  });
+  attempts.push(nativeFocusAttempt('electron_system_events_verify', verifyResult));
   if (verifyResult.exitCode !== 0) {
     return {
       ok: false,
@@ -572,18 +675,29 @@ end run
       fallback_used: false,
     };
   }
-  const snapshot = parseNativeFocusSnapshot(verifyResult.stdout, cleanAppName, attempts);
-  return {
-    ok: snapshot.focus_verified,
-    action: 'electron.native.desktop.focus',
-    summary: snapshot.focus_verified
-      ? `Focused ${snapshot.app_name} via Electron native bridge`
-      : `Could not verify ${snapshot.app_name} is foreground via Electron native bridge`,
-    ...(snapshot.focus_verified ? {} : { error: 'app_focus_not_verified' }),
-    data: snapshot,
-    permission_error: false,
-    fallback_used: false,
-  };
+  let latestSnapshot = parseNativeFocusSnapshot(verifyResult.stdout, cleanAppName, attempts);
+  if (latestSnapshot.focus_verified) return nativeFocusToolResult(latestSnapshot);
+
+  const appKitResult = await runNativeCommand(
+    '/usr/bin/osascript',
+    ['-l', 'JavaScript', '-e', nativeAppKitFocusScript(), cleanAppName],
+    5000,
+  );
+  attempts.push(nativeFocusAttempt('electron_appkit_nsrunningapplication', appKitResult));
+  if (appKitResult.exitCode === 0) {
+    latestSnapshot = parseNativeAppKitFocusSnapshot(appKitResult.stdout, cleanAppName, attempts);
+    if (latestSnapshot.focus_verified) return nativeFocusToolResult(latestSnapshot);
+  }
+
+  const launchServicesResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
+  attempts.push(nativeFocusAttempt('electron_launchservices_open_a', launchServicesResult));
+  const launchVerifyResult = await runNativeCommand('/usr/bin/osascript', ['-e', verifyScript, cleanAppName], 5000);
+  attempts.push(nativeFocusAttempt('electron_launchservices_verify', launchVerifyResult));
+  if (launchVerifyResult.exitCode === 0) {
+    latestSnapshot = parseNativeFocusSnapshot(launchVerifyResult.stdout, cleanAppName, attempts);
+    latestSnapshot.launchservices_returncode = launchServicesResult.exitCode ?? undefined;
+  }
+  return nativeFocusToolResult(latestSnapshot);
 }
 
 async function handleNativeRuntimeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -741,12 +855,29 @@ async function runElectronNativeBridgeSmoke(): Promise<Record<string, unknown>> 
       payload: response.payload,
     };
   }
+  const focusPayload = (
+    focusResult?.payload
+    && typeof focusResult.payload === 'object'
+  ) ? focusResult.payload as Record<string, unknown> : {};
+  const focusData = (
+    focusPayload
+    && typeof focusPayload === 'object'
+    && 'data' in focusPayload
+    && typeof focusPayload.data === 'object'
+    && focusPayload.data
+  ) ? focusPayload.data as Record<string, unknown> : {};
+  const focusVerified = Boolean(
+    focusApp
+    && focusPayload?.ok === true
+    && focusData.focus_verified === true
+  );
   const ok = (
     unauthenticatedStatus.statusCode === 403
     && unauthenticatedStatus.payload.error === 'invalid_native_bridge_token'
     && authenticatedStatus.statusCode === 200
     && authenticatedStatus.payload.ok === true
     && authenticatedStatus.payload.service === 'oha-yachiyo-electron-native-runtime'
+    && (!focusApp || focusVerified)
   );
   return {
     ok,
@@ -770,6 +901,7 @@ async function runElectronNativeBridgeSmoke(): Promise<Record<string, unknown>> 
       authenticated_status_ok: authenticatedStatus.statusCode === 200 && authenticatedStatus.payload.ok === true,
       auth_value_not_printed: true,
       focus_attempted: Boolean(focusApp),
+      ...(focusApp ? { focus_verified: focusVerified } : {}),
     },
   };
 }
