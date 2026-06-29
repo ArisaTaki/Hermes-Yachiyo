@@ -992,9 +992,23 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="workspace.list",
         description=(
             "List entries in an allowed workspace directory. Use this before workspace.read "
-            "when you only know a directory path."
+            "when you only know a directory path. Optional pattern/file_type filters narrow "
+            "file listings before model follow-up."
         ),
-        properties={"path": {"type": "string", "description": "Relative directory path."}},
+        properties={
+            "path": {"type": "string", "description": "Relative directory path."},
+            "pattern": {
+                "type": "string",
+                "description": "Optional glob filter such as *.pdf or *.{png,jpg}.",
+            },
+            "file_type": {
+                "type": "string",
+                "description": (
+                    "Optional semantic file type hint such as screenshot, pdf, invoice, "
+                    "image, document, spreadsheet, archive, audio, or video."
+                ),
+            },
+        },
     ),
     "workspace.read": ToolDescriptor(
         name="workspace.read",

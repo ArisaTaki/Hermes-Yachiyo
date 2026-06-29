@@ -1712,7 +1712,14 @@ def _context_prefetch_payload(
 ) -> dict[str, Any] | None:
     if tool_name == "workspace.list":
         path = str(payload.get("path") or "").strip()
-        return {"path": path} if path else {}
+        request_payload: dict[str, Any] = {"path": path} if path else {}
+        pattern = str(payload.get("pattern") or "").strip()
+        file_type = str(payload.get("file_type") or "").strip()
+        if pattern:
+            request_payload["pattern"] = pattern
+        if file_type:
+            request_payload["file_type"] = file_type
+        return request_payload
     if tool_name == "workspace.read":
         path = str(payload.get("path") or "").strip()
         return {"path": path} if path else None

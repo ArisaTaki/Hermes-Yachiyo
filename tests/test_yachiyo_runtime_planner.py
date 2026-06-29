@@ -13701,7 +13701,7 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads"},
+            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_report_context",
             "continue_to_model": True,
@@ -13744,6 +13744,14 @@ def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
         "找出 Downloads 里的重复文件",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    screenshot_requests = planner_tool_requests(
+        "把 Downloads 里的截图整理到 Screenshots 文件夹",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
+    screenshot_inventory_requests = planner_tool_requests(
+        "查一下 Downloads 里有哪些截图",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run", "screen.capture"],
+    )
 
     assert requests == [
         {
@@ -13785,6 +13793,21 @@ def test_planner_tool_requests_prefetches_file_scope_for_model_loop() -> None:
             "continue_to_model": True,
         }
     ]
+    assert screenshot_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+                "file_type": "screenshot",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+    assert screenshot_inventory_requests == screenshot_requests
 
 
 def test_planner_tool_requests_prefetches_communication_surface_for_model_loop() -> None:

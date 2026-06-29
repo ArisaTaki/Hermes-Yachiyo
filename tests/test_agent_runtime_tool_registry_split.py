@@ -73,6 +73,29 @@ def test_tool_broker_call_uses_split_registry_for_workspace_read(tmp_path) -> No
     }
 
 
+def test_tool_broker_call_passes_workspace_list_filters(tmp_path) -> None:
+    (tmp_path / "Screen Shot 1.png").write_text("png", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("text", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "workspace.list",
+        {
+            "path": ".",
+            "pattern": "*.{png,jpg,jpeg}",
+            "file_type": "screenshot",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["entries"] == [{"name": "Screen Shot 1.png", "type": "file"}]
+    assert result["filter"] == {
+        "pattern": "*.{png,jpg,jpeg}",
+        "file_type": "screenshot",
+        "expanded_patterns": ["*.png", "*.jpg", "*.jpeg"],
+    }
+
+
 def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> None:
     (tmp_path / "sales.csv").write_text(
         "region,revenue\nEast,10\nWest,20\nEast,30\n",

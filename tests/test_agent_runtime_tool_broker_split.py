@@ -139,6 +139,42 @@ def test_tool_broker_write_patch_keeps_workspace_scope_and_hash_reporting(
     assert target.read_text(encoding="utf-8") == "hi\n"
 
 
+def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: Path) -> None:
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "Screen Shot 1.png").write_text("png", encoding="utf-8")
+    (workdir / "receipt.pdf").write_text("pdf", encoding="utf-8")
+    (workdir / "notes.txt").write_text("text", encoding="utf-8")
+    (workdir / "nested").mkdir()
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    screenshots = broker.workspace_list(
+        ".",
+        pattern="*.{png,jpg,jpeg,heic,gif,webp}",
+        file_type="screenshot",
+    )
+    invoices = broker.workspace_list(".", file_type="invoice")
+
+    assert screenshots["ok"] is True
+    assert screenshots["entries"] == [{"name": "Screen Shot 1.png", "type": "file"}]
+    assert screenshots["filter"] == {
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "file_type": "screenshot",
+        "expanded_patterns": ["*.png", "*.jpg", "*.jpeg", "*.heic", "*.gif", "*.webp"],
+    }
+    assert screenshots["matched_count"] == 1
+    assert screenshots["total_entries"] == 4
+    assert invoices["entries"] == [{"name": "receipt.pdf", "type": "file"}]
+    assert invoices["filter"]["file_type"] == "invoice"
+
+
 def test_tool_broker_artifact_write_redacts_secrets(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     broker = ToolBroker({}, artifact_root)

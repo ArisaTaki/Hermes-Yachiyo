@@ -75,7 +75,11 @@ def _future_task_cancel(broker: Any, payload: dict[str, Any], _approved: bool) -
 
 
 def _workspace_list(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
-    return broker.workspace_list(str(payload.get("path") or "."))
+    return broker.workspace_list(
+        str(payload.get("path") or "."),
+        pattern=str(payload.get("pattern") or ""),
+        file_type=str(payload.get("file_type") or ""),
+    )
 
 
 def _workspace_read(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,72 @@ def _clean_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+_WORKSPACE_LIST_FILE_TYPE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "screenshot": ("*.png", "*.jpg", "*.jpeg", "*.heic", "*.gif", "*.webp"),
+    "image": ("*.png", "*.jpg", "*.jpeg", "*.heic", "*.gif", "*.webp"),
+    "pdf": ("*.pdf",),
+    "invoice": ("*invoice*", "*receipt*", "*发票*", "*票据*", "*收据*"),
+    "document": ("*.doc", "*.docx", "*.pages", "*.rtf", "*.txt", "*.md"),
+    "spreadsheet": ("*.csv", "*.tsv", "*.xls", "*.xlsx", "*.numbers"),
+    "archive": ("*.zip", "*.rar", "*.7z", "*.tar", "*.gz"),
+    "audio": ("*.mp3", "*.wav", "*.aac", "*.m4a", "*.flac"),
+    "video": ("*.mp4", "*.mov", "*.m4v", "*.avi", "*.mkv"),
+}
+
+
+def _workspace_list_patterns(pattern: str, file_type: str) -> list[str]:
+    patterns = _expand_workspace_list_pattern(pattern)
+    if patterns:
+        return patterns
+    return list(_WORKSPACE_LIST_FILE_TYPE_PATTERNS.get(file_type.strip().casefold(), ()))
+
+
+def _expand_workspace_list_pattern(pattern: str) -> list[str]:
+    value = str(pattern or "").strip()
+    if not value:
+        return []
+    expanded: list[str] = []
+    for item in _split_workspace_list_patterns(value):
+        item = item.strip()
+        if not item:
+            continue
+        brace = re.fullmatch(r"(?P<prefix>.*)\{(?P<items>[^{}]+)\}(?P<suffix>.*)", item)
+        if brace:
+            prefix = brace.group("prefix")
+            suffix = brace.group("suffix")
+            expanded.extend(
+                f"{prefix}{part.strip()}{suffix}"
+                for part in brace.group("items").split(",")
+                if part.strip()
+            )
+        else:
+            expanded.append(item)
+    return expanded
+
+
+def _split_workspace_list_patterns(value: str) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(value):
+        if char == "{":
+            depth += 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(value[start:index].strip())
+            start = index + 1
+    parts.append(value[start:].strip())
+    return parts
+
+
+def _workspace_list_entry_matches(name: str, patterns: list[str]) -> bool:
+    if not patterns:
+        return True
+    lowered = name.casefold()
+    return any(fnmatch.fnmatchcase(lowered, pattern.casefold()) for pattern in patterns)
 
 
 def _normalized_app_name(value: Any) -> str:
@@ -178,7 +246,13 @@ class ToolBroker:
             raise AgentRuntimeError("路径不在 Agent 允许的工作区范围内")
         return target
 
-    def workspace_list(self, path: str = ".") -> dict[str, Any]:
+    def workspace_list(
+        self,
+        path: str = ".",
+        *,
+        pattern: str = "",
+        file_type: str = "",
+    ) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
         display_path = path or "."
         if not target.exists():
@@ -196,10 +270,28 @@ class ToolBroker:
                 "hint": "如果要读取文件内容，请改用 workspace.read。",
                 "suggested_tool": "workspace.read",
             }
+        patterns = _workspace_list_patterns(pattern, file_type)
         entries = []
-        for child in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]:
+        total_entries = 0
+        for child in sorted(target.iterdir(), key=lambda item: item.name.lower()):
+            total_entries += 1
+            if patterns and (
+                child.is_dir() or not _workspace_list_entry_matches(child.name, patterns)
+            ):
+                continue
+            if len(entries) >= 200:
+                continue
             entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
-        return {"ok": True, "path": display_path, "entries": entries}
+        result: dict[str, Any] = {"ok": True, "path": display_path, "entries": entries}
+        if patterns:
+            result["filter"] = {
+                "pattern": pattern,
+                "file_type": file_type,
+                "expanded_patterns": patterns,
+            }
+            result["matched_count"] = len(entries)
+            result["total_entries"] = total_entries
+        return result
 
     def skill_read(self, skill_id: str = "", name: str = "") -> dict[str, Any]:
         wanted = str(skill_id or name or "").strip()
