@@ -9134,6 +9134,7 @@ def _looks_like_visible_text_artifact_source(text: str) -> bool:
             "foreground window",
             "foreground app",
             "visible text",
+            "visible content",
             "当前窗口",
             "当前应用",
             "当前 app",
@@ -9143,6 +9144,10 @@ def _looks_like_visible_text_artifact_source(text: str) -> bool:
             "前台应用",
             "当前界面",
             "当前屏幕",
+            "当前可见",
+            "可见文字",
+            "可见文本",
+            "可见内容",
             "屏幕内容",
             "界面内容",
         ],
@@ -12428,6 +12433,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         ),
         "visible_text": (
             r"(?:当前窗口|当前应用|当前界面|当前屏幕|前台窗口|前台应用|"
+            r"当前可见文字|当前可见文本|当前可见内容|可见文字|可见文本|可见内容|"
             r"current\s+window|current\s+app|foreground\s+window|foreground\s+app)"
             r"(?:的|里的)?(?:内容|文本|文字|摘要|总结|报告|content|text|summary|report)?"
         ),
