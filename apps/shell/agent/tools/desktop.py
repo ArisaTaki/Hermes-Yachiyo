@@ -141,7 +141,6 @@ UI_CONTROL_LIKE_ROLES = {
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXLink",
-    "AXMenuItem",
     "AXPopUpButton",
     "AXRadioButton",
     "AXRow",
@@ -2743,7 +2742,10 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     "screen.capture",
                 ],
             }
-            if _desktop_session_is_locked(failed_data["frontmost_app"]):
+            if _focus_failure_indicates_locked_session(
+                failed_data["frontmost_app"],
+                focus_attempts,
+            ):
                 return _desktop_session_locked_result(
                     "app.focus",
                     app_name=resolved_name,
@@ -2814,7 +2816,10 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "screen.capture",
         ],
     }
-    if _desktop_session_is_locked(failed_data["frontmost_app"]):
+    if _focus_failure_indicates_locked_session(
+        failed_data["frontmost_app"],
+        focus_attempts,
+    ):
         return _desktop_session_locked_result(
             "app.focus",
             app_name=resolved_name,
@@ -5186,6 +5191,20 @@ def _appkit_frontmost_app_name() -> dict[str, Any]:
 
 def _desktop_session_is_locked(frontmost_app: Any) -> bool:
     return _compact_app_match_name(str(frontmost_app or "")) == "loginwindow"
+
+
+def _focus_failure_indicates_locked_session(
+    frontmost_app: Any,
+    focus_attempts: list[dict[str, Any]],
+) -> bool:
+    if not _desktop_session_is_locked(frontmost_app):
+        return False
+    observed_frontmost = [
+        _compact_app_match_name(str(attempt.get("frontmost_app") or ""))
+        for attempt in focus_attempts
+        if str(attempt.get("frontmost_app") or "").strip()
+    ]
+    return not any(name and name != "loginwindow" for name in observed_frontmost)
 
 
 def _desktop_session_locked_result(

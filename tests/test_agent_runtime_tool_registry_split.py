@@ -3978,6 +3978,43 @@ def test_app_focus_reports_locked_desktop_session_without_permission_error(monke
     ]
 
 
+def test_app_focus_does_not_report_locked_when_system_events_saw_unlocked_frontmost(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Calculator|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Calculator|true|false|loginwindow",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is False
+    assert result["error"] == "app_focus_not_verified"
+    assert result["data"]["frontmost_app"] == "loginwindow"
+    assert result["data"]["focus_attempts"][0]["frontmost_app"] == "Codex"
+    assert result["data"]["focus_attempts"][1]["frontmost_app"] == "loginwindow"
+    assert "blocking_condition" not in result
+    assert result["missing_permissions"] == ["foreground_focus"]
+    assert result["permission_targets"] == ["foreground_focus"]
+
+
 def test_app_quit_uses_osascript_and_verifies_running_state(monkeypatch) -> None:
     osascript_calls = []
 
@@ -4815,6 +4852,39 @@ def test_desktop_ui_elements_diagnoses_menu_level_only_visibility(monkeypatch) -
     assert result["data"]["menu_level_only"] is True
     assert result["data"]["window_title_missing"] is True
     assert result["data"]["visibility_limited"] is True
+    assert result["data"]["visibility_status"] == "menu_level_only"
+
+
+def test_desktop_ui_elements_does_not_count_menu_items_as_body_controls(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": (
+                "META\tCalculator\t505\t\n"
+                "0\tAXMenuBar\t\t\t\t\ttrue\t0\t0\t1200\t24\n"
+                "1\tAXMenu\t\tApple\t\t\ttrue\t0\t0\t0\t0\n"
+                "2\tAXMenuItem\t\tAbout This Mac\t\t\ttrue\t0\t0\t0\t0\n"
+                "2\tAXMenuItem\t\tSystem Settings\t\t\ttrue\t0\t0\t0\t0"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.ui_elements(app_name="Calculator", limit=20)
+
+    assert result["ok"] is True
+    assert result["data"]["role_counts"] == {
+        "AXMenuBar": 1,
+        "AXMenu": 1,
+        "AXMenuItem": 2,
+    }
+    assert result["data"]["menu_level_count"] == 4
+    assert result["data"]["control_like_count"] == 0
+    assert result["data"]["inspection_level"] == "menu"
+    assert result["data"]["menu_level_only"] is True
     assert result["data"]["visibility_status"] == "menu_level_only"
 
 
