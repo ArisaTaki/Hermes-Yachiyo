@@ -2121,7 +2121,11 @@ class RuntimePlanner:
             screen_capture = None
         if screen_capture is not None and not str((screen_capture or {}).get("app_name") or "").strip():
             app_management = None
-        if screen_capture is not None:
+        if (
+            screen_capture is not None
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            not in {"new_note", "new_document"}
+        ):
             safe_shortcut = None
             safe_shortcut_sequence = []
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
@@ -3280,6 +3284,13 @@ class RuntimePlanner:
                     if len(steps) == 1 and steps[0].step_id == "discover-desktop-state"
                     else [steps[-1].step_id]
                 )
+                inspect_payload = dict(operation_preview)
+                if isinstance(ui_inspection, Mapping):
+                    for key in ("role_filter", "limit"):
+                        if key not in inspect_payload and ui_inspection.get(key) not in (None, ""):
+                            inspect_payload[key] = ui_inspection[key]
+                if screen_capture is not None or ui_inspection is not None:
+                    inspect_payload.setdefault("limit", 80)
                 inspect_step = _step(
                     intent,
                     "inspect-app",
@@ -3288,7 +3299,7 @@ class RuntimePlanner:
                     inspect_tool,
                     input_preview=_desktop_inspect_app_input_preview(
                         app_name,
-                        operation_preview,
+                        inspect_payload,
                         open_if_needed=True,
                         focus=True,
                     ),
@@ -11106,8 +11117,12 @@ def _app_scoped_create_text_hint(text: str) -> str:
         r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片)",
+        r"(?:内容|正文)\s*(?:是|为|写|写成|写下|:|：)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:写下|写入|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
         r"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
         r"\babout\s+(?P<text_en>[^.!?,]+)",
+        r"\b(?:saying|with(?:\s+(?:content|text|body))?|content|text|body)\s+"
+        r"(?P<text_en>[^.!?,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, followup, flags=re.IGNORECASE)

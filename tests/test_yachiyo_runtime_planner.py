@@ -3171,6 +3171,77 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "action": "new_note",
     }
 
+    observe_then_create_with_text = RuntimePlanner().decision(
+        "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记，内容写本周业绩不错",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert observe_then_create_with_text.selected_intent.kind == "desktop_operation"
+    assert observe_then_create_with_text.selected_intent.inputs["app_name_hint"] == "Orbit Notes"
+    assert [step.step_id for step in observe_then_create_with_text.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(observe_then_create_with_text, "inspect-app").input_preview == {
+        "app_name": "Orbit Notes",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    assert _step_by_id(observe_then_create_with_text, "operate-foreground-ui").input_preview == {
+        "app_name": "Orbit Notes",
+        "action": "new_note",
+    }
+    assert _step_by_id(
+        observe_then_create_with_text,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "本周业绩不错"}
+    assert [request["tool"] for request in planner_tool_requests(
+        "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记，内容写本周业绩不错",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    english_observe_then_create_with_text = RuntimePlanner().decision(
+        "open any app PixelForge, inspect the UI, then create a new note saying weekly sales improved",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert english_observe_then_create_with_text.selected_intent.kind == "desktop_operation"
+    assert english_observe_then_create_with_text.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert [step.step_id for step in english_observe_then_create_with_text.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(
+        english_observe_then_create_with_text,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "weekly sales improved"}
+
 
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(

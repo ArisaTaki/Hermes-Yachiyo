@@ -504,6 +504,51 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_crea
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记，内容写本周业绩不错",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "limit": 80,
+                "app_name": "Orbit Notes",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Orbit Notes", "action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "本周业绩不错"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_targets() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
