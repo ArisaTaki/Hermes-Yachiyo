@@ -1363,6 +1363,70 @@ def test_release_candidate_verifier_fails_when_yachiyo_route_approval_smoke_fail
     ]
 
 
+def test_release_candidate_verifier_reports_group_run_timeline_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "group run timeline smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["group_run_timeline_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "group_run_timeline_smoke"
+    assert section["evidence"]["started"]["group_run_id"] == "group-run-smoke"
+    assert section["evidence"]["started"]["participants"][0]["run_status"] == (
+        "approval_required"
+    )
+    assert section["evidence"]["event_page"]["has_more"] is True
+
+
+def test_release_candidate_verifier_fails_when_group_run_timeline_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_group_run_timeline_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "group_run_timeline_smoke",
+            "error": "group run event page did not preserve child sequence",
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "group run timeline smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["group_run_timeline_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == (
+        "group run event page did not preserve child sequence"
+    )
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_group_run_timeline.py"),
+            "message": "group run event page did not preserve child sequence",
+        }
+    ]
+
+
 def test_release_candidate_verifier_merges_manual_check_evidence(
     tmp_path, monkeypatch, capsys
 ):

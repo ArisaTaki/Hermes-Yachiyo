@@ -215,6 +215,19 @@ task/run snapshots, and artifact readback shape are preserved at the shared
 entrypoints. It does not replace packaged renderer, native provider, or full
 `NativeRunEngine` evidence.
 
+Current source-level GroupRun timeline evidence is reproducible with:
+
+```bash
+python scripts/smoke_group_run_timeline.py \
+  --report-json tmp/group-run-timeline.json
+```
+
+This proves Agent Studio can start, list, fetch, and replay a GroupRun public
+snapshot with participants, child run timelines, tool calls, pending approvals,
+shared artifacts, and paginated group events preserved at the service boundary.
+It does not replace packaged Agent Studio UI or real multi-agent provider
+evidence.
+
 Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:
 

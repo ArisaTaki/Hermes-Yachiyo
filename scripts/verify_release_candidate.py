@@ -43,6 +43,9 @@ from scripts.smoke_data_analysis_artifacts import (
 from scripts.smoke_desktop_planner_discovery import (
     run_smoke as run_desktop_planner_discovery_smoke,
 )
+from scripts.smoke_group_run_timeline import (
+    run_smoke as run_group_run_timeline_smoke,
+)
 from scripts.smoke_planner_runtime_tool_parity import (
     run_smoke as run_planner_runtime_tool_parity_smoke,
 )
@@ -2180,6 +2183,43 @@ def verify_yachiyo_route_approval_smoke(root: Path) -> tuple[list[Finding], dict
     return [
         Finding(
             root / "scripts/smoke_yachiyo_route_approval.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_group_run_timeline_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_group_run_timeline_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_group_run_timeline.py",
+                f"GroupRun timeline smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "group_run_timeline_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_group_run_timeline.py",
+                "GroupRun timeline smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "group_run_timeline_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "GroupRun timeline smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_group_run_timeline.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4685,6 +4725,18 @@ def verify_release_candidate(
         "status": "failed" if yachiyo_route_approval_findings else "passed",
         "evidence": yachiyo_route_approval_evidence,
         "findings": _finding_report(yachiyo_route_approval_findings),
+        "run_requested": True,
+    }
+
+    group_run_timeline_findings, group_run_timeline_evidence = (
+        verify_group_run_timeline_smoke(root)
+    )
+    _print_findings("group run timeline smoke", group_run_timeline_findings)
+    failed = failed or bool(group_run_timeline_findings)
+    report["group_run_timeline_smoke"] = {
+        "status": "failed" if group_run_timeline_findings else "passed",
+        "evidence": group_run_timeline_evidence,
+        "findings": _finding_report(group_run_timeline_findings),
         "run_requested": True,
     }
 
