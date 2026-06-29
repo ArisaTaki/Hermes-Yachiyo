@@ -20,7 +20,7 @@ def test_real_desktop_ui_inspection_smoke_skips_non_macos(monkeypatch):
     }
 
 
-def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
+def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(monkeypatch):
     calls: list[tuple[str, str]] = []
     status_values = iter([False, True, False])
 
@@ -31,7 +31,7 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
         lambda *, query="", limit=200: {
             "ok": True,
             "action": "desktop.list_apps",
-            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+            "data": {"query": query, "apps": [{"name": "Oha-Yachiyo"}]},
             "permission_error": False,
         },
     )
@@ -65,7 +65,7 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
         lambda: {
             "ok": True,
             "action": "desktop.running_apps",
-            "data": {"apps": [{"name": "Calculator", "frontmost": False}]},
+            "data": {"apps": [{"name": "Oha-Yachiyo", "frontmost": False}]},
         },
     )
     monkeypatch.setattr(
@@ -104,8 +104,8 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
 
     def fake_ui_elements(*, app_name="", role_filter="", limit=80):
         elements = [
-            {"role": "AXMenuBar", "name": "Calculator"},
-            {"role": "AXMenuBarItem", "name": "File"},
+            {"depth": 0, "role": "AXMenuBar", "name": "Oha-Yachiyo"},
+            {"depth": 1, "role": "AXMenuBarItem", "name": "File"},
         ]
         if role_filter == "menu":
             elements = [element for element in elements if "Menu" in element["role"]]
@@ -140,7 +140,7 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
         },
     )
 
-    evidence = smoke.run_smoke(app_name="Calculator", cleanup=True)
+    evidence = smoke.run_smoke(app_name="Oha-Yachiyo", cleanup=True)
 
     assert evidence["ok"] is True
     assert evidence["focus_verified"] is False
@@ -154,9 +154,34 @@ def test_real_desktop_ui_inspection_smoke_reads_named_app_ui(monkeypatch):
     assert evidence["ui_visibility_limited"] is True
     assert evidence["menu_level_count"] == 2
     assert evidence["control_like_count"] == 0
+    assert evidence["deepest_ui_depth"] == 1
+    assert evidence["checks"]["default_app_control_surface_visible"] is True
     assert evidence["checks"]["named_ui_elements_match_app"] is True
     assert evidence["checks"]["menu_level_ui_visible"] is True
     assert evidence["cleanup"]["attempted"] is True
+
+
+def test_real_desktop_ui_inspection_requires_default_app_body_controls():
+    assert smoke._default_app_control_surface_visible(
+        "Calculator",
+        role_counts={"AXButton": 19, "AXMenuItem": 40},
+        deepest_ui_depth=5,
+    ) is False
+    assert smoke._default_app_control_surface_visible(
+        "Calculator",
+        role_counts={"AXButton": 20},
+        deepest_ui_depth=3,
+    ) is False
+    assert smoke._default_app_control_surface_visible(
+        "Calculator",
+        role_counts={"AXButton": 20},
+        deepest_ui_depth=4,
+    ) is True
+    assert smoke._default_app_control_surface_visible(
+        "Oha-Yachiyo",
+        role_counts={},
+        deepest_ui_depth=1,
+    ) is True
 
 
 def test_real_desktop_ui_inspection_smoke_fails_when_named_ui_is_not_read(monkeypatch):

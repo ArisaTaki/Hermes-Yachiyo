@@ -131,12 +131,20 @@ _UNSAFE_OPEN_PATH_SUFFIXES = {
     ".applescript",
 }
 
-_UI_CONTROL_LIKE_ROLES = {
+UI_CONTROL_LIKE_ROLES = {
     "AXButton",
+    "AXCell",
     "AXCheckBox",
+    "AXColorWell",
     "AXComboBox",
+    "AXDateField",
+    "AXDisclosureTriangle",
+    "AXIncrementor",
+    "AXLink",
+    "AXMenuItem",
     "AXPopUpButton",
     "AXRadioButton",
+    "AXRow",
     "AXSlider",
     "AXTextArea",
     "AXTextField",
@@ -859,6 +867,7 @@ def ui_elements(
     end replaceText
 
     on cleanText(valueToClean)
+        if valueToClean is missing value then return ""
         try
             set cleaned to valueToClean as text
         on error
@@ -891,30 +900,18 @@ def ui_elements(
         set heightText to ""
         tell application "System Events"
             try
-                set roleText to my cleanText(role of targetElement)
-            end try
-            try
-                set subroleText to my cleanText(subrole of targetElement)
-            end try
-            try
-                set nameText to my cleanText(name of targetElement)
-            end try
-            try
-                set descriptionText to my cleanText(description of targetElement)
-            end try
-            try
-                set valueText to my cleanText(value of targetElement)
-            end try
-            try
-                set enabledText to my cleanText(enabled of targetElement)
-            end try
-            try
-                set positionValue to position of targetElement
+                set elementProperties to properties of targetElement
+                set roleText to my cleanText(role of elementProperties)
+                set subroleText to my cleanText(subrole of elementProperties)
+                set nameText to my cleanText(name of elementProperties)
+                if nameText is "" then set nameText to my cleanText(help of elementProperties)
+                set descriptionText to my cleanText(description of elementProperties)
+                set valueText to my cleanText(value of elementProperties)
+                set enabledText to my cleanText(enabled of elementProperties)
+                set positionValue to position of elementProperties
                 set xText to item 1 of positionValue as text
                 set yText to item 2 of positionValue as text
-            end try
-            try
-                set sizeValue to size of targetElement
+                set sizeValue to size of elementProperties
                 set widthText to item 1 of sizeValue as text
                 set heightText to item 2 of sizeValue as text
             end try
@@ -976,7 +973,7 @@ def ui_elements(
         end tell
     end run
     """
-    result = _run_osascript(script, [str(clean_limit), "2", app_filter])
+    result = _run_osascript(script, [str(clean_limit), "6", app_filter])
     if not result["ok"]:
         return _with_permission_metadata(
             "desktop.ui_elements",
@@ -5857,7 +5854,7 @@ def _ui_inspection_metadata(
     unclassified_count = max(0, len(elements) - role_bearing_count)
     menu_level_count = sum(count for role, count in role_counts.items() if "Menu" in role)
     control_like_count = sum(
-        count for role, count in role_counts.items() if role in _UI_CONTROL_LIKE_ROLES
+        count for role, count in role_counts.items() if role in UI_CONTROL_LIKE_ROLES
     )
     has_elements = bool(elements)
     menu_level_only = (

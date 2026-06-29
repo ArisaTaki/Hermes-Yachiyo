@@ -24,18 +24,6 @@ from scripts.smoke_real_desktop_app_open import (
 )
 
 
-CONTROL_LIKE_ROLES = {
-    "AXButton",
-    "AXCheckBox",
-    "AXComboBox",
-    "AXPopUpButton",
-    "AXRadioButton",
-    "AXSlider",
-    "AXTextArea",
-    "AXTextField",
-}
-
-
 def _data(result: dict[str, Any]) -> dict[str, Any]:
     return result.get("data") if isinstance(result.get("data"), dict) else {}
 
@@ -67,7 +55,34 @@ def _role_counts(elements: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _control_like_count(elements: list[dict[str, Any]]) -> int:
-    return sum(1 for element in elements if str(element.get("role") or "") in CONTROL_LIKE_ROLES)
+    return sum(
+        1
+        for element in elements
+        if str(element.get("role") or "") in desktop_tools.UI_CONTROL_LIKE_ROLES
+    )
+
+
+def _deepest_ui_depth(elements: list[dict[str, Any]]) -> int:
+    return max(
+        (
+            int(element.get("depth"))
+            for element in elements
+            if isinstance(element.get("depth"), int)
+            and not isinstance(element.get("depth"), bool)
+        ),
+        default=-1,
+    )
+
+
+def _default_app_control_surface_visible(
+    app_name: str,
+    *,
+    role_counts: dict[str, int],
+    deepest_ui_depth: int,
+) -> bool:
+    if app_name.casefold() != DEFAULT_APP_NAME.casefold():
+        return True
+    return int(role_counts.get("AXButton") or 0) >= 20 and deepest_ui_depth >= 4
 
 
 def run_smoke(
@@ -135,6 +150,12 @@ def run_smoke(
     menu_role_count = sum(count for role, count in role_counts.items() if "Menu" in role)
     menu_level_count = int(ui_data.get("menu_level_count") or len(menu_elements) or menu_role_count)
     control_like_count = int(ui_data.get("control_like_count") or _control_like_count(elements))
+    deepest_ui_depth = _deepest_ui_depth(elements)
+    default_app_control_surface_visible = _default_app_control_surface_visible(
+        clean_app_name,
+        role_counts=role_counts,
+        deepest_ui_depth=deepest_ui_depth,
+    )
     ui_inspection_level = str(ui_data.get("inspection_level") or "").strip()
     if not ui_inspection_level:
         ui_inspection_level = (
@@ -162,6 +183,7 @@ def run_smoke(
         "menu_level_ui_visible": (
             bool(menu_elements) or menu_role_count > 0 or control_like_count > 0
         ),
+        "default_app_control_surface_visible": default_app_control_surface_visible,
         "cleanup_ok": cleanup_result.get("ok") is True,
         "did_not_quit_existing_app": not (
             cleanup
@@ -189,6 +211,7 @@ def run_smoke(
         "ui_visibility_limited": ui_data.get("visibility_limited") is True,
         "menu_level_count": menu_level_count,
         "control_like_count": control_like_count,
+        "deepest_ui_depth": deepest_ui_depth,
         "discovery": {"result": discovery, "names": discovered_names},
         "before_status": before_status,
         "open_result": open_result,

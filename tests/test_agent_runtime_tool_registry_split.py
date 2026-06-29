@@ -4483,8 +4483,10 @@ def test_desktop_windows_permission_failure_returns_recovery_targets(monkeypatch
 
 def test_desktop_ui_elements_returns_foreground_accessibility_controls(monkeypatch) -> None:
     osascript_args = []
+    osascript_scripts = []
 
-    def fake_osascript(_script, args=None):
+    def fake_osascript(script, args=None):
+        osascript_scripts.append(script)
         osascript_args.append(args)
         return {
             "ok": True,
@@ -4537,7 +4539,10 @@ def test_desktop_ui_elements_returns_foreground_accessibility_controls(monkeypat
         "visibility_limited": False,
         "visibility_status": "control_accessible",
     }
-    assert osascript_args == [["20", "2", ""]]
+    assert osascript_args == [["20", "6", ""]]
+    assert "set elementProperties to properties of targetElement" in osascript_scripts[0]
+    assert 'if valueToClean is missing value then return ""' in osascript_scripts[0]
+    assert "help of elementProperties" in osascript_scripts[0]
 
 
 def test_desktop_ui_elements_diagnoses_menu_level_only_visibility(monkeypatch) -> None:
@@ -4568,6 +4573,30 @@ def test_desktop_ui_elements_diagnoses_menu_level_only_visibility(monkeypatch) -
     assert result["data"]["window_title_missing"] is True
     assert result["data"]["visibility_limited"] is True
     assert result["data"]["visibility_status"] == "menu_level_only"
+
+
+def test_desktop_ui_elements_classifies_selectable_file_cells_as_controls(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": (
+                "META\tTextEdit\t505\tOpen\n"
+                "4\tAXCell\t\tDownloads\tCell\t\ttrue\t20\t120\t100\t32"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.ui_elements(app_name="TextEdit", limit=20)
+
+    assert result["ok"] is True
+    assert result["data"]["role_counts"] == {"AXCell": 1}
+    assert result["data"]["control_like_count"] == 1
+    assert result["data"]["inspection_level"] == "control"
+    assert result["data"]["visibility_status"] == "control_accessible"
 
 
 def test_desktop_ui_elements_can_read_named_running_app(monkeypatch) -> None:
@@ -4605,7 +4634,7 @@ def test_desktop_ui_elements_can_read_named_running_app(monkeypatch) -> None:
     assert result["data"]["resolved_app_name"] == "Google Chrome"
     assert result["data"]["app_resolution"] == "installed_app_bundle"
     assert result["data"]["elements"][0]["name"] == "Send"
-    assert osascript_args == [["20", "2", "Google Chrome"]]
+    assert osascript_args == [["20", "6", "Google Chrome"]]
 
 
 def test_desktop_inspect_app_returns_ready_snapshot_for_accessible_controls(monkeypatch) -> None:
