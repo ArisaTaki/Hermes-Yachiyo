@@ -454,7 +454,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
     parser.add_argument("--input-text", default=DEFAULT_INPUT_TEXT)
     parser.add_argument("--no-cleanup", action="store_true")
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        help="Optional JSON evidence report path.",
+    )
     return parser
+
+
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -464,6 +477,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         input_text=args.input_text,
         cleanup=not args.no_cleanup,
     )
+    if args.report_json is not None:
+        _write_report(args.report_json, evidence)
+        print(
+            f"real desktop interaction smoke report: {args.report_json}",
+            file=sys.stderr,
+        )
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0 if evidence.get("ok") is True else 1
 

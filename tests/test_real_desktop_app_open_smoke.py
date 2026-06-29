@@ -259,3 +259,28 @@ def test_real_desktop_app_open_smoke_cli_outputs_json(monkeypatch, capsys):
     assert output["mode"] == "real_desktop_app_open_smoke"
     assert output["skipped"] is True
     assert output["app_name"] == "Calculator"
+
+
+def test_real_desktop_app_open_smoke_cli_writes_report_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    report_path = tmp_path / "real-desktop-app-open.json"
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
+
+    assert (
+        smoke.main(["--app-name", "Calculator", "--report-json", str(report_path)])
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "real_desktop_app_open_smoke"
+    assert report["skipped"] is True
+    assert report["app_name"] == "Calculator"
+    assert "real desktop app open smoke report:" in captured.err
+    assert str(report_path) in captured.err

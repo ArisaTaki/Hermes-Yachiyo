@@ -92,36 +92,57 @@ This proves arbitrary app names and app-scoped click/type requests plan through
 `desktop.list_apps`, app foreground tools, verification steps, and
 Studio-routable events.
 
-Current real desktop discovery evidence is reproducible with
-`python scripts/smoke_real_desktop_discovery.py`; on macOS this runs the real
-`desktop.list_apps` implementation against installed system apps without
-opening them, and archives permission preflight diagnostics. On non-macOS
-source checks it records skipped evidence instead of pretending desktop
-execution was exercised.
+Current real desktop discovery evidence is reproducible with:
 
-Current opt-in real desktop app open evidence is reproducible with
-`python scripts/smoke_real_desktop_app_open.py`; on macOS this runs the real
-`desktop.list_apps -> app.open -> app.status` chain against Calculator by
-default, then attempts cleanup only if the app was not already running before
-the smoke. The RC verifier keeps this evidence skipped by default and only runs
-it with `--run-real-desktop-app-open-smoke`, so source gates do not open user
-apps unless explicitly requested.
+```bash
+python scripts/smoke_real_desktop_discovery.py \
+  --report-json tmp/real-desktop-discovery.json
+```
 
-Current opt-in real desktop UI inspection evidence is reproducible with
-`python scripts/smoke_real_desktop_ui_inspection.py`; on macOS this runs the
-real `desktop.running_apps`, `desktop.windows`, `app.focus`,
-`desktop.active_window`, and named-app `desktop.ui_elements(app_name=...)`
-path. The evidence records whether focus was actually verified and how many
-menu-level or control-like UI roles were observed, so current environment
-limits remain visible instead of being hidden behind a passing smoke.
+On macOS this runs the real `desktop.list_apps` implementation against
+installed system apps without opening them, and archives permission preflight
+diagnostics. On non-macOS source checks it records skipped evidence instead of
+pretending desktop execution was exercised.
 
-Current opt-in real desktop interaction evidence is reproducible with
-`python scripts/smoke_real_desktop_interaction.py`; on an unlocked macOS
-session it opens a previously stopped Calculator, types a value, reads the
-named app UI tree, clicks a semantic accessibility control, and verifies the
-visible result changed before cleaning up. It fails before mutation when the
-desktop session is locked or the app was already running, and the RC verifier
-only enables it with `--run-real-desktop-interaction-smoke`.
+Current opt-in real desktop app open evidence is reproducible with:
+
+```bash
+python scripts/smoke_real_desktop_app_open.py \
+  --report-json tmp/real-desktop-app-open.json
+```
+
+On macOS this runs the real `desktop.list_apps -> app.open -> app.status` chain
+against Calculator by default, then attempts cleanup only if the app was not
+already running before the smoke. The RC verifier keeps this evidence skipped
+by default and only runs it with `--run-real-desktop-app-open-smoke`, so source
+gates do not open user apps unless explicitly requested.
+
+Current opt-in real desktop UI inspection evidence is reproducible with:
+
+```bash
+python scripts/smoke_real_desktop_ui_inspection.py \
+  --report-json tmp/real-desktop-ui-inspection.json
+```
+
+On macOS this runs the real `desktop.running_apps`, `desktop.windows`,
+`app.focus`, `desktop.active_window`, and named-app
+`desktop.ui_elements(app_name=...)` path. The evidence records whether focus
+was actually verified and how many menu-level or control-like UI roles were
+observed, so current environment limits remain visible instead of being hidden
+behind a passing smoke.
+
+Current opt-in real desktop interaction evidence is reproducible with:
+
+```bash
+python scripts/smoke_real_desktop_interaction.py \
+  --report-json tmp/real-desktop-interaction.json
+```
+
+On an unlocked macOS session it opens a previously stopped Calculator, types a
+value, reads the named app UI tree, clicks a semantic accessibility control,
+and verifies the visible result changed before cleaning up. It fails before
+mutation when the desktop session is locked or the app was already running,
+and the RC verifier only enables it with `--run-real-desktop-interaction-smoke`.
 
 Runtime failures can also expose a non-permission `blocking_condition` such as
 `desktop_session_locked`. Chat task cards plus Bubble and Live2D launcher task

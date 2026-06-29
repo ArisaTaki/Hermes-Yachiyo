@@ -308,3 +308,24 @@ def test_real_desktop_interaction_smoke_cli_outputs_json(monkeypatch, capsys):
     output = json.loads(capsys.readouterr().out)
     assert output["mode"] == "real_desktop_interaction_smoke"
     assert output["skipped"] is True
+
+
+def test_real_desktop_interaction_smoke_cli_writes_report_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    report_path = tmp_path / "real-desktop-interaction.json"
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "real_desktop_interaction_smoke"
+    assert report["skipped"] is True
+    assert "real desktop interaction smoke report:" in captured.err
+    assert str(report_path) in captured.err
