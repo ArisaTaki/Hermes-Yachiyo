@@ -9682,6 +9682,85 @@ def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
     assert send_step.approval_required is True
     assert send_step.risk_level == "high"
 
+    app_scoped_type_decision = RuntimePlanner().decision(
+        "打开 Slack 发消息给 yachiyo：hello",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "app.open_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert app_scoped_type_decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(
+        app_scoped_type_decision,
+        "type-communication-recipient",
+    ).tool_name == "app.open_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_type_decision,
+        "type-communication-recipient",
+    ).input_preview == {
+        "app_name": "Slack",
+        "text": "yachiyo",
+    }
+    assert _step_by_id(
+        app_scoped_type_decision,
+        "draft-communication-message",
+    ).tool_name == "app.open_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_type_decision,
+        "draft-communication-message",
+    ).input_preview == {
+        "app_name": "Slack",
+        "text": "hello",
+    }
+    assert planner_direct_tool_requests(
+        "打开 Slack 发消息给 yachiyo：hello",
+        [
+            "app.open_and_safe_shortcut",
+            "app.open_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Slack", "text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Slack", "text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
+
 
 def test_runtime_planner_routes_implicit_chinese_direct_communication_send_sequence() -> None:
     requests = planner_direct_tool_requests(
@@ -10768,6 +10847,113 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
             "continue_to_model": True,
         },
     ]
+
+    app_scoped_tools = [
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    app_scoped_search_result = RuntimePlanner().decision(
+        "打开 Slack 搜索 yachiyo，然后把搜索结果发给 Alice",
+        allowed_tools=app_scoped_tools,
+    )
+
+    assert app_scoped_search_result.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(app_scoped_search_result, "focus-app-search-field").tool_name == (
+        "app.open_and_safe_shortcut"
+    )
+    assert _step_by_id(app_scoped_search_result, "focus-app-search-field").input_preview == {
+        "app_name": "Slack",
+        "action": "find",
+    }
+    assert _step_by_id(app_scoped_search_result, "type-app-search-query").tool_name == (
+        "app.open_and_safe_type_text"
+    )
+    assert _step_by_id(app_scoped_search_result, "type-app-search-query").input_preview == {
+        "app_name": "Slack",
+        "text": "yachiyo",
+    }
+    assert planner_tool_requests(
+        "打开 Slack 搜索 yachiyo，然后把搜索结果发给 Alice",
+        allowed_tools=app_scoped_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Slack", "text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Slack", "role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+    legacy_calls: list[dict[str, Any]] = []
+    selection = planner_first_direct_tool_selection(
+        "打开 Slack 搜索 yachiyo，然后把搜索结果发给 Alice",
+        app_scoped_tools,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert legacy_calls == []
 
 
 def test_runtime_planner_prefetches_non_message_app_search_result_before_delivery() -> None:

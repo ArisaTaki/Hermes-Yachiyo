@@ -5188,6 +5188,7 @@ def _app_search_result_context_steps(
 
     steps: list[ToolPlanStepSnapshot] = []
     depends_on: list[str] = []
+    source_mode = str(direct_message.get("source_app_mode") or "focus").strip() or "focus"
     if source_app:
         discover_tool = _first_allowed(("desktop.list_apps", "desktop.running_apps"), allowed)
         discover_input = (
@@ -5208,7 +5209,6 @@ def _app_search_result_context_steps(
             )
         )
         depends_on = ["discover-app-search-source"]
-        source_mode = str(direct_message.get("source_app_mode") or "focus").strip()
         source_tool_candidates = (
             ("app.open", "app.focus") if source_mode == "open" else ("app.focus", "app.open")
         )
@@ -5259,7 +5259,20 @@ def _app_search_result_context_steps(
         depends_on = ["discover-app-search-source"]
 
     shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
-    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    shortcut_input = {"action": "find"}
+    if not shortcut_tool and source_app:
+        shortcut_tool = _first_allowed(
+            app_foreground_tool_candidates(source_mode, "safe_shortcut"),
+            allowed,
+        )
+        if shortcut_tool:
+            shortcut_input = {"app_name": source_app, "action": "find"}
+    type_tool, type_input = _safe_type_text_operation_preview(
+        app_name=source_app,
+        mode=source_mode,
+        allowed=allowed,
+        payload={"text": query},
+    )
     submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     read_tool = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
     read_input = (
@@ -5280,10 +5293,10 @@ def _app_search_result_context_steps(
                 "Focus app search field",
                 "desktop.ui_operation",
                 shortcut_tool,
-                input_preview={"action": "find"},
+                input_preview=shortcut_input,
                 depends_on=depends_on,
                 action="shortcut",
-                reason="Open the source app search field with a generic safe shortcut.",
+                reason="Open the source app search field with a safe shortcut.",
             ),
             _step(
                 intent,
@@ -5291,7 +5304,7 @@ def _app_search_result_context_steps(
                 "Type app search query",
                 "desktop.ui_operation",
                 type_tool,
-                input_preview={"text": query},
+                input_preview=type_input,
                 depends_on=["focus-app-search-field"],
                 action="type",
                 reason="Type only the explicit source-app search query.",
@@ -5817,7 +5830,12 @@ def _direct_communication_steps(
         allowed,
     )
     app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
-    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    type_tool, recipient_type_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload={"text": recipient},
+    )
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     steps: list[ToolPlanStepSnapshot] = []
@@ -5919,7 +5937,7 @@ def _direct_communication_steps(
                 "Type communication recipient",
                 "communication.compose",
                 type_tool,
-                input_preview={"text": recipient},
+                input_preview=recipient_type_input,
                 depends_on=["focus-communication-recipient-search"],
                 action="type",
                 reason="Type only the explicit recipient from the user prompt.",
@@ -5961,13 +5979,19 @@ def _direct_communication_steps(
             draft_input = {"text": body} if body else {"body_source": body_source}
         if transform:
             draft_input["transform"] = transform
+        draft_tool, draft_input = _safe_type_text_operation_preview(
+            app_name=app_name,
+            mode=mode,
+            allowed=allowed,
+            payload=draft_input,
+        )
         steps.append(
             _step(
                 intent,
                 "draft-communication-message",
                 "Draft communication message",
                 "communication.compose",
-                type_tool,
+                draft_tool,
                 input_preview=draft_input,
                 depends_on=["submit-communication-recipient-search"],
                 action="draft_message",
@@ -6046,7 +6070,10 @@ def _communication_desktop_send_tools_available(
     if not app_shortcut_tool and not (app_tool and shortcut_tool):
         return False
     return bool(
-        _first_allowed(("desktop.safe_type_text",), allowed)
+        _first_allowed(
+            _safe_type_text_operation_candidates("Mail", mode),
+            allowed,
+        )
         and _first_allowed(("desktop.search_submit",), allowed)
         and _first_allowed(("desktop.submit_foreground",), allowed)
     )
@@ -13653,6 +13680,32 @@ def _app_search_operation_candidates(
     if not str(app_name or "").strip():
         return generic
     return (*generic, *app_foreground_tool_candidates(mode, action))
+
+
+def _safe_type_text_operation_candidates(app_name: str, mode: str) -> tuple[str, ...]:
+    return _app_search_operation_candidates(
+        "safe_type_text",
+        app_name=app_name,
+        mode=mode,
+        generic=("desktop.safe_type_text",),
+    )
+
+
+def _safe_type_text_operation_preview(
+    *,
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+    payload: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    tool_name = _first_allowed(
+        _safe_type_text_operation_candidates(app_name, mode),
+        allowed,
+    )
+    input_preview = dict(payload)
+    if str(tool_name or "").startswith("app."):
+        input_preview = {"app_name": app_name, **input_preview}
+    return tool_name, input_preview
 
 
 def _type_into_ui_element_tool_available(
