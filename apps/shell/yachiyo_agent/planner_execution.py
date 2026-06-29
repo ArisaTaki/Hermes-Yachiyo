@@ -157,6 +157,12 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         direct_requests = _direct_communication_tool_requests(decision, allowed)
         if direct_requests:
             return direct_requests
+        direct_context_requests = _direct_communication_context_tool_requests(
+            decision,
+            allowed,
+        )
+        if direct_context_requests:
+            return direct_context_requests
         context_requests = _context_source_tool_requests(
             decision,
             allowed,
@@ -165,12 +171,6 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         )
         if context_requests:
             return context_requests
-        direct_context_requests = _direct_communication_context_tool_requests(
-            decision,
-            allowed,
-        )
-        if direct_context_requests:
-            return direct_context_requests
         return _context_prefetch_tool_requests(
             decision,
             allowed,
@@ -1235,7 +1235,7 @@ def _direct_communication_requires_model_body(direct_hint: Mapping[str, Any]) ->
     transform = str(direct_hint.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"current_page_content", "visible_text"}
+    return body_source in {"app_search_result", "current_page_content", "visible_text"}
 
 
 def _direct_communication_context_tool_requests(
@@ -1248,6 +1248,13 @@ def _direct_communication_context_tool_requests(
         return []
     source = str(direct_hint.get("body_source") or inputs.get("context_source") or "").strip()
     planning_reason = "planner_prefetch_communication_context"
+
+    if source == "app_search_result":
+        return _direct_app_search_result_context_tool_requests(
+            decision,
+            allowed,
+            planning_reason=planning_reason,
+        )
 
     if source == "selection":
         if "desktop.safe_shortcut" not in allowed or "clipboard.read" not in allowed:
@@ -1292,6 +1299,45 @@ def _direct_communication_context_tool_requests(
         return [request]
 
     return []
+
+
+def _direct_app_search_result_context_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    source_step_ids = {
+        "discover-app-search-source",
+        "open-app-search-source",
+        "focus-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-communication-context",
+    }
+    requests: list[dict[str, Any]] = []
+    tool_plan = getattr(getattr(decision, "plan", None), "tool_plan", None)
+    for step in getattr(tool_plan, "steps", []):
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id not in source_step_ids:
+            continue
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        request = _request(
+            tool_name,
+            _desktop_request_payload(tool_name, payload),
+            planning_reason=planning_reason,
+        )
+        if step_id == "read-communication-context":
+            request["continue_to_model"] = True
+        requests.append(request)
+        if step_id == "read-communication-context":
+            break
+    return requests
 
 
 def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

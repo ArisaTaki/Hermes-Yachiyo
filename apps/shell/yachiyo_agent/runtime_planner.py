@@ -1348,12 +1348,17 @@ class TaskIntentRouter:
         ).strip()
         if scoped_action == "new_message":
             return _empty_intent("communication", text)
-        direct_hint = _direct_communication_candidate_hint(text)
+        app_search_result_hint = _app_search_result_communication_hint(text)
+        direct_hint = app_search_result_hint or _direct_communication_candidate_hint(text)
         if not direct_hint and click_target_hint(text) and _app_name_hint(text):
             return _empty_intent("communication", text)
         if _foreground_submit_action_hint(text) and not direct_hint:
             return _empty_intent("communication", text)
-        source = _communication_context_source_hint(text)
+        source = (
+            "app_search_result"
+            if app_search_result_hint
+            else _communication_context_source_hint(text)
+        )
         score = _score_terms(text, ["email", "message", "mail", "send to", "send ", "邮件", "消息", "发给", "发送"])
         if score <= 0 and direct_hint:
             score = 0.24
@@ -4230,10 +4235,6 @@ class RuntimePlanner:
             if isinstance(direct_message, Mapping)
             else {}
         )
-        if isinstance(direct_message, Mapping):
-            direct_steps = _direct_communication_steps(intent, allowed, direct_message)
-            if direct_steps:
-                return direct_steps
         compose_tool = _first_allowed(
             (
                 "app.open_and_type_into_ui_element",
@@ -4246,6 +4247,39 @@ class RuntimePlanner:
             ),
             allowed,
         )
+        if isinstance(direct_message, Mapping):
+            direct_steps = _direct_communication_steps(intent, allowed, direct_message)
+            if direct_steps:
+                return direct_steps
+            if str(direct_message.get("body_source") or "").strip() == "app_search_result":
+                context_steps = _app_search_result_context_steps(
+                    intent,
+                    allowed,
+                    direct_message,
+                    step_prefix="communication",
+                    capability_id="communication.compose",
+                )
+                if context_steps:
+                    draft_input = _communication_draft_input_preview(direct_message)
+                    draft_input.setdefault("body_source", "app_search_result")
+                    return [
+                        *context_steps,
+                        _step(
+                            intent,
+                            "draft-communication-from-context",
+                            "Draft communication from captured context",
+                            "communication.compose",
+                            compose_tool,
+                            input_preview=draft_input,
+                            risk_level="medium",
+                            approval_required=True,
+                            depends_on=[context_steps[-1].step_id],
+                            reason=(
+                                "Inspect the requested app search result before drafting "
+                                "the communication; final sending remains approval-gated."
+                            ),
+                        ),
+                    ]
         if context_source:
             context_steps = _context_source_steps(
                 intent,
@@ -4674,6 +4708,162 @@ def _context_source_steps(
     return []
 
 
+def _app_search_result_context_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    direct_message: Mapping[str, Any],
+    *,
+    step_prefix: str,
+    capability_id: str,
+) -> list[ToolPlanStepSnapshot]:
+    source_app = str(direct_message.get("source_app_name") or "").strip()
+    source_scope = str(direct_message.get("source_scope") or "").strip()
+    query = _clean_app_search_query(
+        str(direct_message.get("source_app_search_query") or "")
+    )
+    if not query:
+        return []
+
+    steps: list[ToolPlanStepSnapshot] = []
+    depends_on: list[str] = []
+    if source_app:
+        discover_tool = _first_allowed(("desktop.list_apps", "desktop.running_apps"), allowed)
+        discover_input = (
+            {"query": source_app, "limit": 20}
+            if discover_tool == "desktop.list_apps"
+            else {}
+        )
+        steps.append(
+            _step(
+                intent,
+                "discover-app-search-source",
+                "Discover source app",
+                "desktop.app_discovery",
+                discover_tool,
+                input_preview=discover_input,
+                action="list_apps",
+                reason="Discover the requested source app before searching inside it.",
+            )
+        )
+        depends_on = ["discover-app-search-source"]
+        source_mode = str(direct_message.get("source_app_mode") or "focus").strip()
+        source_tool_candidates = (
+            ("app.open", "app.focus") if source_mode == "open" else ("app.focus", "app.open")
+        )
+        source_tool = _first_allowed(source_tool_candidates, allowed)
+        steps.append(
+            _step(
+                intent,
+                "open-app-search-source",
+                "Open or focus source app",
+                "desktop.app_control",
+                source_tool,
+                input_preview={"app_name": source_app},
+                depends_on=depends_on,
+                action="open_app" if source_tool == "app.open" else "focus_app",
+                reason="Prepare the source app before using its in-app search.",
+            )
+        )
+        depends_on = ["open-app-search-source"]
+        if source_tool == "app.open" and "app.focus" in (allowed or set()):
+            steps.append(
+                _step(
+                    intent,
+                    "focus-app-search-source",
+                    "Focus source app",
+                    "desktop.app_control",
+                    "app.focus",
+                    input_preview={"app_name": source_app},
+                    depends_on=depends_on,
+                    action="focus_app",
+                    reason="Focus the source app after opening it.",
+                )
+            )
+            depends_on = ["focus-app-search-source"]
+    elif source_scope == "foreground":
+        discover_tool = _first_allowed(("desktop.running_apps", "desktop.active_window"), allowed)
+        steps.append(
+            _step(
+                intent,
+                "discover-app-search-source",
+                "Discover foreground app",
+                "desktop.app_discovery",
+                discover_tool,
+                input_preview={},
+                action="active_window" if discover_tool == "desktop.active_window" else "list_apps",
+                reason="Inspect the foreground app before searching inside it.",
+            )
+        )
+        depends_on = ["discover-app-search-source"]
+
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    read_tool = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
+    read_input = (
+        {"role_filter": "text", "limit": 120}
+        if read_tool == "desktop.ui_elements"
+        else {"reason": "Read the source app search result before composing."}
+        if read_tool == "screen.capture"
+        else {}
+    )
+    if source_app and read_tool == "desktop.ui_elements":
+        read_input["app_name"] = source_app
+
+    steps.extend(
+        [
+            _step(
+                intent,
+                "focus-app-search-field",
+                "Focus app search field",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "find"},
+                depends_on=depends_on,
+                action="shortcut",
+                reason="Open the source app search field with a generic safe shortcut.",
+            ),
+            _step(
+                intent,
+                "type-app-search-query",
+                "Type app search query",
+                "desktop.ui_operation",
+                type_tool,
+                input_preview={"text": query},
+                depends_on=["focus-app-search-field"],
+                action="type",
+                reason="Type only the explicit source-app search query.",
+            ),
+            _step(
+                intent,
+                "submit-app-search",
+                "Submit app search",
+                "desktop.ui_operation",
+                submit_tool,
+                input_preview={},
+                depends_on=["type-app-search-query"],
+                action="submit_search",
+                reason="Submit the source-app search before reading the result.",
+            ),
+            _step(
+                intent,
+                f"read-{step_prefix}-context",
+                "Read app search result",
+                _context_source_capability_id("app_search_result", read_tool, capability_id),
+                read_tool,
+                input_preview=read_input,
+                depends_on=["submit-app-search"],
+                action="read_ui",
+                reason=(
+                    "Read the app search result so the model can generate the requested "
+                    "message body from observed content."
+                ),
+            ),
+        ]
+    )
+    return steps
+
+
 def _data_analysis_context_source_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -5005,6 +5195,8 @@ def _context_source_capability_id(source: str, tool_name: str | None, fallback: 
     clean_tool = str(tool_name or "").strip()
     if source in {"selection", "clipboard"}:
         return "clipboard.read_write"
+    if source == "app_search_result":
+        return "desktop.app_discovery"
     if source in {"current_page_link", "current_page_content"}:
         if clean_tool.startswith("browser."):
             return "browser.research"
@@ -5035,6 +5227,7 @@ def _direct_communication_steps(
             not body
             and body_source
             not in {
+                "app_search_result",
                 "clipboard",
                 "selection",
                 "current_page_link",
@@ -5056,12 +5249,22 @@ def _direct_communication_steps(
     source_step_id = ""
     generated_body = _direct_message_requires_generated_body(direct_message)
     if generated_body and body_source:
-        context_steps = _context_source_steps(
-            intent,
-            allowed,
-            body_source,
-            step_prefix="communication",
-            capability_id="communication.compose",
+        context_steps = (
+            _app_search_result_context_steps(
+                intent,
+                allowed,
+                direct_message,
+                step_prefix="communication",
+                capability_id="communication.compose",
+            )
+            if body_source == "app_search_result"
+            else _context_source_steps(
+                intent,
+                allowed,
+                body_source,
+                step_prefix="communication",
+                capability_id="communication.compose",
+            )
         )
         steps.extend(context_steps)
         if context_steps:
@@ -5226,7 +5429,7 @@ def _direct_message_requires_generated_body(direct_message: Mapping[str, Any]) -
     transform = str(direct_message.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"current_page_content", "visible_text"}
+    return body_source in {"app_search_result", "current_page_content", "visible_text"}
 
 
 def _current_page_find_steps(
@@ -6905,6 +7108,109 @@ def _communication_content_transform_hint(text: str) -> str:
     if _contains_any(value, ("摘要", "总结", "概括", "summary", "summarize")):
         return "summary"
     return ""
+
+
+def _app_search_result_communication_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
+        return {}
+    if not _contains_any(
+        value,
+        (
+            "搜索结果",
+            "当前结果",
+            "查询结果",
+            "检索结果",
+            "结果",
+            "search result",
+            "search results",
+            "results",
+        ),
+    ):
+        return {}
+    target = _app_search_result_communication_target_text(value)
+    if not target:
+        return {}
+
+    foreground_search = _foreground_app_search_hint(value)
+    source_app = ""
+    source_scope = ""
+    query = ""
+    if foreground_search:
+        source_scope = "foreground"
+        query = str(foreground_search.get("query") or "").strip()
+    else:
+        leading_search = _leading_app_search_hint(value)
+        source_app = str(leading_search.get("app_name") or "").strip()
+        query = str(leading_search.get("query") or "").strip()
+        if not source_app:
+            source_app = _app_name_hint(value)
+        if source_app and not query:
+            query = _app_search_query_hint(value, source_app)
+
+    query = _clean_app_search_query(query)
+    if not query:
+        return {}
+
+    target_app, recipient = _split_communication_surface_and_recipient(target)
+    if not recipient:
+        recipient = _clean_communication_recipient_text(target)
+    if not target_app and recipient:
+        target_app = _communication_surface_for_recipient_hint(recipient)
+    if (
+        not target_app
+        and source_app
+        and supports_new_message_app_hint(source_app)
+    ):
+        target_app = source_app
+    if not recipient:
+        return {}
+
+    hint: dict[str, str] = {
+        "recipient": recipient,
+        "body_source": "app_search_result",
+        "source_app_search_query": query,
+        "mode": _communication_app_mode(value),
+        "send_action": "send",
+    }
+    if target_app:
+        hint["app_name"] = target_app
+    if source_app:
+        hint["source_app_name"] = source_app
+        hint["source_app_mode"] = _app_search_result_source_mode(value)
+    if source_scope:
+        hint["source_scope"] = source_scope
+    transform = _communication_content_transform_hint(value)
+    if transform:
+        hint["content_transform_hint"] = transform
+    return hint
+
+
+def _app_search_result_communication_target_text(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:把|将)?.{0,40}?(?:搜索结果|当前结果|查询结果|检索结果|结果).{0,30}?"
+        r"(?:发给|发送给|发到|发送到|转发给|转发到)\s*(?P<target>[^。！？!?]+)$",
+        r"(?:send|message|forward)\s+(?:the\s+)?(?:search\s+)?results?\s+"
+        r"(?:to|for)\s+(?P<target_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        return _clean_communication_hint_text(
+            match.groupdict().get("target")
+            or match.groupdict().get("target_en")
+            or ""
+        )
+    return ""
+
+
+def _app_search_result_source_mode(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(r"(?:打开|启动|开启|open|launch|start)", value, flags=re.IGNORECASE):
+        return "open"
+    return "focus"
 
 
 def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
@@ -10967,6 +11273,11 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         r"(?:应用|app|application|窗口|界面|ui)"
         r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
         r"(?P<query>.+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*(?:把|将)?\s*"
+        r"(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
+        r"(?:应用|app|application|窗口|界面|ui)"
+        r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
+        r"(?P<query_result>.+?)\s*(?:的)?(?:搜索结果|结果|内容).*$",
         r"^(?:search|find)\s+(?P<query_en>.+?)\s+"
         r"(?:in|inside|within)\s+(?:the\s+)?(?:current|active|foreground)\s+"
         r"(?:app|application|window|ui)$",
@@ -10979,6 +11290,7 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
             continue
         query = _clean_app_search_query(
             match.groupdict().get("query")
+            or match.groupdict().get("query_result")
             or match.groupdict().get("query_en")
             or match.groupdict().get("query_en2")
             or ""
@@ -11282,11 +11594,13 @@ def _clean_app_search_query(query: str) -> str:
         r"(?:选择|选中|点击|点按|打开|按|"
         r"(?:把|将)?(?:当前|前台|这份|这个|这些|搜索结果|结果|内容|文本)?"
         r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成|"
-        r"读|读取|查看|看看|看一下|看下|判断|决定|分析|识别|告诉|说明)|"
+        r"读|读取|查看|看看|看一下|看下|判断|决定|分析|识别|告诉|说明|"
+        r"发给|发送给|发到|发送到|转发给|转发到)|"
+        r"发给|发送给|发到|发送到|转发给|转发到|"
         r"下一步|该点哪里|该点哪个|能否|能不能|可以点|是否可以|"
         r"截图|截屏|screen\s*capture|screenshot|"
         r"choose|select|click|open|press|summari[sz]e|write|generate|output|"
-        r"read|inspect|check|judge|decide|determine|tell|explain)(?:\b)?",
+        r"read|inspect|check|judge|decide|determine|tell|explain|send|message|forward)(?:\b)?",
         value,
         maxsplit=1,
         flags=re.IGNORECASE,

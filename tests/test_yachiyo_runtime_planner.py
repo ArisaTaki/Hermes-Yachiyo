@@ -8801,6 +8801,225 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
     }
 
 
+def test_runtime_planner_prefetches_app_search_result_for_communication() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+    slack_result = RuntimePlanner().decision(
+        "打开 Slack 搜索 yachiyo，然后把搜索结果发给 Alice",
+        allowed_tools=allowed_tools,
+    )
+
+    assert slack_result.selected_intent.kind == "communication"
+    assert slack_result.selected_intent.inputs == {
+        "context_source": "app_search_result",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "Alice",
+            "body_source": "app_search_result",
+            "source_app_name": "Slack",
+            "source_app_mode": "open",
+            "source_app_search_query": "yachiyo",
+            "mode": "open",
+            "send_action": "send",
+        },
+    }
+    assert [step.step_id for step in slack_result.plan.tool_plan.steps] == [
+        "discover-app-search-source",
+        "open-app-search-source",
+        "focus-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(slack_result, "type-app-search-query").input_preview == {
+        "text": "yachiyo"
+    }
+    assert _step_by_id(slack_result, "read-communication-context").input_preview == {
+        "role_filter": "text",
+        "limit": 120,
+        "app_name": "Slack",
+    }
+    assert _step_by_id(slack_result, "open-or-focus-app").depends_on == [
+        "read-communication-context"
+    ]
+    assert _step_by_id(slack_result, "send-communication-message").approval_required is True
+
+    assert planner_tool_requests(
+        "打开 Slack 搜索 yachiyo，然后把搜索结果发给 Alice",
+        allowed_tools=allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Slack", "role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+
+
+def test_runtime_planner_prefetches_non_message_app_search_result_before_delivery() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+    notion_result = RuntimePlanner().decision(
+        "打开 Notion 搜索 release plan，把结果整理成摘要并发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+    foreground_result = RuntimePlanner().decision(
+        "把当前前台应用搜索 yachiyo 的结果发给 Alice",
+        allowed_tools=allowed_tools,
+    )
+
+    assert notion_result.selected_intent.kind == "communication"
+    assert notion_result.selected_intent.inputs["content_transform_hint"] == "summary"
+    assert notion_result.selected_intent.inputs["direct_message_hint"] == {
+        "app_name": "WeChat",
+        "recipient": "文件传输助手",
+        "body_source": "app_search_result",
+        "source_app_name": "Notion",
+        "source_app_mode": "open",
+        "source_app_search_query": "release plan",
+        "mode": "open",
+        "send_action": "send",
+        "content_transform_hint": "summary",
+    }
+    assert _step_by_id(notion_result, "type-app-search-query").input_preview == {
+        "text": "release plan"
+    }
+    assert _step_by_id(notion_result, "open-or-focus-app").input_preview == {
+        "app_name": "WeChat"
+    }
+    assert _step_by_id(notion_result, "draft-communication-message").input_preview == {
+        "body_source": "app_search_result",
+        "transform": "summary",
+    }
+
+    assert foreground_result.selected_intent.kind == "communication"
+    assert foreground_result.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body_source": "app_search_result",
+        "source_app_search_query": "yachiyo",
+        "mode": "focus",
+        "send_action": "send",
+        "source_scope": "foreground",
+    }
+    assert [step.step_id for step in foreground_result.plan.tool_plan.steps] == [
+        "discover-app-search-source",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-communication-context",
+        "draft-communication-from-context",
+    ]
+    assert planner_execution_tool_requests(
+        planner_tool_requests(
+            "把当前前台应用搜索 yachiyo 的结果发给 Alice",
+            allowed_tools=allowed_tools,
+        ),
+        allowed_tools=allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_runtime_planner_routes_explicit_note_to_information_capture() -> None:
     decision = RuntimePlanner().decision(
         "新建备忘录内容是 今天要买牛奶",
