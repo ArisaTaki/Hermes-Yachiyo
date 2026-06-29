@@ -1269,7 +1269,13 @@ def _direct_communication_requires_model_body(direct_hint: Mapping[str, Any]) ->
     transform = str(direct_hint.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"app_search_result", "current_page_content", "visible_text", "file"}
+    return body_source in {
+        "app_search_result",
+        "screen_capture",
+        "current_page_content",
+        "visible_text",
+        "file",
+    }
 
 
 def _direct_communication_context_tool_requests(
@@ -1315,6 +1321,17 @@ def _direct_communication_context_tool_requests(
         if "browser.current_page" not in allowed:
             return []
         request = _request("browser.current_page", {}, planning_reason=planning_reason)
+        request["continue_to_model"] = True
+        return [request]
+
+    if source == "screen_capture":
+        if "screen.capture" not in allowed:
+            return []
+        request = _request(
+            "screen.capture",
+            {"reason": "Capture the screen before sending it."},
+            planning_reason=planning_reason,
+        )
         request["continue_to_model"] = True
         return [request]
 

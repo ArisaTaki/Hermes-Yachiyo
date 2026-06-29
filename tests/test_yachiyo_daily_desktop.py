@@ -503,6 +503,26 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "把当前屏幕截图发给微信文件传输助手",
+        allowed_tools=[
+            "screen.capture",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "Capture the screen before sending it."},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_operations() -> None:
     cases = (

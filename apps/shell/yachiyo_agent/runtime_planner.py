@@ -5163,6 +5163,20 @@ def _context_source_steps(
             )
         ]
 
+    if source == "screen_capture":
+        tool_name = _first_allowed(("screen.capture",), allowed)
+        return [
+            _step(
+                intent,
+                f"read-{step_prefix}-context",
+                "Capture screen context",
+                _context_source_capability_id(source, tool_name, capability_id),
+                tool_name,
+                input_preview={"reason": "Capture the screen before sending it."},
+                reason="Capture the explicitly requested screenshot before using it as task context.",
+            )
+        ]
+
     if source == "visible_text":
         tool_name = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
         return [
@@ -5839,6 +5853,8 @@ def _context_source_capability_id(source: str, tool_name: str | None, fallback: 
             return "desktop.app_discovery"
     if source == "visible_text":
         return "desktop.app_discovery"
+    if source == "screen_capture":
+        return "desktop.app_discovery"
     if source == "file":
         return "file.workspace_read"
     return fallback
@@ -5851,6 +5867,8 @@ def _context_source_required_capability(source: str) -> str:
     if clean_source in {"current_page_link", "current_page_content"}:
         return "browser.research"
     if clean_source == "visible_text":
+        return "desktop.app_discovery"
+    if clean_source == "screen_capture":
         return "desktop.app_discovery"
     if clean_source == "file":
         return "file.workspace_read"
@@ -5891,6 +5909,7 @@ def _direct_communication_steps(
                 "app_search_result",
                 "clipboard",
                 "selection",
+                "screen_capture",
                 "current_page_link",
                 "current_page_content",
                 "visible_text",
@@ -6182,7 +6201,13 @@ def _direct_message_requires_generated_body(direct_message: Mapping[str, Any]) -
     transform = str(direct_message.get("content_transform_hint") or "").strip()
     if transform and body_source:
         return True
-    return body_source in {"app_search_result", "current_page_content", "visible_text", "file"}
+    return body_source in {
+        "app_search_result",
+        "screen_capture",
+        "current_page_content",
+        "visible_text",
+        "file",
+    }
 
 
 def _current_page_find_steps(
@@ -8410,6 +8435,8 @@ def _context_artifact_source_hint(text: str) -> str:
 
 
 def _communication_context_source_hint(text: str) -> str:
+    if _looks_like_screen_capture_communication_source(text):
+        return "screen_capture"
     if _looks_like_visible_text_artifact_source(text):
         return "visible_text"
     source = _task_context_source_hint(text)
@@ -8420,6 +8447,22 @@ def _communication_context_source_hint(text: str) -> str:
     if _looks_like_current_page_artifact_source(text):
         return "current_page_content"
     return ""
+
+
+def _looks_like_screen_capture_communication_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
+        return False
+    return bool(
+        re.search(
+            r"(?:截图|截屏|屏幕截图|当前截图|当前屏幕截图|当前窗口截图|"
+            r"screenshot|screen\s+capture)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _communication_file_context_hint(
@@ -12563,6 +12606,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
     if source not in {
         "clipboard",
         "selection",
+        "screen_capture",
         "current_page_link",
         "current_page_content",
         "visible_text",
@@ -12575,6 +12619,10 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
             r"(?:当前选中的内容|当前选中内容|当前选中的文字|当前选中文字|当前选中文本|"
             r"选中的内容|选中内容|选中的文字|选中文字|选中文本|"
             r"selected\s+text|selected\s+content|selection)"
+        ),
+        "screen_capture": (
+            r"(?:当前屏幕截图|当前窗口截图|当前界面截图|当前截图|屏幕截图|截图当前屏幕|"
+            r"截图当前窗口|截图当前界面|截图|截屏|screenshot|screen\s+capture)"
         ),
         "current_page_link": (
             r"(?:当前网页链接|当前页面链接|当前浏览器页面链接|当前浏览器网页链接|"

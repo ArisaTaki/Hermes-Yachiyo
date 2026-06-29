@@ -11222,6 +11222,82 @@ def test_runtime_planner_routes_visible_text_delivery_from_natural_phrase() -> N
     ]
 
 
+def test_runtime_planner_routes_screen_capture_delivery_to_communication() -> None:
+    allowed_tools = [
+        "screen.capture",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(
+        "把当前屏幕截图发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "screen_capture",
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body_source": "screen_capture",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(decision, "read-communication-context").tool_name == "screen.capture"
+    assert _step_by_id(decision, "read-communication-context").input_preview == {
+        "reason": "Capture the screen before sending it."
+    }
+    assert _step_by_id(decision, "draft-communication-message").input_preview == {
+        "app_name": "WeChat",
+        "body_source": "screen_capture",
+    }
+    assert _step_by_id(decision, "send-communication-message").approval_required is True
+    assert planner_tool_requests(
+        "把当前屏幕截图发给微信文件传输助手",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "Capture the screen before sending it."},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    slack_screenshot = RuntimePlanner().decision(
+        "截图当前屏幕并发给 Slack 的 Alice",
+        allowed_tools=allowed_tools,
+    )
+    assert slack_screenshot.selected_intent.kind == "communication"
+    assert slack_screenshot.selected_intent.inputs == {
+        "context_source": "screen_capture",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "Alice",
+            "body_source": "screen_capture",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert _step_by_id(slack_screenshot, "read-communication-context").tool_name == (
+        "screen.capture"
+    )
+
+
 def test_runtime_planner_routes_generated_context_to_direct_communication() -> None:
     allowed_tools = [
         "browser.extract_text",
