@@ -51,6 +51,8 @@ def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None)
         flags=re.IGNORECASE,
     ):
         return "Desktop"
+    if _looks_like_download_data_scope(text):
+        return "Downloads"
     known_locations = (
         ("downloads", "Downloads"),
         ("download folder", "Downloads"),
@@ -63,6 +65,49 @@ def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None)
         if marker in lowered:
             return location
     return ""
+
+
+def _looks_like_download_data_scope(text: str) -> bool:
+    value = str(text or "").strip()
+    lowered = value.lower()
+    data_terms = (
+        r"(?:数据|数据集|文件|表格|电子表格|销售|报表|明细|"
+        r"csv|tsv|xlsx|xls|jsonl?|parquet|txt|markdown|md)"
+    )
+    data_file = r"[^\s，,。；;]+?\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|txt|md|markdown)"
+    downloaded_source = (
+        r"(?:(?:最近|最新|最后|上一个|刚刚?|刚才|新近)\s*下载(?:的|下来|好|完成)?|"
+        r"(?<!可)下载(?:的|下来|好|完成))"
+    )
+    if re.search(
+        rf"{downloaded_source}\s*(?:{data_file}|{data_terms})",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        rf"(?:{data_file}|{data_terms})\s*(?:是|来自|在|从)?\s*"
+        rf"{downloaded_source}",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:recently|latest|last|newly|just)\s+downloaded\s+"
+            r"(?:data|dataset|file|table|spreadsheet|csv|tsv|xlsx|xls|jsonl?|parquet|txt|"
+            r"[^\s]+\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|txt|md|markdown))\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bdownloaded\s+"
+            r"(?:data|dataset|table|spreadsheet|csv|tsv|xlsx|xls|jsonl?|parquet|"
+            r"[^\s]+\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|txt|md|markdown))\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def data_source_kind_hint(source_hint: str, text: str = "") -> str:

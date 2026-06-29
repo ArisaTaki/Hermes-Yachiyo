@@ -1962,6 +1962,18 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析 Downloads 里的销售数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    recent_download_data_decision = RuntimePlanner().decision(
+        "分析最近下载的数据并生成图表报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    recent_download_csv_decision = RuntimePlanner().decision(
+        "分析最近下载的 CSV 并生成图表报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    named_download_file_decision = RuntimePlanner().decision(
+        "分析刚刚下载的 sales.csv 并生成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     desktop_scoped_decision = RuntimePlanner().decision(
         "分析桌面上的销售数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -1990,6 +2002,25 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     assert _step_by_id(scoped_decision, "inspect-data-source").input_preview == {
         "path": "Downloads"
     }
+    assert recent_download_data_decision.selected_intent.kind == "data_analysis"
+    assert recent_download_data_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert _step_by_id(recent_download_data_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads"
+    }
+    assert recent_download_csv_decision.selected_intent.kind == "data_analysis"
+    assert recent_download_csv_decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert recent_download_csv_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert _step_by_id(recent_download_csv_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+    }
+    assert named_download_file_decision.selected_intent.kind == "data_analysis"
+    assert named_download_file_decision.selected_intent.inputs["data_source_hint"] == "Downloads/sales.csv"
+    assert _step_by_id(named_download_file_decision, "analyze-data-file").input_preview == _data_analysis_preview(
+        "Downloads/sales.csv",
+        "csv",
+    )
     assert desktop_scoped_decision.selected_intent.kind == "data_analysis"
     assert desktop_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
     assert "context_source" not in desktop_scoped_decision.selected_intent.inputs
@@ -15407,6 +15438,18 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         "分析 Downloads 里的销售数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    recent_download_data_requests = planner_tool_requests(
+        "分析最近下载的数据并生成图表报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    recent_download_csv_requests = planner_tool_requests(
+        "分析最近下载的 CSV 并生成图表报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    named_download_file_requests = planner_tool_requests(
+        "分析刚刚下载的 sales.csv 并生成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     generic_requests = planner_tool_requests(
         "分析数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -15428,6 +15471,35 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
+        }
+    ]
+    assert recent_download_data_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert recent_download_csv_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert named_download_file_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview("Downloads/sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
         }
     ]
     assert xlsx_requests == [

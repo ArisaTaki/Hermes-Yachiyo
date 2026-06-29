@@ -297,6 +297,20 @@ def test_planner_first_daily_desktop_entrypoint_requests_open_spreadsheet_data_f
         },
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "分析最近下载的数据并生成图表报告",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_targets() -> None:
     cases = (
