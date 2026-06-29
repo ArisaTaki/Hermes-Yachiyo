@@ -949,6 +949,76 @@ def test_release_candidate_verifier_fails_when_real_desktop_ui_inspection_smoke_
     ]
 
 
+def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_requested(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_electron_native_bridge_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "electron_native_bridge_smoke",
+            "native_runtime_url": "http://127.0.0.1:50123",
+            "checks": {
+                "native_bridge_started": True,
+                "unauthenticated_rejected": True,
+                "authenticated_status_ok": True,
+            },
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_electron_native_bridge_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Electron native bridge smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    section = report["electron_native_bridge_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "electron_native_bridge_smoke"
+
+
+def test_release_candidate_verifier_fails_when_electron_native_bridge_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_electron_native_bridge_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "electron_native_bridge_smoke",
+            "error": "electron_not_installed",
+            "checks": {"electron_bin_exists": False},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_electron_native_bridge_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "Electron native bridge smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    section = report["electron_native_bridge_smoke"]
+    assert section["status"] == "failed"
+    assert section["run_requested"] is True
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_electron_native_bridge.py"),
+            "message": "electron_not_installed",
+        }
+    ]
+
+
 def test_release_candidate_verifier_reports_real_desktop_interaction_smoke_when_requested(
     tmp_path, monkeypatch, capsys
 ):

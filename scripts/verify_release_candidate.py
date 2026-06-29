@@ -43,6 +43,9 @@ from scripts.smoke_data_analysis_artifacts import (
 from scripts.smoke_desktop_planner_discovery import (
     run_smoke as run_desktop_planner_discovery_smoke,
 )
+from scripts.smoke_electron_native_bridge import (
+    run_smoke as run_electron_native_bridge_smoke,
+)
 from scripts.smoke_group_run_timeline import (
     run_smoke as run_group_run_timeline_smoke,
 )
@@ -2035,6 +2038,43 @@ def verify_real_desktop_interaction_smoke(root: Path) -> tuple[list[Finding], di
     return [
         Finding(
             root / "scripts/smoke_real_desktop_interaction.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_electron_native_bridge_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_electron_native_bridge_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_electron_native_bridge.py",
+                f"Electron native bridge smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "electron_native_bridge_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_electron_native_bridge.py",
+                "Electron native bridge smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "electron_native_bridge_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "Electron native bridge smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_electron_native_bridge.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4164,6 +4204,7 @@ def verify_release_candidate(
     run_real_desktop_app_open_smoke: bool = False,
     run_real_desktop_interaction_smoke: bool = False,
     run_real_desktop_ui_inspection_smoke: bool = False,
+    run_electron_native_bridge_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: ManualChecksJsonInput = None,
     manual_checks_markdown: Path | None = None,
@@ -4237,6 +4278,12 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+        },
+        "electron_native_bridge_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_electron_native_bridge_smoke,
         },
         "planner_runtime_tool_parity_smoke": {
             "status": "pending",
@@ -4393,6 +4440,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
             source_only_conflicts.append("--run-ui-smoke")
+        if run_electron_native_bridge_smoke:
+            source_only_conflicts.append("--run-electron-native-bridge-smoke")
 
     if source_only_conflicts:
         conflict_message = f"--source-only cannot be combined with {', '.join(source_only_conflicts)}"
@@ -4443,6 +4492,12 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+        }
+        report["electron_native_bridge_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_electron_native_bridge_smoke,
         }
         report["planner_runtime_tool_parity_smoke"] = {
             "status": "skipped",
@@ -4666,6 +4721,30 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_interaction_smoke,
+        }
+
+    if run_electron_native_bridge_smoke:
+        electron_native_findings, electron_native_evidence = (
+            verify_electron_native_bridge_smoke(root)
+        )
+        _print_findings("Electron native bridge smoke", electron_native_findings)
+        failed = failed or bool(electron_native_findings)
+        report["electron_native_bridge_smoke"] = {
+            "status": "failed" if electron_native_findings else "passed",
+            "evidence": electron_native_evidence,
+            "findings": _finding_report(electron_native_findings),
+            "run_requested": run_electron_native_bridge_smoke,
+        }
+    else:
+        print(
+            "Electron native bridge smoke: skipped; pass "
+            "--run-electron-native-bridge-smoke to verify Electron host native bridge"
+        )
+        report["electron_native_bridge_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": run_electron_native_bridge_smoke,
         }
 
     tool_parity_smoke_findings, tool_parity_smoke_evidence = (
@@ -5350,6 +5429,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run opt-in real macOS named-app UI tree inspection smoke.",
     )
     parser.add_argument(
+        "--run-electron-native-bridge-smoke",
+        action="store_true",
+        help="Run opt-in Electron native runtime bridge auth/status smoke.",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
@@ -5515,6 +5599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_real_desktop_ui_inspection_smoke=(
             args.run_real_desktop_ui_inspection_smoke
         ),
+        run_electron_native_bridge_smoke=args.run_electron_native_bridge_smoke,
         manual_checks_json=args.manual_checks_json,
         manual_checks_markdown=args.manual_checks_markdown,
         require_manual_checks_complete=args.require_manual_checks_complete,

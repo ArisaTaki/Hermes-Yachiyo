@@ -36,6 +36,8 @@ const BRIDGE_URL_ENV = 'OHA_YACHIYO_BRIDGE_URL';
 const BRIDGE_TOKEN_ENV = 'OHA_YACHIYO_BRIDGE_TOKEN';
 const ELECTRON_NATIVE_URL_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_URL';
 const ELECTRON_NATIVE_TOKEN_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_TOKEN';
+const ELECTRON_NATIVE_BRIDGE_SMOKE_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE';
+const ELECTRON_NATIVE_BRIDGE_SMOKE_APP_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE_APP';
 const DESKTOP_SMOKE_MODE_ENV = 'OHA_YACHIYO_DESKTOP_SMOKE_MODE';
 const CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV = 'OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
@@ -661,6 +663,115 @@ function closeNativeRuntimeServer(): void {
   try {
     server.close();
   } catch {}
+}
+
+function requestNativeBridgeJson(
+  method: string,
+  routePath: string,
+  token: string,
+  body?: Record<string, unknown>,
+): Promise<{ statusCode: number; payload: Record<string, unknown>; rawBody: string }> {
+  return new Promise((resolve, reject) => {
+    if (!nativeRuntimeUrl) {
+      reject(new Error('native_runtime_bridge_not_started'));
+      return;
+    }
+    const target = new URL(routePath, nativeRuntimeUrl);
+    const rawBody = body === undefined ? '' : JSON.stringify(body);
+    const request = http.request(
+      {
+        hostname: target.hostname,
+        port: Number(target.port),
+        path: `${target.pathname}${target.search}`,
+        method,
+        headers: {
+          ...(token ? { 'x-oha-yachiyo-bridge-token': token } : {}),
+          ...(rawBody ? {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(rawBody),
+          } : {}),
+        },
+        timeout: 7000,
+      },
+      (response) => {
+        let responseBody = '';
+        response.on('data', (chunk: Buffer | string) => {
+          responseBody += chunk.toString();
+        });
+        response.on('end', () => {
+          let payload: Record<string, unknown> = {};
+          try {
+            payload = responseBody.trim() ? JSON.parse(responseBody) as Record<string, unknown> : {};
+          } catch {
+            payload = { ok: false, error: 'invalid_json', raw_body: responseBody };
+          }
+          resolve({
+            statusCode: response.statusCode || 0,
+            payload,
+            rawBody: responseBody,
+          });
+        });
+      },
+    );
+    request.on('timeout', () => {
+      request.destroy(new Error('native_bridge_request_timeout'));
+    });
+    request.on('error', reject);
+    if (rawBody) request.write(rawBody);
+    request.end();
+  });
+}
+
+async function runElectronNativeBridgeSmoke(): Promise<Record<string, unknown>> {
+  const startedAt = new Date().toISOString();
+  await startNativeRuntimeServer();
+  const unauthenticatedStatus = await requestNativeBridgeJson('GET', '/status', '');
+  const authenticatedStatus = await requestNativeBridgeJson('GET', '/status', bridgeSessionToken);
+  const focusApp = String(process.env[ELECTRON_NATIVE_BRIDGE_SMOKE_APP_ENV] || '').trim();
+  let focusResult: Record<string, unknown> | null = null;
+  if (focusApp) {
+    const response = await requestNativeBridgeJson(
+      'POST',
+      '/native/desktop/focus',
+      bridgeSessionToken,
+      { app_name: focusApp },
+    );
+    focusResult = {
+      status_code: response.statusCode,
+      payload: response.payload,
+    };
+  }
+  const ok = (
+    unauthenticatedStatus.statusCode === 403
+    && unauthenticatedStatus.payload.error === 'invalid_native_bridge_token'
+    && authenticatedStatus.statusCode === 200
+    && authenticatedStatus.payload.ok === true
+    && authenticatedStatus.payload.service === 'oha-yachiyo-electron-native-runtime'
+  );
+  return {
+    ok,
+    mode: 'electron_native_bridge_smoke',
+    started_at: startedAt,
+    platform: process.platform,
+    native_runtime_url: nativeRuntimeUrl,
+    authenticated_status: {
+      status_code: authenticatedStatus.statusCode,
+      payload: authenticatedStatus.payload,
+    },
+    unauthenticated_status: {
+      status_code: unauthenticatedStatus.statusCode,
+      payload: unauthenticatedStatus.payload,
+    },
+    focus_app: focusApp || '',
+    ...(focusResult ? { focus_result: focusResult } : {}),
+    checks: {
+      native_bridge_started: Boolean(nativeRuntimeUrl),
+      unauthenticated_rejected: unauthenticatedStatus.statusCode === 403,
+      authenticated_status_ok: authenticatedStatus.statusCode === 200 && authenticatedStatus.payload.ok === true,
+      auth_value_not_printed: true,
+      focus_attempted: Boolean(focusApp),
+    },
+  };
 }
 
 function defaultLatestJsonUrl(branch = 'oha-develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
@@ -3226,6 +3337,24 @@ ipcMain.handle('oha:openLauncherMenu', (event, mode: unknown) => {
 app.whenReady().then(() => {
   showMacDockIcon();
   void (async () => {
+    if (process.env[ELECTRON_NATIVE_BRIDGE_SMOKE_ENV] === '1') {
+      try {
+        const smokeResult = await runElectronNativeBridgeSmoke();
+        console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
+        closeNativeRuntimeServer();
+        app.exit(smokeResult.ok === true ? 0 : 1);
+      } catch (error) {
+        const smokeResult = {
+          ok: false,
+          mode: 'electron_native_bridge_smoke',
+          error: error instanceof Error ? error.message : String(error),
+        };
+        console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
+        closeNativeRuntimeServer();
+        app.exit(1);
+      }
+      return;
+    }
     await prepareBridgeUrlForPackagedBackend();
     try {
       await startNativeRuntimeServer();

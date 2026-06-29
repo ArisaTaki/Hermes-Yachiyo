@@ -148,6 +148,20 @@ shape, so Agent Studio can replay whether the Electron host actually improved
 foreground control. Source/CLI smokes will not show this strategy unless the
 backend was launched by Electron.
 
+Current Electron native bridge host evidence is reproducible with:
+
+```bash
+python scripts/smoke_electron_native_bridge.py \
+  --report-json tmp/electron-native-bridge-smoke.json
+```
+
+This compiles the Electron main process, starts it in native-bridge smoke mode,
+checks that unauthenticated loopback requests are rejected, checks that
+authenticated `/status` returns the Electron native runtime service payload,
+and exits without starting the full backend or opening a desktop target app.
+The release verifier exposes the same opt-in gate with
+`--run-electron-native-bridge-smoke`.
+
 Current opt-in real desktop interaction evidence is reproducible with:
 
 ```bash
