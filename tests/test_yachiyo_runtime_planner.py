@@ -11806,7 +11806,136 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
             "planning_reason": "planner_desktop_operation",
         }
     ]
+    assert planner_tool_requests("帮我找一下机器上有没有 PixelForge", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
     assert planner_tool_requests("我现在是不是在家", allowed_tools) == []
+
+
+def test_runtime_planner_keeps_current_and_global_desktop_scopes_generic() -> None:
+    window_requests = planner_tool_requests(
+        "列出当前所有打开的窗口",
+        ["desktop.running_apps", "desktop.windows", "desktop.list_apps"],
+    )
+    assert window_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.windows",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    current_ui = planner_tool_requests(
+        "读取当前应用里面有哪些按钮",
+        ["desktop.running_apps", "desktop.ui_elements", "desktop.inspect_app"],
+    )
+    assert current_ui == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    current_click = planner_tool_requests(
+        "在任意当前应用点击保存按钮",
+        ["desktop.running_apps", "desktop.click_ui_element", "desktop.ui_elements"],
+    )
+    assert current_click == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "保存",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_runtime_planner_cleans_desktop_app_surface_qualifiers() -> None:
+    slack_ui = RuntimePlanner().decision(
+        "读取 Slack 里面有哪些按钮",
+        allowed_tools=["desktop.inspect_app", "desktop.ui_elements"],
+    )
+    assert slack_ui.selected_intent.kind == "desktop_operation"
+    assert slack_ui.selected_intent.inputs == {
+        "app_name_hint": "Slack",
+        "operation_hint": "read_ui",
+        "ui_inspection_hint": {
+            "role_filter": "button",
+            "limit": 80,
+            "app_name": "Slack",
+        },
+    }
+    assert _step_by_id(slack_ui, "inspect-app").input_preview == {
+        "app_name": "Slack",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+
+    numbers_target = RuntimePlanner().decision(
+        "分析 sales.csv 输出图表并写进 Numbers 新表格",
+        allowed_tools=["data.analyze", "artifact.write", "app.focus"],
+    )
+    assert numbers_target.selected_intent.kind == "data_analysis"
+    assert numbers_target.selected_intent.inputs == {
+        "data_source_hint": "sales.csv",
+        "data_source_kind": "csv",
+        "target_app_hint": "Numbers",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert _step_by_id(numbers_target, "prepare-analysis-target-app").input_preview == {
+        "app_name": "Numbers",
+        "target_action": "app_paste",
+        "container_action": "new_document",
+        "body_source": "model_generated_content",
+    }
 
 
 def test_planner_direct_tool_requests_keeps_unknown_app_discover_and_verify_steps() -> None:

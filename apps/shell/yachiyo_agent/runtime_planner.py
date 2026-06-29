@@ -7592,6 +7592,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.08
     if (
         intent.kind == "desktop_operation"
+        and isinstance(intent.inputs.get("desktop_discovery_hint"), Mapping)
+        and str(intent.inputs["desktop_discovery_hint"].get("action") or "").strip()
+        == "discover_apps"
+        and str(intent.inputs["desktop_discovery_hint"].get("query") or "").strip()
+    ):
+        score += 0.34
+    if (
+        intent.kind == "desktop_operation"
         and app_scoped_ui_operation
         and intent.inputs.get("app_name_hint")
     ):
@@ -7761,6 +7769,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs.get("browser_action") or "").strip() != "type_text"
     ):
         score -= 0.24
+    if intent.kind == "web_research" and _local_app_discovery_query(text):
+        score -= 0.42
     if (
         intent.kind == "web_research"
         and app_management_hint(text)
@@ -9889,8 +9899,8 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下|起来)$", "", app).strip(" .，,。")
-    app = re.sub(r"\s*(?:的|里(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
-    app = re.sub(r"\s*(?:在|里|中|上|内)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:的|里(?:的)?|里面(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:在|里|里面|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"(?:应用(?:程序)?|软件)$", "", app).strip(" .，,。")
     app = re.sub(r"^(?:一下|下|这个|那个)\s*", "", app).strip()
@@ -9931,6 +9941,10 @@ def _clean_app_name_hint(value: str) -> str:
         "刚才关闭的标签页",
         "刚关闭的标签页",
         "当前",
+        "任意当前",
+        "任意当前应用",
+        "当前所有",
+        "当前全部",
         "当前app",
         "当前应用",
         "前台应用",
@@ -10401,9 +10415,10 @@ def _dynamic_context_target_container_action_hint(text: str) -> str:
         return "new_note"
     if re.search(
         r"(?:新页面|新建页面|创建页面|新文档|新建文档|创建文档|新文件|新建文件|创建文件|"
-        r"\bnew\s+(?:page|document|file)\b|"
-        r"\bcreate\s+(?:a\s+)?new\s+(?:page|document|file)\b|"
-        r"\bmake\s+(?:a\s+)?new\s+(?:page|document|file)\b)",
+        r"新表格|新建表格|创建表格|"
+        r"\bnew\s+(?:page|document|file|table|spreadsheet)\b|"
+        r"\bcreate\s+(?:a\s+)?new\s+(?:page|document|file|table|spreadsheet)\b|"
+        r"\bmake\s+(?:a\s+)?new\s+(?:page|document|file|table|spreadsheet)\b)",
         value,
         flags=re.IGNORECASE,
     ):
@@ -10632,13 +10647,14 @@ def _clean_dynamic_context_target_app(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip(" .，,。")
     app = re.sub(
-        r"\s*(?:new\s+)?(?:note|page|document|file)$",
+        r"\s*(?:new\s+)?(?:note|page|document|file|table|spreadsheet)$",
         "",
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
     app = re.sub(
-        r"\s*(?:新笔记|新备忘录|新便签|新页面|新文档|新文件|笔记|备忘录|便签|页面|文档|文件)$",
+        r"\s*(?:新笔记|新备忘录|新便签|新页面|新文档|新文件|新表格|新建表格|"
+        r"笔记|备忘录|便签|页面|文档|文件|表格)$",
         "",
         app,
         flags=re.IGNORECASE,
@@ -14903,6 +14919,9 @@ def _desktop_discovery_hint(text: str) -> dict[str, Any] | None:
         return {"action": "read_active_window"}
     if _looks_like_running_apps_request(value, lowered):
         return {"action": "read_running_apps"}
+    app_query = _local_app_discovery_query(value)
+    if app_query:
+        return {"action": "discover_apps", "query": app_query}
     if _looks_like_installed_apps_request(value, lowered):
         return {"action": "discover_apps"}
     return None
@@ -14919,7 +14938,11 @@ def _desktop_discovery_tool_preview(
     if action == "read_running_apps":
         return "desktop.running_apps", {}
     if action == "discover_apps":
-        return "desktop.list_apps", {}
+        query = str(hint.get("query") or "").strip()
+        return (
+            "desktop.list_apps",
+            {"query": query, "limit": 20} if query else {},
+        )
     return None, {}
 
 
@@ -15007,6 +15030,28 @@ def _looks_like_installed_apps_request(value: str, lowered: str) -> bool:
         or re.search(r"\b(?:list|show)\s+all\s+(?:apps?|applications?)\b", lowered)
         or re.search(r"\blist\s+(?:installed|available)\s+(?:apps?|applications?)\b", lowered)
     )
+
+
+def _local_app_discovery_query(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:机器|电脑|mac|系统|本机|本地).{0,8}(?:有没有|是否有|有无|装了|安装了|有没有安装)\s*(?P<app>[^。！？!?，,]+)",
+        r"(?:有没有|是否有|有无|装了|安装了|有没有安装).{0,8}(?P<app>[\w .·-]{2,40})(?:\s*(?:这个|这款|这个应用|这个软件|app|application|应用|软件))?$",
+        r"\b(?:is|do\s+i\s+have|have)\s+(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:installed|on\s+(?:this\s+)?mac|on\s+(?:this\s+)?machine)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = (
+            match.groupdict().get("app")
+            or match.groupdict().get("app_en")
+            or ""
+        )
+        app = _clean_app_name_hint(raw_app)
+        if app and not _is_generic_foreground_app_label(app):
+            return app
+    return ""
 
 
 def _looks_like_ui_operation(text: str) -> bool:

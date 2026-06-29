@@ -1252,6 +1252,12 @@ def _clean_window_app_name_hint(value: str) -> str:
     app = re.sub(r"\s*(?:的)$", "", app, flags=re.IGNORECASE)
     app = app.strip(" .，,。")
     if re.fullmatch(
+        r"(?:当前|现在|前台)?(?:所有|全部)?(?:打开|打开的|开启|开着|正在显示|open|opened)?",
+        app,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    if re.fullmatch(
         r"(?:当前|现在|前台|这个|该)?(?:应用|app|软件|程序|窗口|window)(?:的)?",
         app,
         flags=re.IGNORECASE,
@@ -1485,6 +1491,12 @@ def _clean_ui_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE)
+    app = re.sub(
+        r"\s*(?:里|里面|中|上|内)(?:的)?$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
     app = re.split(
         r"(?:看看|看一下|看下|查看|读取|观察|识别|有哪些|有什么|有啥|"
         r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
@@ -1492,6 +1504,12 @@ def _clean_ui_app_name_hint(value: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0].strip()
+    app = re.sub(
+        r"\s*(?:里|里面|中|上|内)(?:的)?$",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip()
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE).strip()
     called_app_match = re.match(
         r"^(?:一个|一款|这个|那个)?(?:叫|名叫|名称是|名字是)\s*(?P<app>.+?)\s*(?:的)?(?:应用(?:程序)?|软件)$",
