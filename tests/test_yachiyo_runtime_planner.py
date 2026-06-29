@@ -11127,7 +11127,7 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
     assert target_first_click_decision.selected_intent.kind != "desktop_operation"
 
 
-def test_planner_desktop_tool_requests_prefers_generic_foreground_sequence() -> None:
+def test_planner_desktop_tool_requests_prefers_app_scoped_foreground_tool() -> None:
     requests = planner_desktop_tool_requests(
         "打开 PixelForge 并点击导出按钮",
         allowed_tools=["app.open_and_click_ui_element", "app.open", "desktop.click_ui_element"],
@@ -11136,15 +11136,9 @@ def test_planner_desktop_tool_requests_prefers_generic_foreground_sequence() -> 
     assert requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "PixelForge"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.click_ui_element",
+            "tool": "app.open_and_click_ui_element",
             "input": {
+                "app_name": "PixelForge",
                 "target": "导出",
                 "role_filter": "button",
                 "limit": 80,

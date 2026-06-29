@@ -45,11 +45,10 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         ],
         "expected_request_tools": [
             "desktop.inspect_app",
-            "app.focus",
-            "desktop.click_ui_element",
+            "app.focus_and_click_ui_element",
             "desktop.ui_elements",
         ],
-        "approval_required": ["desktop.click_ui_element"],
+        "approval_required": ["app.focus_and_click_ui_element"],
     },
     {
         "id": "builtin_data_analysis",
