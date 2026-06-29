@@ -65,6 +65,7 @@ export function RuntimeToolCallCard({
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);
   const recoveryHints = runtimeToolRecoveryHintsFromRecords([outputPreview, inputPreview]);
+  const blockingConditions = runtimeToolBlockingConditionsFromRecords([outputPreview, inputPreview]);
   const recoveryActions = runtimeToolRecoveryActionsFromRecords(
     [outputPreview, inputPreview],
     {
@@ -78,6 +79,7 @@ export function RuntimeToolCallCard({
     <div
       className={className}
       data-approval-id={toolCall.approval_id || ''}
+      data-blocking-conditions={blockingConditions.join(',')}
       data-group-id={toolCall.group_id || ''}
       data-group-run-id={toolCall.group_run_id || ''}
       data-risk-level={toolCall.risk_level || ''}
@@ -108,6 +110,15 @@ export function RuntimeToolCallCard({
             </div>
           ))}
         </dl>
+      ) : null}
+      {blockingConditions.length ? (
+        <div className="runtime-tool-call-blockers" data-testid={`${testId}-runtime-blockers`}>
+          {blockingConditions.map((condition) => (
+            <span data-runtime-blocker={condition} key={condition}>
+              {runtimeToolBlockingConditionLabel(condition)}
+            </span>
+          ))}
+        </div>
       ) : null}
       {recoveryHints.length ? (
         <ul className="runtime-tool-call-recovery-hints" data-testid={`${testId}-recovery-hints`}>
@@ -215,4 +226,30 @@ function formatToolPreview(value: Record<string, unknown>): string {
   } catch {
     return String(value);
   }
+}
+
+function runtimeToolBlockingConditionsFromRecords(records: Record<string, unknown>[]): string[] {
+  return uniqueStrings(records.flatMap((record) => [
+    ...stringList(record.blocking_condition),
+    ...stringList(record.blocking_conditions),
+    ...stringList(approvalPreviewRecord(record.data).blocking_condition),
+    ...stringList(approvalPreviewRecord(record.data).blocking_conditions),
+  ]));
+}
+
+function runtimeToolBlockingConditionLabel(condition: string): string {
+  if (condition === 'desktop_session_locked') return 'desktop session locked';
+  return condition.replace(/_/g, ' ');
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => stringList(item));
+  }
+  const clean = String(value || '').trim();
+  return clean ? [clean] : [];
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
