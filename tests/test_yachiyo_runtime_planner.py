@@ -1739,6 +1739,40 @@ def test_runtime_planner_routes_web_research_report_to_app_write_target() -> Non
     }
 
 
+def test_runtime_planner_routes_browser_docs_lookup_to_web_research() -> None:
+    prompt = "打开浏览器查一下 OpenAI 最新 API 文档，然后总结成 markdown artifact"
+    expected_url = (
+        "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0+API+%E6%96%87%E6%A1%A3"
+    )
+    allowed_tools = ["browser.open_url", "artifact.write"]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": expected_url,
+        "browser_action": "open_search",
+        "query": "OpenAI 最新 API 文档",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-web-search",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(decision, "open-web-search").input_preview == {
+        "url": expected_url,
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": expected_url},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_routes_web_research_report_to_communication_target() -> None:
     prompt = "调研 https://example.com 的信息并把报告发给 Slack 的 yachiyo"
     allowed_tools = [
@@ -2118,6 +2152,10 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "把桌面上的 pdf 整理到 Documents",
         allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
     )
+    screenshot_rename_decision = RuntimePlanner().decision(
+        "打开 Finder，把下载文件夹里最近的截图重命名成 demo.png",
+        allowed_tools=["workspace.list", "artifact.write", "terminal.run"],
+    )
     assert organize_decision.selected_intent.kind == "file_organization"
     assert organize_decision.selected_intent.inputs == {
         "location_hint": "Downloads",
@@ -2159,6 +2197,26 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "file_pattern_hint": "*.pdf",
         "destination_hint": "Documents",
     }
+    assert screenshot_rename_decision.selected_intent.kind == "file_organization"
+    assert screenshot_rename_decision.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "rename",
+        "file_type_hint": "screenshot",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination_hint": "demo.png",
+    }
+    rename_apply_step = _step_by_id(
+        screenshot_rename_decision,
+        "apply-file-organization",
+    )
+    assert rename_apply_step.input_preview == {
+        "path": "Downloads",
+        "operation": "rename",
+        "file_type": "screenshot",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination": "demo.png",
+    }
+    assert rename_apply_step.approval_required is True
 
 
 def test_runtime_planner_prefers_structured_file_organize_tool() -> None:

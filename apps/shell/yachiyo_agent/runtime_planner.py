@@ -1341,6 +1341,8 @@ class TaskIntentRouter:
         scoped_operation = _app_scoped_safe_operation_hint(text)
         if scoped_operation and not _file_duplicate_hint(text):
             return _empty_intent("file_organization", text)
+        if _looks_like_external_docs_lookup(text):
+            return _empty_intent("file_organization", text)
         if _looks_like_context_artifact_request(text):
             return _empty_intent("file_organization", text)
         score = _score_terms(
@@ -1423,6 +1425,8 @@ class TaskIntentRouter:
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
+            return _empty_intent("file_access", text)
+        if _looks_like_file_organization_request(text):
             return _empty_intent("file_access", text)
         if _looks_like_scoped_data_analysis_request(text):
             return _empty_intent("file_access", text)
@@ -1613,6 +1617,12 @@ class TaskIntentRouter:
             (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
         ).strip()
         if scoped_action in {"new_reminder", "new_event"}:
+            return _empty_intent("schedule", text)
+        shortcut_action = str((safe_shortcut_hint(text) or {}).get("action") or "").strip()
+        if shortcut_action in {"new_note", "new_document"} and not _contains_any(
+            text,
+            _SCHEDULE_ACTION_TERMS,
+        ):
             return _empty_intent("schedule", text)
         if _looks_like_meeting_content_task(text):
             return _empty_intent("schedule", text)
@@ -9743,6 +9753,8 @@ def _looks_like_external_info_lookup(text: str) -> bool:
         return False
     if _looks_like_local_observation_or_control_request(value):
         return False
+    if _looks_like_external_docs_lookup(value):
+        return True
     if context_source_hint(value) or data_source_hint(value) or data_source_scope_hint(value):
         return False
     lookup_action = re.search(
@@ -9787,6 +9799,53 @@ def _looks_like_external_info_lookup(text: str) -> bool:
         _contains_any(value, ["latest", "最新", "最近", "news", "新闻"])
         and _contains_any(value, ["pricing", "price", "价格", "定价", "报价", "release", "版本"])
     )
+
+
+def _looks_like_external_docs_lookup(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _looks_like_external_docs_subject(value):
+        return False
+    return bool(
+        re.search(
+            r"(?:research|search|look\s+up|find\s+out|find|查找|查询|检索|搜索|调研|研究|了解|找一下|找下|查一下|查查|查(?!看)|看一下|看看)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_external_docs_subject(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        (
+            "文件夹",
+            "目录",
+            "哪些文件",
+            "什么文件",
+            "folder",
+            "directory",
+            "files in",
+            "file list",
+        ),
+    ):
+        return False
+    docs_subject = re.search(
+        r"(?:\b(?:api|sdk|docs?|documentation|reference|manual|guide)\b|文档|手册|指南|参考|开发者文档)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    external_surface = re.search(
+        r"(?:\b(?:api|sdk|docs?|documentation|official|latest|current|browser|chrome|safari|web|website)\b|"
+        r"官方|官网|最新|当前|现在|浏览器|网页|网站)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return bool(docs_subject and external_surface)
 
 
 def _spreadsheet_ui_app_hint(text: str) -> str:
@@ -9850,6 +9909,11 @@ def _file_destination_hint(text: str, *, source_hint: str = "") -> str:
     if not value:
         return ""
     patterns = (
+        re.compile(
+            r"(?:重命名|改名|rename)"
+            r".{0,40}?(?:为|成|叫|命名为|\bto\b|\bas\b)\s*(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
         re.compile(
             r"(?:整理|分类|移动|搬|挪|归档|复制|放|放入|放进|移到|移入)"
             r".{0,24}?(?:到|至|进|入)\s*(?P<target>[^，。；,;]+)",
@@ -14832,6 +14896,28 @@ def _looks_like_local_file_name(candidate: str) -> bool:
         "jsonl",
         "txt",
         "md",
+        "markdown",
+        "pdf",
+        "doc",
+        "docx",
+        "rtf",
+        "pages",
+        "png",
+        "jpg",
+        "jpeg",
+        "heic",
+        "gif",
+        "webp",
+        "mp3",
+        "wav",
+        "aac",
+        "m4a",
+        "flac",
+        "mp4",
+        "mov",
+        "m4v",
+        "avi",
+        "mkv",
         "py",
         "js",
         "ts",
@@ -15175,7 +15261,7 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:(?:在|用|通过|打开|启动|开启)\s*)?"
         r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
         r"(?:里|中|上|内)?\s*"
-        r"(?:打开|访问|浏览|搜索|查找|检索)\s*"
+        r"(?:打开|访问|浏览|搜索|搜一下|搜|查找|查询|查一下|查查|检索)\s*"
         r"(?!新标签页?|新标签|new\s+tab)(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)?\s*"
@@ -15183,7 +15269,7 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:里|中|上|内)?\s*"
         r"(?:(?:打开|启动|开启|新建|开)\s*(?:一个|个)?\s*"
         r"(?:新标签页?|新标签|new\s+tab)?\s*)?"
-        r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"(?:并|然后|再)?\s*(?:搜索|搜一下|搜|查找|查询|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s*"
         r"(?P<query>[^。！？!?]+)$",
@@ -15212,6 +15298,8 @@ def _direct_web_search_query(text: str) -> str:
 
 
 def _looks_like_local_search_query(query: str) -> bool:
+    if _looks_like_external_docs_subject(query):
+        return False
     return bool(
         context_source_hint(query)
         or data_source_hint(query)
@@ -15323,6 +15411,17 @@ def _clean_web_destination_site_hint(site_name: str) -> str:
 
 
 def _web_search_surface_hint(text: str) -> str:
+    direct_browser = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:在|用|通过|打开|启动|开启)\s*)?"
+        r"(?P<surface>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
+        r"(?:里|中|上|内)?\s*"
+        r"(?:打开|访问|浏览|搜索|搜一下|搜|查找|查询|查一下|查查|检索)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if direct_browser:
+        return _clean_web_search_surface_hint(str(direct_browser.group("surface") or ""))
     patterns = (
         r"\b(?:can\s+you\s+)?search\s+(?P<surface>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+for\s+.+$",
         r"^(?P<surface>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s*(?:搜索|查找|检索)\s*.+$",
@@ -15487,7 +15586,7 @@ def _clean_web_search_query(query: str) -> str:
     ).strip()
     value = re.sub(
         r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|做总结|汇总)(?:一份|一下|成)?"
-        r"[^。；;！!？?]{0,24}(?:报告|总结|文档|结果|表格|清单|table)$",
+        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|markdown|artifact|md|table)$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -15503,7 +15602,7 @@ def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.sub(
         r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"[^。；;！!？?]{0,24}(?:报告|总结|文档|结果|表格|清单|table)$",
+        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|markdown|artifact|md|table)$",
         "",
         value,
         flags=re.IGNORECASE,
