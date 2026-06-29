@@ -9,7 +9,7 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     evidence = smoke.run_smoke()
 
     assert evidence["ok"] is True
-    assert evidence["case_count"] == 8
+    assert evidence["case_count"] == 10
     case_by_id = {case["id"]: case for case in evidence["cases"]}
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
@@ -18,12 +18,11 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     ]
     assert case_by_id["app_scoped_ui_click"]["request_tools"] == [
         "desktop.inspect_app",
-        "app.focus",
-        "desktop.click_ui_element",
+        "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
     assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
-        "desktop.click_ui_element"
+        "app.focus_and_click_ui_element"
     ]
     assert case_by_id["builtin_data_analysis"]["request_tools"] == ["data.analyze"]
     assert case_by_id["visible_table_analysis"]["plan_tools"] == [
@@ -36,6 +35,20 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["current_page_report"]["plan_tools"] == [
         "browser.extract_text",
         "artifact.write",
+    ]
+    assert case_by_id["clipboard_send_to_slack"]["request_tools"] == [
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+    ]
+    assert case_by_id["clipboard_send_to_slack"]["approval_required_tools"] == [
+        "desktop.submit_foreground"
+    ]
+    assert case_by_id["system_settings_bluetooth"]["request_tools"] == [
+        "system.settings_open"
     ]
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"
