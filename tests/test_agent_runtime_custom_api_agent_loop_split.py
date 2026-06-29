@@ -545,6 +545,49 @@ def test_custom_api_agent_loop_guides_desktop_tasks_to_split_app_operation_path(
     assert "older app.*_and_* shortcut tools unless a required split step is unavailable" in system_prompt
 
 
+def test_custom_api_agent_loop_preserves_post_mutation_ui_verification_requests() -> None:
+    requests = [
+        {
+            "tool": "desktop.inspect_app",
+            "input": {"app_name": "Notion", "open_if_needed": True, "focus": True},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "New Page"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    filtered = custom_api_agent_module._drop_trailing_daily_desktop_verify_requests(requests)
+
+    assert [request["tool"] for request in filtered] == [
+        "desktop.inspect_app",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+
+def test_custom_api_agent_loop_still_drops_unmarked_trailing_verify_requests() -> None:
+    requests = [
+        {"tool": "desktop.list_apps", "input": {"query": "Notes"}},
+        {"tool": "app.open", "input": {"app_name": "Notes"}},
+        {"tool": "desktop.ui_elements", "input": {"limit": 80}},
+    ]
+
+    filtered = custom_api_agent_module._drop_trailing_daily_desktop_verify_requests(requests)
+
+    assert [request["tool"] for request in filtered] == ["desktop.list_apps", "app.open"]
+
+
 def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() -> None:
     system_prompt = _runtime_planner_guidance_prompt(
         "请检查这个仓库代码并运行测试",
@@ -11130,6 +11173,13 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
     ]
     planned_events = [
@@ -11139,8 +11189,10 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     assert [event["source"] for event in planned_events] == [
+        "runtime_planner",
         "runtime_planner",
         "runtime_planner",
         "runtime_planner",
@@ -11160,6 +11212,7 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     assert selection_events[0]["plan_step_count"] == 4
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
@@ -11168,6 +11221,7 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
@@ -11285,20 +11339,22 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
     )
 
     assert result == "已打开 Notes。"
-    assert tool_runs == [direct_tool_requests[:2]]
+    assert tool_runs == [direct_tool_requests]
     planned_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     ]
     assert [event["detail"] for event in planned_events] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
     assert not [event for event in timeline if event["event"] == "agent.plan.selection"]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
-    assert completed[-1]["detail"] == "app.open"
+    assert completed[-1]["detail"] == "desktop.active_window"
     assert completed[-1]["tools"] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
 
 
@@ -11446,6 +11502,149 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
         "runtime_planner",
         "runtime_planner",
     ]
+
+
+def test_custom_api_agent_loop_executes_runtime_planner_desktop_click_with_ui_verification(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run before runtime planner")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "desktop.inspect_app":
+                result = {
+                    "ok": True,
+                    "action": "desktop.inspect_app",
+                    "summary": "Inspected Notion",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "elements": [{"role": "button", "label": "New Page"}],
+                    },
+                }
+            elif tool == "app.focus_and_click_ui_element":
+                result = {
+                    "ok": True,
+                    "action": "app.focus_and_click_ui_element",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "target": payload["target"],
+                        "x": 120,
+                        "y": 240,
+                        "click_count": 1,
+                    },
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "summary": "Read foreground UI after click",
+                    "data": {"elements": [{"role": "heading", "label": "Untitled"}]},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.inspect_app",
+                    "app.focus",
+                    "desktop.click_ui_element",
+                    "app.focus_and_click_ui_element",
+                    "desktop.ui_elements",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime planner desktop operation should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "在 Notion 点击 New Page",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-desktop-click-verify",
+    )
+
+    assert "Notion" in str(result)
+    assert [request["tool"] for request in tool_runs[0]] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[0][-1]["source"] == "runtime_planner"
+    assert tool_runs[0][-1]["planning_reason"] == "planner_desktop_operation"
+    assert tool_runs[0][-1]["input"] == {"limit": 80}
+
+    selection = _planner_selection_events(timeline)[0]
+    assert selection["selected_tools"] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert selection["plan_tools"] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
+    assert completed[-1]["tools"] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert [step["tool"] for step in completed[-1]["steps"]] == completed[-1]["tools"]
 
 
 def test_custom_api_agent_loop_prefers_runtime_planner_media_before_legacy_rules(

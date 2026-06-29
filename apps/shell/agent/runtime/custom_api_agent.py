@@ -3399,6 +3399,11 @@ def _visible_daily_desktop_completed_steps(
             and index > last_primary
             and not _is_requested_ui_readback(completed_steps, index, first_primary, last_primary)
             and not _is_preserved_active_window_verification(completed_steps, index)
+            and not _is_preserved_runtime_planner_verification(
+                completed_steps,
+                index,
+                last_primary,
+            )
         ):
             continue
         visible_steps.append(step)
@@ -3429,7 +3434,26 @@ def _drop_trailing_daily_desktop_verify_requests(
         for index, request in enumerate(requests)
         if index <= last_primary
         or str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_VERIFY_TOOLS
+        or _is_preserved_runtime_planner_verification(requests, index, last_primary)
     ]
+
+
+def _is_preserved_runtime_planner_verification(
+    requests: list[dict[str, Any]],
+    index: int,
+    last_primary: int,
+) -> bool:
+    if index <= last_primary:
+        return False
+    request = requests[index]
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS:
+        return False
+    planning_reason = str(request.get("planning_reason") or "").strip()
+    if planning_reason != "planner_desktop_operation":
+        return False
+    previous_primary = str(requests[last_primary].get("tool") or "").strip()
+    return previous_primary.startswith(("app.", "desktop."))
 
 
 def _direct_action_with_active_window_verification(
