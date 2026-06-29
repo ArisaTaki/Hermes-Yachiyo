@@ -2337,7 +2337,6 @@ def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
-        "active_window",
         "safe_key",
     ]
 
@@ -2442,7 +2441,6 @@ def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
-        "active_window",
         "safe_scroll",
     ]
 
@@ -2694,18 +2692,23 @@ def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
     }
     assert list(result["fallback_result"]) == [
         "focus",
-        "active_window",
         "safe_shortcut",
     ]
 
 
-def test_tool_broker_app_foreground_action_stops_when_active_app_changes(
+def test_tool_broker_safe_shortcut_skips_active_window_verification_after_focus(
     tmp_path,
     monkeypatch,
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
-    _stub_active_window(monkeypatch, "QQ")
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("safe shortcut should not require active-window verification")
+        ),
+    )
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2716,51 +2719,26 @@ def test_tool_broker_app_foreground_action_stops_when_active_app_changes(
     monkeypatch.setattr(
         desktop_mod,
         "desktop_safe_shortcut",
-        lambda action: (_ for _ in ()).throw(
-            AssertionError("must not send foreground input to the wrong app")
-        ),
+        lambda action: calls.append(("shortcut", action))
+        or {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "data": {"shortcut_action": action},
+        },
     )
 
     result = broker.app_focus_and_safe_shortcut("Slack", "paste")
 
-    assert calls == [("focus", "Slack")]
-    assert result["ok"] is False
+    assert calls == [("focus", "Slack"), ("shortcut", "paste")]
+    assert result["ok"] is True
     assert result["action"] == "app.focus_and_safe_shortcut"
-    assert result["error"] == "foreground_app_mismatch"
-    assert result["summary"] == "Could not verify target app is foreground before foreground action"
-    assert result["blocking_condition"] == "foreground_focus_unavailable"
-    assert result["blocking_conditions"] == ["foreground_focus_unavailable"]
-    assert result["retryable"] is True
-    assert result["data"]["app_name"] == "Slack"
-    assert result["data"]["expected_app_name"] == "Slack"
-    assert result["data"]["active_app_name"] == "QQ"
-    assert result["data"]["foreground_action"] == "safe_shortcut"
-    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
-    assert result["data"]["retryable"] is True
-    assert result["recovery_actions"] == [
-        {
-            "label": "重新打开Slack",
-            "tool": "app.open",
-            "input": {"app_name": "Slack"},
-            "permission_target": "foreground_focus",
-            "risk_level": "low",
-        },
-        {
-            "label": "查看前台窗口",
-            "tool": "desktop.active_window",
-            "input": {},
-            "permission_target": "foreground_focus",
-            "risk_level": "low",
-        },
-        {
-            "label": "截图确认前台",
-            "tool": "screen.capture",
-            "input": {"reason": "verify foreground app after focus failure"},
-            "permission_target": "foreground_focus",
-            "risk_level": "low",
-        },
-    ]
-    assert list(result["fallback_result"]) == ["focus", "active_window"]
+    assert result["summary"] == "Focused app and completed foreground action"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "foreground_action": "safe_shortcut",
+        "shortcut_action": "paste",
+    }
+    assert list(result["fallback_result"]) == ["focus", "safe_shortcut"]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
@@ -4247,7 +4225,9 @@ def test_app_focus_reports_locked_desktop_session_without_permission_error(monke
     ]
 
 
-def test_app_focus_reports_locked_desktop_session_from_runtime_probe(monkeypatch) -> None:
+def test_app_focus_ignores_locked_runtime_probe_when_focus_observes_unlocked_frontmost(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
     monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
@@ -4292,12 +4272,51 @@ def test_app_focus_reports_locked_desktop_session_from_runtime_probe(monkeypatch
     result = desktop_mod.app_focus("Calculator")
 
     assert result["ok"] is False
+    assert result["error"] == "app_focus_not_verified"
+    assert result["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["permission_error"] is False
+    assert result["data"]["blocking_condition"] == "foreground_focus_unavailable"
+    assert result["data"]["desktop_session_locked_runtime_probe_ignored"] is True
+    assert "desktop_session_locked" not in result["data"]
+    assert "desktop_session_locked_by_runtime_probe" not in result["data"]
+    assert result["data"]["frontmost_app"] == "Codex"
+
+
+def test_app_focus_reports_locked_desktop_session_from_runtime_probe_without_unlocked_observation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(desktop_mod, "_desktop_session_locked_by_runtime_probe", lambda: True)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Calculator|false|",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "appkit|Calculator|true|false|loginwindow",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is False
     assert result["error"] == "desktop_session_locked"
     assert result["blocking_condition"] == "desktop_session_locked"
     assert result["permission_error"] is False
     assert result["data"]["desktop_session_locked"] is True
     assert result["data"]["desktop_session_locked_by_runtime_probe"] is True
-    assert result["data"]["frontmost_app"] == "Codex"
+    assert result["data"]["frontmost_app"] == "loginwindow"
 
 
 def test_app_focus_does_not_report_locked_when_system_events_saw_unlocked_frontmost(

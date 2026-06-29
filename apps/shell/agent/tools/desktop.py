@@ -3078,7 +3078,15 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 focus_attempts,
             )
             locked_by_runtime_probe = _desktop_session_locked_by_runtime_probe()
-            if locked_by_observation or locked_by_runtime_probe:
+            runtime_probe_has_unlocked_observation = (
+                locked_by_runtime_probe
+                and _focus_attempts_observed_unlocked_frontmost(focus_attempts)
+            )
+            if runtime_probe_has_unlocked_observation:
+                failed_data["desktop_session_locked_runtime_probe_ignored"] = True
+            if locked_by_observation or (
+                locked_by_runtime_probe and not runtime_probe_has_unlocked_observation
+            ):
                 if locked_by_runtime_probe:
                     failed_data["desktop_session_locked_by_runtime_probe"] = True
                 return _desktop_session_locked_result(
@@ -3261,7 +3269,15 @@ def app_focus(app_name: str) -> dict[str, Any]:
         focus_attempts,
     )
     locked_by_runtime_probe = _desktop_session_locked_by_runtime_probe()
-    if locked_by_observation or locked_by_runtime_probe:
+    runtime_probe_has_unlocked_observation = (
+        locked_by_runtime_probe
+        and _focus_attempts_observed_unlocked_frontmost(focus_attempts)
+    )
+    if runtime_probe_has_unlocked_observation:
+        failed_data["desktop_session_locked_runtime_probe_ignored"] = True
+    if locked_by_observation or (
+        locked_by_runtime_probe and not runtime_probe_has_unlocked_observation
+    ):
         if locked_by_runtime_probe:
             failed_data["desktop_session_locked_by_runtime_probe"] = True
         return _desktop_session_locked_result(
@@ -5777,12 +5793,17 @@ def _focus_failure_indicates_locked_session(
 ) -> bool:
     if not _desktop_session_is_locked(frontmost_app):
         return False
-    observed_frontmost = [
-        _compact_app_match_name(str(attempt.get("frontmost_app") or ""))
-        for attempt in focus_attempts
-        if str(attempt.get("frontmost_app") or "").strip()
-    ]
-    return not any(name and name != "loginwindow" for name in observed_frontmost)
+    return not _focus_attempts_observed_unlocked_frontmost(focus_attempts)
+
+
+def _focus_attempts_observed_unlocked_frontmost(
+    focus_attempts: list[dict[str, Any]],
+) -> bool:
+    for attempt in focus_attempts:
+        name = _compact_app_match_name(str(attempt.get("frontmost_app") or ""))
+        if name and name != "loginwindow":
+            return True
+    return False
 
 
 def _desktop_session_locked_result(
