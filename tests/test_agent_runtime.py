@@ -4473,9 +4473,177 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
             "desktop.active_window",
         ]
         assert planned_events[1]["payload"]["source"] == "runtime_planner"
-        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Apple Music"}
+        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Music"}
         assert tool_event["payload"]["tool"] == "app.open"
         assert tool_event["payload"]["input_preview"] == {"app_name": "Music"}
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    desktop_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "matches": [{"name": "Obsidian", "path": "/Applications/Obsidian.app"}],
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.open", {"app_name": app_name}))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.focus", {"app_name": app_name}))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        desktop_calls.append(("desktop.safe_shortcut", {"action": action}))
+        return {"ok": True, "action": "desktop.safe_shortcut", "data": {"action": action}}
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        desktop_calls.append(("desktop.safe_type_text", {"text": text}))
+        return {"ok": True, "action": "desktop.safe_type_text", "data": {"text": text}}
+
+    def fake_search_submit() -> dict[str, Any]:
+        desktop_calls.append(("desktop.search_submit", {}))
+        return {"ok": True, "action": "desktop.search_submit"}
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Obsidian search result content",
+            "elements": [
+                {
+                    "role": "AXStaticText",
+                    "value": "Yachiyo runtime supports discover, act, verify, artifact.",
+                }
+            ],
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        if len(model_calls) == 1:
+            assert messages[-1]["role"] == "user"
+            assert messages[-1]["content"].startswith("Runtime follow-up context:")
+            assert "desktop-content-report.md" in messages[-1]["content"]
+            assert any(
+                "Tool result for desktop.ui_elements" in str(message.get("content") or "")
+                and "Yachiyo runtime supports discover" in str(message.get("content") or "")
+                for message in messages
+            )
+            return {
+                "content": json.dumps(
+                    {
+                        "action": "tool",
+                        "tool": "artifact.write",
+                        "input": {
+                            "path": "desktop-content-report.md",
+                            "content": "# Desktop Content Report\n\nYachiyo runtime supports discover, act, verify, artifact.",
+                        },
+                    }
+                )
+            }
+        assert "Tool result for artifact.write" in messages[-1]["content"]
+        return {"content": "已生成桌面内容报告。"}
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-desktop-content-artifact",
+            session_id="session-main-desktop-content-artifact",
+            user_goal="打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [
+                {
+                    "role": "user",
+                    "content": "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
+                }
+            ],
+            tool_policy={
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open",
+                    "app.focus",
+                    "desktop.safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.search_submit",
+                    "desktop.ui_elements",
+                    "artifact.write",
+                ]
+            },
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_ui = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_planned"
+            and event["payload"]["tool"] == "desktop.ui_elements"
+        )
+        followup = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.model.followup_context"
+        )
+        artifact_path = service.agent_artifacts_dir / run["run_id"] / "desktop-content-report.md"
+
+        assert updated["result"] == "已生成桌面内容报告。"
+        assert [name for name, _payload in desktop_calls] == [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ]
+        assert planned_ui["payload"]["planning_reason"] == "planner_prefetch_desktop_content"
+        assert planned_ui["payload"]["continue_to_model"] is True
+        assert followup["payload"]["planning_reason"] == "planner_prefetch_desktop_content"
+        assert followup["payload"]["artifacts_expected"] == ["desktop-content-report.md"]
+        assert followup["payload"]["artifact_write_allowed"] is True
+        assert len(model_calls) == 2
+        assert artifact_path.read_text(encoding="utf-8").startswith("# Desktop Content Report")
     finally:
         service.close()
 
@@ -4535,7 +4703,6 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
         assert "model.requested" not in event_types
         assert completed_event["payload"]["tool"] == "desktop.active_window"
         assert completed_event["payload"]["tools"] == [
-            "desktop.running_apps",
             "desktop.quit_app",
             "desktop.active_window",
         ]

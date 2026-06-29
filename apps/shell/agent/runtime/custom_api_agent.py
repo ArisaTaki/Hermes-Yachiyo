@@ -393,6 +393,14 @@ class RuntimeCustomApiAgentLoop:
                         )
                         if direct_result:
                             return direct_result
+                    self._append_model_followup_context(
+                        planned_tool_requests,
+                        direct_tool_selection_payload,
+                        allowed_tools=allowed_tools,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
                     direct_result = ""
                 elif len(execution_tool_requests) == 1:
                     planned_tool = str(execution_tool_requests[0].get("tool") or "")
@@ -598,6 +606,39 @@ class RuntimeCustomApiAgentLoop:
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         }
+
+    def _append_model_followup_context(
+        self,
+        planned_tool_requests: list[dict[str, Any]],
+        selection_payload: dict[str, Any],
+        *,
+        allowed_tools: list[str],
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        payload = _desktop_content_followup_payload(
+            planned_tool_requests,
+            selection_payload,
+            allowed_tools=allowed_tools,
+        )
+        if not payload:
+            return
+        messages.append(
+            {
+                "role": "user",
+                "content": _desktop_content_followup_message(payload),
+            }
+        )
+        timeline.append(
+            self._timeline(
+                "agent.model.followup_context",
+                str(payload.get("planning_reason") or "model_followup"),
+                **payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.model.followup_context", payload)
 
     @staticmethod
     def _planned_request_for_tool(
@@ -1162,10 +1203,11 @@ class RuntimeCustomApiAgentLoop:
                 completed_step["presentation"] = presentation
             completed_steps.append(completed_step)
         visible_steps = _visible_daily_desktop_completed_steps(completed_steps)
+        summary_steps = _daily_desktop_sequence_summary_steps(visible_steps)
         summary = _combine_daily_desktop_summaries(
             [
                 str(step.get("summary") or "")
-                for step in visible_steps
+                for step in summary_steps
                 if isinstance(step, dict)
             ]
         )
@@ -1192,7 +1234,8 @@ class RuntimeCustomApiAgentLoop:
         }
         event_payload = {
             "tool": str(last_step.get("tool") or ""),
-            "tools": [str(step.get("tool") or "") for step in completed_tools_steps],
+            "tools": _planned_daily_desktop_tools(planned_tool_requests)
+            or [str(step.get("tool") or "") for step in completed_tools_steps],
             "input_preview": (
                 last_step.get("input_preview") if isinstance(last_step.get("input_preview"), dict) else {}
             ),
@@ -1733,7 +1776,11 @@ class RuntimeCustomApiAgentLoop:
             if str(message.get("role") or "") != "user":
                 continue
             content = self._message_visible_content_text(message).strip()
-            if content.startswith("Tool result for ") or content.startswith("Desktop intent for "):
+            if (
+                content.startswith("Tool result for ")
+                or content.startswith("Desktop intent for ")
+                or content.startswith("Runtime follow-up context:")
+            ):
                 continue
             if content:
                 return content
@@ -3176,6 +3223,76 @@ def _combine_daily_desktop_summaries(summaries: list[str]) -> str:
     return " ".join(sentences)
 
 
+def _desktop_content_followup_payload(
+    planned_tool_requests: list[dict[str, Any]],
+    selection_payload: dict[str, Any],
+    *,
+    allowed_tools: list[str],
+) -> dict[str, Any]:
+    content_requests = [
+        request
+        for request in planned_tool_requests
+        if isinstance(request, dict)
+        and bool(request.get("continue_to_model"))
+        and str(request.get("planning_reason") or "").strip()
+        == "planner_prefetch_desktop_content"
+    ]
+    if not content_requests:
+        return {}
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    artifacts_expected = _string_list(selection_payload.get("artifacts_expected"))
+    observation_tools = _ordered_text_list(
+        [
+            str(request.get("tool") or "").strip()
+            for request in content_requests
+            if str(request.get("tool") or "").strip()
+        ]
+    )
+    payload: dict[str, Any] = {
+        "source": "runtime_planner",
+        "status": "ready",
+        "planning_reason": "planner_prefetch_desktop_content",
+        "observation_tools": observation_tools,
+        "artifact_write_allowed": "artifact.write" in allowed,
+    }
+    if artifacts_expected:
+        payload["artifacts_expected"] = artifacts_expected
+    for key in ("decision_id", "plan_id", "intent_kind"):
+        value = str(selection_payload.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    return payload
+
+
+def _desktop_content_followup_message(payload: dict[str, Any]) -> str:
+    artifacts = _string_list(payload.get("artifacts_expected"))
+    artifact_write_allowed = bool(payload.get("artifact_write_allowed"))
+    observation_tools = _string_list(payload.get("observation_tools"))
+    observation_text = ", ".join(observation_tools) or "desktop observation tools"
+    if artifact_write_allowed and artifacts:
+        artifact_instruction = (
+            "The user requested a durable output. Call artifact.write next with "
+            f"path {artifacts[0]!r} and content derived from the desktop observation. "
+            "Do not write an empty or placeholder artifact."
+        )
+    elif artifact_write_allowed:
+        artifact_instruction = (
+            "If the user requested a durable output, call artifact.write next with an appropriate "
+            "path and content derived from the desktop observation. Do not write an empty artifact."
+        )
+    else:
+        artifact_instruction = (
+            "artifact.write is not allowed, so provide the requested summary or report inline."
+        )
+    return (
+        "Runtime follow-up context: desktop content has just been observed through "
+        f"{observation_text}. Use the latest Tool result messages above as source material. "
+        f"{artifact_instruction} If the observation failed or lacks readable content, explain the "
+        "missing permission, capability, or fallback without asking the user to manually repeat a "
+        "tool-capable action."
+    )
+
+
 def _visible_daily_desktop_completed_steps(
     completed_steps: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -3207,6 +3324,7 @@ def _visible_daily_desktop_completed_steps(
             tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
             and index > last_primary
             and not _is_requested_ui_readback(completed_steps, index, first_primary, last_primary)
+            and not _is_preserved_active_window_verification(completed_steps, index)
         ):
             continue
         visible_steps.append(step)
@@ -3217,6 +3335,10 @@ def _drop_trailing_daily_desktop_verify_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if len(requests) <= 1:
+        return requests
+    if any(bool(request.get("continue_to_model")) for request in requests if isinstance(request, dict)):
+        return requests
+    if _direct_action_with_active_window_verification(requests):
         return requests
     last_primary = -1
     for index, request in enumerate(requests):
@@ -3234,6 +3356,68 @@ def _drop_trailing_daily_desktop_verify_requests(
         if index <= last_primary
         or str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_VERIFY_TOOLS
     ]
+
+
+def _direct_action_with_active_window_verification(
+    requests: list[dict[str, Any]],
+) -> bool:
+    tools = [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and str(request.get("tool") or "").strip()
+    ]
+    if "desktop.active_window" not in tools:
+        return False
+    primary_tools = [
+        tool
+        for tool in tools
+        if tool not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        and tool not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    return bool(primary_tools) and set(primary_tools) <= {
+        "app.open",
+        "app.focus",
+        "desktop.close_window",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+    }
+
+
+def _planned_daily_desktop_tools(
+    planned_tool_requests: list[dict[str, Any]],
+) -> list[str]:
+    return [
+        str(request.get("tool") or "").strip()
+        for request in planned_tool_requests
+        if isinstance(request, dict) and str(request.get("tool") or "").strip()
+    ]
+
+
+def _is_preserved_active_window_verification(
+    completed_steps: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    if str(completed_steps[index].get("tool") or "") != "desktop.active_window":
+        return False
+    return _direct_action_with_active_window_verification(completed_steps)
+
+
+def _daily_desktop_sequence_summary_steps(
+    visible_steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not visible_steps:
+        return []
+    if (
+        str(visible_steps[-1].get("tool") or "") == "desktop.active_window"
+        and _direct_action_with_active_window_verification(visible_steps)
+    ):
+        primary_steps = [
+            step
+            for step in visible_steps
+            if str(step.get("tool") or "") != "desktop.active_window"
+        ]
+        return primary_steps or visible_steps
+    return visible_steps
 
 
 def _is_requested_ui_readback(

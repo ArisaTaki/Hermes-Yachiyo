@@ -729,6 +729,8 @@ def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) 
 
 
 def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
+    if str(getattr(step, "step_id", "") or "").strip() == "read-desktop-content":
+        return "planner_prefetch_desktop_content"
     input_preview = getattr(step, "input_preview", None)
     if "hotkey" in tool_name or (
         isinstance(input_preview, Mapping)

@@ -179,6 +179,7 @@ _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS = frozenset(
         "planner_prefetch_communication_context",
         "planner_prefetch_communication_surface",
         "planner_prefetch_web_context",
+        "planner_prefetch_desktop_content",
     }
 )
 
@@ -189,6 +190,12 @@ def _runtime_planner_model_followup_owns_selection(requests: list[dict[str, Any]
     if not any(bool(request.get("continue_to_model")) for request in requests):
         return False
     reasons = _request_planning_reasons(requests)
+    if "planner_prefetch_desktop_content" in reasons:
+        return reasons <= {
+            "planner_desktop_operation",
+            "planner_desktop_hotkey",
+            "planner_prefetch_desktop_content",
+        }
     return bool(reasons) and reasons <= _RUNTIME_PLANNER_OWNED_MODEL_FOLLOWUP_REASONS
 
 

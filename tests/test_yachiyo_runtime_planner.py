@@ -10816,10 +10816,51 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
             "tool": "desktop.ui_elements",
             "input": {"app_name": "Obsidian", "role_filter": "text", "limit": 120},
             "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
+            "planning_reason": "planner_prefetch_desktop_content",
             "continue_to_model": True,
         },
     ]
+
+
+def test_entrypoint_selection_keeps_runtime_planner_for_desktop_content_prefetch() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "artifact.write",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.event_payload["artifacts_expected"] == ["desktop-content-report.md"]
+    assert selection.event_payload["selected_tools"] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert selection.requests[-1] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"app_name": "Obsidian", "role_filter": "text", "limit": 120},
+        "source": "runtime_planner",
+        "planning_reason": "planner_prefetch_desktop_content",
+        "continue_to_model": True,
+    }
+    assert legacy_calls == []
 
 
 def test_planner_direct_tool_requests_keeps_unknown_app_discovery_before_execution() -> None:
