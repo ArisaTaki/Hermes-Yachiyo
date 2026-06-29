@@ -148,7 +148,21 @@ def context_source_hint(text: str) -> str:
         ),
     ):
         return "selection"
-    if _contains_any(lowered, ("current page link", "current url", "当前网页链接", "当前页面链接", "当前链接")):
+    if _contains_any(
+        lowered,
+        (
+            "current page link",
+            "current browser page link",
+            "current browser tab link",
+            "current url",
+            "当前网页链接",
+            "当前页面链接",
+            "当前浏览器页面链接",
+            "当前浏览器网页链接",
+            "当前浏览器标签页链接",
+            "当前链接",
+        ),
+    ):
         return "current_page_link"
     if _contains_any(
         lowered,

@@ -9303,9 +9303,14 @@ def _looks_like_current_page_artifact_source(text: str) -> bool:
         value,
         [
             "current page link",
+            "current browser page link",
+            "current browser tab link",
             "current url",
             "当前网页链接",
             "当前页面链接",
+            "当前浏览器页面链接",
+            "当前浏览器网页链接",
+            "当前浏览器标签页链接",
             "当前链接",
             "当前页地址",
         ],
@@ -11113,9 +11118,14 @@ def _dynamic_context_source_hint(text: str) -> str:
         lowered,
         (
             "current page link",
+            "current browser page link",
+            "current browser tab link",
             "current url",
             "当前网页链接",
             "当前页面链接",
+            "当前浏览器页面链接",
+            "当前浏览器网页链接",
+            "当前浏览器标签页链接",
             "当前链接",
             "当前页地址",
         ),
@@ -12566,7 +12576,11 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
             r"选中的内容|选中内容|选中的文字|选中文字|选中文本|"
             r"selected\s+text|selected\s+content|selection)"
         ),
-        "current_page_link": r"(?:当前网页链接|当前页面链接|当前链接|current\s+page\s+link|current\s+url)",
+        "current_page_link": (
+            r"(?:当前网页链接|当前页面链接|当前浏览器页面链接|当前浏览器网页链接|"
+            r"当前浏览器标签页链接|当前链接|current\s+(?:browser\s+)?page\s+link|"
+            r"current\s+browser\s+tab\s+link|current\s+url)"
+        ),
         "current_page_content": (
             r"(?:当前网页|当前页面|当前页|这个网页|这个页面|"
             r"current\s+page|current\s+webpage|this\s+page|this\s+webpage)"

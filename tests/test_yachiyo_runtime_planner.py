@@ -11131,6 +11131,37 @@ def test_runtime_planner_uses_browser_current_page_for_link_delivery() -> None:
         }
     ]
 
+    wechat_link = RuntimePlanner().decision(
+        "把当前浏览器页面链接发给微信文件传输助手",
+        allowed_tools=allowed_tools,
+    )
+    assert wechat_link.selected_intent.kind == "communication"
+    assert wechat_link.selected_intent.inputs == {
+        "context_source": "current_page_link",
+        "direct_message_hint": {
+            "app_name": "WeChat",
+            "recipient": "文件传输助手",
+            "body_source": "current_page_link",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert [step.step_id for step in wechat_link.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(wechat_link, "read-communication-context").tool_name == (
+        "browser.current_page"
+    )
+    assert _step_by_id(wechat_link, "draft-communication-message").input_preview == {
+        "app_name": "WeChat",
+        "body_source": "current_page_link",
+    }
+
 
 def test_runtime_planner_routes_visible_text_delivery_from_natural_phrase() -> None:
     allowed_tools = [

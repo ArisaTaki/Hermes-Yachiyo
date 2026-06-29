@@ -2478,6 +2478,7 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
 
     assert daily_desktop_entrypoint_requests("复制当前网页链接发给微信文件传输助手") == comm_link_requests
     assert daily_desktop_entrypoint_requests("复制当前网页链接并发给微信文件传输助手") == comm_link_requests
+    assert daily_desktop_entrypoint_requests("把当前浏览器页面链接发给微信文件传输助手") == comm_link_requests
 
     open_comm_requests = daily_desktop_entrypoint_requests("打开微信发消息给张三你好")
 
