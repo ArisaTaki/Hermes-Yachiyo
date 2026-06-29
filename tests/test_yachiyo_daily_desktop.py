@@ -410,6 +410,53 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_oper
         ]
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_scope_foreground_safe_shortcuts() -> None:
+    allowed_tools = [
+        "desktop.active_window",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        ("刷新当前窗口", "refresh"),
+        ("当前窗口刷新一下", "refresh"),
+        ("当前窗口新建标签页", "new_tab"),
+        ("当前应用打开新标签页", "new_tab"),
+        ("当前窗口打开新窗口", "new_window"),
+        ("当前窗口复制链接", "copy_current_page_link"),
+        ("复制当前窗口链接", "copy_current_page_link"),
+        ("open a new tab in current window", "new_tab"),
+        ("copy current window link", "copy_current_page_link"),
+    )
+
+    for prompt, action in cases:
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=allowed_tools,
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",
@@ -4356,6 +4403,7 @@ def test_daily_desktop_entrypoint_routes_polite_safe_shortcut_and_key_questions_
         ("刷新一下这个网页", "desktop.safe_shortcut", {"action": "refresh"}),
         ("聚焦地址栏", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
         ("打开地址栏", "desktop.safe_shortcut", {"action": "focus_address_bar"}),
+        ("打开新标签页", "desktop.safe_shortcut", {"action": "new_tab"}),
         ("新建标签", "desktop.safe_shortcut", {"action": "new_tab"}),
         ("新建无痕窗口", "desktop.safe_shortcut", {"action": "new_private_window"}),
         ("打开私密窗口", "desktop.safe_shortcut", {"action": "new_private_window"}),

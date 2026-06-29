@@ -1890,14 +1890,26 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     )
     phrase = re.sub(r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
     normalized = re.sub(r"\s+", "", phrase).lower()
-    if re.fullmatch(
-        r"(?:把|将)?(?:当前|这个|该)?(?:网页|页面|页|标签页)?(?:链接|网址|地址)"
-        r"(?:复制|拷贝|复制给我|拷贝给我|放到剪贴板|放进剪贴板|放到系统剪贴板|放进系统剪贴板)",
-        normalized,
-    ) or re.fullmatch(
-        r"(?:copy|put)(?:the)?(?:current|active)?(?:page|tab)?(?:link|url)"
-        r"(?:to(?:the)?(?:system)?clipboard|tome)?",
-        normalized,
+    scoped_normalized = _strip_foreground_shortcut_scope(normalized)
+    if scoped_normalized != normalized:
+        scoped_action = _safe_shortcut_action_from_phrase(scoped_normalized)
+        if scoped_action:
+            return scoped_action
+    if (
+        re.fullmatch(
+            r"(?:把|将)?(?:当前|这个|该)?(?:网页|页面|页|标签页)?(?:链接|网址|地址)"
+            r"(?:复制|拷贝|复制给我|拷贝给我|放到剪贴板|放进剪贴板|放到系统剪贴板|放进系统剪贴板)",
+            normalized,
+        )
+        or re.fullmatch(
+            r"(?:复制|拷贝)(?:当前|前台)?(?:窗口|应用|app)?(?:网页|页面|页|标签页)?(?:链接|网址|地址)",
+            normalized,
+        )
+        or re.fullmatch(
+            r"(?:copy|put)(?:the)?(?:current|active|foreground)?(?:page|tab|window|app|application)?(?:link|url)"
+            r"(?:to(?:the)?(?:system)?clipboard|tome)?",
+            normalized,
+        )
     ):
         return "copy_current_page_link"
     if re.fullmatch(
@@ -1924,6 +1936,8 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "当前链接复制给我": "copy_current_page_link",
         "当前网页链接复制给我": "copy_current_page_link",
         "当前页面链接复制给我": "copy_current_page_link",
+        "复制链接": "copy_current_page_link",
+        "拷贝链接": "copy_current_page_link",
         "复制当前网页链接": "copy_current_page_link",
         "复制当前页面链接": "copy_current_page_link",
         "当前页地址复制": "copy_current_page_link",
@@ -2350,6 +2364,67 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     if action:
         return action
     return _finder_safe_shortcut_action(normalized, mode="exact")
+
+
+def _strip_foreground_shortcut_scope(normalized: str) -> str:
+    value = str(normalized or "").strip()
+    foreground_prefixes = (
+        "在当前窗口",
+        "在当前应用",
+        "在当前app",
+        "在前台窗口",
+        "在前台应用",
+        "在前台app",
+        "当前窗口",
+        "当前应用",
+        "当前app",
+        "前台窗口",
+        "前台应用",
+        "前台app",
+        "当前界面",
+        "当前屏幕",
+        "inthecurrentwindow",
+        "inthecurrentapp",
+        "inthecurrentapplication",
+        "incurrentwindow",
+        "incurrentapp",
+        "incurrentapplication",
+        "currentwindow",
+        "currentapp",
+        "currentapplication",
+        "foregroundwindow",
+        "foregroundapp",
+        "foregroundapplication",
+    )
+    foreground_suffixes = (
+        "当前窗口",
+        "当前应用",
+        "当前app",
+        "前台窗口",
+        "前台应用",
+        "前台app",
+        "当前界面",
+        "当前屏幕",
+        "inthecurrentwindow",
+        "inthecurrentapp",
+        "inthecurrentapplication",
+        "incurrentwindow",
+        "incurrentapp",
+        "incurrentapplication",
+        "currentwindow",
+        "currentapp",
+        "currentapplication",
+        "foregroundwindow",
+        "foregroundapp",
+        "foregroundapplication",
+    )
+    for prefix in foreground_prefixes:
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    for suffix in foreground_suffixes:
+        if value.endswith(suffix):
+            return value[: -len(suffix)]
+    return value
 
 
 def _screenshot_safe_shortcut_action(normalized: str) -> str:

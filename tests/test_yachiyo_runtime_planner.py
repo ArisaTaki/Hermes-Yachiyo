@@ -12396,6 +12396,47 @@ def test_planner_tool_requests_prefers_safe_shortcut_for_whitelisted_hotkey() ->
     ]
 
 
+def test_planner_tool_requests_maps_foreground_scoped_safe_shortcuts() -> None:
+    allowed = ["desktop.active_window", "desktop.safe_shortcut", "desktop.ui_elements"]
+    cases = (
+        ("打开新标签页", "new_tab"),
+        ("当前窗口新建标签页", "new_tab"),
+        ("当前应用打开新标签页", "new_tab"),
+        ("刷新当前窗口", "refresh"),
+        ("当前窗口刷新一下", "refresh"),
+        ("当前窗口复制链接", "copy_current_page_link"),
+        ("复制当前窗口链接", "copy_current_page_link"),
+        ("当前窗口打开新窗口", "new_window"),
+        ("open a new tab in current window", "new_tab"),
+        ("copy current window link", "copy_current_page_link"),
+    )
+
+    for prompt, action in cases:
+        assert planner_tool_requests(prompt, allowed_tools=allowed) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+
 def test_planner_tool_requests_maps_safe_key_scroll_and_click() -> None:
     assert planner_tool_requests(
         "按下一页键",

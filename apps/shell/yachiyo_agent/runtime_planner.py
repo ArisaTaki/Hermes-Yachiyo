@@ -11195,6 +11195,8 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "可以",
         "能否",
         "能不能",
+        "打",
+        "开",
         "打开",
         "启动",
         "开启",
