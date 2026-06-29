@@ -34,6 +34,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'model.request.failed') return '模型请求失败';
   if (name === 'model.output.ready') return '模型输出已就绪';
   if (name === 'model.output.completed' || name === 'model.completed') return '模型输出完成';
+  if (name === 'agent.model.followup_context') return detail ? `模型后续上下文 · ${detail}` : '模型后续上下文';
   if (name === 'agent.run.started') return 'Agent 已启动';
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
@@ -160,6 +161,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'agent.desktop.permission_recovery') return 'approval';
   if (name === 'agent.desktop.intent_completed') return 'ready';
   if (name === 'agent.desktop.intent_unavailable') return 'danger';
+  if (name === 'agent.model.followup_context') return 'model';
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
       ? event.payload as Record<string, unknown>
@@ -273,6 +275,10 @@ export function timelineEventPayload(event: Record<string, unknown>): string {
 export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   if (publicRunEventIsSecret(event)) return event.detail || event.title || '';
+  if (event.event_type === 'agent.model.followup_context') {
+    const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
+    if (contentSnapshotSummary) return contentSnapshotSummary;
+  }
   return (
     event.detail
     || event.title
@@ -294,6 +300,7 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventPayloadString(payload, 'member_agent_id')
     || publicRunEventPayloadString(payload, 'group_id')
     || publicRunEventArtifactSummary(payload)
+    || publicRunEventContentSnapshotSummary(payload)
     || publicRunEventPayloadString(payload, 'artifact_path')
     || publicRunEventPayloadString(payload, 'path')
     || publicRunEventPayloadString(payload, 'child_run_id')
@@ -440,4 +447,26 @@ function publicRunEventArtifactSummary(payload: Record<string, unknown>): string
     || publicRunEventPayloadString(artifactPayload, 'path')
     || publicRunEventPayloadString(artifactPayload, 'artifact_path')
   );
+}
+
+function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>): string {
+  const snapshot = payload.content_snapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return '';
+  const record = snapshot as Record<string, unknown>;
+  const textItemCount = publicRunEventPayloadNumberString(record, 'text_item_count');
+  const elementCount = publicRunEventPayloadNumberString(record, 'element_count');
+  return [
+    publicRunEventPayloadString(record, 'source_tool'),
+    publicRunEventPayloadString(record, 'app_name'),
+    publicRunEventPayloadString(record, 'title'),
+    textItemCount ? `${textItemCount} 条文本` : '',
+    elementCount ? `${elementCount} 个元素` : '',
+    publicRunEventPayloadString(record, 'path'),
+  ].filter(Boolean).join(' · ');
+}
+
+function publicRunEventPayloadNumberString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return publicRunEventPayloadString(payload, key);
 }

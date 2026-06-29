@@ -90,6 +90,11 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
 }
 
 function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string {
+  const type = String(event.event_type || '').trim();
+  if (type === 'agent.model.followup_context') {
+    const contentSnapshotDetail = runtimeTimelineContentSnapshotDetail(event);
+    if (contentSnapshotDetail) return contentSnapshotDetail;
+  }
   const detail = String(event.detail || '').trim();
   if (!detail) return '';
   if (detail === String(event.title || '').trim()) return '';
@@ -135,6 +140,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.request.failed') return '模型请求失败';
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
+  if (type === 'agent.model.followup_context') return '模型后续上下文';
   if (type === 'agent.intent.selected' || type === 'group.run.intent.selected') return 'Intent 识别';
   if (type === 'agent.plan.created' || type === 'group.run.plan.created') return 'Planner 计划';
   if (type === 'agent.plan.step' || type === 'group.run.plan.step') return '计划步骤';
@@ -219,6 +225,36 @@ function runtimeTimelinePlannedDesktopToolLabel(event: RuntimeTimelineEventSnaps
   ).trim();
   if (!tool || runtimeTimelineLooksRuntimeId(tool)) return '';
   return runtimeToolDisplayLabelOrName(tool);
+}
+
+function runtimeTimelineContentSnapshotDetail(event: RuntimeTimelineEventSnapshot): string {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const snapshot = payload.content_snapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return '';
+  const record = snapshot as Record<string, unknown>;
+  const textItemCount = runtimeTimelineRecordNumberString(record, 'text_item_count');
+  const elementCount = runtimeTimelineRecordNumberString(record, 'element_count');
+  return [
+    runtimeTimelineRecordString(record, 'source_tool'),
+    runtimeTimelineRecordString(record, 'app_name'),
+    runtimeTimelineRecordString(record, 'title'),
+    textItemCount ? `${textItemCount} 条文本` : '',
+    elementCount ? `${elementCount} 个元素` : '',
+    runtimeTimelineRecordString(record, 'path'),
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeTimelineRecordString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function runtimeTimelineRecordNumberString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return runtimeTimelineRecordString(record, key);
 }
 
 function runtimeTimelineLooksInternalLabel(value: string): boolean {

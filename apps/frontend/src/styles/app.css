@@ -18482,6 +18482,46 @@ button.activity-item {
   font-size: 10px;
 }
 
+.run-content-snapshot {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--hy-border-soft);
+}
+
+.run-content-snapshot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-content-snapshot-head strong {
+  color: var(--hy-fg);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.run-content-snapshot-head span {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-content-snapshot pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .run-expandable-content {
   display: grid;
   gap: 8px;

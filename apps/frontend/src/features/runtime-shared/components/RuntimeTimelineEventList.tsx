@@ -66,6 +66,7 @@ export function RuntimeTimelineEventList({
           const payloadRecord = runtimeEventPayloadRecord(event);
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
+          const contentSnapshot = eventIsSecret ? null : runtimeEventContentSnapshot(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
             event,
             payloadRecord,
@@ -126,6 +127,12 @@ export function RuntimeTimelineEventList({
                     {runStatusLabel(eventStatus)}
                   </em>
                 ) : null}
+                {contentSnapshot ? (
+                  <RuntimeContentSnapshot
+                    snapshot={contentSnapshot}
+                    testId={`${eventTestId}-content-snapshot`}
+                  />
+                ) : null}
                 {payload ? (
                   <ExpandableRuntimeContent
                     content={payload}
@@ -166,6 +173,27 @@ export function RuntimeTimelineEventList({
         );
       })}
     </ol>
+  );
+}
+
+function RuntimeContentSnapshot({
+  snapshot,
+  testId,
+}: {
+  snapshot: RuntimeTimelineEventRecord;
+  testId: string;
+}) {
+  const text = defaultString(snapshot.text);
+  const summary = defaultString(snapshot.summary) || defaultString(snapshot.error);
+  const meta = runtimeContentSnapshotMeta(snapshot);
+  return (
+    <section className="run-content-snapshot" data-testid={testId}>
+      <div className="run-content-snapshot-head">
+        <strong>桌面内容快照</strong>
+        {meta ? <span>{meta}</span> : null}
+      </div>
+      {text ? <pre>{text}</pre> : summary ? <p>{summary}</p> : null}
+    </section>
   );
 }
 
@@ -403,6 +431,36 @@ function runtimeEventPayloadRecord(event: RuntimeTimelineEventRecord): RuntimeTi
   return payload && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as RuntimeTimelineEventRecord
     : {};
+}
+
+function runtimeEventContentSnapshot(
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineEventRecord | null {
+  const snapshot = runtimeEventNestedRecord(payload, 'content_snapshot');
+  return snapshot && Object.keys(snapshot).length ? snapshot : null;
+}
+
+function runtimeContentSnapshotMeta(snapshot: RuntimeTimelineEventRecord): string {
+  const textItemCount = runtimeEventNumberString(snapshot, 'text_item_count');
+  const elementCount = runtimeEventNumberString(snapshot, 'element_count');
+  const parts = [
+    defaultString(snapshot.source_tool),
+    defaultString(snapshot.app_name),
+    defaultString(snapshot.title),
+    textItemCount ? `${textItemCount} 条文本` : '',
+    elementCount ? `${elementCount} 个元素` : '',
+    defaultString(snapshot.path),
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function runtimeEventNumberString(
+  record: RuntimeTimelineEventRecord,
+  key: string,
+): string {
+  const value = record[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return defaultString(value);
 }
 
 function runtimeEventString(

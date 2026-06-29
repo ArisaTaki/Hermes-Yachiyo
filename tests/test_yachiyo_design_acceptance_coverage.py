@@ -697,7 +697,8 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
             "RuntimeTimelineSummary",
             'testId="yachiyo-agent-task-timeline"',
             "<ApprovalCard",
-            "<ArtifactPreview artifact={artifact}",
+            "<ArtifactPreview",
+            "artifact={artifact}",
         ],
     )
     _assert_contains(
@@ -1531,6 +1532,9 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "agent.plan.created",
             "agent.plan.step",
             "agent.plan.selection",
+            "agent.model.followup_context",
+            "runtimeTimelineContentSnapshotDetail",
+            "content_snapshot",
             "group.run.intent.selected",
             "group.run.plan.created",
             "group.run.plan.step",
