@@ -13742,7 +13742,7 @@ def test_planner_first_owns_app_window_and_management_over_legacy() -> None:
         (
             "切到 Slack 的主窗口",
             ["desktop.list_apps", "desktop.windows", "app.focus_window", "app.focus"],
-            ["desktop.list_apps", "app.focus_window", "desktop.windows"],
+            ["desktop.list_apps", "desktop.windows", "app.focus_window", "desktop.windows"],
         ),
         (
             "最小化 Safari",

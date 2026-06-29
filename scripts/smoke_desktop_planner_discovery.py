@@ -118,6 +118,29 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "desktop.ui_elements",
         ],
     },
+    {
+        "id": "app_window_focus",
+        "prompt": "切到 Slack 的 General 窗口",
+        "allowed_tools": [
+            "desktop.list_apps",
+            "desktop.windows",
+            "app.focus_window",
+            "desktop.active_window",
+        ],
+        "expected_app": "Slack",
+        "expected_steps": [
+            "discover-desktop-state",
+            "list-app-windows",
+            "focus-app-window",
+            "verify-desktop-result",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "desktop.windows",
+            "app.focus_window",
+            "desktop.active_window",
+        ],
+    },
 )
 
 

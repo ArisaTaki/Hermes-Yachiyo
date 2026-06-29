@@ -593,6 +593,8 @@ def _keep_pre_mutation_verification_request(request: dict[str, Any]) -> bool:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if tool_name == "desktop.inspect_app":
         return bool(str(payload.get("app_name") or "").strip())
+    if tool_name == "desktop.windows":
+        return bool(str(payload.get("app_name") or "").strip())
     if tool_name == "screen.capture":
         return bool(str(payload.get("reason") or "").strip())
     return False
@@ -680,18 +682,12 @@ def _expanded_desktop_step_requests(
 
 def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
-    step_ids = {
-        str(getattr(step, "step_id", "") or "").strip()
-        for step in decision.plan.tool_plan.steps
-    }
     for step in decision.plan.tool_plan.steps:
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue
         if step_id == "discover-desktop-state" and not _keep_direct_discovery_step(step, tool_name):
-            continue
-        if step_id == "list-app-windows" and "focus-app-window" in step_ids:
             continue
         if step_id == "write-desktop-content-artifact":
             continue

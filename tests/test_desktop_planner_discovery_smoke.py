@@ -16,6 +16,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
+        "app_window_focus",
     }
     assert [request["tool"] for request in cases["generic_app_open"]["requests"]] == [
         "desktop.list_apps",
@@ -38,6 +39,12 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "app.focus",
         "desktop.hotkey",
         "desktop.ui_elements",
+    ]
+    assert [request["tool"] for request in cases["app_window_focus"]["requests"]] == [
+        "desktop.list_apps",
+        "desktop.windows",
+        "app.focus_window",
+        "desktop.active_window",
     ]
     assert all(case["checks"]["uses_no_browser_tool"] for case in cases.values())
 
