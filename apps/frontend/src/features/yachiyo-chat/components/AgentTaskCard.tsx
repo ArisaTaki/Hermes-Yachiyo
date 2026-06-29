@@ -629,26 +629,29 @@ export function taskPermissionRecoveryFromTaskFacts(
 ): TaskPermissionRecovery | null {
   const safeEvents = events || [];
   const safeToolCalls = toolCalls || [];
+  const recoveryBoundary = latestReadinessRecoverySequence(safeEvents);
+  const recoveryEvents = safeEvents.filter((event) => recoveryEventSurvivesReadinessRecovery(event, recoveryBoundary));
+  const recoveryToolCalls = safeToolCalls.filter((toolCall) => recoveryToolCallSurvivesReadinessRecovery(toolCall, recoveryBoundary));
   const targets = uniqueStrings([
-    ...safeEvents.flatMap((event) => permissionTargetsFromEvent(event)),
-    ...safeToolCalls.flatMap((toolCall) => permissionTargetsFromToolCall(toolCall)),
+    ...recoveryEvents.flatMap((event) => permissionTargetsFromEvent(event)),
+    ...recoveryToolCalls.flatMap((toolCall) => permissionTargetsFromToolCall(toolCall)),
   ]);
   const blockingConditions = uniqueStrings([
-    ...safeEvents.flatMap((event) => blockingConditionsFromEvent(event)),
-    ...safeToolCalls.flatMap((toolCall) => blockingConditionsFromToolCall(toolCall)),
+    ...recoveryEvents.flatMap((event) => blockingConditionsFromEvent(event)),
+    ...recoveryToolCalls.flatMap((toolCall) => blockingConditionsFromToolCall(toolCall)),
   ]);
   if (!targets.length && !blockingConditions.length) return null;
   const hints = uniqueStrings([
-    ...safeEvents.flatMap((event) => recoveryHintsFromEvent(event)),
-    ...safeToolCalls.flatMap((toolCall) => recoveryHintsFromToolCall(toolCall)),
+    ...recoveryEvents.flatMap((event) => recoveryHintsFromEvent(event)),
+    ...recoveryToolCalls.flatMap((toolCall) => recoveryHintsFromToolCall(toolCall)),
   ]);
   const tools = uniqueStrings([
-    ...safeEvents.flatMap((event) => desktopToolsFromEvent(event)),
-    ...safeToolCalls.flatMap((toolCall) => desktopToolsFromToolCall(toolCall)),
+    ...recoveryEvents.flatMap((event) => desktopToolsFromEvent(event)),
+    ...recoveryToolCalls.flatMap((toolCall) => desktopToolsFromToolCall(toolCall)),
   ]);
   const actions = dedupeRecoveryActions([
-    ...executableRecoveryActionsFromEvents(safeEvents),
-    ...executableRecoveryActionsFromToolCalls(safeToolCalls),
+    ...executableRecoveryActionsFromEvents(recoveryEvents),
+    ...executableRecoveryActionsFromToolCalls(recoveryToolCalls),
   ]);
   const params = new URLSearchParams({ command: 'native doctor', return_to: 'chat' });
   if (targets.length) params.set('permission_targets', targets.join(','));
@@ -670,6 +673,38 @@ export function taskPermissionRecoveryFromTaskFacts(
     targets,
     tools,
   };
+}
+
+function latestReadinessRecoverySequence(events: AgentTaskSnapshot['recent_events']): number {
+  return Math.max(
+    0,
+    ...(events || [])
+      .filter((event) => String(event.event_type || '').trim() === 'agent.desktop.readiness_recovered')
+      .map((event) => Number(event.sequence) || 0),
+  );
+}
+
+function recoveryEventSurvivesReadinessRecovery(
+  event: NonNullable<AgentTaskSnapshot['recent_events']>[number],
+  recoveryBoundary: number,
+): boolean {
+  const eventType = String(event.event_type || '').trim();
+  if (eventType === 'agent.desktop.readiness_recovered') return false;
+  if (!recoveryBoundary) return true;
+  if ((Number(event.sequence) || 0) > recoveryBoundary) return true;
+  if (permissionTargetsFromEvent(event).length) return true;
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  return !foregroundReadinessRecordWasRecovered(result) && !foregroundReadinessRecordWasRecovered(payload);
+}
+
+function recoveryToolCallSurvivesReadinessRecovery(
+  toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number],
+  recoveryBoundary: number,
+): boolean {
+  if (!recoveryBoundary) return true;
+  if (permissionTargetsFromToolCall(toolCall).length) return true;
+  return !foregroundReadinessRecordWasRecovered(objectValue(toolCall.output_preview));
 }
 
 function executableRecoveryActionsFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecoveryAction[] {
@@ -752,6 +787,27 @@ function blockingConditionsFromRecord(source: Record<string, unknown>): string[]
     ...stringList(data.blocking_conditions),
   ]);
 }
+
+function foregroundReadinessRecordWasRecovered(source: Record<string, unknown>): boolean {
+  const data = objectValue(source.data);
+  const error = String(source.error_code || source.error || data.error_code || data.error || '').trim();
+  const conditions = uniqueStrings([
+    ...blockingConditionsFromRecord(source),
+    error,
+  ]);
+  if (source.blocked_by_runtime_readiness === true || data.blocked_by_runtime_readiness === true) return true;
+  if (data.ready_for_foreground_action === false) return true;
+  return conditions.some((condition) => recoverableForegroundReadinessConditions.has(condition));
+}
+
+const recoverableForegroundReadinessConditions = new Set([
+  'app_not_found',
+  'app_not_running',
+  'foreground_focus_unverified',
+  'foreground_not_ready',
+  'no_actionable_controls',
+  'ui_elements_empty',
+]);
 
 function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
   if ((event.sensitivity || 'public') === 'secret') return [];

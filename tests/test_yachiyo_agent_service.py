@@ -256,6 +256,28 @@ class _DesktopIntentTaskRuntimePort(_FakeRuntimePort):
         return _desktop_intent_task_payload(task_id=task_id)
 
 
+class _ReadinessRecoveredTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            status="running",
+            current_step="",
+            progress_text="",
+            timeline=[
+                {
+                    "event": "agent.desktop.readiness_recovered",
+                    "detail": "desktop.list_apps",
+                    "tool": "desktop.list_apps",
+                    "recovery_tool": "desktop.list_apps",
+                    "status": "recovered",
+                    "app_name": "PixelForge",
+                    "blocking_conditions": ["app_not_found"],
+                }
+            ],
+        )
+
+
 class _CompletedDesktopIntentTaskRuntimePort(_FakeRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         self.calls.append(("get_task_timeline", task_id))
@@ -550,6 +572,20 @@ def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None
         ("get_task_snapshot", "task-music"),
         ("get_task_timeline", "task-music"),
     ]
+
+
+def test_yachiyo_agent_service_preserves_readiness_recovered_timeline_event() -> None:
+    port = _ReadinessRecoveredTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    timeline = service.get_task_timeline("task-pixelforge")
+
+    assert timeline.events[0].event_type == "agent.desktop.readiness_recovered"
+    assert timeline.events[0].payload["status"] == "recovered"
+    assert timeline.events[0].payload["recovery_tool"] == "desktop.list_apps"
+    assert timeline.events[0].payload["blocking_conditions"] == ["app_not_found"]
+    assert timeline.tool_calls == []
+    assert port.calls == [("get_task_timeline", "task-pixelforge")]
 
 
 def test_yachiyo_agent_service_projects_completed_desktop_intent_as_tool_call() -> None:

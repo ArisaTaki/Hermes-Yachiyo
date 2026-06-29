@@ -638,6 +638,103 @@ def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> N
     assert snapshot.current_step == "准备执行 · 发现已安装应用"
 
 
+def test_agent_task_snapshot_clears_recovered_foreground_readiness_action() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 1,
+                    "payload": {
+                        "tool": "desktop.inspect_app",
+                        "input_preview": {"app_name": "PixelForge"},
+                        "result": {
+                            "ok": False,
+                            "error": "app_not_found",
+                            "recovery_actions": [
+                                {
+                                    "label": "重新发现应用",
+                                    "tool": "desktop.list_apps",
+                                    "input": {"query": "PixelForge", "limit": 20},
+                                }
+                            ],
+                            "data": {
+                                "app_name": "PixelForge",
+                                "ready_for_foreground_action": False,
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.readiness_recovered",
+                    "sequence": 2,
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "recovery_tool": "desktop.list_apps",
+                        "status": "recovered",
+                        "app_name": "PixelForge",
+                        "blocking_conditions": ["app_not_found"],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert snapshot.needs_user_action is False
+    assert snapshot.current_step == "桌面就绪已恢复 · 发现已安装应用"
+    assert [event.event_type for event in snapshot.recent_events] == [
+        "agent.tool.call",
+        "agent.desktop.readiness_recovered",
+    ]
+
+
+def test_agent_task_snapshot_keeps_permission_action_after_readiness_recovery() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 1,
+                    "payload": {
+                        "tool": "desktop.safe_type_text",
+                        "input_preview": {"text": "hello"},
+                        "result": {
+                            "ok": False,
+                            "permission_error": True,
+                            "permission_targets": ["accessibility"],
+                            "recovery_actions": [
+                                {
+                                    "label": "打开辅助功能权限",
+                                    "tool": "system.settings_open",
+                                    "input": {"target": "accessibility"},
+                                }
+                            ],
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.readiness_recovered",
+                    "sequence": 2,
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "recovery_tool": "desktop.list_apps",
+                        "status": "recovered",
+                        "app_name": "Notes",
+                        "blocking_conditions": ["foreground_not_ready"],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert snapshot.needs_user_action is True
+    assert snapshot.current_step == "桌面就绪已恢复 · 发现已安装应用"
+
+
 def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
     pending = ApprovalCardSnapshot(
         approval_id="approval-1",

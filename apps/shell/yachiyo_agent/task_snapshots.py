@@ -33,7 +33,16 @@ _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
 _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_required"
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
 _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
+_READINESS_RECOVERED_DESKTOP_EVENT_TYPE = "agent.desktop.readiness_recovered"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
+_RECOVERABLE_FOREGROUND_READINESS_CONDITIONS = {
+    "app_not_found",
+    "app_not_running",
+    "foreground_focus_unverified",
+    "foreground_not_ready",
+    "no_actionable_controls",
+    "ui_elements_empty",
+}
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
     "desktop.list_apps",
     "desktop.inspect_app",
@@ -341,6 +350,7 @@ def _desktop_intent_progress_text(
             _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
             _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
             _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
+            _READINESS_RECOVERED_DESKTOP_EVENT_TYPE,
             _TOOL_CALL_EVENT_TYPE,
         }:
             continue
@@ -368,6 +378,8 @@ def _desktop_intent_progress_text(
             )
         if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             return f"准备执行 · {label}" if label else "准备执行桌面动作"
+        if event.event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE:
+            return f"桌面就绪已恢复 · {label}" if label else "桌面就绪已恢复"
     return None
 
 
@@ -438,6 +450,7 @@ def _has_desktop_recovery_user_action(
         or _is_structured_recovery_metadata_event(event)
         for event in (all_events or events)
     )
+    latest_readiness_recovery_sequence = _latest_readiness_recovery_sequence(events)
     for event in events:
         if (event.sensitivity or "public") == "secret":
             continue
@@ -451,6 +464,11 @@ def _has_desktop_recovery_user_action(
                 payload,
                 count_success_recovery_actions=count_success_recovery_actions,
             )
+            and not _is_recovered_foreground_readiness_signal(
+                event,
+                payload,
+                latest_readiness_recovery_sequence,
+            )
         ):
             return True
         if (
@@ -461,6 +479,11 @@ def _has_desktop_recovery_user_action(
                     count_success_recovery_actions and not is_recovery_execution
                 ),
             )
+            and not _is_recovered_foreground_readiness_signal(
+                event,
+                result,
+                latest_readiness_recovery_sequence,
+            )
         ):
             return True
     for tool_call in tool_calls:
@@ -470,23 +493,93 @@ def _has_desktop_recovery_user_action(
             count_success_recovery_actions=(
                 count_success_recovery_actions and not is_recovery_execution
             ),
+        ) and not _is_recovered_foreground_readiness_tool_call(
+            output_preview,
+            latest_readiness_recovery_sequence,
         ):
             return True
     return False
 
 
 def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) -> bool:
+    latest_readiness_recovery_sequence = _latest_readiness_recovery_sequence(events)
     for event in reversed(events):
         payload = event.payload if isinstance(event.payload, Mapping) else {}
         if event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE:
-            if _has_recovery_signal(payload):
+            if _has_recovery_signal(payload) and not _is_recovered_foreground_readiness_signal(
+                event,
+                payload,
+                latest_readiness_recovery_sequence,
+            ):
                 return True
             continue
         if event.event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
             continue
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
-        return _has_recovery_signal(result, count_success_recovery_actions=False)
+        return _has_recovery_signal(
+            result,
+            count_success_recovery_actions=False,
+        ) and not _is_recovered_foreground_readiness_signal(
+            event,
+            result,
+            latest_readiness_recovery_sequence,
+        )
     return False
+
+
+def _latest_readiness_recovery_sequence(events: list[PublicRunEvent]) -> int:
+    return max(
+        [
+            int(event.sequence or 0)
+            for event in events
+            if event.event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE
+        ]
+        or [0]
+    )
+
+
+def _is_recovered_foreground_readiness_signal(
+    event: PublicRunEvent,
+    source: Mapping[str, Any],
+    latest_readiness_recovery_sequence: int,
+) -> bool:
+    if not latest_readiness_recovery_sequence:
+        return False
+    if int(event.sequence or 0) >= latest_readiness_recovery_sequence:
+        return False
+    return _has_foreground_readiness_signal(source) and not _has_permission_signal(source)
+
+
+def _is_recovered_foreground_readiness_tool_call(
+    output_preview: Mapping[str, Any],
+    latest_readiness_recovery_sequence: int,
+) -> bool:
+    if not latest_readiness_recovery_sequence:
+        return False
+    return _has_foreground_readiness_signal(output_preview) and not _has_permission_signal(
+        output_preview
+    )
+
+
+def _has_foreground_readiness_signal(source: Mapping[str, Any]) -> bool:
+    data = source.get("data") if isinstance(source.get("data"), Mapping) else {}
+    conditions = set(
+        _result_text_list(source, "blocking_condition", "blocking_conditions")
+        + _result_text_list(data, "blocking_condition", "blocking_conditions")
+    )
+    error = _text(
+        source.get("error_code")
+        or source.get("error")
+        or data.get("error_code")
+        or data.get("error")
+    )
+    return bool(
+        source.get("blocked_by_runtime_readiness")
+        or data.get("blocked_by_runtime_readiness")
+        or data.get("ready_for_foreground_action") is False
+        or error == "app_not_found"
+        or conditions.intersection(_RECOVERABLE_FOREGROUND_READINESS_CONDITIONS)
+    )
 
 
 def _has_recovery_signal(
@@ -495,12 +588,7 @@ def _has_recovery_signal(
     count_success_recovery_actions: bool = True,
 ) -> bool:
     data = source.get("data") if isinstance(source.get("data"), Mapping) else {}
-    has_permission_signal = bool(
-        source.get("permission_error")
-        or _result_text_list(source, "permission_targets", "missing_permissions")
-        or _result_text_list(data, "permission_targets", "missing_permissions")
-    )
-    if has_permission_signal:
+    if _has_permission_signal(source):
         return True
     has_recovery_actions = _has_recovery_actions(source) or _has_recovery_actions(data)
     if not has_recovery_actions:
@@ -509,6 +597,15 @@ def _has_recovery_signal(
         count_success_recovery_actions
         or source.get("ok") is False
         or data.get("ok") is False
+    )
+
+
+def _has_permission_signal(source: Mapping[str, Any]) -> bool:
+    data = source.get("data") if isinstance(source.get("data"), Mapping) else {}
+    return bool(
+        source.get("permission_error")
+        or _result_text_list(source, "permission_targets", "missing_permissions")
+        or _result_text_list(data, "permission_targets", "missing_permissions")
     )
 
 
