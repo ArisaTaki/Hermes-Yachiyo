@@ -43,6 +43,23 @@ def _normalized_visible_text(value: Any) -> str:
     return _BIDI_MARKS.sub("", str(value or "")).strip()
 
 
+def _normalized_app_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if name.casefold().endswith(".app"):
+        name = name[:-4]
+    return " ".join(name.casefold().split())
+
+
+def _app_names_match(expected: Any, actual: Any) -> bool:
+    normalized_expected = _normalized_app_name(expected)
+    normalized_actual = _normalized_app_name(actual)
+    return bool(
+        normalized_expected
+        and normalized_actual
+        and normalized_expected == normalized_actual
+    )
+
+
 def _visible_values(result: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for element in _elements(result):
@@ -296,6 +313,72 @@ def run_smoke(
             },
         )
 
+    pre_click_focus_result = desktop_tools.app_focus(opened_app_name)
+    pre_click_focus_verified = pre_click_focus_result.get("ok") is True and _data(
+        pre_click_focus_result
+    ).get("focus_verified") is True
+    if not pre_click_focus_verified:
+        return fail_stage(
+            "pre_click_focus",
+            str(pre_click_focus_result.get("error") or "app_focus_not_verified"),
+            {
+                "open_ok": True,
+                "focus_verified": focus_verified,
+                "clear_ok": True,
+                "type_ok": True,
+                "before_ui_matches_app": before_ui_matches_app,
+                "typed_value_visible": clean_input in before_values,
+                "sign_control_found": bool(sign_target),
+                "pre_click_focus_verified": False,
+            },
+            {
+                "focus_result": focus_result,
+                "clear_result": clear_result,
+                "type_result": type_result,
+                "before_ui": before_ui,
+                "before_values": before_values,
+                "sign_target": sign_target,
+                "pre_click_focus_result": pre_click_focus_result,
+            },
+        )
+
+    pre_click_window = desktop_tools.active_window()
+    pre_click_active_app = str(_data(pre_click_window).get("app_name") or "")
+    pre_click_active_app_matches = (
+        pre_click_window.get("ok") is True
+        and _app_names_match(opened_app_name, pre_click_active_app)
+    )
+    if not pre_click_active_app_matches:
+        return fail_stage(
+            "pre_click_active_window",
+            (
+                str(pre_click_window.get("error") or "")
+                or "foreground_app_mismatch_before_click"
+            ),
+            {
+                "open_ok": True,
+                "focus_verified": focus_verified,
+                "clear_ok": True,
+                "type_ok": True,
+                "before_ui_matches_app": before_ui_matches_app,
+                "typed_value_visible": clean_input in before_values,
+                "sign_control_found": bool(sign_target),
+                "pre_click_focus_verified": pre_click_focus_verified,
+                "pre_click_active_app_matches": False,
+            },
+            {
+                "focus_result": focus_result,
+                "clear_result": clear_result,
+                "type_result": type_result,
+                "before_ui": before_ui,
+                "before_values": before_values,
+                "sign_target": sign_target,
+                "pre_click_focus_result": pre_click_focus_result,
+                "pre_click_window": pre_click_window,
+                "pre_click_active_app": pre_click_active_app,
+            },
+        )
+
     click_result = desktop_tools.click_ui_element(
         sign_target,
         role_filter="button",
@@ -328,6 +411,8 @@ def run_smoke(
         "before_ui_matches_app": before_ui_matches_app,
         "typed_value_visible": clean_input in before_values,
         "sign_control_found": bool(sign_target),
+        "pre_click_focus_verified": pre_click_focus_verified,
+        "pre_click_active_app_matches": pre_click_active_app_matches,
         "click_ok": click_result.get("ok") is True,
         "after_ui_matches_app": after_ui_matches_app,
         "signed_value_visible": expected_signed_value in after_values,
@@ -354,6 +439,8 @@ def run_smoke(
         "clear_result": clear_result,
         "type_result": type_result,
         "before_ui": before_ui,
+        "pre_click_focus_result": pre_click_focus_result,
+        "pre_click_window": pre_click_window,
         "click_result": click_result,
         "after_ui": after_ui,
         "after_status": after_status,

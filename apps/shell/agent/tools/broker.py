@@ -51,6 +51,36 @@ def _clean_string_list(value: Any) -> list[str]:
     return [str(item or "").strip() for item in value if str(item or "").strip()]
 
 
+def _normalized_app_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if name.casefold().endswith(".app"):
+        name = name[:-4]
+    return " ".join(name.casefold().split())
+
+
+def _app_names_match(expected: Any, actual: Any) -> bool:
+    normalized_expected = _normalized_app_name(expected)
+    normalized_actual = _normalized_app_name(actual)
+    return bool(
+        normalized_expected
+        and normalized_actual
+        and normalized_expected == normalized_actual
+    )
+
+
+def _foreground_expected_app_name(
+    fallback_app_name: str,
+    step_results: Mapping[str, dict[str, Any]],
+) -> str:
+    for result in reversed(list(step_results.values())):
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        for key in ("resolved_app_name", "app_name"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+    return str(fallback_app_name or "").strip()
+
+
 def _artifact_manifest_by_path(value: Any) -> dict[str, dict[str, str]]:
     if not isinstance(value, list):
         return {}
@@ -1244,6 +1274,44 @@ class ToolBroker:
                 }
 
         action_name, action = action_step
+        expected_app_name = _foreground_expected_app_name(clean_app_name, step_results)
+        active_window_result = desktop.active_window()
+        step_results["active_window"] = active_window_result
+        fallback_used = fallback_used or bool(active_window_result.get("fallback_used"))
+        active_window_data = (
+            active_window_result.get("data")
+            if isinstance(active_window_result.get("data"), dict)
+            else {}
+        )
+        active_app_name = str(
+            active_window_data.get("app_name")
+            or active_window_data.get("frontmost_app")
+            or ""
+        ).strip()
+        if active_window_result.get("ok") is not True or not _app_names_match(
+            expected_app_name,
+            active_app_name,
+        ):
+            data = dict(active_window_data)
+            if clean_app_name:
+                data["app_name"] = clean_app_name
+            data["expected_app_name"] = expected_app_name
+            data["active_app_name"] = active_app_name
+            data["foreground_action"] = action_name
+            return {
+                **active_window_result,
+                "ok": False,
+                "action": tool_name,
+                "summary": "Could not verify target app is foreground before foreground action",
+                "error": (
+                    str(active_window_result.get("error") or "")
+                    or "foreground_app_mismatch"
+                ),
+                "data": data,
+                "fallback_used": fallback_used,
+                "fallback_result": dict(step_results),
+            }
+
         action_result = action()
         action_data = action_result.get("data") if isinstance(action_result.get("data"), dict) else {}
         data = dict(action_data)

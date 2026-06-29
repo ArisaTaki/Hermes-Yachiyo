@@ -44,6 +44,12 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
 def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     calls: list[tuple] = []
     statuses = iter([False, True, False])
+    active_windows = iter(
+        [
+            {"ok": True, "data": {"app_name": "Codex"}},
+            {"ok": True, "data": {"app_name": "Calculator"}},
+        ]
+    )
     ui_results = iter(
         [
             {
@@ -72,7 +78,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     monkeypatch.setattr(
         smoke.desktop_tools,
         "active_window",
-        lambda: {"ok": True, "data": {"app_name": "Codex"}},
+        lambda: next(active_windows),
     )
     monkeypatch.setattr(
         smoke.desktop_tools,
@@ -145,6 +151,103 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
         ("type", "42"),
         ("click", "更改数值符号", {"role_filter": "button", "limit": 80}),
     ]
+
+
+def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click(
+    monkeypatch,
+):
+    statuses = iter([False, True, False])
+    active_windows = iter(
+        [
+            {"ok": True, "data": {"app_name": "Codex"}},
+            {"ok": True, "data": {"app_name": "QQ"}},
+        ]
+    )
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(smoke.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "active_window",
+        lambda: next(active_windows),
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "data": {"apps": [{"name": "Calculator"}]},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "data": {"app_name": app_name, "running": next(statuses)},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "data": {"app_name": app_name, "launch_verified": True},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_focus",
+        lambda app_name: {
+            "ok": True,
+            "data": {"app_name": app_name, "focus_verified": True},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "desktop_safe_key",
+        lambda action, repeat_count=1: {"ok": True},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "desktop_safe_type_text",
+        lambda text: {"ok": True},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "ui_elements",
+        lambda **_kwargs: {
+            "ok": True,
+            "data": {
+                "app_name": "Calculator",
+                "elements": [
+                    {"role": "AXStaticText", "name": "\u200e42", "value": "\u200e42"},
+                    {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "click_ui_element",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not click after foreground app changed")
+        ),
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "running": False}},
+    )
+
+    evidence = smoke.run_smoke()
+
+    assert evidence["ok"] is False
+    assert evidence["stage"] == "pre_click_active_window"
+    assert evidence["error"] == "foreground_app_mismatch_before_click"
+    assert evidence["pre_click_active_app"] == "QQ"
+    assert evidence["checks"]["pre_click_focus_verified"] is True
+    assert evidence["checks"]["pre_click_active_app_matches"] is False
+    assert evidence["cleanup"]["attempted"] is True
 
 
 def test_real_desktop_interaction_smoke_never_types_when_focus_fails(monkeypatch):

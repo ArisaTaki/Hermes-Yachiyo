@@ -46,6 +46,18 @@ def _broker(tmp_path):
     )
 
 
+def _stub_active_window(monkeypatch, app_name: str) -> None:
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": app_name, "title": ""},
+        },
+    )
+
+
 def test_tool_dispatch_registry_covers_known_agent_tools() -> None:
     assert set(TOOL_DISPATCH_REGISTRY) == KNOWN_AGENT_TOOLS
 
@@ -2164,6 +2176,7 @@ def test_tool_broker_app_open_and_safe_type_text_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "Notes")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2199,7 +2212,12 @@ def test_tool_broker_app_open_and_safe_type_text_sequences_foreground_action(
         "character_count": 5,
         "explicit_user_text": True,
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "safe_type_text"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "safe_type_text",
+    ]
 
 
 def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
@@ -2208,6 +2226,7 @@ def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2252,7 +2271,12 @@ def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
         "repeat_count": 2,
         "explicit_user_key": True,
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "safe_key"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "safe_key",
+    ]
 
 
 def test_tool_broker_app_open_and_hotkey_sequences_foreground_action(
@@ -2261,6 +2285,7 @@ def test_tool_broker_app_open_and_hotkey_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2296,7 +2321,12 @@ def test_tool_broker_app_open_and_hotkey_sequences_foreground_action(
         "key": "l",
         "modifiers": ["command"],
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "hotkey"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "hotkey",
+    ]
 
 
 def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(
@@ -2305,6 +2335,7 @@ def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2345,7 +2376,12 @@ def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(
         "pages": 2,
         "explicit_user_scroll": True,
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "safe_scroll"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "safe_scroll",
+    ]
 
 
 def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
@@ -2354,6 +2390,7 @@ def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, Any]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2396,7 +2433,12 @@ def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
         "click_count": 1,
         "explicit_user_coordinates": True,
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "safe_click"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "safe_click",
+    ]
 
 
 def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
@@ -2405,6 +2447,7 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, Any]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2463,7 +2506,12 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
         "click_count": 2,
         "role_filter": "button",
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "click_ui_element"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "click_ui_element",
+    ]
 
 
 def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_action(
@@ -2472,6 +2520,7 @@ def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_acti
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, Any]] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2526,7 +2575,12 @@ def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_acti
         "character_count": 10,
         "role_filter": "text",
     }
-    assert list(result["fallback_result"]) == ["open", "focus", "type_into_ui_element"]
+    assert list(result["fallback_result"]) == [
+        "open",
+        "focus",
+        "active_window",
+        "type_into_ui_element",
+    ]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
@@ -2535,6 +2589,7 @@ def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "Slack")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -2566,7 +2621,47 @@ def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
         "foreground_action": "safe_shortcut",
         "shortcut_action": "paste",
     }
-    assert list(result["fallback_result"]) == ["focus", "safe_shortcut"]
+    assert list(result["fallback_result"]) == [
+        "focus",
+        "active_window",
+        "safe_shortcut",
+    ]
+
+
+def test_tool_broker_app_foreground_action_stops_when_active_app_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, str]] = []
+    _stub_active_window(monkeypatch, "QQ")
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {"ok": True, "action": "app.focus", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_safe_shortcut",
+        lambda action: (_ for _ in ()).throw(
+            AssertionError("must not send foreground input to the wrong app")
+        ),
+    )
+
+    result = broker.app_focus_and_safe_shortcut("Slack", "paste")
+
+    assert calls == [("focus", "Slack")]
+    assert result["ok"] is False
+    assert result["action"] == "app.focus_and_safe_shortcut"
+    assert result["error"] == "foreground_app_mismatch"
+    assert result["summary"] == "Could not verify target app is foreground before foreground action"
+    assert result["data"]["app_name"] == "Slack"
+    assert result["data"]["expected_app_name"] == "Slack"
+    assert result["data"]["active_app_name"] == "QQ"
+    assert result["data"]["foreground_action"] == "safe_shortcut"
+    assert list(result["fallback_result"]) == ["focus", "active_window"]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
