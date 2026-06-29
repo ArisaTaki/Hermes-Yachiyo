@@ -49,6 +49,9 @@ from scripts.smoke_electron_native_bridge import (
 from scripts.smoke_group_run_timeline import (
     run_smoke as run_group_run_timeline_smoke,
 )
+from scripts.smoke_media_playback_chain import (
+    run_smoke as run_media_playback_chain_smoke,
+)
 from scripts.smoke_planner_runtime_tool_parity import (
     run_smoke as run_planner_runtime_tool_parity_smoke,
 )
@@ -1890,6 +1893,43 @@ def verify_planner_runtime_tool_parity_smoke(root: Path) -> tuple[list[Finding],
     return [
         Finding(
             root / "scripts/smoke_planner_runtime_tool_parity.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_media_playback_chain_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_media_playback_chain_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_media_playback_chain.py",
+                f"media playback chain smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "media_playback_chain_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_media_playback_chain.py",
+                "media playback chain smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "media_playback_chain_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "media playback chain smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_media_playback_chain.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4291,6 +4331,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "media_playback_chain_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "approval_policy_gate_smoke": {
             "status": "pending",
             "evidence": {},
@@ -4498,6 +4544,12 @@ def verify_release_candidate(
             "run_requested": run_electron_native_bridge_smoke,
         }
         report["planner_runtime_tool_parity_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
+        report["media_playback_chain_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
@@ -4754,6 +4806,18 @@ def verify_release_candidate(
         "status": "failed" if tool_parity_smoke_findings else "passed",
         "evidence": tool_parity_smoke_evidence,
         "findings": _finding_report(tool_parity_smoke_findings),
+        "run_requested": True,
+    }
+
+    media_playback_smoke_findings, media_playback_smoke_evidence = (
+        verify_media_playback_chain_smoke(root)
+    )
+    _print_findings("media playback chain smoke", media_playback_smoke_findings)
+    failed = failed or bool(media_playback_smoke_findings)
+    report["media_playback_chain_smoke"] = {
+        "status": "failed" if media_playback_smoke_findings else "passed",
+        "evidence": media_playback_smoke_evidence,
+        "findings": _finding_report(media_playback_smoke_findings),
         "run_requested": True,
     }
 
