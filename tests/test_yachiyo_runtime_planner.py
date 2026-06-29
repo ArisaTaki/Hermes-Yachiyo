@@ -36,9 +36,11 @@ from apps.shell.yachiyo_agent.hotkey_hints import (
     legacy_parse_hotkey_combo,
 )
 from apps.shell.yachiyo_agent.planner_projection import (
+    planner_enriched_chat_request,
     planner_selection_payload,
     planner_selection_timeline_event,
     planner_timeline_events,
+    runtime_planner_metadata,
 )
 from apps.shell.yachiyo_agent.path_alias_hints import legacy_common_desktop_path_hint
 from apps.shell.yachiyo_agent.web_destination_hints import (
@@ -1565,6 +1567,116 @@ def test_planner_selection_payload_surfaces_followup_communication_target() -> N
         "mode": "focus",
         "app_name": "WeChat",
         "transform": "report",
+    }
+
+
+def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> None:
+    prompt = "打开一个能写 markdown 的应用，新建文档标题为周报"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["intent_kind"] == "desktop_operation"
+    assert payload["selected_tools"] == ["desktop.list_apps"]
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "markdown",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "markdown",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "compose_text": "周报",
+        "body_source": "explicit_user_text",
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+    enriched = planner_enriched_chat_request(
+        {"prompt": prompt, "agent_id": "builtin:yachiyo-main", "metadata": {}},
+        allowed_tools=allowed_tools,
+    )
+    assert enriched["metadata"]["yachiyo_followup_target"] == payload["followup_target"]
+
+    image_prompt = "打开一个能编辑图片的应用，新建一张 1024x1024 图片"
+    image_decision = RuntimePlanner().decision(image_prompt, allowed_tools=allowed_tools)
+    image_requests = planner_tool_requests(image_prompt, allowed_tools)
+    image_payload = planner_selection_payload(
+        decision=image_decision,
+        planner_requests=image_requests,
+        legacy_requests=[],
+        selected_requests=image_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert image_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "image",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "图片",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "creative_canvas": {
+            "kind": "image_canvas",
+            "width": 1024,
+            "height": 1024,
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+        },
+    }
+
+    presentation_prompt = (
+        "find an app for presentations and create a new presentation titled project review"
+    )
+    presentation_decision = RuntimePlanner().decision(
+        presentation_prompt,
+        allowed_tools=allowed_tools,
+    )
+    presentation_requests = planner_tool_requests(presentation_prompt, allowed_tools)
+    presentation_payload = planner_selection_payload(
+        decision=presentation_decision,
+        planner_requests=presentation_requests,
+        legacy_requests=[],
+        selected_requests=presentation_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert presentation_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "presentation", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert presentation_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "presentation",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "presentations",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "compose_text": "project review",
+        "body_source": "explicit_user_text",
     }
 
 

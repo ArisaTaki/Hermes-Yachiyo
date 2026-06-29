@@ -38,7 +38,7 @@ def runtime_planner_metadata(
         for step in tool_plan.steps
         if str(step.tool_name or "").strip()
     ]
-    return {
+    payload = {
         "yachiyo_runtime_planner": True,
         "yachiyo_plan_source": decision.source,
         "yachiyo_decision_id": decision.decision_id,
@@ -55,6 +55,10 @@ def runtime_planner_metadata(
         "yachiyo_required_capabilities": _required_capability_ids(decision),
         "yachiyo_missing_capabilities": list(tool_plan.missing_capabilities),
     }
+    followup_target = _selection_followup_target_payload(decision)
+    if followup_target:
+        payload["yachiyo_followup_target"] = followup_target
+    return payload
 
 
 def planner_enriched_chat_request(
@@ -193,6 +197,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     inputs = getattr(intent, "inputs", None)
     if not isinstance(inputs, Mapping):
         return {}
+    desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
+    if desktop_discovered_app_target:
+        return desktop_discovered_app_target
     target_app = str(inputs.get("target_app_hint") or "").strip()
     target_action = str(inputs.get("target_action_hint") or "").strip()
     context_source = str(inputs.get("context_source") or "").strip()
@@ -231,6 +238,52 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         value = str(communication_target.get(source_key) or "").strip()
         if value:
             payload[target_key] = value
+    return payload
+
+
+def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    app_capability = inputs.get("app_capability_hint")
+    desktop_discovery = inputs.get("desktop_discovery_hint")
+    if not isinstance(app_capability, Mapping) or not isinstance(desktop_discovery, Mapping):
+        return {}
+    if str(desktop_discovery.get("action") or "").strip() != "discover_apps":
+        return {}
+    query = str(desktop_discovery.get("query") or app_capability.get("query") or "").strip()
+    if not query:
+        return {}
+    payload: dict[str, Any] = {
+        "kind": "desktop_discovered_app_action",
+        "app_query": query,
+        "app_name_source": "desktop.list_apps",
+    }
+    description = str(app_capability.get("description") or "").strip()
+    if description:
+        payload["capability_description"] = description
+    safe_shortcut = inputs.get("safe_shortcut_hint")
+    if isinstance(safe_shortcut, Mapping):
+        action = str(safe_shortcut.get("action") or "").strip()
+        if action:
+            payload["target_action"] = "safe_shortcut"
+            payload["safe_shortcut_action"] = action
+    if "target_action" not in payload:
+        payload["target_action"] = "open_app"
+    compose_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
+    if compose_text:
+        payload["compose_text"] = compose_text
+        payload["body_source"] = "explicit_user_text"
+    creative_canvas = inputs.get("creative_canvas_hint")
+    if isinstance(creative_canvas, Mapping):
+        payload["creative_canvas"] = dict(creative_canvas)
+    ui_inspection = inputs.get("ui_inspection_hint")
+    if isinstance(ui_inspection, Mapping):
+        payload["post_action_observation"] = {
+            "tool": "desktop.ui_elements",
+            "input": {
+                key: ui_inspection[key]
+                for key in ("role_filter", "limit")
+                if key in ui_inspection and ui_inspection[key] not in (None, "")
+            },
+        }
     return payload
 
 

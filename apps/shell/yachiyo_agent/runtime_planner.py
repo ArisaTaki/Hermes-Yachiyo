@@ -402,6 +402,10 @@ class TaskIntentRouter:
                 "action": "discover_apps",
                 "query": str(app_capability.get("query") or "").strip(),
             }
+            if safe_shortcut is None and _looks_like_app_scoped_create_followup(text):
+                create_container_action = _generic_create_container_action_hint(text)
+                if create_container_action:
+                    safe_shortcut = {"action": create_container_action}
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = None
         context_source = context_source_hint(text)
@@ -2116,8 +2120,11 @@ class RuntimePlanner:
         foreground_management = foreground_management_hint(intent.user_goal)
         safe_shortcut = safe_shortcut_hint(intent.user_goal)
         intent_safe_shortcut = intent.inputs.get("safe_shortcut_hint")
+        intent_has_app_capability = isinstance(intent.inputs.get("app_capability_hint"), Mapping)
+        intent_safe_shortcut_from_inputs = False
         if isinstance(intent_safe_shortcut, Mapping):
             safe_shortcut = dict(intent_safe_shortcut)
+            intent_safe_shortcut_from_inputs = True
         creative_canvas = (
             dict(intent.inputs.get("creative_canvas_hint"))
             if isinstance(intent.inputs.get("creative_canvas_hint"), Mapping)
@@ -2127,7 +2134,11 @@ class RuntimePlanner:
             safe_shortcut = {"action": "new_document"}
         if creative_canvas and ui_inspection is None and screen_capture is None:
             ui_inspection = {"role_filter": "text", "limit": 80}
-        safe_shortcut_sequence = safe_shortcut_sequence_hint(intent.user_goal)
+        safe_shortcut_sequence = (
+            []
+            if intent_has_app_capability and intent_safe_shortcut_from_inputs
+            else safe_shortcut_sequence_hint(intent.user_goal)
+        )
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
         safe_key = safe_key_hint(intent.user_goal)
@@ -2186,7 +2197,9 @@ class RuntimePlanner:
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = {}
         app_search = intent.inputs.get("app_search_hint")
-        if not isinstance(app_search, Mapping):
+        if app_capability:
+            app_search = {}
+        elif not isinstance(app_search, Mapping):
             app_search = _app_search_hint(
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
@@ -11298,6 +11311,9 @@ def _foreground_compose_text_hint(text: str) -> str:
     create_text = _app_scoped_create_text_hint(value)
     if create_text:
         return create_text
+    create_title_text = _generic_create_title_text_hint(value)
+    if create_title_text:
+        return create_title_text
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+?)"
@@ -11333,6 +11349,75 @@ def _foreground_compose_text_hint(text: str) -> str:
     return ""
 
 
+def _generic_create_title_text_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not re.search(r"(?:新建|创建|新增|\b(?:new|create|make)\b)", value, flags=re.IGNORECASE):
+        return ""
+    container = (
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|"
+        r"项目|任务|卡片|page|note|document|file|presentation|slide|project|task|card)"
+    )
+    chinese_patterns = (
+        rf"(?:新建|创建|新增).{{0,80}}?"
+        rf"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
+        rf"(?P<text>[^。！？!?，,]+?)\s*的\s*{container}",
+        rf"(?:新建|创建|新增).{{0,80}}?{container}.{{0,30}}?"
+        rf"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
+        rf"(?P<text>[^。！？!?，,]+)",
+    )
+    for pattern in chinese_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        text_value = _clean_foreground_compose_text(match.group("text"))
+        if text_value:
+            return text_value
+    english_patterns = (
+        rf"\b(?:new|create|make)\b.{{0,80}}\b{container}\b.{{0,30}}"
+        rf"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
+    )
+    for pattern in english_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        text_value = _clean_foreground_compose_text(match.group("text_en"))
+        if text_value:
+            return text_value
+    return ""
+
+
+def _generic_create_container_action_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
+        r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
+        r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
+        r"(?:笔记|备忘录|日志|日记)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:new|create|make)\b.{0,40}\b(?:note|journal|diary)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "new_note"
+    if re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
+        r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
+        r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
+        r"(?:页面|文档|文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:new|create|make)\b.{0,60}\b"
+        r"(?:page|document|file|image|picture|canvas|spreadsheet|workbook|presentation|slide|project|task|card)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "new_document"
+    return ""
+
+
 def _app_scoped_create_text_hint(text: str) -> str:
     value = _clean_prompt(text)
     parsed = _app_scoped_followup_hint(value)
@@ -11344,11 +11429,11 @@ def _app_scoped_create_text_hint(text: str) -> str:
     patterns = (
         r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+?)"
-        r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片))?"
+        r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片))?"
         r"(?:$|[。！？!?，,])",
         r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
-        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片)",
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片)",
         r"(?:内容|正文)\s*(?:是|为|写|写成|写下|:|：)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:写下|写入|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
         r"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
@@ -11375,13 +11460,13 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
             r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-            r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|项目|任务|卡片)",
+            r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|项目|任务|卡片)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:new|create|make)\b.{0,40}\b"
-            r"(?:page|note|document|file|project|task|card)\b",
+            r"(?:page|note|document|file|presentation|slide|project|task|card)\b",
             value,
             flags=re.IGNORECASE,
         )
