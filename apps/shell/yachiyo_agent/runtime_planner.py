@@ -4283,6 +4283,8 @@ class RuntimePlanner:
             ),
             allowed,
         )
+        if _communication_draft_should_use_artifact(direct_message, allowed):
+            compose_tool = "artifact.write"
         if isinstance(direct_message, Mapping):
             direct_steps = _direct_communication_steps(intent, allowed, direct_message)
             if direct_steps:
@@ -5274,7 +5276,11 @@ def _direct_communication_steps(
     body = str(direct_message.get("body") or "").strip()
     body_source = str(direct_message.get("body_source") or "").strip()
     transform = str(direct_message.get("content_transform_hint") or "").strip()
+    channel = str(direct_message.get("channel") or "").strip()
+    send_action = str(direct_message.get("send_action") or "send").strip() or "send"
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
+    if not app_name and send_action == "send":
+        app_name = _default_communication_app_for_channel(channel, mode, allowed)
     if (
         not app_name
         or not recipient
@@ -5369,12 +5375,15 @@ def _direct_communication_steps(
         )
         focus_depends_on = ["open-or-focus-app"]
         focus_tool = shortcut_tool
-        focus_input = {"action": "find"}
+        focus_input = {"action": _communication_recipient_focus_action(channel)}
         focus_capability = "communication.compose"
         focus_reason = "Open foreground recipient search with a generic safe shortcut."
     else:
         focus_tool = app_shortcut_tool
-        focus_input = {"app_name": app_name, "action": "find"}
+        focus_input = {
+            "app_name": app_name,
+            "action": _communication_recipient_focus_action(channel),
+        }
         focus_capability = "communication.compose"
         focus_reason = "Open the app's recipient search with a safe shortcut before drafting the message."
     steps.extend(
@@ -5477,6 +5486,57 @@ def _communication_draft_input_preview(direct_message: Mapping[str, Any]) -> dic
         if value:
             preview[key] = value
     return preview
+
+
+def _communication_draft_should_use_artifact(
+    direct_message: Any,
+    allowed: set[str] | None,
+) -> bool:
+    if not isinstance(direct_message, Mapping):
+        return False
+    if str(direct_message.get("send_action") or "").strip() != "draft":
+        return False
+    if str(direct_message.get("app_name") or "").strip():
+        return False
+    return bool(_first_allowed(("artifact.write",), allowed))
+
+
+def _default_communication_app_for_channel(
+    channel: str,
+    mode: str,
+    allowed: set[str] | None,
+) -> str:
+    if channel != "email":
+        return ""
+    if not _communication_desktop_send_tools_available(mode, allowed):
+        return ""
+    return "Mail"
+
+
+def _communication_desktop_send_tools_available(
+    mode: str,
+    allowed: set[str] | None,
+) -> bool:
+    if allowed is None:
+        return True
+    app_shortcut_tool = _first_allowed(
+        app_foreground_tool_candidates(mode, "safe_shortcut"),
+        allowed,
+    )
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools("Mail", mode, allowed)
+    if not app_shortcut_tool and not (app_tool and shortcut_tool):
+        return False
+    return bool(
+        _first_allowed(("desktop.safe_type_text",), allowed)
+        and _first_allowed(("desktop.search_submit",), allowed)
+        and _first_allowed(("desktop.submit_foreground",), allowed)
+    )
+
+
+def _communication_recipient_focus_action(channel: str) -> str:
+    if channel == "email":
+        return "new_message"
+    return "find"
 
 
 def _direct_message_requires_generated_body(direct_message: Mapping[str, Any]) -> bool:
@@ -10399,7 +10459,10 @@ def _direct_communication_candidate_hint(text: str) -> dict[str, str]:
         direct_context_hint = _direct_context_communication_hint(text, source)
         if direct_context_hint:
             return direct_context_hint
-    return _direct_paste_communication_hint(text) or _direct_communication_hint(text)
+    generic_hint = _generic_direct_communication_hint(text)
+    if str(generic_hint.get("channel") or "").strip() == "email":
+        return generic_hint
+    return _direct_paste_communication_hint(text) or _direct_communication_hint(text) or generic_hint
 
 
 def _direct_paste_communication_hint(text: str) -> dict[str, str]:
