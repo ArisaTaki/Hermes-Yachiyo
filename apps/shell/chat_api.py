@@ -53,6 +53,8 @@ from apps.shell.yachiyo_agent.daily_desktop import (
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
 from apps.shell.yachiyo_agent.planner_execution import planner_orchestration_requests
+from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
 
@@ -340,6 +342,39 @@ def _can_direct_execute_data_analysis_discovery(
         return False
     payload = request.get("input") if isinstance(request.get("input"), dict) else {}
     return _has_single_data_analysis_file(default_workdir, str(payload.get("path") or ""))
+
+
+def _discovered_app_followup_target_can_direct_execute(
+    target: dict[str, Any],
+    allowed_tools: list[str],
+) -> bool:
+    if isinstance(target.get("creative_canvas"), dict):
+        return False
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    target_action = str(target.get("target_action") or "").strip()
+    if target_action == "safe_shortcut":
+        if not str(target.get("safe_shortcut_action") or "").strip():
+            return False
+        can_prepare = (
+            "app.open_and_safe_shortcut" in allowed
+            or "app.focus_and_safe_shortcut" in allowed
+            or (
+                ("app.open" in allowed or "app.focus" in allowed)
+                and "desktop.safe_shortcut" in allowed
+            )
+        )
+    elif target_action in {"open_app", "open", "focus_app", "focus"}:
+        can_prepare = "app.open" in allowed or "app.focus" in allowed
+    else:
+        return False
+    if not can_prepare:
+        return False
+    if str(target.get("compose_text") or "").strip() and not (
+        "desktop.safe_type_text" in allowed
+        or "app.focus_and_safe_type_text" in allowed
+    ):
+        return False
+    return True
 
 
 def _has_single_data_analysis_file(default_workdir: Path, path: str) -> bool:
@@ -1665,7 +1700,11 @@ class ChatAPI:
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and self._daily_desktop_requests_can_direct_execute(daily_desktop_requests)
+                and self._daily_desktop_requests_can_direct_execute(
+                    daily_desktop_requests,
+                    task_text,
+                    metadata=metadata,
+                )
             )
             direct_planner_orchestration_intent = (
                 not raw_attachments
@@ -4200,7 +4239,13 @@ class ChatAPI:
         executor = getattr(runner, "executor", None)
         return bool(execution_capabilities(executor).get("model"))
 
-    def _daily_desktop_requests_can_direct_execute(self, requests: list[dict[str, Any]]) -> bool:
+    def _daily_desktop_requests_can_direct_execute(
+        self,
+        requests: list[dict[str, Any]],
+        text: str = "",
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
         if not requests:
             return False
         if _can_direct_execute_data_analysis_discovery(
@@ -4208,7 +4253,60 @@ class ChatAPI:
             self._main_chat_default_workdir(),
         ):
             return True
+        if self._can_direct_execute_discovered_app_followup(
+            requests,
+            text,
+            metadata=metadata,
+        ):
+            return True
         return not any(bool(request.get("continue_to_model")) for request in requests)
+
+    def _can_direct_execute_discovered_app_followup(
+        self,
+        requests: list[dict[str, Any]],
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        if not text or len(requests) != 1:
+            return False
+        request = requests[0]
+        if str(request.get("tool") or "").strip() != "desktop.list_apps":
+            return False
+        if not bool(request.get("continue_to_model")):
+            return False
+        try:
+            allowed_tools = main_chat_entrypoint_allowed_tools(
+                self._agent_runtime_service(),
+                fallback=daily_desktop_allowed_tools(),
+            )
+        except Exception:
+            allowed_tools = daily_desktop_allowed_tools()
+        try:
+            decision = RuntimePlanner().decision(
+                text,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+            )
+            payload = planner_selection_payload(
+                decision=decision,
+                planner_requests=requests,
+                legacy_requests=[],
+                selected_requests=requests,
+                selected_source="runtime_planner",
+                selected_reason="runtime_planner_direct",
+                metadata=metadata,
+            )
+        except Exception:
+            logger.debug("Discovered app follow-up direct check failed", exc_info=True)
+            return False
+        target = payload.get("followup_target") if isinstance(payload.get("followup_target"), dict) else {}
+        if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+            return False
+        return _discovered_app_followup_target_can_direct_execute(
+            target,
+            allowed_tools,
+        )
 
     def _main_chat_default_workdir(self) -> Path | None:
         try:

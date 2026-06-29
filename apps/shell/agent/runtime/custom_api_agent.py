@@ -20,11 +20,12 @@ from apps.shell.agent.runtime.desktop_intents import (
 from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
 )
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshots,
     latest_followup_content_snapshot,
 )
-from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.tool_execution import _discovered_app_name_for_query
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
@@ -194,6 +195,22 @@ class RuntimeCustomApiAgentLoop:
             direct_tool_selection_payload: dict[str, Any] = {}
             if direct_planned_tool_requests:
                 planned_tool_requests = direct_planned_tool_requests
+                if any(
+                    bool(request.get("continue_to_model"))
+                    and str(request.get("source") or "").strip() == "runtime_planner"
+                    for request in direct_planned_tool_requests
+                    if isinstance(request, dict)
+                ):
+                    (
+                        runtime_planner_decision,
+                        planner_execution_requests,
+                        direct_tool_selection_payload,
+                    ) = self._runtime_planner_tool_requests(
+                        planning_context,
+                        allowed_tools,
+                    )
+                    if planner_execution_requests:
+                        planned_tool_requests = planner_execution_requests
             elif direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
             else:
@@ -330,10 +347,14 @@ class RuntimeCustomApiAgentLoop:
                     if isinstance(request, dict)
                 )
                 if continue_to_model:
+                    followup_selection_payload = _selection_payload_with_timeline_fallback(
+                        direct_tool_selection_payload,
+                        timeline,
+                    )
                     auto_followup_request = self._auto_data_analysis_request_from_discovery(
                         planned_tool_requests,
                         allowed_tools,
-                        direct_tool_selection_payload,
+                        followup_selection_payload,
                         timeline,
                     )
                     if auto_followup_request:
@@ -382,7 +403,7 @@ class RuntimeCustomApiAgentLoop:
                             budget=budget,
                         )
                         if _selection_payload_has_model_followup_target(
-                            direct_tool_selection_payload
+                            followup_selection_payload
                         ):
                             auto_followup_request = {
                                 **auto_followup_request,
@@ -411,9 +432,103 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
+                    auto_discovered_app_requests = _auto_discovered_app_followup_requests(
+                        followup_selection_payload,
+                        allowed_tools,
+                        timeline,
+                    )
+                    if auto_discovered_app_requests:
+                        self._record_auto_model_followup_app_write_plan(
+                            auto_discovered_app_requests,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_permission_preflight(
+                            auto_discovered_app_requests,
+                            broker,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_tool_policy_decisions(
+                            auto_discovered_app_requests,
+                            allowed_tools=allowed_tools,
+                            agent=agent,
+                            run_id=run_id,
+                        )
+                        auto_tool_timeline_start = len(timeline)
+                        try:
+                            self._run_tool_requests(
+                                auto_discovered_app_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=start_iteration,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                        except AgentApprovalRequired as exc:
+                            pending_approval = (
+                                exc.pending_approval
+                                if isinstance(exc.pending_approval, dict)
+                                else {}
+                            )
+                            planned_tool = str(
+                                pending_approval.get("tool")
+                                or auto_discovered_app_requests[0].get("tool")
+                                or ""
+                            )
+                            approval_request = self._planned_request_for_tool(
+                                auto_discovered_app_requests,
+                                planned_tool,
+                            )
+                            planned_input = self._pending_approval_input_preview(
+                                pending_approval,
+                                approval_request,
+                                (
+                                    auto_discovered_app_requests[0]
+                                    if auto_discovered_app_requests
+                                    else {}
+                                ),
+                            )
+                            self._record_desktop_intent_approval_required(
+                                planned_tool,
+                                planned_input,
+                                pending_approval=exc.pending_approval,
+                                timeline=timeline,
+                                run_id=run_id,
+                                source=self._approval_event_source(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                                planning_reason=self._approval_event_planning_reason(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                            )
+                            raise
+                        if any(
+                            bool(request.get("continue_to_model"))
+                            for request in auto_discovered_app_requests
+                            if isinstance(request, dict)
+                        ):
+                            planned_tool_requests = [
+                                *planned_tool_requests,
+                                *auto_discovered_app_requests,
+                            ]
+                        else:
+                            direct_result = self._direct_daily_desktop_sequence_result(
+                                auto_discovered_app_requests,
+                                timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            if direct_result:
+                                return direct_result
                     self._append_model_followup_context(
                         planned_tool_requests,
-                        direct_tool_selection_payload,
+                        followup_selection_payload,
                         allowed_tools=allowed_tools,
                         messages=messages,
                         timeline=timeline,
@@ -3452,6 +3567,30 @@ def _model_followup_context_payload(
     return payload
 
 
+def _selection_payload_with_timeline_fallback(
+    selection_payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload = dict(selection_payload) if isinstance(selection_payload, Mapping) else {}
+    if isinstance(payload.get("followup_target"), Mapping):
+        return payload
+    for event in reversed(timeline):
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event") or "").strip() != "agent.plan.selection":
+            continue
+        target = event.get("followup_target")
+        if not isinstance(target, Mapping):
+            continue
+        event_payload = {
+            str(key): value
+            for key, value in event.items()
+            if key not in {"event", "detail", "timestamp"}
+        }
+        return {**event_payload, **payload, "followup_target": dict(target)}
+    return payload
+
+
 def _model_followup_context_message(payload: dict[str, Any]) -> str:
     artifacts = _string_list(payload.get("artifacts_expected"))
     artifact_write_allowed = bool(payload.get("artifact_write_allowed"))
@@ -3500,6 +3639,8 @@ def _model_followup_target_payload(
     kind = str(target.get("kind") or "").strip()
     if kind == "communication_message":
         return _model_followup_communication_target_payload(target, allowed)
+    if kind == "desktop_discovered_app_action":
+        return _model_followup_desktop_discovered_app_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
         return {}
     container_action = _model_followup_container_action(target)
@@ -3523,6 +3664,57 @@ def _model_followup_target_payload(
     context_source = str(target.get("context_source") or "").strip()
     if context_source:
         payload["context_source"] = context_source
+    return payload
+
+
+def _model_followup_desktop_discovered_app_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    app_query = str(target.get("app_query") or "").strip()
+    if not app_query:
+        return {}
+    recommended_tools = [
+        tool
+        for tool in (
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+        )
+        if tool in allowed
+    ]
+    verify_tools = [
+        tool
+        for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+        if tool in allowed
+    ]
+    payload: dict[str, Any] = {
+        "kind": "desktop_discovered_app_action",
+        "app_query": app_query,
+        "app_name_source": str(target.get("app_name_source") or "desktop.list_apps").strip(),
+        "target_action": str(target.get("target_action") or "").strip(),
+        "recommended_tools": recommended_tools,
+        "verify_tools": verify_tools,
+    }
+    safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+    if safe_shortcut_action:
+        payload["safe_shortcut_action"] = safe_shortcut_action
+    compose_text = str(target.get("compose_text") or "").strip()
+    if compose_text:
+        payload["compose_text"] = compose_text
+        payload["body_source"] = str(target.get("body_source") or "explicit_user_text").strip()
+    creative_canvas = (
+        target.get("creative_canvas")
+        if isinstance(target.get("creative_canvas"), Mapping)
+        else {}
+    )
+    if creative_canvas:
+        payload["creative_canvas"] = dict(creative_canvas)
     return payload
 
 
@@ -3597,7 +3789,240 @@ def _selection_payload_has_model_followup_target(
         return bool(str(target.get("app_name") or "").strip())
     if kind == "communication_message":
         return bool(str(target.get("recipient") or "").strip())
+    if kind == "desktop_discovered_app_action":
+        return bool(str(target.get("app_query") or "").strip())
     return False
+
+
+def _auto_discovered_app_followup_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    app_query = str(target.get("app_query") or "").strip()
+    app_name = _discovered_app_name_for_query(timeline, app_query)
+    if not app_name:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    source = "runtime_planner"
+    planning_reason = "planner_discovered_app_followup"
+    target_action = str(target.get("target_action") or "").strip()
+    safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+    requests: list[dict[str, Any]] = []
+    if target_action == "safe_shortcut" and safe_shortcut_action:
+        requests.extend(
+            _discovered_app_safe_shortcut_requests(
+                app_query,
+                app_name,
+                safe_shortcut_action,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    elif target_action in {"open_app", "open", "focus_app", "focus"}:
+        open_request = _discovered_app_open_request(
+            app_query,
+            app_name,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if open_request:
+            requests.append(open_request)
+    compose_text = str(target.get("compose_text") or "").strip()
+    if requests and compose_text:
+        type_request = _discovered_app_type_text_request(
+            app_query,
+            app_name,
+            compose_text,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if type_request:
+            requests.append(type_request)
+    if not requests:
+        return []
+    observation_request = _discovered_app_observation_request(
+        target,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if observation_request:
+        requests.append(observation_request)
+    return requests
+
+
+def _discovered_app_safe_shortcut_requests(
+    app_query: str,
+    app_name: str,
+    action: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    if "app.open_and_safe_shortcut" in allowed:
+        return [
+            _with_discovered_app_resolution(
+                _request_like(
+                    "app.open_and_safe_shortcut",
+                    {"app_name": app_name, "action": action},
+                    source=source,
+                    planning_reason=planning_reason,
+                ),
+                app_query,
+                app_name,
+            )
+        ]
+    if "app.focus_and_safe_shortcut" in allowed:
+        return [
+            _with_discovered_app_resolution(
+                _request_like(
+                    "app.focus_and_safe_shortcut",
+                    {"app_name": app_name, "action": action},
+                    source=source,
+                    planning_reason=planning_reason,
+                ),
+                app_query,
+                app_name,
+            )
+        ]
+    focus_tool = "app.open" if "app.open" in allowed else ("app.focus" if "app.focus" in allowed else "")
+    if focus_tool and "desktop.safe_shortcut" in allowed:
+        return [
+            _with_discovered_app_resolution(
+                _request_like(
+                    focus_tool,
+                    {"app_name": app_name},
+                    source=source,
+                    planning_reason=planning_reason,
+                ),
+                app_query,
+                app_name,
+            ),
+            _request_like(
+                "desktop.safe_shortcut",
+                {"action": action},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
+    return []
+
+
+def _discovered_app_open_request(
+    app_query: str,
+    app_name: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    tool_name = "app.open" if "app.open" in allowed else ("app.focus" if "app.focus" in allowed else "")
+    if not tool_name:
+        return {}
+    return _with_discovered_app_resolution(
+        _request_like(
+            tool_name,
+            {"app_name": app_name},
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        app_query,
+        app_name,
+    )
+
+
+def _discovered_app_type_text_request(
+    app_query: str,
+    app_name: str,
+    text: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    if "desktop.safe_type_text" in allowed:
+        return _request_like(
+            "desktop.safe_type_text",
+            {"text": text},
+            source=source,
+            planning_reason=planning_reason,
+        )
+    if "app.focus_and_safe_type_text" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "app.focus_and_safe_type_text",
+                {"app_name": app_name, "text": text},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    return {}
+
+
+def _discovered_app_observation_request(
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    post_action_observation = (
+        target.get("post_action_observation")
+        if isinstance(target.get("post_action_observation"), Mapping)
+        else {}
+    )
+    tool_name = str(post_action_observation.get("tool") or "desktop.ui_elements").strip()
+    raw_input = (
+        post_action_observation.get("input")
+        if isinstance(post_action_observation.get("input"), Mapping)
+        else {}
+    )
+    if tool_name not in allowed:
+        if "desktop.ui_elements" not in allowed:
+            return {}
+        tool_name = "desktop.ui_elements"
+        raw_input = {}
+    request = _request_like(
+        tool_name,
+        dict(raw_input),
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if isinstance(target.get("creative_canvas"), Mapping):
+        request["continue_to_model"] = True
+    return request
+
+
+def _with_discovered_app_resolution(
+    request: dict[str, Any],
+    app_query: str,
+    app_name: str,
+) -> dict[str, Any]:
+    tool_name = str(request.get("tool") or "").strip()
+    return {
+        **request,
+        "input_resolution": {
+            "tool": tool_name,
+            "field": "app_name",
+            "requested_app_name": app_query,
+            "resolved_app_name": app_name,
+            "source_tool": "desktop.list_apps",
+        },
+    }
 
 
 def _model_followup_communication_prepare_tool_names(
@@ -3664,10 +4089,13 @@ def _model_followup_container_action(target: Mapping[str, Any]) -> str:
 def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
     if not isinstance(target, Mapping):
         return ""
-    if str(target.get("kind") or "").strip() == "communication_message":
+    kind = str(target.get("kind") or "").strip()
+    if kind == "communication_message":
         return _model_followup_communication_instruction(target)
+    if kind == "desktop_discovered_app_action":
+        return _model_followup_desktop_discovered_app_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
-    if str(target.get("kind") or "").strip() != "app_write" or not app_name:
+    if kind != "app_write" or not app_name:
         return ""
     if not bool(target.get("write_allowed")):
         return (
@@ -3697,6 +4125,40 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
         f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]) -> str:
+    app_query = str(target.get("app_query") or "").strip()
+    if not app_query:
+        return ""
+    creative_canvas = (
+        target.get("creative_canvas")
+        if isinstance(target.get("creative_canvas"), Mapping)
+        else {}
+    )
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    tool_text = ", ".join(tools) or "the allowed desktop operation tools"
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after the operation."
+        if verify_tools
+        else ""
+    )
+    if creative_canvas:
+        width = str(creative_canvas.get("width") or "").strip()
+        height = str(creative_canvas.get("height") or "").strip()
+        size_text = f" {width}x{height}" if width and height else ""
+        return (
+            f"The runtime already discovered and attempted to open the best app for {app_query!r}. "
+            f"Use the latest UI observation to create or configure the requested{size_text} canvas. "
+            f"Call desktop UI tools next instead of replying inline. Prefer {tool_text}."
+            f"{verify_text} If the required fields are not visible, inspect the UI again before "
+            "claiming completion. "
+        )
+    return (
+        f"The runtime discovered an app for {app_query!r}. Continue the requested desktop action "
+        f"with safe app or foreground tools next. Prefer {tool_text}.{verify_text} "
     )
 
 

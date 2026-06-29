@@ -1774,6 +1774,15 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict:
+        calls.append(("active", "PixelForge Studio", None))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active PixelForge Studio",
+            "data": {"app_name": "PixelForge Studio", "title": "Canvas"},
+        }
+
     def fake_safe_shortcut(action: str) -> dict:
         calls.append(("shortcut", action, None))
         return {
@@ -1812,6 +1821,7 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_key", fake_safe_key)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_scroll", fake_safe_scroll)
@@ -1820,47 +1830,65 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
     cases = (
         (
             "PixelForge press command n",
-            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("shortcut", "new_window", None), ("ui", "", 80)],
+            [
+                ("list_apps", "PixelForge", 20),
+                ("focus", "PixelForge Studio", None),
+                ("active", "PixelForge Studio", None),
+                ("shortcut", "new_window", None),
+                ("ui", "", 80),
+            ],
             [
                 ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
                 (
-                    "app.focus",
+                    "app.focus_and_safe_shortcut",
                     {
                         "app_name": "PixelForge Studio",
                         "app_resolution_source": "desktop.list_apps",
                         "requested_app_name": "PixelForge",
                         "resolved_app_name": "PixelForge Studio",
+                        "action": "new_window",
                     },
                 ),
-                ("desktop.safe_shortcut", {"action": "new_window"}),
                 ("desktop.ui_elements", {}),
             ],
-            ["app.focus", "desktop.safe_shortcut"],
-            {"action": "new_window"},
+            ["app.focus_and_safe_shortcut"],
+            {"app_name": "PixelForge Studio", "action": "new_window"},
         ),
         (
             "refresh PixelForge",
-            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("shortcut", "refresh", None), ("ui", "", 80)],
+            [
+                ("list_apps", "PixelForge", 20),
+                ("focus", "PixelForge Studio", None),
+                ("active", "PixelForge Studio", None),
+                ("shortcut", "refresh", None),
+                ("ui", "", 80),
+            ],
             [
                 ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
                 (
-                    "app.focus",
+                    "app.focus_and_safe_shortcut",
                     {
                         "app_name": "PixelForge Studio",
                         "app_resolution_source": "desktop.list_apps",
                         "requested_app_name": "PixelForge",
                         "resolved_app_name": "PixelForge Studio",
+                        "action": "refresh",
                     },
                 ),
-                ("desktop.safe_shortcut", {"action": "refresh"}),
                 ("desktop.ui_elements", {}),
             ],
-            ["app.focus", "desktop.safe_shortcut"],
-            {"action": "refresh"},
+            ["app.focus_and_safe_shortcut"],
+            {"app_name": "PixelForge Studio", "action": "refresh"},
         ),
         (
             "press escape in PixelForge",
-            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("key", "escape", 1), ("ui", "", 80)],
+            [
+                ("list_apps", "PixelForge", 20),
+                ("focus", "PixelForge Studio", None),
+                ("active", "PixelForge Studio", None),
+                ("key", "escape", 1),
+                ("ui", "", 80),
+            ],
             [
                 ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
                 (
@@ -1881,7 +1909,13 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
         ),
         (
             "PixelForge scroll down",
-            [("list_apps", "PixelForge", 20), ("focus", "PixelForge Studio", None), ("scroll", "down", 1), ("ui", "", 80)],
+            [
+                ("list_apps", "PixelForge", 20),
+                ("focus", "PixelForge Studio", None),
+                ("active", "PixelForge Studio", None),
+                ("scroll", "down", 1),
+                ("ui", "", 80),
+            ],
             [
                 ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
                 (
@@ -1934,6 +1968,157 @@ def test_chat_bridge_quick_message_executes_generic_english_app_safe_operations(
         assert "agent.desktop.intent_approval_required" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_discovered_app_followup_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        calls.append(("list_apps", query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found Typora for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "Typora",
+                        "bundle_id": "abnerworks.Typora",
+                        "path": "/Applications/Typora.app",
+                        "match_score": 97,
+                    }
+                ],
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        calls.append(("focus", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_active_window() -> dict:
+        calls.append(("active", "Typora", None))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Typora",
+            "data": {"app_name": "Typora", "title": "Untitled"},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        calls.append(("shortcut", action, None))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        calls.append(("type", text, None))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": f"Typed {len(text)} chars",
+            "data": {"text_length": len(text)},
+        }
+
+    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
+        calls.append(("ui", role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Typora controls",
+            "data": {"app_name": "Typora", "title": "Untitled", "elements": []},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开一个能写 markdown 的应用，新建文档标题为周报",
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("list_apps", "markdown", 20),
+        ("open", "Typora", None),
+        ("focus", "Typora", None),
+        ("active", "Typora", None),
+        ("shortcut", "new_document", None),
+        ("type", "周报", None),
+        ("ui", "", 80),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.tool.input_resolved" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+    plan_events = [
+        event["payload"]
+        for event in result["_events"]
+        if event["event_type"] == "agent.plan.selection"
+    ]
+    assert plan_events
+    followup_target = plan_events[-1]["followup_target"]
+    assert followup_target == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "markdown",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "markdown",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "compose_text": "周报",
+        "body_source": "explicit_user_text",
+    }
+    tool_calls = [
+        (event["payload"]["tool"], event["payload"]["input_preview"])
+        for event in result["_events"]
+        if event["event_type"] == "agent.tool.call"
+    ]
+    assert tool_calls == [
+        ("desktop.list_apps", {"query": "markdown", "limit": 20}),
+        (
+            "app.open_and_safe_shortcut",
+            {
+                "app_name": "Typora",
+                "action": "new_document",
+                "app_resolution_source": "desktop.list_apps",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Typora",
+            },
+        ),
+        ("desktop.safe_type_text", {"text": "周报"}),
+        ("desktop.ui_elements", {}),
+    ]
 
 
 def test_chat_bridge_quick_message_reads_current_ui_elements_without_fake_app_focus(
