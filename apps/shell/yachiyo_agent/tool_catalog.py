@@ -356,6 +356,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.ui_elements": [
             "Requires Automation or Accessibility permission to read foreground or named-app UI controls.",
         ],
+        "desktop.inspect_app": [
+            "Combines app discovery, optional open/focus, windows, and named-app UI inspection into one observable readiness snapshot.",
+        ],
         "app.status": [
             "Checks whether a local desktop app is running without opening or focusing it.",
         ],

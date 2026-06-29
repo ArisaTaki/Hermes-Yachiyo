@@ -11,6 +11,7 @@ DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.running_apps": "读取运行中应用",
     "desktop.windows": "读取窗口列表",
     "desktop.ui_elements": "读取界面控件",
+    "desktop.inspect_app": "检查应用可操作性",
     "app.status": "检查应用状态",
     "data.analyze": "分析数据",
     "desktop.reveal_path": "在 Finder 中显示",

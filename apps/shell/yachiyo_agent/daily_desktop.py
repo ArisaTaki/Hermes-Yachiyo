@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _ENTRYPOINT_DISCOVERY_TOOLS = {
     "desktop.list_apps",
+    "desktop.inspect_app",
     "desktop.running_apps",
     "desktop.permissions",
 }

@@ -67,6 +67,7 @@ from .tool_catalog import runtime_tool_catalog_snapshot
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
 _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS = {
     "desktop.list_apps",
+    "desktop.inspect_app",
     "desktop.running_apps",
     "desktop.windows",
     "desktop.permissions",
@@ -75,6 +76,7 @@ _DAILY_DESKTOP_METADATA_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.windows",
     "desktop.ui_elements",
+    "desktop.inspect_app",
     "screen.capture",
 }
 
@@ -1579,6 +1581,7 @@ def _search_field_prompt(prompt: str) -> bool:
 def _legacy_direct_verify_request(request: dict[str, Any]) -> bool:
     return str(request.get("tool") or "").strip() in {
         "desktop.ui_elements",
+        "desktop.inspect_app",
         "desktop.active_window",
         "desktop.running_apps",
         "screen.capture",

@@ -36,12 +36,14 @@ _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
     "desktop.list_apps",
+    "desktop.inspect_app",
     "desktop.running_apps",
     "desktop.windows",
     "desktop.permissions",
 }
 _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
     "desktop.list_apps",
+    "desktop.inspect_app",
     "desktop.running_apps",
     "desktop.permissions",
 }
@@ -49,6 +51,7 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.windows",
     "desktop.ui_elements",
+    "desktop.inspect_app",
 }
 
 
@@ -565,6 +568,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.list_apps": "已安装应用",
         "desktop.windows": "窗口列表",
         "desktop.ui_elements": "界面控件",
+        "desktop.inspect_app": "应用检查",
         "app.status": "应用状态",
         "app.open": "打开应用",
         "app.focus_window": "聚焦应用窗口",

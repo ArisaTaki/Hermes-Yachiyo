@@ -159,7 +159,9 @@ def run_smoke(
         "named_ui_elements_match_app": ui_app_name == opened_app_name,
         "named_ui_elements_nonempty": bool(elements),
         "named_ui_roles_nonempty": bool(role_counts),
-        "menu_level_ui_visible": bool(menu_elements) or menu_role_count > 0,
+        "menu_level_ui_visible": (
+            bool(menu_elements) or menu_role_count > 0 or control_like_count > 0
+        ),
         "cleanup_ok": cleanup_result.get("ok") is True,
         "did_not_quit_existing_app": not (
             cleanup

@@ -720,6 +720,35 @@ def test_desktop_ui_elements_schema_accepts_optional_filter_and_limit() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.ui_elements", {"limit": 0})
 
 
+def test_desktop_inspect_app_schema_requires_app_name_and_valid_options() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.inspect_app", {"app_name": "Linear"})
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.inspect_app",
+        {
+            "app_name": "Linear",
+            "open_if_needed": False,
+            "focus": True,
+            "role_filter": "button",
+            "limit": 20,
+        },
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.inspect_app 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("desktop.inspect_app", {})
+    with pytest.raises(AgentRuntimeError, match="desktop.inspect_app 参数 open_if_needed 必须是布尔值"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.inspect_app",
+            {"app_name": "Linear", "open_if_needed": "false"},
+        )
+    with pytest.raises(AgentRuntimeError, match="desktop.inspect_app 参数 focus 必须是布尔值"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.inspect_app",
+            {"app_name": "Linear", "focus": "true"},
+        )
+    with pytest.raises(AgentRuntimeError, match="desktop.inspect_app 参数 limit 必须是 1-200 的整数"):
+        ToolDescriptorRegistry.validate_payload("desktop.inspect_app", {"app_name": "Linear", "limit": 0})
+
+
 def test_desktop_click_ui_element_schema_requires_target_and_valid_options() -> None:
     ToolDescriptorRegistry.validate_payload(
         "desktop.click_ui_element",
@@ -1629,6 +1658,21 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_inspect_app",
+        lambda app_name, *, open_if_needed=True, focus=True, role_filter="", limit=80: calls.append(
+            ("inspect_app", app_name, open_if_needed, focus, role_filter, limit)
+        )
+        or {
+            "ok": True,
+            "app_name": app_name,
+            "open_if_needed": open_if_needed,
+            "focus": focus,
+            "role_filter": role_filter,
+            "limit": limit,
+        },
+    )
+    monkeypatch.setattr(
+        broker,
         "app_status",
         lambda app_name: calls.append(("status", app_name)) or {"ok": True, "app_name": app_name},
     )
@@ -1990,6 +2034,24 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "role_filter": "button", "limit": 20, "app_name": "Google Chrome"}
     assert dispatch_tool_call(
         broker,
+        "desktop.inspect_app",
+        {
+            "app_name": "Linear",
+            "open_if_needed": False,
+            "focus": True,
+            "role_filter": "button",
+            "limit": 30,
+        },
+    ) == {
+        "ok": True,
+        "app_name": "Linear",
+        "open_if_needed": False,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 30,
+    }
+    assert dispatch_tool_call(
+        broker,
         "app.status",
         {"app_name": "Google Chrome"},
     ) == {"ok": True, "app_name": "Google Chrome"}
@@ -2039,6 +2101,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("list_apps", "Word", 10),
         ("windows", "Google Chrome"),
         ("ui_elements", "button", 20, "Google Chrome"),
+        ("inspect_app", "Linear", False, True, "button", 30),
         ("status", "Google Chrome"),
     ]
 
@@ -3988,6 +4051,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.running_apps",
         "desktop.windows",
         "desktop.ui_elements",
+        "desktop.inspect_app",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "media.system_control",
@@ -4490,6 +4554,245 @@ def test_desktop_ui_elements_can_read_named_running_app(monkeypatch) -> None:
     assert result["data"]["app_resolution"] == "installed_app_bundle"
     assert result["data"]["elements"][0]["name"] == "Send"
     assert osascript_args == [["20", "2", "Google Chrome"]]
+
+
+def test_desktop_inspect_app_returns_ready_snapshot_for_accessible_controls(monkeypatch) -> None:
+    calls: list[tuple] = []
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "list_apps",
+        lambda query="", limit=200: calls.append(("list_apps", query, limit))
+        or {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"apps": [{"name": "Linear"}]},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_status",
+        lambda app_name: calls.append(("status", app_name))
+        or {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: calls.append(("focus", app_name))
+        or {
+            "ok": True,
+            "action": "app.focus",
+            "data": {"app_name": app_name, "focus_verified": True},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: calls.append(("active_window",))
+        or {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Linear"},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "windows",
+        lambda app_name="": calls.append(("windows", app_name))
+        or {
+            "ok": True,
+            "action": "desktop.windows",
+            "data": {"app_name": app_name, "count": 1, "windows": [{"title": "Inbox"}]},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "ui_elements",
+        lambda app_name="", role_filter="", limit=80: calls.append(
+            ("ui_elements", app_name, role_filter, limit)
+        )
+        or {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "data": {
+                "app_name": app_name,
+                "count": 2,
+                "inspection_level": "control",
+                "control_like_count": 2,
+                "visibility_limited": False,
+                "visibility_status": "control_accessible",
+            },
+        },
+    )
+
+    result = desktop_mod.inspect_app("Linear", role_filter="button", limit=20)
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.inspect_app"
+    assert result["summary"] == "Inspected Linear: focused with accessible controls"
+    assert result["data"]["ready_for_foreground_action"] is True
+    assert result["data"]["focus_verified"] is True
+    assert result["data"]["window_count"] == 1
+    assert result["data"]["ui_element_count"] == 2
+    assert result["data"]["recommended_tools"] == [
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+    ]
+    assert calls == [
+        ("list_apps", "Linear", 10),
+        ("status", "Linear"),
+        ("status", "Linear"),
+        ("focus", "Linear"),
+        ("active_window",),
+        ("windows", "Linear"),
+        ("ui_elements", "Linear", "button", 20),
+    ]
+
+
+def test_desktop_inspect_app_reports_limited_menu_visibility(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "list_apps",
+        lambda query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"apps": [{"name": "Calculator"}]},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: {
+            "ok": False,
+            "action": "app.focus",
+            "error": "app_focus_not_verified",
+            "data": {"app_name": app_name, "focus_verified": False},
+            "recovery_actions": [
+                {"label": "查看前台窗口", "tool": "desktop.active_window", "input": {}}
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {"ok": True, "action": "desktop.active_window", "data": {"app_name": "Codex"}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "windows",
+        lambda app_name="": {
+            "ok": True,
+            "action": "desktop.windows",
+            "data": {
+                "app_name": app_name,
+                "count": 0,
+                "visibility_limited": True,
+                "window_visibility_status": "running_without_visible_windows",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "ui_elements",
+        lambda app_name="", role_filter="", limit=80: {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "data": {
+                "app_name": app_name,
+                "count": 4,
+                "inspection_level": "menu",
+                "control_like_count": 0,
+                "visibility_limited": True,
+                "visibility_status": "menu_level_only",
+            },
+        },
+    )
+
+    result = desktop_mod.inspect_app("Calculator")
+
+    assert result["ok"] is True
+    assert result["summary"] == (
+        "Inspected Calculator: limited to menu-level UI; foreground action is not ready"
+    )
+    assert result["data"]["ready_for_foreground_action"] is False
+    assert result["data"]["focus_verified"] is False
+    assert result["data"]["visibility_limited"] is True
+    assert result["data"]["visibility_status"] == "menu_level_only"
+    assert result["data"]["recommended_tools"] == [
+        "app.focus",
+        "desktop.permissions",
+        "app.show",
+        "screen.capture",
+        "desktop.windows",
+        "desktop.ui_elements",
+    ]
+    assert result["data"]["recovery_actions"][0]["tool"] == "desktop.active_window"
+    assert any(action["tool"] == "screen.capture" for action in result["data"]["recovery_actions"])
+
+
+def test_desktop_inspect_app_reports_app_not_found(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "list_apps",
+        lambda query="", limit=200: {"ok": True, "action": "desktop.list_apps", "data": {"apps": []}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": False},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {
+            "ok": False,
+            "action": "app.open",
+            "data": {"app_name": app_name},
+        },
+    )
+    monkeypatch.setattr(desktop_mod, "active_window", lambda: {"ok": True, "data": {}})
+    monkeypatch.setattr(
+        desktop_mod,
+        "windows",
+        lambda app_name="": {"ok": True, "action": "desktop.windows", "data": {"count": 0}},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "ui_elements",
+        lambda app_name="", role_filter="", limit=80: {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "data": {"app_name": app_name, "count": 0},
+        },
+    )
+
+    result = desktop_mod.inspect_app("Definitely Missing App")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.inspect_app"
+    assert result["error"] == "app_not_found"
+    assert result["data"]["app_found"] is False
+    assert result["recommended_tools"] == ["desktop.list_apps", "app.open", "screen.capture", "desktop.permissions"]
 
 
 def test_desktop_ui_elements_permission_failure_returns_recovery_targets(monkeypatch) -> None:

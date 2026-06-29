@@ -585,6 +585,23 @@ class ToolBroker:
             app_name=app_name,
         )
 
+    def desktop_inspect_app(
+        self,
+        app_name: str,
+        *,
+        open_if_needed: Any = True,
+        focus: Any = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        return desktop.inspect_app(
+            app_name,
+            open_if_needed=open_if_needed,
+            focus=focus,
+            role_filter=role_filter,
+            limit=limit,
+        )
+
     def desktop_click_ui_element(
         self,
         target: str,

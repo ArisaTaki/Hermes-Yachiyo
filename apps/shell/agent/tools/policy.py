@@ -34,6 +34,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.list_apps": "desktop_list_apps",
     "desktop.windows": "desktop_windows",
     "desktop.ui_elements": "desktop_ui_elements",
+    "desktop.inspect_app": "desktop_inspect_app",
     "desktop.click_ui_element": "desktop_click_ui_element",
     "desktop.type_into_ui_element": "desktop_type_into_ui_element",
     "app.status": "app_status",
@@ -185,6 +186,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.list_apps",
     "desktop.windows",
     "desktop.ui_elements",
+    "desktop.inspect_app",
     "app.status",
     "app.open",
     "app.focus",
@@ -478,6 +480,18 @@ class ToolDescriptor:
                 value = payload.get("limit")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 500:
                     raise AgentRuntimeError("desktop.list_apps 参数 limit 必须是 1-500 的整数")
+        if self.name == "desktop.inspect_app":
+            if not str(payload.get("app_name") or "").strip():
+                raise AgentRuntimeError("desktop.inspect_app 参数 app_name 必须是非空字符串")
+            for key in ("open_if_needed", "focus"):
+                if key in payload and not isinstance(payload.get(key), bool):
+                    raise AgentRuntimeError(f"desktop.inspect_app 参数 {key} 必须是布尔值")
+            if "role_filter" in payload and not isinstance(payload.get("role_filter"), str):
+                raise AgentRuntimeError("desktop.inspect_app 参数 role_filter 必须是字符串")
+            if "limit" in payload:
+                value = payload.get("limit")
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
+                    raise AgentRuntimeError("desktop.inspect_app 参数 limit 必须是 1-200 的整数")
         if self.name in {
             "desktop.ui_elements",
             "desktop.click_ui_element",
@@ -1166,6 +1180,41 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": "Maximum number of UI elements to return. Defaults to 80.",
             },
         },
+    ),
+    "desktop.inspect_app": ToolDescriptor(
+        name="desktop.inspect_app",
+        description=(
+            "Inspect a named desktop app end-to-end for planning: discover installed app "
+            "matches, optionally open and focus it, read windows and named-app UI elements, "
+            "then return readiness, visibility limits, recommended next tools, and recovery "
+            "actions. This is low-risk observable state and does not click, type, or bypass "
+            "approval gates."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "User-facing application name or partial app query to inspect.",
+            },
+            "open_if_needed": {
+                "type": "boolean",
+                "description": "Open the app when it is not already running. Defaults true.",
+            },
+            "focus": {
+                "type": "boolean",
+                "description": "Attempt to bring the app foreground for readiness verification. Defaults true.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional UI element role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of UI elements to return. Defaults to 80.",
+            },
+        },
+        required=("app_name",),
     ),
     "desktop.click_ui_element": ToolDescriptor(
         name="desktop.click_ui_element",

@@ -532,12 +532,14 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.running_apps",
         "desktop.windows",
         "desktop.ui_elements",
+        "desktop.inspect_app",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
     ),
     "app_control": (
         "app.status",
         "app.open",
+        "desktop.inspect_app",
         "system.settings_open",
         "app.focus",
         "app.focus_window",
@@ -563,6 +565,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
     ),
     "foreground_activation": (
         "app.focus",
+        "desktop.inspect_app",
         "app.focus_window",
         "app.show",
         "app.open_and_safe_type_text",
@@ -1566,6 +1569,161 @@ def app_open(app_name: str) -> dict[str, Any]:
         "data": data,
         "permission_error": False,
         "fallback_used": resolved_name != clean_name,
+    }
+
+
+def inspect_app(
+    app_name: str,
+    *,
+    open_if_needed: Any = True,
+    focus: Any = True,
+    role_filter: str = "",
+    limit: Any = 80,
+) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.inspect_app")
+    clean_name = _clean_required(app_name, "app_name")
+    clean_open = _clean_bool(open_if_needed, default=True)
+    clean_focus = _clean_bool(focus, default=True)
+    clean_filter = str(role_filter or "").strip()
+    try:
+        clean_limit = max(1, min(200, int(limit or 80)))
+    except (TypeError, ValueError):
+        clean_limit = 80
+
+    discovery = list_apps(query=clean_name, limit=10)
+    discovered_names = _discovered_app_names(discovery)
+    discovered_name = _best_discovered_app_name(clean_name, discovered_names)
+    app_found = bool(discovered_names)
+    target_app = discovered_name or clean_name
+    before_status = app_status(target_app)
+    before_running = _tool_running(before_status)
+
+    open_result: dict[str, Any] | None = None
+    if clean_open and before_running is not True:
+        open_result = app_open(target_app)
+        target_app = _resolved_tool_app_name(open_result, target_app)
+
+    after_status = app_status(target_app)
+    after_running = _tool_running(after_status)
+    running = after_running if after_running is not None else before_running
+
+    focus_result: dict[str, Any] | None = None
+    if clean_focus and (running is not False or (open_result or {}).get("ok") is True):
+        focus_result = app_focus(target_app)
+        target_app = _resolved_tool_app_name(focus_result, target_app)
+
+    active_window_result = active_window() if focus_result is not None else None
+    windows_result = windows(target_app)
+    ui_result = ui_elements(app_name=target_app, role_filter=clean_filter, limit=clean_limit)
+
+    focus_data = _tool_data(focus_result)
+    windows_data = _tool_data(windows_result)
+    ui_data = _tool_data(ui_result)
+    focus_verified = focus_data.get("focus_verified") is True
+    window_count = int(windows_data.get("count") or 0)
+    ui_count = int(ui_data.get("count") or 0)
+    control_like_count = int(ui_data.get("control_like_count") or 0)
+    visibility_limited = (
+        windows_data.get("visibility_limited") is True
+        or ui_data.get("visibility_limited") is True
+    )
+    inspection_level = str(ui_data.get("inspection_level") or "").strip() or (
+        "control" if control_like_count > 0 else "empty" if ui_count == 0 else "structural"
+    )
+    ready_for_foreground_action = bool(focus_verified and control_like_count > 0)
+    recommended_tools = _inspect_app_recommended_tools(
+        app_found=app_found,
+        running=running is True,
+        focus_requested=clean_focus,
+        focus_verified=focus_verified,
+        window_count=window_count,
+        ui_count=ui_count,
+        control_like_count=control_like_count,
+        visibility_limited=visibility_limited,
+    )
+    recovery_actions = _inspect_app_recovery_actions(
+        target_app,
+        focus_result=focus_result,
+        ui_result=ui_result,
+        app_found=app_found,
+        running=running is True,
+        focus_verified=focus_verified,
+        visibility_limited=visibility_limited,
+    )
+    checks = {
+        "discovered_app": discovery.get("ok") is True and app_found,
+        "open_ok": open_result is None or open_result.get("ok") is True,
+        "status_running": running is True,
+        "focus_verified": focus_verified,
+        "windows_query_ok": windows_result.get("ok") is True,
+        "ui_query_ok": ui_result.get("ok") is True,
+        "named_ui_elements_nonempty": ui_count > 0,
+        "control_like_ui_visible": control_like_count > 0,
+        "ready_for_foreground_action": ready_for_foreground_action,
+    }
+    data = {
+        "app_name": target_app,
+        "requested_app_name": clean_name,
+        "discovered_app_name": discovered_name,
+        "app_found": app_found,
+        "open_if_needed": clean_open,
+        "focus_requested": clean_focus,
+        "running": running is True,
+        "focus_verified": focus_verified,
+        "window_count": window_count,
+        "ui_element_count": ui_count,
+        "inspection_level": inspection_level,
+        "visibility_limited": visibility_limited,
+        "visibility_status": str(
+            ui_data.get("visibility_status")
+            or windows_data.get("window_visibility_status")
+            or ""
+        ),
+        "control_like_count": control_like_count,
+        "ready_for_foreground_action": ready_for_foreground_action,
+        "recommended_tools": recommended_tools,
+        "recovery_actions": recovery_actions,
+        "checks": checks,
+        "discovery": discovery,
+        "before_status": before_status,
+        "open_result": open_result,
+        "after_status": after_status,
+        "focus_result": focus_result,
+        "active_window": active_window_result,
+        "windows": windows_result,
+        "ui_elements": ui_result,
+    }
+    if not app_found:
+        return {
+            "ok": False,
+            "action": "desktop.inspect_app",
+            "summary": f"No installed app matched {clean_name}",
+            "error": "app_not_found",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": False,
+            "recommended_tools": recommended_tools,
+            "recovery_actions": recovery_actions,
+        }
+    summary = _inspect_app_summary(
+        target_app,
+        ready_for_foreground_action=ready_for_foreground_action,
+        focus_verified=focus_verified,
+        inspection_level=inspection_level,
+        window_count=window_count,
+        ui_count=ui_count,
+        visibility_limited=visibility_limited,
+    )
+    return {
+        "ok": True,
+        "action": "desktop.inspect_app",
+        "summary": summary,
+        "data": data,
+        "permission_error": False,
+        "fallback_used": bool(open_result and open_result.get("fallback_used")),
+        "recommended_tools": recommended_tools,
+        "recovery_actions": recovery_actions,
     }
 
 
@@ -4955,6 +5113,122 @@ def _app_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
     ]
 
 
+def _inspect_app_recommended_tools(
+    *,
+    app_found: bool,
+    running: bool,
+    focus_requested: bool,
+    focus_verified: bool,
+    window_count: int,
+    ui_count: int,
+    control_like_count: int,
+    visibility_limited: bool,
+) -> list[str]:
+    tools: list[str] = []
+    if not app_found:
+        tools.extend(["desktop.list_apps", "app.open"])
+    if app_found and not running:
+        tools.append("app.open")
+    if app_found and focus_requested and not focus_verified:
+        tools.extend(["app.focus", "desktop.permissions"])
+    if visibility_limited or (running and window_count == 0):
+        tools.extend(["app.show", "screen.capture", "desktop.windows", "desktop.ui_elements"])
+    if ui_count == 0:
+        tools.extend(["screen.capture", "desktop.permissions"])
+    if focus_verified and control_like_count > 0:
+        tools.extend(["desktop.click_ui_element", "desktop.type_into_ui_element"])
+    return _ordered_unique(tools)
+
+
+def _inspect_app_recovery_actions(
+    app_name: str,
+    *,
+    focus_result: dict[str, Any] | None,
+    ui_result: dict[str, Any] | None,
+    app_found: bool,
+    running: bool,
+    focus_verified: bool,
+    visibility_limited: bool,
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    if not app_found or not running:
+        actions.append(
+            {
+                "label": f"打开{app_name}",
+                "tool": "app.open",
+                "input": {"app_name": app_name},
+                "permission_target": "open_command",
+                "risk_level": "low",
+            }
+        )
+    if app_found and not focus_verified:
+        focus_actions = (
+            focus_result.get("recovery_actions")
+            if isinstance(focus_result, dict) and isinstance(focus_result.get("recovery_actions"), list)
+            else _app_focus_recovery_actions(app_name)
+        )
+        actions.extend(action for action in focus_actions if isinstance(action, dict))
+    if visibility_limited or _tool_data(ui_result).get("visibility_limited") is True:
+        actions.extend(
+            [
+                {
+                    "label": "显示应用窗口",
+                    "tool": "app.show",
+                    "input": {"app_name": app_name},
+                    "permission_target": "foreground_focus",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "截图确认当前桌面",
+                    "tool": "screen.capture",
+                    "input": {"reason": f"inspect {app_name} after limited UI visibility"},
+                    "permission_target": "screen_observation",
+                    "risk_level": "low",
+                },
+            ]
+        )
+    return _dedupe_recovery_actions(actions)
+
+
+def _dedupe_recovery_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
+    deduped: list[dict[str, Any]] = []
+    for action in actions:
+        tool_name = str(action.get("tool") or "").strip()
+        label = str(action.get("label") or tool_name).strip()
+        raw_input = action.get("input") if isinstance(action.get("input"), dict) else {}
+        input_key = tuple(sorted((str(key), str(value)) for key, value in raw_input.items()))
+        key = (tool_name, label, input_key)
+        if not tool_name or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(action)
+    return deduped
+
+
+def _inspect_app_summary(
+    app_name: str,
+    *,
+    ready_for_foreground_action: bool,
+    focus_verified: bool,
+    inspection_level: str,
+    window_count: int,
+    ui_count: int,
+    visibility_limited: bool,
+) -> str:
+    if ready_for_foreground_action:
+        return f"Inspected {app_name}: focused with accessible controls"
+    if visibility_limited:
+        return f"Inspected {app_name}: limited to menu-level UI; foreground action is not ready"
+    if not focus_verified:
+        return f"Inspected {app_name}: focus is not verified; foreground action is not ready"
+    if ui_count:
+        return f"Inspected {app_name}: {inspection_level} UI with {ui_count} elements"
+    if window_count:
+        return f"Inspected {app_name}: {window_count} windows but no readable UI controls"
+    return f"Inspected {app_name}: no visible windows or UI controls"
+
+
 def _looks_like_app_not_found(value: Any) -> bool:
     normalized = str(value or "").lower()
     return any(
@@ -4975,6 +5249,19 @@ def _clean_required(value: str, field: str) -> str:
     if not clean:
         raise ValueError(f"{field} is required")
     return clean
+
+
+def _clean_bool(value: Any, *, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    return default
 
 
 def _note_title_from_body(value: str) -> str:
@@ -5382,6 +5669,56 @@ def _parse_running_apps(value: Any) -> list[dict[str, Any]]:
             }
         )
     return apps
+
+
+def _tool_data(result: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _tool_running(result: dict[str, Any] | None) -> bool | None:
+    data = _tool_data(result)
+    if isinstance(data.get("running"), bool):
+        return bool(data.get("running"))
+    if isinstance(data.get("launch_verified"), bool):
+        return bool(data.get("launch_verified"))
+    return None
+
+
+def _resolved_tool_app_name(result: dict[str, Any] | None, fallback: str) -> str:
+    data = _tool_data(result)
+    for key in ("app_name", "resolved_app_name"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return str(fallback or "").strip()
+
+
+def _discovered_app_names(result: dict[str, Any]) -> list[str]:
+    apps = _tool_data(result).get("apps")
+    if not isinstance(apps, list):
+        return []
+    names: list[str] = []
+    for item in apps:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _best_discovered_app_name(requested: str, names: list[str]) -> str:
+    clean_requested = str(requested or "").strip()
+    if not names:
+        return ""
+    requested_key = _compact_app_match_name(clean_requested)
+    for name in names:
+        if _compact_app_match_name(name) == requested_key:
+            return name
+    return names[0]
 
 
 def _parse_window_rows(value: Any) -> list[dict[str, Any]]:
@@ -5929,6 +6266,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation_or_accessibility"],
         "desktop.windows": ["automation_or_accessibility"],
         "desktop.ui_elements": ["automation_or_accessibility"],
+        "desktop.inspect_app": ["automation_or_accessibility"],
         "desktop.click_ui_element": ["automation_or_accessibility"],
         "desktop.type_into_ui_element": ["automation_or_accessibility"],
         "app.focus": ["automation"],
@@ -5990,6 +6328,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.running_apps": ["automation", "accessibility"],
         "desktop.windows": ["automation", "accessibility"],
         "desktop.ui_elements": ["automation", "accessibility"],
+        "desktop.inspect_app": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "app.focus_window": ["automation", "accessibility"],
         "app.show": ["automation", "accessibility"],
