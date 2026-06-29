@@ -6361,6 +6361,42 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
             "text": "sales.csv",
         }
 
+    search_field_fallback = RuntimePlanner().decision(
+        "在微信里的搜索框输入文件传输助手",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert search_field_fallback.selected_intent.kind == "desktop_operation"
+    assert search_field_fallback.selected_intent.inputs["app_name_hint"] == "WeChat"
+    assert search_field_fallback.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in search_field_fallback.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+    ]
+    assert _step_by_id(search_field_fallback, "focus-app-search-field").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+    assert _step_by_id(search_field_fallback, "focus-app-search-field").input_preview == {
+        "app_name": "WeChat",
+        "action": "find",
+    }
+    assert _step_by_id(search_field_fallback, "type-app-search-query").tool_name == (
+        "app.focus_and_safe_type_text"
+    )
+    assert _step_by_id(search_field_fallback, "type-app-search-query").input_preview == {
+        "app_name": "WeChat",
+        "text": "文件传输助手",
+    }
+
     leading = RuntimePlanner().decision(
         "Finder 找下载文件",
         allowed_tools=[
@@ -6794,6 +6830,33 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(first_result, "verify-desktop-result").depends_on == [
         "select-app-search-result"
     ]
+
+    app_scoped_first_result = RuntimePlanner().decision(
+        "在 Slack 搜索 Alice 并选择第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_scoped_first_result.plan.tool_plan.missing_capabilities == []
+    app_scoped_result_click = _step_by_id(
+        app_scoped_first_result,
+        "select-app-search-result",
+    )
+    assert app_scoped_result_click.tool_name == "app.focus_and_click_ui_element"
+    assert app_scoped_result_click.input_preview == {
+        "app_name": "Slack",
+        "target": "第一个结果",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert app_scoped_result_click.approval_required is True
 
     first_result_with_context_word = RuntimePlanner().decision(
         "在 Raycast 搜索 clipboard history 并打开第一个结果",
@@ -13611,6 +13674,65 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         },
     ]
 
+    app_scoped_search_field_requests = planner_desktop_tool_requests(
+        "在微信里的搜索框输入文件传输助手",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+
+    assert [
+        (request["tool"], request["input"])
+        for request in app_scoped_search_field_requests
+    ] == [
+        ("desktop.list_apps", {"query": "WeChat", "limit": 20}),
+        ("app.focus", {"app_name": "WeChat"}),
+        ("app.focus_and_safe_shortcut", {"app_name": "WeChat", "action": "find"}),
+        (
+            "app.focus_and_safe_type_text",
+            {"app_name": "WeChat", "text": "文件传输助手"},
+        ),
+    ]
+
+    app_scoped_result_click_requests = planner_desktop_tool_requests(
+        "在 Slack 搜索 Alice 并选择第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [
+        (request["tool"], request["input"])
+        for request in app_scoped_result_click_requests
+    ] == [
+        ("desktop.list_apps", {"query": "Slack", "limit": 20}),
+        ("app.focus", {"app_name": "Slack"}),
+        ("app.focus_and_safe_shortcut", {"app_name": "Slack", "action": "find"}),
+        ("app.focus_and_safe_type_text", {"app_name": "Slack", "text": "Alice"}),
+        ("desktop.search_submit", {}),
+        (
+            "app.focus_and_click_ui_element",
+            {
+                "app_name": "Slack",
+                "target": "第一个结果",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+        ),
+        ("desktop.ui_elements", {}),
+    ]
+
 
 def test_entrypoint_selection_keeps_runtime_planner_for_desktop_content_prefetch() -> None:
     legacy_calls: list[dict[str, Any]] = []
@@ -17033,6 +17155,22 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
             "在微信里的搜索框输入文件传输助手",
             ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
             ["desktop.list_apps", "app.focus_and_type_into_ui_element"],
+        ),
+        (
+            "在微信里的搜索框输入文件传输助手",
+            [
+                "desktop.list_apps",
+                "app.focus",
+                "app.focus_and_safe_shortcut",
+                "app.focus_and_safe_type_text",
+                "desktop.search_submit",
+            ],
+            [
+                "desktop.list_apps",
+                "app.focus",
+                "app.focus_and_safe_shortcut",
+                "app.focus_and_safe_type_text",
+            ],
         ),
         (
             "在 Linear 上的搜索框输入 ticket",

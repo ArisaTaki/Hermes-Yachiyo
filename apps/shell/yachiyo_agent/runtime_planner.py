@@ -2259,7 +2259,13 @@ class RuntimePlanner:
             app_search
             and type_target
             and _looks_like_app_search_field_input(intent.user_goal)
-            and not _app_search_safe_sequence_available(intent.user_goal, app_search, allowed)
+            and not _app_search_safe_sequence_available(
+                intent.user_goal,
+                app_search,
+                allowed,
+                app_name=app_name,
+                mode=mode,
+            )
         ):
             app_search = {}
         foreground_compose_text = (
@@ -2325,6 +2331,8 @@ class RuntimePlanner:
                 intent.user_goal,
                 fallback_app_search,
                 allowed,
+                app_name=app_name,
+                mode=mode,
             ):
                 app_search = fallback_app_search
                 type_target = None
@@ -3330,6 +3338,22 @@ class RuntimePlanner:
                 app_search_needs_verify = True
                 if search_followup.get("action") == "click_first_result":
                     click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
+                    click_payload = {
+                        "target": str(search_followup.get("target") or "第一个结果"),
+                        "role_filter": "",
+                        "limit": 80,
+                        "click_count": int(search_followup.get("click_count") or 1),
+                    }
+                    if not click_tool and app_name:
+                        click_tool = _first_allowed(
+                            app_foreground_tool_candidates(
+                                _app_search_prepare_mode(intent.user_goal, mode),
+                                "click_ui_element",
+                            ),
+                            allowed,
+                        )
+                    if str(click_tool or "").startswith("app."):
+                        click_payload = {"app_name": app_name, **click_payload}
                     steps.append(
                         _step(
                             intent,
@@ -3337,12 +3361,7 @@ class RuntimePlanner:
                             "Select app search result",
                             "desktop.ui_operation",
                             click_tool,
-                            input_preview={
-                                "target": str(search_followup.get("target") or "第一个结果"),
-                                "role_filter": "",
-                                "limit": 80,
-                                "click_count": int(search_followup.get("click_count") or 1),
-                            },
+                            input_preview=click_payload,
                             depends_on=[search_terminal_step_id],
                             action="click",
                             risk_level=_desktop_operation_risk_level(click_tool),
@@ -13563,21 +13582,77 @@ def _app_search_safe_sequence_available(
     text: str,
     app_search: Mapping[str, Any],
     allowed: set[str] | None,
+    *,
+    app_name: str = "",
+    mode: str = "focus",
 ) -> bool:
-    allowed_tools = allowed or set()
-    if "desktop.safe_shortcut" not in allowed_tools:
-        return False
+    allowed_tools = allowed
     context_source = _app_search_query_context_source(app_search)
-    if context_source not in {"selection", "clipboard"} and "desktop.safe_type_text" not in allowed_tools:
+    if context_source in {"selection", "clipboard"}:
+        if _first_allowed(("desktop.safe_shortcut",), allowed_tools) is None:
+            return False
+    elif _first_allowed(
+        _app_search_operation_candidates(
+            "safe_shortcut",
+            app_name=app_name,
+            mode=mode,
+            generic=("desktop.safe_shortcut",),
+        ),
+        allowed_tools,
+    ) is None:
+        return False
+    if (
+        context_source not in {"selection", "clipboard"}
+        and _first_allowed(
+            _app_search_operation_candidates(
+                "safe_type_text",
+                app_name=app_name,
+                mode=mode,
+                generic=("desktop.safe_type_text",),
+            ),
+            allowed_tools,
+        )
+        is None
+    ):
         return False
     followup = _app_search_followup_hint(text)
     if followup.get("action") == "arrow_down_confirm":
-        return "desktop.safe_key" in allowed_tools and "desktop.submit_foreground" in allowed_tools
-    if _app_search_should_submit(text, followup) and "desktop.search_submit" not in allowed_tools:
+        return (
+            _first_allowed(("desktop.safe_key",), allowed_tools) is not None
+            and _first_allowed(("desktop.submit_foreground",), allowed_tools) is not None
+        )
+    if (
+        _app_search_should_submit(text, followup)
+        and _first_allowed(("desktop.search_submit",), allowed_tools) is None
+    ):
         return False
-    if followup.get("action") == "click_first_result" and "desktop.click_ui_element" not in allowed_tools:
+    if (
+        followup.get("action") == "click_first_result"
+        and _first_allowed(
+            _app_search_operation_candidates(
+                "click_ui_element",
+                app_name=app_name,
+                mode=mode,
+                generic=("desktop.click_ui_element",),
+            ),
+            allowed_tools,
+        )
+        is None
+    ):
         return False
     return True
+
+
+def _app_search_operation_candidates(
+    action: str,
+    *,
+    app_name: str,
+    mode: str,
+    generic: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not str(app_name or "").strip():
+        return generic
+    return (*generic, *app_foreground_tool_candidates(mode, action))
 
 
 def _type_into_ui_element_tool_available(
