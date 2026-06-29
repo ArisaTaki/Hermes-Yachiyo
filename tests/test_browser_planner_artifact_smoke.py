@@ -35,3 +35,18 @@ def test_browser_planner_artifact_smoke_cli_outputs_json(capsys):
     assert output["ok"] is True
     assert output["mode"] == "browser_planner_artifact_smoke"
     assert output["case_count"] == len(smoke.BROWSER_PLANNER_CASES)
+
+
+def test_browser_planner_artifact_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "browser-planner-artifacts.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "browser_planner_artifact_smoke"
+    assert "browser planner artifact smoke report:" in captured.err
+    assert str(report_path) in captured.err

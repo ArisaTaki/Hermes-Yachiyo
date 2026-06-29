@@ -41,3 +41,20 @@ def test_data_analysis_artifact_smoke_cli_outputs_json(capsys, tmp_path):
     assert output["input_path"] == smoke.SAMPLE_PATH
     assert output["result"]["artifact_paths"] == smoke.ARTIFACT_PATHS
     assert output["followup_snapshot"]["source_tool"] == "data.analyze"
+
+
+def test_data_analysis_artifact_smoke_cli_writes_report_json(capsys, tmp_path):
+    report_path = tmp_path / "data-analysis-artifacts.json"
+    workdir = tmp_path / "workspace"
+
+    assert smoke.main(["--workdir", str(workdir), "--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "data_analysis_artifact_smoke"
+    assert report["result"]["artifact_paths"] == smoke.ARTIFACT_PATHS
+    assert "data analysis artifact smoke report:" in captured.err
+    assert str(report_path) in captured.err

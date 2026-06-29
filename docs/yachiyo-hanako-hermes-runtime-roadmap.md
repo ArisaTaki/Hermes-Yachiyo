@@ -70,10 +70,16 @@ project can claim release parity.
 | Groups and Workflow | GroupRun and Workflow share the planner/runtime event vocabulary and remain first-class Studio surfaces. | Group/Workflow service tests and UI smoke scripts. |
 | Release packaging | A user can install, grant permissions, run first task, collect diagnostics, and understand rollback/update steps. | Packaging docs, first-run smoke, release checklist, and signed/unsigned artifact proof. |
 
-Current Browser/Web planner artifact evidence is reproducible with
-`python scripts/smoke_browser_planner_artifacts.py`; this proves the planner
-selects browser tools and expected artifacts, while real browser/CDP execution
-remains covered by later UI or opt-in integration smoke evidence.
+Current Browser/Web planner artifact evidence is reproducible with:
+
+```bash
+python scripts/smoke_browser_planner_artifacts.py \
+  --report-json tmp/browser-planner-artifacts.json
+```
+
+This proves the planner selects browser tools and expected artifacts, while
+real browser/CDP execution remains covered by later UI or opt-in integration
+smoke evidence.
 
 Current desktop discovery/operate planner evidence is reproducible with:
 
@@ -253,8 +259,14 @@ Exit evidence:
 
 - Data-source hints produce `workspace.read`/analysis/artifact plans.
 - Artifacts are observable and readable through existing task/run surfaces.
-- Sample dataset artifact readback is reproducible with
-  `python scripts/smoke_data_analysis_artifacts.py --workdir tmp/data-analysis-artifact-smoke`.
+- Sample dataset artifact readback is reproducible with:
+
+  ```bash
+  python scripts/smoke_data_analysis_artifacts.py \
+    --workdir tmp/data-analysis-artifact-smoke \
+    --report-json tmp/data-analysis-artifacts.json
+  ```
+
   The smoke also archives the `data.analyze` follow-up context snapshot so
   Agent Studio/Run Timeline can replay rows, columns, and generated artifact
   paths without relying on private tool output.
