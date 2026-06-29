@@ -12247,6 +12247,11 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             r"\s*[:：]\s*(?P<body>.+)$"
         ),
         (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对|发给|发送给)\s*(?P<target>[^：:，,。]+?)\s*"
+            r"(?:发送|发出|发消息|发|message|send)\s*(?P<body>.+)$"
+        ),
+        (
             r"^(?:打开|启动|开启)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
             r"(?:发消息|发送|发)\s*(?:给|到)?\s*(?P<recipient>[^：:，,。]+?)"
             r"\s*[:：]\s*(?P<body>.+)$"
@@ -12298,6 +12303,13 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             if not split_tail:
                 continue
             recipient, body = split_tail
+        elif groups.get("target"):
+            app_name, recipient = _split_communication_surface_and_recipient(
+                str(groups.get("target") or "")
+            )
+            body = _clean_communication_body_text(groups.get("body") or "")
+            if not app_name:
+                continue
         else:
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
             body = _clean_communication_body_text(groups.get("body") or "")

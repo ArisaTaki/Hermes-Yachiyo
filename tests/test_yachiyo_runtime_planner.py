@@ -10145,6 +10145,16 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
                 "send_action": "send",
             },
         ),
+        (
+            "给 Slack 的 yachiyo 发 hello",
+            {
+                "app_name": "Slack",
+                "recipient": "yachiyo",
+                "body": "hello",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
     ]
 
     for prompt, direct_hint in examples:
@@ -10152,6 +10162,25 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
 
         assert decision.selected_intent.kind == "communication"
         assert decision.selected_intent.inputs == {"direct_message_hint": direct_hint}
+
+    app_scoped_target = RuntimePlanner().decision(
+        "给 Slack 的 yachiyo 发 hello",
+        allowed_tools=[
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert app_scoped_target.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(
+        app_scoped_target,
+        "type-communication-recipient",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_target,
+        "draft-communication-message",
+    ).input_preview == {"app_name": "Slack", "text": "hello"}
 
     generic_decision = RuntimePlanner().decision(
         "发送消息给 Alice：今晚八点见",
