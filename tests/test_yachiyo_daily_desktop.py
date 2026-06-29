@@ -380,9 +380,11 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_oper
             prompt,
             allowed_tools=[
                 "desktop.list_apps",
+                "app.focus",
                 "app.focus_and_safe_shortcut",
                 "app.focus_and_safe_key",
                 "app.focus_and_safe_scroll",
+                "desktop.safe_shortcut",
                 "desktop.ui_elements",
             ],
         ) == [

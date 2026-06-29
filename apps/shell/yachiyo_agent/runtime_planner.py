@@ -4588,6 +4588,28 @@ def _append_app_scoped_safe_shortcut_steps(
     fallback_reason: str,
 ) -> str:
     clean_mode = mode or "focus"
+    app_foreground_tool = _first_allowed(
+        app_foreground_tool_candidates(clean_mode, "safe_shortcut"),
+        allowed,
+    )
+    if app_name and app_foreground_tool:
+        steps.append(
+            _step(
+                intent,
+                step_id,
+                title,
+                "desktop.app_control",
+                app_foreground_tool,
+                input_preview={"app_name": app_name, "action": shortcut_action},
+                depends_on=depends_on,
+                action="shortcut",
+                risk_level="low",
+                approval_required=False,
+                reason=fallback_reason,
+            )
+        )
+        return step_id
+
     app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(
         app_name,
         clean_mode,
@@ -4629,10 +4651,7 @@ def _append_app_scoped_safe_shortcut_steps(
             step_id,
             title,
             "desktop.app_control",
-            _first_allowed(
-                app_foreground_tool_candidates(clean_mode, "safe_shortcut"),
-                allowed,
-            ),
+            app_foreground_tool,
             input_preview={"app_name": app_name, "action": shortcut_action},
             depends_on=depends_on,
             action="shortcut",
@@ -13682,6 +13701,10 @@ def _desktop_operation_tool_preview(
     allow_app_tools: bool = True,
 ) -> tuple[str | None, dict[str, Any]]:
     if safe_shortcut:
+        if app_name and allow_app_tools:
+            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_shortcut"), allowed)
+            if app_tool:
+                return app_tool, {"app_name": app_name, **safe_shortcut}
         generic_tool = _generic_app_foreground_operation_tool(
             app_name=app_name,
             mode=mode,
@@ -13690,10 +13713,6 @@ def _desktop_operation_tool_preview(
         )
         if generic_tool:
             return generic_tool, dict(safe_shortcut)
-        if app_name and allow_app_tools:
-            app_tool = _first_allowed(app_foreground_tool_candidates(mode, "safe_shortcut"), allowed)
-            if app_tool:
-                return app_tool, {"app_name": app_name, **safe_shortcut}
         shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
         if shortcut_tool:
             return shortcut_tool, dict(safe_shortcut)
