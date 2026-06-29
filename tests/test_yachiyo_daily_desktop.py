@@ -181,6 +181,26 @@ def test_planner_first_daily_desktop_entrypoint_reads_page_for_ambiguous_click()
             "continue_to_model": True,
         }
     ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 https://example.com 然后点击最像帮助的链接",
+        allowed_tools=["browser.open_url", "browser.current_page", "browser.click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
 
 
 def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_with_text() -> None:
@@ -551,6 +571,34 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
                 "limit": 80,
                 "app_name": "SuperData Studio",
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在当前应用找到最像设置的按钮并点开",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,

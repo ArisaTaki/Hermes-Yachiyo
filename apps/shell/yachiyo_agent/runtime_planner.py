@@ -321,6 +321,16 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
+        if (
+            ui_inspection is None
+            and screen_capture is None
+            and _ambiguous_visible_target_action_requested(text)
+        ):
+            click_target = click_target_hint(text)
+            ui_inspection = {
+                "role_filter": str((click_target or {}).get("role_filter") or ""),
+                "limit": 80,
+            }
         app_management = app_management_hint(text)
         foreground_management = foreground_management_hint(text)
         safe_shortcut = safe_shortcut_hint(text)
@@ -2079,6 +2089,9 @@ class RuntimePlanner:
         focus_window = focus_window_hint(intent.user_goal)
         window_list = window_list_hint(intent.user_goal)
         ui_inspection = ui_inspection_hint(intent.user_goal)
+        intent_ui_inspection = intent.inputs.get("ui_inspection_hint")
+        if isinstance(intent_ui_inspection, Mapping):
+            ui_inspection = dict(intent_ui_inspection)
         if window_list is not None:
             ui_inspection = None
         elif ui_inspection is not None and not focus_window:
@@ -4285,6 +4298,26 @@ class RuntimePlanner:
                     *([prepare_step] if prepare_step is not None else []),
                     open_url_step,
                     click_step,
+                ]
+            if browser_action in {"current_page", "extract_text", "screenshot"} and url:
+                open_url_step = _step(
+                    intent,
+                    "open-web-url",
+                    "Open web URL",
+                    "browser.research",
+                    _first_allowed(("browser.open_url",), allowed),
+                    input_preview={"url": url},
+                    risk_level="low",
+                    approval_required=False,
+                    depends_on=[prepare_step_id] if prepare_step_id else [],
+                    reason="Open the explicit URL before reading the requested page state.",
+                )
+                read_step = _with_step_dependencies(main_step, ["open-web-url"])
+                return [
+                    *([discover_step] if discover_step is not None else []),
+                    *([prepare_step] if prepare_step is not None else []),
+                    open_url_step,
+                    read_step,
                 ]
             steps = [
                 *([discover_step] if discover_step is not None else []),
@@ -13882,6 +13915,11 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not value:
         return {}
+    if (
+        _ambiguous_visible_target_action_requested(value)
+        or _looks_like_find_visible_target_action(value)
+    ):
+        return {}
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
         r"(?:在|用|通过)?\s*(?:(?:任意|任何)\s*)?(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
@@ -13977,13 +14015,46 @@ def _looks_like_find_visible_target_action(text: str) -> bool:
         re.search(
             r"(?:找到|找|定位|选择|选中).{1,80}"
             r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?.{0,12}"
-            r"(?:点击|点一下|点按|单击|打开|进入)$",
+            r"(?:点击|点一下|点按|点开|单击|打开|进入)$",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:find|locate|choose|select)\b.{1,80}"
             r"\b(?:click|press|tap|open)\b(?:\s+(?:it|that|them))?[.!?]?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _ambiguous_visible_target_action_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not (
+        re.search(
+            r"(?:最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪个|哪里|哪一个|哪项|哪条)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|"
+            r"should|possible)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:当前|前台|这个|该)?(?:应用|app|application|窗口|界面|ui|页面|网页)?"
+            r".{0,40}(?:找到|找|定位|选择|选中|点击|点按|点开|打开|进入)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        and re.search(
+            r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目|链接|button|control|element|menu|item|link)",
             value,
             flags=re.IGNORECASE,
         )

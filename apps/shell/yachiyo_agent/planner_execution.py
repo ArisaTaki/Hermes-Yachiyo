@@ -1549,6 +1549,50 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             step_ids=("copy-selected-web-context", "read-web-context"),
             planning_reason="planner_prefetch_web_context",
         )
+    url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
+    if browser_action in {"current_page", "extract_text", "screenshot"} and url:
+        read_step = next(
+            (
+                item
+                for item in decision.plan.tool_plan.steps
+                if getattr(item, "step_id", "")
+                in {"read-current-page", "extract-current-page-text", "capture-current-page"}
+            ),
+            None,
+        )
+        read_tool_name = str(getattr(read_step, "tool_name", "") or "").strip()
+        if (
+            "browser.open_url" not in allowed
+            or read_tool_name not in allowed
+            or not _step_available(read_step)
+        ):
+            return []
+        requests = [
+            _request(
+                "browser.open_url",
+                {"url": url},
+                planning_reason="planner_fallback_web_research",
+            )
+        ]
+        payload: dict[str, Any] = {}
+        if read_tool_name == "browser.screenshot":
+            reason = str(decision.selected_intent.inputs.get("reason") or "").strip()
+            payload = {"reason": reason} if reason else {}
+        request = _request(
+            read_tool_name,
+            payload,
+            planning_reason="planner_fallback_web_research",
+        )
+        presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
+        if presentation:
+            request["presentation"] = presentation
+        if (
+            _web_request_needs_model_followup(decision.selected_intent.user_goal)
+            or presentation
+        ):
+            request["continue_to_model"] = True
+        requests.append(request)
+        return [*prepare_requests, *requests]
     step = next(
         (
             item
@@ -1572,7 +1616,6 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         return []
     if tool_name not in allowed:
         return []
-    url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
     payload: dict[str, Any] = {}
     if tool_name in {
         "browser.open_url",

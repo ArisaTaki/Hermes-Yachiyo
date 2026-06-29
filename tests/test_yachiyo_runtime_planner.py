@@ -2948,6 +2948,45 @@ def test_runtime_planner_reads_page_before_ambiguous_browser_click() -> None:
         }
     ]
 
+    url_prompt = "打开 https://example.com 然后点击最像帮助的链接"
+    url_decision = RuntimePlanner().decision(
+        url_prompt,
+        allowed_tools=["browser.open_url", "browser.current_page", "browser.click"],
+    )
+
+    assert url_decision.selected_intent.kind == "web_research"
+    assert url_decision.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "browser_action": "current_page",
+        "target_hint": "最像帮助的",
+        "reason": "resolve_ambiguous_click_target",
+    }
+    assert [step.step_id for step in url_decision.plan.tool_plan.steps] == [
+        "open-web-url",
+        "read-current-page",
+    ]
+    assert _step_by_id(url_decision, "read-current-page").depends_on == ["open-web-url"]
+    assert planner_tool_requests(
+        url_prompt,
+        ["browser.open_url", "browser.current_page", "browser.click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+
 
 def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
     allowed_tools = [
@@ -3201,6 +3240,78 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
         }
+    ]
+
+    current_app_ambiguous_click = RuntimePlanner().decision(
+        "在当前应用找到最像设置的按钮并点开",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert current_app_ambiguous_click.selected_intent.kind == "desktop_operation"
+    assert current_app_ambiguous_click.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "click",
+        "ui_inspection_hint": {"role_filter": "", "limit": 80},
+    }
+    assert [step.step_id for step in current_app_ambiguous_click.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+    ]
+    assert _step_by_id(current_app_ambiguous_click, "read-foreground-ui").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert planner_tool_requests(
+        "在当前应用找到最像设置的按钮并点开",
+        [
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert [
+        request["tool"]
+        for request in planner_tool_requests(
+            "在当前应用搜索 Alice",
+            [
+                "desktop.running_apps",
+                "desktop.ui_elements",
+                "desktop.click_ui_element",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+            ],
+        )
+    ] == [
+        "desktop.running_apps",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
     ]
 
     type_tools = [
