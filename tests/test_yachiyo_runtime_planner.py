@@ -1396,6 +1396,42 @@ def test_planner_selection_payload_surfaces_followup_app_write_target() -> None:
     }
 
 
+def test_planner_selection_payload_surfaces_followup_communication_target() -> None:
+    prompt = "分析剪贴板里的表格并把报告发给微信文件传输助手"
+    allowed_tools = [
+        "clipboard.read",
+        "data.analyze",
+        "artifact.write",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+
+    assert payload["intent_kind"] == "data_analysis"
+    assert payload["followup_target"] == {
+        "kind": "communication_message",
+        "recipient": "文件传输助手",
+        "body_source": "model_generated_content",
+        "send_action": "send",
+        "mode": "focus",
+        "app_name": "WeChat",
+        "transform": "report",
+    }
+
+
 def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> None:
     prompt = "请分析 sales.csv 并把报告写进 Obsidian 新笔记"
     allowed_tools = [

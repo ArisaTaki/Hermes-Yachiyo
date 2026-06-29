@@ -196,19 +196,41 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     target_app = str(inputs.get("target_app_hint") or "").strip()
     target_action = str(inputs.get("target_action_hint") or "").strip()
     context_source = str(inputs.get("context_source") or "").strip()
-    if not target_app or target_action != "app_paste":
+    if target_app and target_action == "app_paste":
+        payload: dict[str, Any] = {
+            "kind": "app_write",
+            "app_name": target_app,
+            "target_action": target_action,
+            "body_source": "model_generated_content",
+        }
+        container_action = str(inputs.get("target_container_action_hint") or "").strip()
+        if container_action:
+            payload["container_action"] = container_action
+        if context_source:
+            payload["context_source"] = context_source
+        return payload
+
+    communication_target = inputs.get("communication_target_hint")
+    if not isinstance(communication_target, Mapping):
         return {}
-    payload: dict[str, Any] = {
-        "kind": "app_write",
-        "app_name": target_app,
-        "target_action": target_action,
+    recipient = str(communication_target.get("recipient") or "").strip()
+    if not recipient:
+        return {}
+    payload = {
+        "kind": "communication_message",
+        "recipient": recipient,
         "body_source": "model_generated_content",
+        "send_action": str(communication_target.get("send_action") or "send").strip(),
+        "mode": str(communication_target.get("mode") or "focus").strip() or "focus",
     }
-    container_action = str(inputs.get("target_container_action_hint") or "").strip()
-    if container_action:
-        payload["container_action"] = container_action
-    if context_source:
-        payload["context_source"] = context_source
+    for source_key, target_key in (
+        ("app_name", "app_name"),
+        ("channel", "channel"),
+        ("content_transform_hint", "transform"),
+    ):
+        value = str(communication_target.get(source_key) or "").strip()
+        if value:
+            payload[target_key] = value
     return payload
 
 

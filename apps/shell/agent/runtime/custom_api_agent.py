@@ -381,7 +381,7 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                             budget=budget,
                         )
-                        if _selection_payload_has_app_write_followup(
+                        if _selection_payload_has_model_followup_target(
                             direct_tool_selection_payload
                         ):
                             auto_followup_request = {
@@ -3466,6 +3466,8 @@ def _model_followup_target_payload(
     )
     app_name = str(target.get("app_name") or "").strip()
     kind = str(target.get("kind") or "").strip()
+    if kind == "communication_message":
+        return _model_followup_communication_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
         return {}
     container_action = _model_followup_container_action(target)
@@ -3492,7 +3494,65 @@ def _model_followup_target_payload(
     return payload
 
 
-def _selection_payload_has_app_write_followup(
+def _model_followup_communication_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    recipient = str(target.get("recipient") or "").strip()
+    if not recipient:
+        return {}
+    channel = str(target.get("channel") or "").strip()
+    app_name = str(target.get("app_name") or "").strip()
+    if not app_name and channel == "email":
+        app_name = "Mail"
+    if not app_name:
+        return {}
+    send_action = str(target.get("send_action") or "send").strip() or "send"
+    mode = str(target.get("mode") or "focus").strip() or "focus"
+    prepare_tools = _model_followup_communication_prepare_tool_names(
+        allowed,
+        app_name=app_name,
+        mode=mode,
+        channel=channel,
+    )
+    draft_allowed = bool(
+        prepare_tools
+        and "desktop.safe_type_text" in allowed
+        and "desktop.search_submit" in allowed
+    )
+    send_allowed = send_action == "send" and "desktop.submit_foreground" in allowed
+    verify_tools = [
+        tool
+        for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+        if tool in allowed
+    ]
+    payload: dict[str, Any] = {
+        "kind": "communication_message",
+        "app_name": app_name,
+        "recipient": recipient,
+        "body_source": "model_generated_content",
+        "draft_allowed": draft_allowed,
+        "mode": mode,
+        "send_action": send_action,
+        "send_allowed": send_allowed,
+        "recommended_tools": [
+            *prepare_tools,
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.safe_type_text",
+            *(["desktop.submit_foreground"] if send_allowed else []),
+        ] if draft_allowed else prepare_tools,
+        "verify_tools": verify_tools,
+    }
+    if channel:
+        payload["channel"] = channel
+    transform = str(target.get("transform") or "").strip()
+    if transform:
+        payload["transform"] = transform
+    return payload
+
+
+def _selection_payload_has_model_followup_target(
     selection_payload: Mapping[str, Any],
 ) -> bool:
     target = (
@@ -3500,10 +3560,38 @@ def _selection_payload_has_app_write_followup(
         if isinstance(selection_payload.get("followup_target"), Mapping)
         else {}
     )
-    return (
-        str(target.get("kind") or "").strip() == "app_write"
-        and bool(str(target.get("app_name") or "").strip())
-    )
+    kind = str(target.get("kind") or "").strip()
+    if kind == "app_write":
+        return bool(str(target.get("app_name") or "").strip())
+    if kind == "communication_message":
+        return bool(str(target.get("recipient") or "").strip())
+    return False
+
+
+def _model_followup_communication_prepare_tool_names(
+    allowed: set[str],
+    *,
+    app_name: str,
+    mode: str,
+    channel: str,
+) -> list[str]:
+    action = _model_followup_communication_focus_action(channel)
+    if mode == "open" and "app.open_and_safe_shortcut" in allowed:
+        return ["app.open_and_safe_shortcut"]
+    if "app.focus_and_safe_shortcut" in allowed:
+        return ["app.focus_and_safe_shortcut"]
+    if "app.open_and_safe_shortcut" in allowed:
+        return ["app.open_and_safe_shortcut"]
+    focus_tool = "app.open" if mode == "open" and "app.open" in allowed else ""
+    if not focus_tool:
+        focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if app_name and focus_tool and "desktop.safe_shortcut" in allowed and action:
+        return [focus_tool, "desktop.safe_shortcut"]
+    return []
+
+
+def _model_followup_communication_focus_action(channel: str) -> str:
+    return "new_message" if str(channel or "").strip() == "email" else "find"
 
 
 def _model_followup_app_write_tool_names(
@@ -3544,6 +3632,8 @@ def _model_followup_container_action(target: Mapping[str, Any]) -> str:
 def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
     if not isinstance(target, Mapping):
         return ""
+    if str(target.get("kind") or "").strip() == "communication_message":
+        return _model_followup_communication_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
         return ""
@@ -3575,6 +3665,41 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
         f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _model_followup_communication_instruction(target: Mapping[str, Any]) -> str:
+    app_name = str(target.get("app_name") or "").strip()
+    recipient = str(target.get("recipient") or "").strip()
+    if not app_name or not recipient:
+        return ""
+    if not bool(target.get("draft_allowed")):
+        return (
+            f"The user requested a message to {recipient} in {app_name}, but the allowed "
+            "desktop tools cannot safely focus the recipient and type a draft. Explain the "
+            "missing capability instead of claiming the message was prepared."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    transform = str(target.get("transform") or "").strip()
+    transform_text = f" Apply the requested content transform: {transform}." if transform else ""
+    send_text = (
+        " Include the approval-gated send step only after the draft is typed."
+        if bool(target.get("send_allowed"))
+        else " Sending is not available in the allowed tools, so prepare the draft only."
+    )
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after drafting."
+        if verify_tools
+        else ""
+    )
+    return (
+        f"The user requested the generated content be prepared as a message to {recipient} "
+        f"in {app_name}. After deriving the final message body, call desktop tools next "
+        "instead of only replying inline: focus the communication target, type the explicit "
+        "recipient, submit/select the recipient, then type the generated message body."
+        f"{transform_text} Prefer {', '.join(tools) or 'the allowed communication tools'}."
+        f"{send_text}{verify_text} "
     )
 
 
@@ -3617,6 +3742,8 @@ def _model_followup_app_write_requests(
     content = str(generated_content or "").strip()
     if not content or not isinstance(target, Mapping):
         return []
+    if str(target.get("kind") or "").strip() == "communication_message":
+        return _model_followup_communication_requests(content, target, allowed_tools)
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
         return []
@@ -3705,6 +3832,136 @@ def _model_followup_app_write_requests(
             ),
         ]
         return [*requests, *([verify_request] if verify_request else [])]
+    return []
+
+
+def _model_followup_communication_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    app_name = str(target.get("app_name") or "").strip()
+    recipient = str(target.get("recipient") or "").strip()
+    if not content or not app_name or not recipient:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planning_reason = "planner_followup_communication"
+    source = "runtime_planner"
+    prepare_requests = _model_followup_communication_prepare_requests(
+        app_name,
+        str(target.get("mode") or "focus").strip() or "focus",
+        str(target.get("channel") or "").strip(),
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if (
+        not prepare_requests
+        or "desktop.safe_type_text" not in allowed
+        or "desktop.search_submit" not in allowed
+    ):
+        return []
+    requests = [
+        *prepare_requests,
+        _request_like(
+            "desktop.safe_type_text",
+            {"text": recipient},
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        _request_like(
+            "desktop.search_submit",
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        _request_like(
+            "desktop.safe_type_text",
+            {"text": content},
+            source=source,
+            planning_reason=planning_reason,
+        ),
+    ]
+    if (
+        str(target.get("send_action") or "").strip() == "send"
+        and "desktop.submit_foreground" in allowed
+    ):
+        requests.append(
+            _request_like(
+                "desktop.submit_foreground",
+                {"action": "send"},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    if "desktop.ui_elements" in allowed:
+        requests.append(
+            _request_like(
+                "desktop.ui_elements",
+                {},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    return requests
+
+
+def _model_followup_communication_prepare_requests(
+    app_name: str,
+    mode: str,
+    channel: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    action = _model_followup_communication_focus_action(channel)
+    if mode == "open" and "app.open_and_safe_shortcut" in allowed:
+        return [
+            _request_like(
+                "app.open_and_safe_shortcut",
+                {"app_name": app_name, "action": action},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+    if "app.focus_and_safe_shortcut" in allowed:
+        return [
+            _request_like(
+                "app.focus_and_safe_shortcut",
+                {"app_name": app_name, "action": action},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+    if "app.open_and_safe_shortcut" in allowed:
+        return [
+            _request_like(
+                "app.open_and_safe_shortcut",
+                {"app_name": app_name, "action": action},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+    focus_tool = "app.open" if mode == "open" and "app.open" in allowed else ""
+    if not focus_tool:
+        focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
+    if focus_tool and "desktop.safe_shortcut" in allowed:
+        return [
+            _request_like(
+                focus_tool,
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                "desktop.safe_shortcut",
+                {"action": action},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
     return []
 
 

@@ -1507,6 +1507,171 @@ def test_custom_api_agent_loop_writes_captured_data_analysis_to_target_app() -> 
     assert "written into Notion" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_sends_captured_data_analysis_to_communication_target() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {
+            "role": "user",
+            "content": "读取当前网页内容，分析里面的表格并把报告发给 Slack 的 yachiyo",
+        }
+    ]
+    captured_table = "| region | revenue |\n| --- | ---: |\n| East | 10 |\n| West | 20 |"
+    generated = "网页表格分析报告\n- East revenue 10\n- West revenue 20"
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "browser.extract_text":
+                result = {
+                    "ok": True,
+                    "text": captured_table,
+                    "url": "https://example.test/report",
+                }
+            elif tool_name == "data.analyze":
+                result = {
+                    "ok": True,
+                    "path": str(input_preview.get("display_path") or ""),
+                    "source_kind": str(input_preview.get("source_kind") or ""),
+                    "rows": 2,
+                    "analyzed_rows": 2,
+                    "columns": ["region", "revenue"],
+                    "artifact_paths": ["analysis-report.md"],
+                    "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+                    "summary": "Analyzed captured browser table.",
+                }
+            elif tool_name in {"app.focus_and_safe_shortcut", "desktop.safe_type_text"}:
+                result = {"ok": True, **input_preview}
+            else:
+                result = {"ok": True}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "browser.extract_text",
+                    "browser.current_page",
+                    "data.analyze",
+                    "artifact.write",
+                    "app.focus_and_safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.search_submit",
+                    "desktop.submit_foreground",
+                    "desktop.ui_elements",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": generated},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-captured-data-analysis-communication",
+    )
+
+    assert "Slack" in str(result)
+    assert "输入文字" in str(result)
+    assert [run["tool_requests"][0]["tool"] for run in tool_runs] == [
+        "browser.extract_text",
+        "data.analyze",
+        "app.focus_and_safe_shortcut",
+    ]
+    assert [request["tool"] for request in tool_runs[2]["tool_requests"]] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[2]["tool_requests"][0]["input"] == {
+        "app_name": "Slack",
+        "action": "find",
+    }
+    assert tool_runs[2]["tool_requests"][1]["input"] == {"text": "yachiyo"}
+    assert tool_runs[2]["tool_requests"][3]["input"] == {"text": generated}
+    assert tool_runs[2]["tool_requests"][4]["input"] == {"action": "send"}
+    followup = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup["followup_target"]["kind"] == "communication_message"
+    assert followup["followup_target"]["app_name"] == "Slack"
+    assert followup["followup_target"]["recipient"] == "yachiyo"
+    assert followup["followup_target"]["send_allowed"] is True
+    assert any(
+        event["event"] == "agent.desktop.intent_planned"
+        and event["detail"] == "desktop.submit_foreground"
+        and event["planning_reason"] == "planner_followup_communication"
+        for event in timeline
+    )
+    assert len(model_calls) == 1
+    assert "message to yachiyo in Slack" in model_calls[0][-1]["content"]
+    assert "Data analysis result for https://example.test/report (text_table)." in (
+        model_calls[0][-1]["content"]
+    )
+
+
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
     timeline = [
         _timeline(
