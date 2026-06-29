@@ -679,6 +679,103 @@ def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool(
     ]
 
 
+def test_runtime_tool_request_runner_skips_foreground_mutation_after_inspect_not_ready() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = {
+            "ok": False,
+            "action": "desktop.inspect_app",
+            "summary": "No installed app matched PixelForge",
+            "error": "app_not_found",
+            "recommended_tools": ["desktop.list_apps", "app.open"],
+            "recovery_actions": [
+                {
+                    "label": "重新发现应用",
+                    "tool": "desktop.list_apps",
+                    "input": {"query": "PixelForge", "limit": 20},
+                    "permission_target": "app_discovery",
+                    "risk_level": "low",
+                }
+            ],
+            "data": {
+                "app_name": "PixelForge",
+                "requested_app_name": "PixelForge",
+                "app_found": False,
+                "running": False,
+                "focus_verified": False,
+                "ui_element_count": 0,
+                "control_like_count": 0,
+                "ready_for_foreground_action": False,
+                "checks": {
+                    "discovered_app": False,
+                    "status_running": False,
+                    "focus_verified": False,
+                    "named_ui_elements_nonempty": False,
+                    "control_like_ui_visible": False,
+                    "ready_for_foreground_action": False,
+                },
+            },
+        }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    messages = [{"role": "user", "content": "打开 PixelForge 并点击登录"}]
+    budget = FakeBudget()
+
+    runner.run(
+        [
+            {"tool": "desktop.inspect_app", "input": {"app_name": "PixelForge"}},
+            {
+                "tool": "app.open_and_click_ui_element",
+                "input": {"app_name": "PixelForge", "target": "登录"},
+            },
+        ],
+        ["desktop.inspect_app", "app.open_and_click_ui_element"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert calls == [("desktop.inspect_app", {"app_name": "PixelForge"})]
+    assert budget.claims == [("app.open_and_click_ui_element", False)]
+    assert [event["event"] for event in timeline] == ["agent.tool.call", "agent.tool.skipped"]
+    skipped = timeline[-1]["result"]
+    assert skipped["blocked_by_runtime_readiness"] is True
+    assert skipped["tool"] == "app.open_and_click_ui_element"
+    assert skipped["blocking_conditions"] == [
+        "app_not_found",
+        "app_not_running",
+        "foreground_focus_unverified",
+        "ui_elements_empty",
+        "no_actionable_controls",
+        "foreground_not_ready",
+    ]
+    assert skipped["recommended_tools"] == ["desktop.list_apps", "app.open"]
+    assert skipped["recovery_actions"][0]["tool"] == "desktop.list_apps"
+    assert run_events[-1][1] == "agent.tool.skipped"
+    assert run_events[-1][2]["result"]["blocked_by_runtime_readiness"] is True
+    assert "blocked_by_runtime_readiness" in messages[-1]["content"]
+
+
 def test_runtime_tool_request_runner_records_discovered_app_name_resolution() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

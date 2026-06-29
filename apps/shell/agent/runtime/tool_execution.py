@@ -438,6 +438,7 @@ class RuntimeToolRequestRunner:
     ) -> None:
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
+        foreground_readiness_blocker: dict[str, Any] | None = None
         for index, tool_request in enumerate(tool_requests):
             app_name_resolution = (
                 tool_request.get("input_resolution")
@@ -475,6 +476,37 @@ class RuntimeToolRequestRunner:
                 self._input_preview(raw_input),
                 app_name_resolution,
             )
+            runtime_skip = _runtime_readiness_skip_result(
+                tool_name,
+                raw_input,
+                foreground_readiness_blocker,
+            )
+            if runtime_skip is not None:
+                budget.claim_tool_call(tool_name)
+                timeline.append(
+                    self._timeline(
+                        "agent.tool.skipped",
+                        tool_name,
+                        input_preview=input_preview,
+                        result=runtime_skip,
+                    )
+                )
+                if run_id:
+                    self._append_run_event(
+                        run_id,
+                        "agent.tool.skipped",
+                        {
+                            "tool": tool_name,
+                            "input_preview": input_preview,
+                            "result": runtime_skip,
+                        },
+                    )
+                self._tool_loop_projection.append_tool_result_message(
+                    messages,
+                    {**tool_request, "tool": tool_name},
+                    runtime_skip,
+                )
+                continue
             goal_block_reason = self._goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
                 budget.claim_tool_call(tool_name)
@@ -554,3 +586,163 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 tool_result,
             )
+            inspect_blocker = _foreground_readiness_blocker(tool_name, raw_input, tool_result)
+            if inspect_blocker is not None:
+                foreground_readiness_blocker = inspect_blocker
+            elif tool_name in _FOREGROUND_READINESS_RESET_TOOLS:
+                foreground_readiness_blocker = None
+
+
+_FOREGROUND_READINESS_GATED_TOOLS = {
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
+    "desktop.safe_shortcut",
+    "desktop.safe_key",
+    "desktop.safe_scroll",
+    "desktop.safe_click",
+    "desktop.safe_type_text",
+    "desktop.hotkey",
+    "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
+    "desktop.submit_foreground",
+    "desktop.click",
+    "desktop.type_text",
+}
+
+_FOREGROUND_READINESS_RESET_TOOLS = {
+    "app.open",
+    "app.focus",
+    "app.focus_window",
+    "app.show",
+    "desktop.active_window",
+    "desktop.inspect_app",
+}
+
+
+def _runtime_readiness_skip_result(
+    tool_name: str,
+    raw_input: dict[str, Any],
+    blocker: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if blocker is None or tool_name not in _FOREGROUND_READINESS_GATED_TOOLS:
+        return None
+    blocked_app = str(blocker.get("app_name") or "").strip()
+    requested_app = str(raw_input.get("app_name") or "").strip()
+    if blocked_app and requested_app and requested_app != blocked_app:
+        return None
+    conditions = _string_list(blocker.get("blocking_conditions")) or ["foreground_not_ready"]
+    recovery_actions = blocker.get("recovery_actions")
+    recommended_tools = blocker.get("recommended_tools")
+    result: dict[str, Any] = {
+        "ok": False,
+        "skipped": True,
+        "blocked_by_runtime_readiness": True,
+        "tool": tool_name,
+        "action": tool_name,
+        "error": conditions[0],
+        "blocking_condition": conditions[0],
+        "blocking_conditions": conditions,
+        "source_tool": "desktop.inspect_app",
+        "source_summary": str(blocker.get("summary") or "").strip(),
+        "hint": (
+            "desktop.inspect_app did not prove the target app is ready for foreground "
+            "input. Run one of the recovery actions or inspect again before mutating UI."
+        ),
+        "data": {
+            "app_name": blocked_app,
+            "requested_app_name": str(blocker.get("requested_app_name") or "").strip(),
+            "skipped_tool": tool_name,
+            "skipped_input": raw_input,
+            "readiness_checks": blocker.get("checks") if isinstance(blocker.get("checks"), dict) else {},
+        },
+    }
+    if isinstance(recovery_actions, list) and recovery_actions:
+        result["recovery_actions"] = recovery_actions
+    if isinstance(recommended_tools, list) and recommended_tools:
+        result["recommended_tools"] = recommended_tools
+    return result
+
+
+def _foreground_readiness_blocker(
+    tool_name: str,
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool_name != "desktop.inspect_app":
+        return None
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    if tool_result.get("ok") is True and data.get("ready_for_foreground_action") is True:
+        return None
+    conditions = _inspect_app_blocking_conditions(tool_result, data, checks)
+    return {
+        "app_name": str(data.get("app_name") or raw_input.get("app_name") or "").strip(),
+        "requested_app_name": str(
+            data.get("requested_app_name") or raw_input.get("app_name") or ""
+        ).strip(),
+        "summary": str(tool_result.get("summary") or "").strip(),
+        "blocking_conditions": conditions,
+        "checks": checks,
+        "recommended_tools": (
+            tool_result.get("recommended_tools")
+            if isinstance(tool_result.get("recommended_tools"), list)
+            else data.get("recommended_tools")
+        ),
+        "recovery_actions": (
+            tool_result.get("recovery_actions")
+            if isinstance(tool_result.get("recovery_actions"), list)
+            else data.get("recovery_actions")
+        ),
+    }
+
+
+def _inspect_app_blocking_conditions(
+    tool_result: dict[str, Any],
+    data: dict[str, Any],
+    checks: dict[str, Any],
+) -> list[str]:
+    conditions: list[str] = []
+    if tool_result.get("ok") is False and str(tool_result.get("error") or "").strip():
+        conditions.append(str(tool_result.get("error") or "").strip())
+    if data.get("app_found") is False or checks.get("discovered_app") is False:
+        conditions.append("app_not_found")
+    if data.get("running") is False or checks.get("status_running") is False:
+        conditions.append("app_not_running")
+    if data.get("focus_verified") is False or checks.get("focus_verified") is False:
+        conditions.append("foreground_focus_unverified")
+    if data.get("visibility_limited") is True:
+        conditions.append("foreground_visibility_limited")
+    if checks.get("ui_query_ok") is False:
+        conditions.append("ui_inspection_failed")
+    if data.get("ui_element_count") == 0 or checks.get("named_ui_elements_nonempty") is False:
+        conditions.append("ui_elements_empty")
+    if data.get("control_like_count") == 0 or checks.get("control_like_ui_visible") is False:
+        conditions.append("no_actionable_controls")
+    if checks.get("ready_for_foreground_action") is False:
+        conditions.append("foreground_not_ready")
+    return _string_list(conditions) or ["foreground_not_ready"]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        value = [value] if value not in (None, "") else []
+    items: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items

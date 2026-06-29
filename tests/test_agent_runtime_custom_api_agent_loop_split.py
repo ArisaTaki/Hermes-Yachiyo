@@ -171,6 +171,105 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
     ]
 
 
+def test_daily_desktop_sequence_summary_includes_runtime_readiness_skips() -> None:
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda _message: "",
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+    requests = [
+        {
+            "tool": "desktop.inspect_app",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "tool": "app.open_and_click_ui_element",
+            "input": {"app_name": "PixelForge", "target": "登录"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.inspect_app",
+            input_preview={"app_name": "PixelForge"},
+            result={
+                "ok": False,
+                "action": "desktop.inspect_app",
+                "summary": "No installed app matched PixelForge",
+                "error": "app_not_found",
+            },
+        ),
+        _timeline(
+            "agent.tool.skipped",
+            "app.open_and_click_ui_element",
+            input_preview={"app_name": "PixelForge", "target": "登录"},
+            result={
+                "ok": False,
+                "skipped": True,
+                "blocked_by_runtime_readiness": True,
+                "tool": "app.open_and_click_ui_element",
+                "error": "app_not_found",
+                "blocking_conditions": ["app_not_found", "foreground_not_ready"],
+                "source_tool": "desktop.inspect_app",
+                "source_summary": "No installed app matched PixelForge",
+                "recovery_actions": [
+                    {
+                        "label": "重新发现应用",
+                        "tool": "desktop.list_apps",
+                        "input": {"query": "PixelForge", "limit": 20},
+                        "permission_target": "app_discovery",
+                        "risk_level": "low",
+                    }
+                ],
+            },
+        ),
+    ]
+
+    result = loop._direct_daily_desktop_sequence_result(
+        requests,
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert result == (
+        "桌面操作已暂停：前置检查未确认目标应用可接收前台输入："
+        "app_not_found, foreground_not_ready。No installed app matched PixelForge。"
+        "可直接打开：重新发现应用。"
+    )
+    completed = next(
+        event for event in timeline if event.get("event") == "agent.desktop.intent_completed"
+    )
+    assert completed["event"] == "agent.desktop.intent_completed"
+    assert completed["result"]["blocked_by_runtime_readiness"] is True
+    assert completed["steps"][-1]["tool"] == "app.open_and_click_ui_element"
+    recovery = next(
+        event for event in timeline if event.get("event") == "agent.desktop.permission_recovery"
+    )
+    assert recovery["recovery_actions"][0]["tool"] == "desktop.list_apps"
+
+
 class RecordingDesktopBroker:
     def __init__(self, order: list[str]) -> None:
         self.order = order

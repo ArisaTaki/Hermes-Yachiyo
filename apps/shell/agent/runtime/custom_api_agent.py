@@ -1300,7 +1300,7 @@ class RuntimeCustomApiAgentLoop:
         tool_events = [
             event
             for event in timeline[tool_timeline_start:]
-            if event.get("event") == "agent.tool.call"
+            if event.get("event") in {"agent.tool.call", "agent.tool.skipped"}
         ]
         event_index = 0
         completed_steps: list[dict[str, Any]] = []
@@ -1737,6 +1737,18 @@ class RuntimeCustomApiAgentLoop:
         error = str(result.get("error") or result_summary or "工具返回失败").strip()
         permission_targets = result.get("permission_targets")
         fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
+        if result.get("blocked_by_runtime_readiness"):
+            conditions = _text_list(result.get("blocking_conditions")) or ([error] if error else [])
+            condition_text = ", ".join(conditions)
+            source_summary = str(result.get("source_summary") or "").strip()
+            detail = (
+                f"前置检查未确认目标应用可接收前台输入：{condition_text}。"
+                if condition_text
+                else "前置检查未确认目标应用可接收前台输入。"
+            )
+            if source_summary:
+                detail = f"{detail}{source_summary}。"
+            return _append_recovery_action_summary(f"桌面操作已暂停：{detail}", result)
         if tool_name == "app.open" and str(result.get("error_code") or "") == "app_not_found":
             app_name = _payload_text(result, planned_input, "app_name")
             target = _display_target_name(app_name)
@@ -4218,14 +4230,14 @@ def _visible_daily_desktop_completed_steps(
     primary_indexes = [
         index
         for index, step in enumerate(completed_steps)
-        if str(step.get("tool") or "") not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        if not _is_daily_desktop_discovery_completed_step(step)
         and str(step.get("tool") or "") not in _DAILY_DESKTOP_VERIFY_TOOLS
     ]
     if not primary_indexes:
         visible_steps = list(completed_steps)
         while (
             len(visible_steps) > 1
-            and str(visible_steps[0].get("tool") or "") in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS
+            and _is_daily_desktop_discovery_prefix_completed_step(visible_steps[0])
         ):
             visible_steps = visible_steps[1:]
         return visible_steps
@@ -4235,7 +4247,7 @@ def _visible_daily_desktop_completed_steps(
     for index, step in enumerate(completed_steps):
         tool_name = str(step.get("tool") or "")
         if (
-            tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS
+            _is_daily_desktop_discovery_completed_step(step)
             and (index < first_primary or index > last_primary)
         ):
             continue
@@ -4253,6 +4265,20 @@ def _visible_daily_desktop_completed_steps(
             continue
         visible_steps.append(step)
     return visible_steps or completed_steps
+
+
+def _is_daily_desktop_discovery_completed_step(step: dict[str, Any]) -> bool:
+    tool_name = str(step.get("tool") or "")
+    if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS:
+        return True
+    return tool_name == "desktop.inspect_app" and isinstance(step.get("result"), dict)
+
+
+def _is_daily_desktop_discovery_prefix_completed_step(step: dict[str, Any]) -> bool:
+    tool_name = str(step.get("tool") or "")
+    if tool_name in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
+        return True
+    return tool_name == "desktop.inspect_app" and isinstance(step.get("result"), dict)
 
 
 def _drop_trailing_daily_desktop_verify_requests(
