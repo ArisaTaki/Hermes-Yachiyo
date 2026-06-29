@@ -3250,14 +3250,26 @@ class RuntimePlanner:
                 )
                 search_terminal_step_id = "paste-app-search-query"
             else:
+                search_type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+                if not search_type_tool and app_name:
+                    search_type_tool = _first_allowed(
+                        app_foreground_tool_candidates(
+                            _app_search_prepare_mode(intent.user_goal, mode),
+                            "safe_type_text",
+                        ),
+                        allowed,
+                    )
+                search_type_payload = {"text": search_query}
+                if str(search_type_tool or "").startswith("app."):
+                    search_type_payload = {"app_name": app_name, **search_type_payload}
                 steps.append(
                     _step(
                         intent,
                         "type-app-search-query",
                         "Type app search query",
                         "desktop.ui_operation",
-                        _first_allowed(("desktop.safe_type_text",), allowed),
-                        input_preview={"text": search_query},
+                        search_type_tool,
+                        input_preview=search_type_payload,
                         depends_on=["focus-app-search-field"],
                         action="type",
                         reason="Type only the explicit app-search query from the user prompt.",
