@@ -337,6 +337,15 @@ class TaskIntentRouter:
         foreground_compose_text = _foreground_compose_text_hint(text)
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
+        container_action = _dynamic_context_target_container_action_hint(text)
+        if (
+            container_action
+            and safe_shortcut is None
+            and foreground_compose_text
+            and not _dynamic_context_source_hint(text)
+            and not _dynamic_context_transform_target_hint(text)
+        ):
+            safe_shortcut = {"action": container_action}
         foreground_paste = _foreground_paste_hint(text)
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
@@ -2280,6 +2289,21 @@ class RuntimePlanner:
             followup_return_hotkey = _explicit_return_key_followup_hint(intent.user_goal)
         if followup_return_hotkey:
             submit_action = ""
+        if (
+            not app_search
+            and app_type_scope
+            and type_target
+            and _looks_like_app_search_field_input(intent.user_goal)
+            and not _type_into_ui_element_tool_available(app_name, mode, allowed)
+        ):
+            fallback_app_search = _app_search_from_type_target(type_target, intent.user_goal)
+            if _app_search_safe_sequence_available(
+                intent.user_goal,
+                fallback_app_search,
+                allowed,
+            ):
+                app_search = fallback_app_search
+                type_target = None
         create_first_safe_shortcut = (
             safe_shortcut_action in {"new_note", "new_document"}
             and bool(safe_type_text)
@@ -10494,7 +10518,7 @@ def _foreground_compose_app_name_hint(text: str) -> str:
         raw_app = match.group("app")
         if _looks_like_too_short_cjk_app_label(raw_app):
             continue
-        app = _canonical_app_name_hint(raw_app)
+        app = _clean_dynamic_context_target_app(raw_app)
         if app and not _is_generic_foreground_app_label(app):
             return app
     return ""
@@ -10503,6 +10527,7 @@ def _foreground_compose_app_name_hint(text: str) -> str:
 def _clean_foreground_compose_text(value: str) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
+    text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
     text = re.sub(r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)$", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(r"[。！？!?]+$", "", text).strip()
     return text
@@ -12999,6 +13024,34 @@ def _app_search_safe_sequence_available(
     if followup.get("action") == "click_first_result" and "desktop.click_ui_element" not in allowed_tools:
         return False
     return True
+
+
+def _type_into_ui_element_tool_available(
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+) -> bool:
+    if allowed is None:
+        return True
+    candidates = ["desktop.type_into_ui_element"]
+    if str(app_name or "").strip():
+        candidates = [
+            *app_foreground_tool_candidates(mode, "type_into_ui_element"),
+            *candidates,
+        ]
+    return any(tool in allowed for tool in candidates)
+
+
+def _app_search_from_type_target(
+    type_target: Mapping[str, Any],
+    text: str,
+) -> dict[str, str]:
+    query = _clean_app_search_query(str(type_target.get("text") or ""))
+    target_value = str(type_target.get("target") or "").strip()
+    return {
+        "query": query,
+        "target": "搜索" if _contains_any(target_value or text, ("搜索", "查找", "检索", "找")) else "Search",
+    }
 
 
 def _app_search_should_submit(text: str, search_followup: Mapping[str, Any]) -> bool:

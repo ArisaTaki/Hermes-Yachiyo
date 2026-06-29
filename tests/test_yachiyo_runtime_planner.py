@@ -5394,6 +5394,139 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
     )
 
 
+def test_runtime_planner_falls_back_to_safe_app_search_field_input() -> None:
+    prompt = "在 PixelForge 的搜索框输入猫耳少女"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+    ]
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(decision, "focus-app-search-field").input_preview == {
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "猫耳少女",
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "猫耳少女"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    precise = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert _step_by_id(precise, "operate-foreground-ui").tool_name == (
+        "app.focus_and_type_into_ui_element"
+    )
+
+
+def test_runtime_planner_creates_container_before_direct_app_text() -> None:
+    prompt = "在 Obsidian 新笔记写下：今天继续推进 Yachiyo"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "Obsidian",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+        "foreground_compose_text_hint": "今天继续推进 Yachiyo",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "operate-foreground-ui").input_preview == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(decision, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "今天继续推进 Yachiyo",
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Obsidian", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "今天继续推进 Yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_splits_app_first_field_typing_targets() -> None:
     cases = (
         (
