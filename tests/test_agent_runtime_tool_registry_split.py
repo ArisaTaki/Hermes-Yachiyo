@@ -3799,6 +3799,8 @@ def test_app_focus_reports_locked_desktop_session_without_permission_error(monke
 
     assert result["ok"] is False
     assert result["error"] == "desktop_session_locked"
+    assert result["blocking_condition"] == "desktop_session_locked"
+    assert result["retryable"] is True
     assert result["permission_error"] is False
     assert "missing_permissions" not in result
     assert "permission_targets" not in result
@@ -4123,6 +4125,8 @@ def test_desktop_active_window_reports_locked_desktop_session(monkeypatch) -> No
 
     assert result["ok"] is False
     assert result["error"] == "desktop_session_locked"
+    assert result["blocking_condition"] == "desktop_session_locked"
+    assert result["retryable"] is True
     assert result["permission_error"] is False
     assert "missing_permissions" not in result
     assert result["data"] == {

@@ -194,14 +194,14 @@ export function LauncherAgentTaskLight({
   const studioParams = studioTarget.routeParams;
   const status = String(lightTask.status || currentTask.status || '');
   const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
-  const needsAction = Boolean(lightTask.needs_user_action || approval);
   const taskTitle = launcherAgentTaskTitle(currentTask);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(
     currentTask.recent_events,
     currentTask.tool_calls,
   );
+  const needsAction = Boolean(lightTask.needs_user_action || approval || permissionRecovery);
   const detail = permissionRecovery
-    ? `需要权限 · ${permissionRecovery.labels.join('、')}`
+    ? `${permissionRecovery.kind === 'permission' ? '需要权限' : '需要处理'} · ${permissionRecovery.labels.join('、')}`
     : lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
@@ -273,14 +273,19 @@ export function LauncherAgentTaskLight({
         <button
           type="button"
           className="launcher-agent-task-diagnostics"
+          data-blocking-conditions={permissionRecovery.blockingConditions.join(',')}
           data-desktop-tools={permissionRecovery.tools.join(',')}
           data-permission-targets={permissionRecovery.targets.join(',')}
+          data-recovery-kind={permissionRecovery.kind}
           data-testid={testIds.diagnostics}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
             void openAppView('diagnostics', {
               command: 'native doctor',
+              ...(permissionRecovery.blockingConditions.length
+                ? { blocking_conditions: permissionRecovery.blockingConditions.join(',') }
+                : {}),
               desktop_tools: permissionRecovery.tools.join(','),
               permission_targets: permissionRecovery.targets.join(','),
               return_to: mode,
@@ -288,7 +293,7 @@ export function LauncherAgentTaskLight({
           }}
           title={`打开诊断：${permissionRecovery.labels.join('、')}`}
         >
-          权限
+          {permissionRecovery.kind === 'permission' ? '权限' : '诊断'}
         </button>
       ) : null}
       {primaryRecoveryAction ? (
@@ -306,7 +311,7 @@ export function LauncherAgentTaskLight({
           }}
           title={primaryRecoveryAction.prompt}
         >
-          恢复
+          {permissionRecovery?.kind === 'blocking_condition' ? '重试' : '恢复'}
         </button>
       ) : null}
       {canHandleApproval || canCancel ? (

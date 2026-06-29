@@ -111,6 +111,12 @@ visible result changed before cleaning up. It fails before mutation when the
 desktop session is locked or the app was already running, and the RC verifier
 only enables it with `--run-real-desktop-interaction-smoke`.
 
+Runtime failures can also expose a non-permission `blocking_condition` such as
+`desktop_session_locked`. Chat task cards plus Bubble and Live2D launcher task
+lights preserve that condition separately from `permission_targets`, show the
+localized blocker and recovery hint, and keep executable recovery actions
+available without claiming that the user must grant another macOS permission.
+
 Current planner/runtime tool parity evidence is reproducible with
 `python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder

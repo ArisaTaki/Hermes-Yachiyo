@@ -122,13 +122,21 @@ export function AgentTaskCard({
       {permissionRecovery ? (
         <div
           className="yachiyo-agent-task-permission-recovery"
+          data-blocking-conditions={permissionRecovery.blockingConditions.join(',')}
           data-desktop-tools={permissionRecovery.tools.join(',')}
           data-permission-targets={permissionRecovery.targets.join(',')}
+          data-recovery-kind={permissionRecovery.kind}
           data-testid="yachiyo-agent-task-permission-recovery"
         >
           <UiIcon name="diagnostics" />
           <div>
-            <strong>需要恢复桌面权限</strong>
+            <strong>
+              {permissionRecovery.kind === 'permission'
+                ? '需要恢复桌面权限'
+                : permissionRecovery.kind === 'blocking_condition'
+                  ? '运行条件阻塞'
+                  : '需要处理运行环境'}
+            </strong>
             <span>{permissionRecovery.labels.join('、')} 未就绪</span>
             {permissionRecovery.hints.map((hint) => (
               <span className="yachiyo-agent-task-recovery-hint" key={hint}>{hint}</span>
@@ -486,8 +494,10 @@ function taskStatusLabel(status: string) {
 
 type TaskPermissionRecovery = {
   actions: TaskPermissionRecoveryAction[];
+  blockingConditions: string[];
   href: string;
   hints: string[];
+  kind: 'permission' | 'blocking_condition' | 'mixed';
   labels: string[];
   targets: string[];
   tools: string[];
@@ -522,6 +532,10 @@ const permissionTargetLabels: Record<string, string> = {
   screen_capture_probe_failed: '屏幕录制探测',
   screen_recording: '屏幕录制权限',
   unsupported_platform: '当前平台',
+};
+
+const blockingConditionLabels: Record<string, string> = {
+  desktop_session_locked: '桌面会话已锁定',
 };
 
 function taskRecoveryRetryActionWithSelectedCoordinate(
@@ -618,7 +632,11 @@ export function taskPermissionRecoveryFromTaskFacts(
     ...safeEvents.flatMap((event) => permissionTargetsFromEvent(event)),
     ...safeToolCalls.flatMap((toolCall) => permissionTargetsFromToolCall(toolCall)),
   ]);
-  if (!targets.length) return null;
+  const blockingConditions = uniqueStrings([
+    ...safeEvents.flatMap((event) => blockingConditionsFromEvent(event)),
+    ...safeToolCalls.flatMap((toolCall) => blockingConditionsFromToolCall(toolCall)),
+  ]);
+  if (!targets.length && !blockingConditions.length) return null;
   const hints = uniqueStrings([
     ...safeEvents.flatMap((event) => recoveryHintsFromEvent(event)),
     ...safeToolCalls.flatMap((toolCall) => recoveryHintsFromToolCall(toolCall)),
@@ -631,17 +649,23 @@ export function taskPermissionRecoveryFromTaskFacts(
     ...executableRecoveryActionsFromEvents(safeEvents),
     ...executableRecoveryActionsFromToolCalls(safeToolCalls),
   ]);
-  const params = new URLSearchParams({
-    command: 'native doctor',
-    permission_targets: targets.join(','),
-    return_to: 'chat',
-  });
+  const params = new URLSearchParams({ command: 'native doctor', return_to: 'chat' });
+  if (targets.length) params.set('permission_targets', targets.join(','));
+  if (blockingConditions.length) params.set('blocking_conditions', blockingConditions.join(','));
   if (tools.length) params.set('desktop_tools', tools.join(','));
+  const kind = targets.length && blockingConditions.length
+    ? 'mixed'
+    : blockingConditions.length ? 'blocking_condition' : 'permission';
   return {
     actions,
+    blockingConditions,
     href: `#/diagnostics?${params.toString()}`,
     hints,
-    labels: targets.map((target) => permissionTargetLabels[target] || target),
+    kind,
+    labels: [
+      ...targets.map((target) => permissionTargetLabels[target] || target),
+      ...blockingConditions.map((condition) => blockingConditionLabels[condition] || condition),
+    ],
     targets,
     tools,
   };
@@ -702,6 +726,30 @@ function permissionTargetsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['
     ...stringList(outputPreview.missing_permissions),
   ];
   return outputPreview.permission_error === true || targets.length ? targets : [];
+}
+
+function blockingConditionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
+  if ((event.sensitivity || 'public') === 'secret') return [];
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  return uniqueStrings([
+    ...blockingConditionsFromRecord(result),
+    ...blockingConditionsFromRecord(payload),
+  ]);
+}
+
+function blockingConditionsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
+  return blockingConditionsFromRecord(objectValue(toolCall.output_preview));
+}
+
+function blockingConditionsFromRecord(source: Record<string, unknown>): string[] {
+  const data = objectValue(source.data);
+  return uniqueStrings([
+    ...stringList(source.blocking_condition),
+    ...stringList(source.blocking_conditions),
+    ...stringList(data.blocking_condition),
+    ...stringList(data.blocking_conditions),
+  ]);
 }
 
 function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {

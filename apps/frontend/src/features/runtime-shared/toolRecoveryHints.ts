@@ -16,8 +16,22 @@ export function runtimeToolRecoveryHintsFromRecord(source: Record<string, unknow
     const toolText = tools.length ? tools.join(' -> ') : 'screen.capture -> desktop.click';
     hints.push(`Chrome CDP 不可用时不能直接用 CSS selector 点击；请先用 ${toolText} 观察目标位置，再提供 ${fieldText} 坐标。`);
   }
+  hints.push(...blockingConditionRecoveryHints(source));
   hints.push(...permissionRecoveryHints(source));
   return uniqueStrings(hints);
+}
+
+function blockingConditionRecoveryHints(source: Record<string, unknown>): string[] {
+  const data = objectValue(source.data);
+  const conditions = uniqueStrings([
+    ...stringList(source.blocking_condition),
+    ...stringList(source.blocking_conditions),
+    ...stringList(data.blocking_condition),
+    ...stringList(data.blocking_conditions),
+  ]);
+  return conditions
+    .map((condition) => BLOCKING_CONDITION_RECOVERY_HINTS[condition] || '')
+    .filter(Boolean);
 }
 
 function permissionRecoveryHints(source: Record<string, unknown>): string[] {
@@ -46,6 +60,10 @@ const PERMISSION_RECOVERY_HINTS: Record<string, string> = {
   screen_capture_probe_failed: '屏幕录制探测失败；请在诊断页重新运行截图摘要，并检查屏幕录制授权。',
   screen_recording: '在 macOS「系统设置 > 隐私与安全性 > 屏幕录制」允许 Oha-Yachiyo 或当前终端录制屏幕。',
   unsupported_platform: '当前桌面工具主要支持 macOS；此平台暂时只能使用非桌面 fallback。',
+};
+
+const BLOCKING_CONDITION_RECOVERY_HINTS: Record<string, string> = {
+  desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台操作。',
 };
 
 function objectValue(value: unknown): Record<string, unknown> {

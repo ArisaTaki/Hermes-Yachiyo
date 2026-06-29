@@ -178,8 +178,20 @@ function publicAgentTasks() {
           detail: 'media.apple_music_play',
           payload: {
             result: {
+              data: {
+                blocking_condition: 'desktop_session_locked',
+              },
               permission_error: true,
               permission_targets: ['music_app', 'automation'],
+              recovery_actions: [
+                {
+                  input: {},
+                  label: '解锁后重新检查前台窗口',
+                  permission_target: 'desktop_session_unlocked',
+                  risk_level: 'low',
+                  tool: 'desktop.active_window',
+                },
+              ],
               recovery_hints: ['Open Music once and allow Automation permissions.'],
             },
           },
@@ -540,6 +552,7 @@ async function main() {
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
     const taskStudio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
     const taskDiagnostics = document.querySelector('[data-testid="bubble-launcher-agent-task-open-diagnostics"]');
+    const taskRecovery = document.querySelector('[data-testid="bubble-launcher-agent-task-run-recovery-action"]');
     const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
@@ -554,12 +567,19 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
-      && taskLight.textContent.includes('需要权限')
+      && taskLight.textContent.includes('需要处理')
+      && taskLight.textContent.includes('桌面会话已锁定')
       && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
       && taskStudio.textContent.includes('Agent Studio')
       && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
-      && taskDiagnostics.textContent.includes('权限')
+      && taskDiagnostics?.getAttribute('data-blocking-conditions') === 'desktop_session_locked'
+      && taskDiagnostics?.getAttribute('data-recovery-kind') === 'mixed'
+      && taskDiagnostics.textContent.includes('诊断')
+      && taskRecovery?.getAttribute('data-permission-target') === 'desktop_session_unlocked'
+      && taskRecovery?.getAttribute('data-recovery-tool') === 'desktop.active_window'
+      && taskRecovery.textContent.includes('恢复')
+      && !taskRecovery.disabled
       && taskApprove
       && !taskApprove.disabled
       && taskReject
@@ -608,6 +628,7 @@ async function main() {
     && window.__ohaLauncherOpenViewCalls.some((call) => (
       call?.view === 'diagnostics'
       && call?.params?.command === 'native doctor'
+      && call?.params?.blocking_conditions === 'desktop_session_locked'
       && call?.params?.permission_targets === 'music_app,automation'
       && call?.params?.return_to === 'bubble'
     ))
@@ -769,6 +790,7 @@ async function main() {
     const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
     const taskStudio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
     const taskDiagnostics = document.querySelector('[data-testid="live2d-launcher-agent-task-open-diagnostics"]');
+    const taskRecovery = document.querySelector('[data-testid="live2d-launcher-agent-task-run-recovery-action"]');
     const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="live2d-launcher-agent-task-cancel"]');
@@ -785,12 +807,19 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
-      && taskLight.textContent.includes('需要权限')
+      && taskLight.textContent.includes('需要处理')
+      && taskLight.textContent.includes('桌面会话已锁定')
       && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
       && taskStudio.textContent.includes('Agent Studio')
       && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
-      && taskDiagnostics.textContent.includes('权限')
+      && taskDiagnostics?.getAttribute('data-blocking-conditions') === 'desktop_session_locked'
+      && taskDiagnostics?.getAttribute('data-recovery-kind') === 'mixed'
+      && taskDiagnostics.textContent.includes('诊断')
+      && taskRecovery?.getAttribute('data-permission-target') === 'desktop_session_unlocked'
+      && taskRecovery?.getAttribute('data-recovery-tool') === 'desktop.active_window'
+      && taskRecovery.textContent.includes('恢复')
+      && !taskRecovery.disabled
       && taskApprove
       && !taskApprove.disabled
       && taskReject

@@ -5140,6 +5140,8 @@ def _desktop_session_locked_result(
         "action": action,
         "summary": "macOS desktop session is locked",
         "error": "desktop_session_locked",
+        "blocking_condition": "desktop_session_locked",
+        "retryable": True,
         "data": {
             **dict(data or {}),
             "desktop_session_locked": True,
