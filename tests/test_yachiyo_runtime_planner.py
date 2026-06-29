@@ -6255,6 +6255,65 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "body_source": "desktop_content",
     }
 
+    app_scoped_content_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "artifact.write",
+    ]
+    for prompt, expected_app, expected_query in (
+        ("把 Slack 搜索 yachiyo 的结果总结成报告", "Slack", "yachiyo"),
+        ("把 Slack 搜索 yachiyo 的结果保存成 Markdown", "Slack", "yachiyo"),
+        ("把 Slack 里搜索 yachiyo 的结果总结成报告", "Slack", "yachiyo"),
+        ("把在 Slack 搜索 yachiyo 的结果总结成报告", "Slack", "yachiyo"),
+        ("把微信搜索文件传输助手的结果总结成报告", "微信", "文件传输助手"),
+        ("把 Notion 搜索 release plan 的结果整理成报告", "Notion", "release plan"),
+    ):
+        app_scoped_content_report = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=app_scoped_content_tools,
+        )
+
+        assert app_scoped_content_report.selected_intent.kind == "desktop_operation"
+        assert app_scoped_content_report.selected_intent.inputs["app_name_hint"] == expected_app
+        assert app_scoped_content_report.selected_intent.inputs["app_search_hint"] == {
+            "app_name": expected_app,
+            "query": expected_query,
+            "target": "搜索",
+        }
+        assert app_scoped_content_report.selected_intent.inputs[
+            "desktop_content_artifact_hint"
+        ] == {
+            "path": "desktop-content-report.md",
+            "body_source": "desktop_content",
+        }
+        assert [step.step_id for step in app_scoped_content_report.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "focus-app-search-field",
+            "type-app-search-query",
+            "submit-app-search",
+            "read-desktop-content",
+            "write-desktop-content-artifact",
+        ]
+        assert _step_by_id(
+            app_scoped_content_report,
+            "focus-app-search-field",
+        ).input_preview == {"app_name": expected_app, "action": "find"}
+        assert _step_by_id(
+            app_scoped_content_report,
+            "type-app-search-query",
+        ).input_preview == {"app_name": expected_app, "text": expected_query}
+        assert _step_by_id(
+            app_scoped_content_report,
+            "read-desktop-content",
+        ).input_preview == {
+            "role_filter": "text",
+            "limit": 120,
+            "app_name": expected_app,
+        }
+
     app_search_screenshot = RuntimePlanner().decision(
         "打开 Linear 搜索 BUG-123 并截图",
         allowed_tools=[

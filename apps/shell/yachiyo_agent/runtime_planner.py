@@ -10380,6 +10380,30 @@ def _clean_app_name_hint(value: str) -> str:
     )[0]
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|and|then)\s*$", "", app, flags=re.IGNORECASE).strip()
     app = re.sub(r"^(?:the\s+)?", "", app, flags=re.IGNORECASE).strip(" .，,。")
+    app = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"^(?:把|将)\s*(?:在|用|通过)?\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"^(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    app = re.sub(
+        r"^(?:open|launch|start|focus|activate|switch\s+to)\s+",
+        "",
+        app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     scoped_called_app_match = re.match(
         r"^(?:一个|一款|这个|那个)?"
         r"(?:(?:我(?:的)?(?:电脑|mac|机器|系统)?|本机|本地)(?:上|里|中|内)?(?:的)?\s*)?"
@@ -13762,10 +13786,21 @@ def _clean_app_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.split(
+        r"\s*(?:(?:[，,]\s*|并|然后|再|接着|之后|后|and\s+then|then)\s*)?"
+        r"(?:把|将)?(?:的(?:搜索|查询|检索)?(?:结果|内容|文本)|"
+        r"(?:搜索|查询|检索)(?:结果|内容|文本))\s*"
+        r"(?:总结|摘要|整理|生成|输出|写成|写|做成|保存成|保存|存成|导出|"
+        r"分析|识别|说明|告诉|发给|发送给|发到|发送到|转发给|转发到|"
+        r"summari[sz]e|write|generate|output|save|export|send|message|forward)",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    value = re.split(
         r"\s*(?:[，,]\s*|并|然后|再|接着|之后|后|and\s+then|then)\s*"
         r"(?:选择|选中|点击|点按|打开|按|"
         r"(?:把|将)?(?:当前|前台|这份|这个|这些|搜索结果|结果|内容|文本)?"
-        r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成|"
+        r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成|保存成|保存|存成|导出|"
         r"读|读取|查看|看看|看一下|看下|判断|决定|分析|识别|告诉|说明|"
         r"发给|发送给|发到|发送到|转发给|转发到)|"
         r"发给|发送给|发到|发送到|转发给|转发到|"
@@ -14501,6 +14536,14 @@ def _web_search_query(text: str) -> str:
     direct_engine_query = _direct_web_search_query(text)
     if direct_engine_query:
         return direct_engine_query
+    leading_app_search = _leading_app_search_hint(text)
+    leading_app_name = str(leading_app_search.get("app_name") or "").strip()
+    if (
+        leading_app_name
+        and not _known_web_destination_search_hint(text)
+        and not _is_browser_or_search_app_name(leading_app_name)
+    ):
+        return ""
     if _looks_like_local_observation_or_control_request(text):
         return ""
     if (
