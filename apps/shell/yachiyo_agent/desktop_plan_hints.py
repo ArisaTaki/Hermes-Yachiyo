@@ -1018,7 +1018,7 @@ def media_app_scope_hint(text: str) -> str:
         r"(?:播放|播|放|play|start\s+playing)",
         r"^(?:open|launch|start|use|using|with|in|on)\s+"
         r"(?P<app_en>[A-Za-z0-9][\w .+&'-]{1,60}?)\s+"
-        r"(?:and\s+)?(?:search|find|play|start\s+playing)\b",
+        r"(?:and\s+|to\s+)?(?:search|find|play|start\s+playing)\b",
         r"^(?:play|start\s+playing)\s+.+?\s+"
         r"(?:on|in|with|using)\s+"
         r"(?P<app_en_suffix>[A-Za-z0-9][\w .+&'-]{1,60}?)(?:\s+app)?$",

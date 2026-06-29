@@ -80,7 +80,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
     {
         "id": "named_media_app_playback",
         "category": "orchestrator",
-        "prompt": "打开 YouTube Music 播放 lo-fi",
+        "prompt": "open VLC play test",
         "expected_intent": "media_playback",
         "expected_plan_tools": [
             "desktop.list_apps",

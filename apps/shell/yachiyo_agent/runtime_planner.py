@@ -1219,6 +1219,13 @@ class TaskIntentRouter:
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _app_command_palette_hint(text):
             return _empty_intent("code_task", text)
+        media_hint = media_playback_hint(text)
+        if (
+            str(media_hint.get("action") or "").strip() == "play"
+            and str(media_hint.get("app_name") or "").strip()
+            and str(media_hint.get("query") or "").strip()
+        ):
+            return _empty_intent("code_task", text)
         app_hint = _app_name_hint(text)
         if app_hint and (
             _app_search_hint(text, app_hint)

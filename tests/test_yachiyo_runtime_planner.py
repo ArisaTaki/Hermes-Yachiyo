@@ -9137,6 +9137,9 @@ def test_runtime_planner_routes_unknown_named_music_app_query_through_app_search
         ("打开 YouTube Music 播放 lo-fi", "YouTube Music", "lo-fi"),
         ("用 Vox 播放 jazz", "Vox", "jazz"),
         ("play jazz in Doppler", "Doppler", "jazz"),
+        ("open VLC play test", "VLC", "test"),
+        ("open foobar2000 play test", "foobar2000", "test"),
+        ("use VLC to play test", "VLC", "test"),
     )
 
     for prompt, app_name, query in cases:
@@ -9171,6 +9174,19 @@ def test_runtime_planner_routes_unknown_named_music_app_query_through_app_search
         assert _step_by_id(decision, "play-media-search-result").input_preview == {
             "app_name": app_name
         }
+        requests = planner_tool_requests(prompt, allowed_tools)
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ]
+        assert requests[0]["input"] == {"query": app_name, "limit": 20}
+        assert requests[1]["input"] == {"app_name": app_name, "action": "find"}
+        assert requests[2]["input"] == {"text": query}
+        assert requests[4]["input"] == {"app_name": app_name}
         assert "media.apple_music_play" not in [
             step.tool_name for step in decision.plan.tool_plan.steps
         ]
