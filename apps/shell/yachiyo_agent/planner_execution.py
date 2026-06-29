@@ -1421,6 +1421,9 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             if fallback_requests:
                 return fallback_requests
             return []
+        url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
+        if url and "browser.open_url" not in allowed:
+            return []
         selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
         if not selector:
             return []
@@ -1432,14 +1435,23 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             value = decision.selected_intent.inputs.get(key)
             if value not in (None, ""):
                 payload[key] = value
-        return [
-            *prepare_requests,
+        requests = [*prepare_requests]
+        if url:
+            requests.append(
+                _request(
+                    "browser.open_url",
+                    {"url": url},
+                    planning_reason="planner_fallback_web_research",
+                )
+            )
+        requests.append(
             _request(
                 "browser.click",
                 payload,
                 planning_reason="planner_fallback_web_research",
             )
-        ]
+        )
+        return requests
     if browser_action == "type_text":
         if "browser.type_text" not in allowed:
             return []
@@ -2166,6 +2178,26 @@ def _web_request_needs_model_followup(prompt: str) -> bool:
             "分析",
             "摘要",
             "输出",
+            "最像",
+            "最接近",
+            "相关",
+            "有关",
+            "匹配",
+            "合适",
+            "适合",
+            "应该",
+            "可能",
+            "哪个",
+            "哪里",
+            "哪一个",
+            "which",
+            "where",
+            "closest",
+            "similar",
+            "related",
+            "matching",
+            "appropriate",
+            "suitable",
         ),
     )
 

@@ -2918,6 +2918,37 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert link_step.action == "read_current_page"
 
 
+def test_runtime_planner_reads_page_before_ambiguous_browser_click() -> None:
+    prompt = "在当前网页点击最像登录的按钮"
+    allowed_tools = ["browser.current_page", "browser.click", "desktop.click_ui_element"]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "current_page",
+        "target_hint": "最像登录的",
+        "reason": "resolve_ambiguous_click_target",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-current-page"
+    ]
+    step = _step_by_id(decision, "read-current-page")
+    assert step.tool_name == "browser.current_page"
+    assert step.approval_required is False
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -3931,6 +3962,56 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     assert click_step.input_preview == {"selector": "search-result=1", "click_count": 1}
     assert click_step.approval_required is True
     assert click_step.depends_on == ["open-web-search"]
+
+    explicit_url_click = RuntimePlanner().decision(
+        "打开 https://example.com 然后点击 More information 链接",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "browser.open_url",
+            "browser.click",
+        ],
+    )
+    assert explicit_url_click.selected_intent.kind == "web_research"
+    assert explicit_url_click.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "browser_action": "click",
+        "selector": "text=More information",
+        "click_count": 1,
+    }
+    assert [step.step_id for step in explicit_url_click.plan.tool_plan.steps] == [
+        "open-web-url",
+        "click-current-page-element",
+    ]
+    assert _step_by_id(explicit_url_click, "open-web-url").tool_name == "browser.open_url"
+    explicit_click_step = _step_by_id(explicit_url_click, "click-current-page-element")
+    assert explicit_click_step.tool_name == "browser.click"
+    assert explicit_click_step.input_preview == {
+        "selector": "text=More information",
+        "click_count": 1,
+    }
+    assert explicit_click_step.approval_required is True
+    assert explicit_click_step.depends_on == ["open-web-url"]
+    assert planner_tool_requests(
+        "打开 https://example.com 然后点击 More information 链接",
+        ["browser.open_url", "browser.click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=More information", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
 
     english_first_result = RuntimePlanner().decision(
         "search Chrome for OpenAI and open first result",

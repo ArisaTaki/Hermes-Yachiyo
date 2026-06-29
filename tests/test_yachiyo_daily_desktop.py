@@ -145,6 +145,44 @@ def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_
         assert requests[1]["input"] == {"app_name": app_name}
 
 
+def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "打开 https://example.com 然后点击 More information 链接",
+        allowed_tools=["browser.open_url", "browser.click", "desktop.list_apps", "app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=More information", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+
+
+def test_planner_first_daily_desktop_entrypoint_reads_page_for_ambiguous_click() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在当前网页点击最像登录的按钮",
+        allowed_tools=["browser.current_page", "browser.click", "desktop.click_ui_element"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_with_text() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "在 Notion 新建一个页面，标题是本周业绩总结",

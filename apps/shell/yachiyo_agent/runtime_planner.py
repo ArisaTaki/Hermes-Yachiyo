@@ -299,6 +299,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _explicit_browser_url_hint(text):
+            return _empty_intent("desktop_operation", text)
         if _chat_status_meta_text_hint(text):
             return _empty_intent("desktop_operation", text)
         if _direct_communication_candidate_hint(text):
@@ -4264,6 +4266,26 @@ class RuntimePlanner:
                         depends_on=artifact_depends_on,
                     )
                 return steps
+            if browser_action == "click" and url:
+                open_url_step = _step(
+                    intent,
+                    "open-web-url",
+                    "Open web URL",
+                    "browser.research",
+                    _first_allowed(("browser.open_url",), allowed),
+                    input_preview={"url": url},
+                    risk_level="low",
+                    approval_required=False,
+                    depends_on=[prepare_step_id] if prepare_step_id else [],
+                    reason="Open the explicit URL before running the requested browser click.",
+                )
+                click_step = _with_step_dependencies(main_step, ["open-web-url"])
+                return [
+                    *([discover_step] if discover_step is not None else []),
+                    *([prepare_step] if prepare_step is not None else []),
+                    open_url_step,
+                    click_step,
+                ]
             steps = [
                 *([discover_step] if discover_step is not None else []),
                 *([prepare_step] if prepare_step is not None else []),
@@ -15716,12 +15738,34 @@ def _browser_click_hint(text: str) -> dict[str, Any]:
         label = _clean_browser_element_label(match.group("label"))
         if not label or _looks_like_click_coordinate_label(label):
             continue
+        if _browser_click_target_needs_observation_choice(value, label):
+            return {
+                "browser_action": "current_page",
+                "target_hint": label,
+                "reason": "resolve_ambiguous_click_target",
+            }
         return {
             "browser_action": "click",
             "selector": _browser_selector_from_label(label),
             "click_count": 1,
         }
     return {}
+
+
+def _browser_click_target_needs_observation_choice(text: str, label: str) -> bool:
+    value = f"{_clean_prompt(text)} {str(label or '').strip()}"
+    return bool(
+        re.search(
+            r"(?:最像|最接近|相关|有关|匹配|合适|适合|应该|可能|哪个|哪里|哪一个|哪项|哪条)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:closest|similar|related|matching|appropriate|suitable|which|where|should|possible)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_browser_app_field_typing(text: str) -> bool:
