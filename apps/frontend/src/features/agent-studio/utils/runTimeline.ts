@@ -455,13 +455,20 @@ function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>):
   const record = snapshot as Record<string, unknown>;
   const textItemCount = publicRunEventPayloadNumberString(record, 'text_item_count');
   const elementCount = publicRunEventPayloadNumberString(record, 'element_count');
+  const rows = publicRunEventPayloadNumberString(record, 'rows');
+  const columns = publicRunEventPayloadArrayLength(record, 'columns');
+  const artifactCount = publicRunEventPayloadNumberString(record, 'artifact_count');
   return [
     publicRunEventPayloadString(record, 'source_tool'),
     publicRunEventPayloadString(record, 'app_name'),
     publicRunEventPayloadString(record, 'title'),
     publicRunEventPayloadString(record, 'url'),
+    publicRunEventPayloadString(record, 'source_kind'),
+    rows ? `${rows} 行` : '',
+    columns ? `${columns} 列` : '',
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
+    artifactCount ? `${artifactCount} 个产物` : '',
     publicRunEventPayloadString(record, 'path'),
   ].filter(Boolean).join(' · ');
 }
@@ -470,4 +477,9 @@ function publicRunEventPayloadNumberString(payload: Record<string, unknown>, key
   const value = payload[key];
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return publicRunEventPayloadString(payload, key);
+}
+
+function publicRunEventPayloadArrayLength(payload: Record<string, unknown>, key: string): number {
+  const value = payload[key];
+  return Array.isArray(value) ? value.length : 0;
 }

@@ -19,6 +19,9 @@ def test_data_analysis_artifact_smoke_writes_and_reads_back_artifacts(tmp_path):
         {"path": "reports/sales.html", "kind": "html"},
         {"path": "reports/sales-chart.png", "kind": "chart", "actual_kind": "image"},
     ]
+    assert evidence["followup_snapshot"]["source_tool"] == "data.analyze"
+    assert evidence["followup_snapshot"]["artifact_paths"] == smoke.ARTIFACT_PATHS
+    assert "Data analysis result for inputs/sales.csv (csv)." in evidence["followup_snapshot"]["text"]
     assert {item["check"] for item in evidence["readback"]} == {
         "markdown_report",
         "csv_summary",
@@ -37,3 +40,4 @@ def test_data_analysis_artifact_smoke_cli_outputs_json(capsys, tmp_path):
     assert output["mode"] == "data_analysis_artifact_smoke"
     assert output["input_path"] == smoke.SAMPLE_PATH
     assert output["result"]["artifact_paths"] == smoke.ARTIFACT_PATHS
+    assert output["followup_snapshot"]["source_tool"] == "data.analyze"

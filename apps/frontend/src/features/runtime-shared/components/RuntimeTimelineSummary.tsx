@@ -236,13 +236,20 @@ function runtimeTimelineContentSnapshotDetail(event: RuntimeTimelineEventSnapsho
   const record = snapshot as Record<string, unknown>;
   const textItemCount = runtimeTimelineRecordNumberString(record, 'text_item_count');
   const elementCount = runtimeTimelineRecordNumberString(record, 'element_count');
+  const rows = runtimeTimelineRecordNumberString(record, 'rows');
+  const columns = runtimeTimelineRecordArrayLength(record, 'columns');
+  const artifactCount = runtimeTimelineRecordNumberString(record, 'artifact_count');
   return [
     runtimeTimelineRecordString(record, 'source_tool'),
     runtimeTimelineRecordString(record, 'app_name'),
     runtimeTimelineRecordString(record, 'title'),
     runtimeTimelineRecordString(record, 'url'),
+    runtimeTimelineRecordString(record, 'source_kind'),
+    rows ? `${rows} 行` : '',
+    columns ? `${columns} 列` : '',
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
+    artifactCount ? `${artifactCount} 个产物` : '',
     runtimeTimelineRecordString(record, 'path'),
   ].filter(Boolean).join(' · ');
 }
@@ -256,6 +263,11 @@ function runtimeTimelineRecordNumberString(record: Record<string, unknown>, key:
   const value = record[key];
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return runtimeTimelineRecordString(record, key);
+}
+
+function runtimeTimelineRecordArrayLength(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function runtimeTimelineLooksInternalLabel(value: string): boolean {

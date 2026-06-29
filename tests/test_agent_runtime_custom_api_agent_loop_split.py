@@ -864,6 +864,124 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     assert "region,revenue\nEast,10\nWest,20" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "请分析 data/sales.csv 并把结果发给小明"}]
+
+    def fake_run_tool_requests(tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        request = tool_requests[0]
+        input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+        result = {
+            "ok": True,
+            "path": "data/sales.csv",
+            "source_kind": "csv",
+            "rows": 3,
+            "analyzed_rows": 3,
+            "columns": ["region", "revenue", "units"],
+            "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+            "artifact_manifest": [
+                {"path": "analysis-report.md", "kind": "markdown"},
+                {"path": "analysis-chart.png", "kind": "chart"},
+            ],
+            "summary": "Analyzed data/sales.csv: 3 rows, 3 columns. Report: analysis-report.md.",
+        }
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                str(request.get("tool") or ""),
+                input_preview=input_preview,
+                result=result,
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["data.analyze", "workspace.read", "terminal.run", "artifact.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for data analysis.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "analysis ready"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-data-analysis-followup",
+    )
+
+    assert str(result) == "analysis ready"
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["analysis_report"],
+                "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+    followup_event = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup_event["planning_reason"] == "planner_builtin_data_analysis"
+    assert followup_event["observation_tools"] == ["data.analyze"]
+    assert followup_event["content_snapshot"]["source_tool"] == "data.analyze"
+    assert followup_event["content_snapshot"]["rows"] == 3
+    assert followup_event["content_snapshot"]["columns"] == ["region", "revenue", "units"]
+    assert followup_event["content_snapshot"]["artifact_paths"] == [
+        "analysis-report.md",
+        "analysis-chart.png",
+    ]
+    assert model_calls[0][-1]["role"] == "user"
+    assert "Observed content snapshot:" in model_calls[0][-1]["content"]
+    assert "Data analysis result for data/sales.csv (csv)." in model_calls[0][-1]["content"]
+    assert "Artifacts: analysis-report.md (markdown), analysis-chart.png (chart)" in model_calls[0][-1]["content"]
+
+
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.runtime.followup_content_snapshot import data_analyze_content_snapshot
 
 SAMPLE_CSV = "region,revenue,units\nEast,10,1\nWest,20,2\nEast,30,3\n"
 SAMPLE_PATH = "inputs/sales.csv"
@@ -133,6 +134,14 @@ def run_smoke(workdir: Path) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise SmokeError("data.analyze returned a non-object result")
 
+    followup_snapshot = data_analyze_content_snapshot(
+        result,
+        {
+            "path": SAMPLE_PATH,
+            "source_kind": "csv",
+            "artifact_manifest": ARTIFACT_MANIFEST,
+        },
+    )
     artifacts = [item for item in result.get("artifacts") or [] if isinstance(item, dict)]
     artifact_by_path = {str(item.get("path") or ""): item for item in artifacts}
     readback = [
@@ -148,6 +157,9 @@ def run_smoke(workdir: Path) -> dict[str, Any]:
         and result.get("columns") == ["region", "revenue", "units"]
         and actual_paths == expected_paths
         and all(item.get("matched") is True for item in readback)
+        and followup_snapshot.get("source_tool") == "data.analyze"
+        and followup_snapshot.get("artifact_paths") == expected_paths
+        and "Data analysis result for inputs/sales.csv (csv)." in str(followup_snapshot.get("text") or "")
     )
     evidence: dict[str, Any] = {
         "ok": ok,
@@ -156,6 +168,7 @@ def run_smoke(workdir: Path) -> dict[str, Any]:
         "artifact_root": str(_artifact_root(resolved_workdir)),
         "input_path": SAMPLE_PATH,
         "result": _selected_result_fields(result),
+        "followup_snapshot": followup_snapshot,
         "readback": readback,
     }
     if not ok:

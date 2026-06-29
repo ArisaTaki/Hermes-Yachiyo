@@ -16,6 +16,7 @@ def latest_followup_content_snapshot(
             "browser.extract_text",
             "browser.open_url_and_extract_text",
             "clipboard.read",
+            "data.analyze",
             "desktop.ui_elements",
             "screen.capture",
             "workspace.read",
@@ -36,6 +37,8 @@ def latest_followup_content_snapshot(
             return browser_extract_text_content_snapshot(result, input_preview, source_tool=tool_name)
         if tool_name == "clipboard.read":
             return clipboard_read_content_snapshot(result, input_preview)
+        if tool_name == "data.analyze":
+            return data_analyze_content_snapshot(result, input_preview)
         if tool_name == "workspace.read":
             return workspace_read_content_snapshot(result, input_preview)
     return {}
@@ -170,6 +173,73 @@ def workspace_read_content_snapshot(
     return _compact_snapshot(snapshot)
 
 
+def data_analyze_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_paths = _ordered_text_list(result.get("artifact_paths"))
+    if not artifact_paths:
+        artifact_paths = [
+            str(item.get("path") or "").strip()
+            for item in result.get("artifacts") or []
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ]
+    artifact_manifest = _artifact_manifest_preview(
+        result.get("artifact_manifest") or input_preview.get("artifact_manifest")
+    )
+    columns = _ordered_text_list(result.get("columns"))
+    path = str(result.get("path") or input_preview.get("path") or "").strip()
+    source_kind = str(result.get("source_kind") or input_preview.get("source_kind") or "").strip()
+    snapshot: dict[str, Any] = {
+        "source_tool": "data.analyze",
+        "ok": bool(result.get("ok")),
+        "path": path,
+        "source_kind": source_kind,
+        "rows": _number_value(result.get("rows")),
+        "analyzed_rows": _number_value(result.get("analyzed_rows")),
+        "columns": columns,
+        "artifact_paths": artifact_paths,
+        "artifact_manifest": artifact_manifest,
+        "artifact_count": len(artifact_paths),
+    }
+    text = data_analyze_snapshot_text(snapshot, result)
+    if text:
+        snapshot["text"] = text
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def data_analyze_snapshot_text(snapshot: dict[str, Any], result: dict[str, Any]) -> str:
+    if snapshot.get("ok") is False:
+        summary = clean_followup_content_text(result.get("summary") or result.get("error"), max_chars=1000)
+        return f"Data analysis failed: {summary}" if summary else ""
+    path = str(snapshot.get("path") or "data source")
+    source_kind = str(snapshot.get("source_kind") or "data")
+    rows = _number_value(snapshot.get("rows"))
+    analyzed_rows = _number_value(snapshot.get("analyzed_rows"))
+    columns = _ordered_text_list(snapshot.get("columns"))
+    artifact_manifest = snapshot.get("artifact_manifest")
+    artifact_paths = _ordered_text_list(snapshot.get("artifact_paths"))
+    lines = [f"Data analysis result for {path} ({source_kind})."]
+    if rows:
+        row_text = f"{rows} rows"
+        if analyzed_rows and analyzed_rows != rows:
+            row_text = f"{row_text}; analyzed {analyzed_rows}"
+        lines.append(row_text)
+    if columns:
+        lines.append(f"Columns: {', '.join(columns[:12])}")
+    artifacts_text = _artifact_manifest_text(artifact_manifest)
+    if not artifacts_text and artifact_paths:
+        artifacts_text = ", ".join(artifact_paths[:8])
+    if artifacts_text:
+        lines.append(f"Artifacts: {artifacts_text}")
+    summary = clean_followup_content_text(result.get("summary"), max_chars=1000)
+    if summary:
+        lines.append(summary)
+    return "\n".join(lines)
+
+
 def desktop_ui_element_text_lines(
     elements: list[Any],
     *,
@@ -270,6 +340,54 @@ def _add_failure_fields(snapshot: dict[str, Any], result: dict[str, Any]) -> Non
 
 def _compact_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in snapshot.items() if value not in ("", None, [])}
+
+
+def _artifact_manifest_preview(value: Any) -> list[dict[str, str]]:
+    items = value if isinstance(value, list) else []
+    manifest: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        kind = str(item.get("kind") or item.get("actual_kind") or "").strip()
+        entry = {"path": path}
+        if kind:
+            entry["kind"] = kind
+        manifest.append(entry)
+        if len(manifest) >= 8:
+            break
+    return manifest
+
+
+def _artifact_manifest_text(value: Any) -> str:
+    items = value if isinstance(value, list) else []
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        kind = str(item.get("kind") or "").strip()
+        parts.append(f"{path} ({kind})" if kind else path)
+    return ", ".join(parts)
+
+
+def _ordered_text_list(value: Any) -> list[str]:
+    items = value if isinstance(value, list) else []
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        values.append(text)
+    return values
 
 
 def _number_value(value: Any) -> int:

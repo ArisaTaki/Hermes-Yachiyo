@@ -227,6 +227,9 @@ Exit evidence:
 - Artifacts are observable and readable through existing task/run surfaces.
 - Sample dataset artifact readback is reproducible with
   `python scripts/smoke_data_analysis_artifacts.py --workdir tmp/data-analysis-artifact-smoke`.
+  The smoke also archives the `data.analyze` follow-up context snapshot so
+  Agent Studio/Run Timeline can replay rows, columns, and generated artifact
+  paths without relying on private tool output.
 
 ## Phase 7 - Prompt/Skill Runtime Doctrine
 

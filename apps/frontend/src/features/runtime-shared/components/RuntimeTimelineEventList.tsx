@@ -443,13 +443,20 @@ function runtimeEventContentSnapshot(
 function runtimeContentSnapshotMeta(snapshot: RuntimeTimelineEventRecord): string {
   const textItemCount = runtimeEventNumberString(snapshot, 'text_item_count');
   const elementCount = runtimeEventNumberString(snapshot, 'element_count');
+  const rows = runtimeEventNumberString(snapshot, 'rows');
+  const columns = runtimeEventArrayLength(snapshot, 'columns');
+  const artifactCount = runtimeEventNumberString(snapshot, 'artifact_count');
   const parts = [
     defaultString(snapshot.source_tool),
     defaultString(snapshot.app_name),
     defaultString(snapshot.title),
     defaultString(snapshot.url),
+    defaultString(snapshot.source_kind),
+    rows ? `${rows} 行` : '',
+    columns ? `${columns} 列` : '',
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
+    artifactCount ? `${artifactCount} 个产物` : '',
     defaultString(snapshot.path),
   ].filter(Boolean);
   return parts.join(' · ');
@@ -462,6 +469,14 @@ function runtimeEventNumberString(
   const value = record[key];
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return defaultString(value);
+}
+
+function runtimeEventArrayLength(
+  record: RuntimeTimelineEventRecord,
+  key: string,
+): number {
+  const value = record[key];
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function runtimeEventString(

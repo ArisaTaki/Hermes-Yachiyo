@@ -1,6 +1,7 @@
 from apps.shell.agent.runtime.followup_content_snapshot import (
     browser_extract_text_content_snapshot,
     clipboard_read_content_snapshot,
+    data_analyze_content_snapshot,
     desktop_ui_elements_content_snapshot,
     latest_followup_content_snapshot,
     screen_capture_content_snapshot,
@@ -180,6 +181,90 @@ def test_workspace_read_content_snapshot_records_path_and_content() -> None:
         "truncated": False,
         "text": "region,revenue\nEast,10\nWest,20",
     }
+
+
+def test_data_analyze_content_snapshot_records_artifact_context() -> None:
+    snapshot = data_analyze_content_snapshot(
+        {
+            "ok": True,
+            "path": "data/sales.csv",
+            "source_kind": "csv",
+            "rows": 3,
+            "analyzed_rows": 3,
+            "columns": ["region", "revenue", "units"],
+            "artifact_paths": [
+                "reports/sales.md",
+                "reports/sales-summary.csv",
+                "reports/sales-chart.png",
+            ],
+            "artifact_manifest": [
+                {"path": "reports/sales.md", "kind": "markdown"},
+                {"path": "reports/sales-summary.csv", "kind": "csv"},
+                {"path": "reports/sales-chart.png", "kind": "chart"},
+            ],
+            "summary": "Analyzed data/sales.csv: 3 rows, 3 columns. Report: reports/sales.md.",
+        },
+        {},
+    )
+
+    assert snapshot == {
+        "source_tool": "data.analyze",
+        "ok": True,
+        "path": "data/sales.csv",
+        "source_kind": "csv",
+        "rows": 3,
+        "analyzed_rows": 3,
+        "columns": ["region", "revenue", "units"],
+        "artifact_paths": [
+            "reports/sales.md",
+            "reports/sales-summary.csv",
+            "reports/sales-chart.png",
+        ],
+        "artifact_manifest": [
+            {"path": "reports/sales.md", "kind": "markdown"},
+            {"path": "reports/sales-summary.csv", "kind": "csv"},
+            {"path": "reports/sales-chart.png", "kind": "chart"},
+        ],
+        "artifact_count": 3,
+        "text": (
+            "Data analysis result for data/sales.csv (csv).\n"
+            "3 rows\n"
+            "Columns: region, revenue, units\n"
+            "Artifacts: reports/sales.md (markdown), "
+            "reports/sales-summary.csv (csv), reports/sales-chart.png (chart)\n"
+            "Analyzed data/sales.csv: 3 rows, 3 columns. Report: reports/sales.md."
+        ),
+    }
+
+
+def test_latest_followup_content_snapshot_reads_data_analysis_result() -> None:
+    snapshot = latest_followup_content_snapshot(
+        [
+            {
+                "event": "agent.tool.call",
+                "detail": "data.analyze",
+                "input_preview": {"path": "data/sales.csv", "source_kind": "csv"},
+                "result": {
+                    "ok": True,
+                    "path": "data/sales.csv",
+                    "source_kind": "csv",
+                    "rows": 2,
+                    "columns": ["region", "revenue"],
+                    "artifacts": [
+                        {"path": "analysis-report.md", "kind": "markdown"},
+                    ],
+                },
+            }
+        ],
+        ["data.analyze"],
+    )
+
+    assert snapshot["source_tool"] == "data.analyze"
+    assert snapshot["path"] == "data/sales.csv"
+    assert snapshot["rows"] == 2
+    assert snapshot["columns"] == ["region", "revenue"]
+    assert snapshot["artifact_paths"] == ["analysis-report.md"]
+    assert "Data analysis result for data/sales.csv (csv)." in snapshot["text"]
 
 
 def test_screen_capture_content_snapshot_preserves_recovery_details() -> None:
