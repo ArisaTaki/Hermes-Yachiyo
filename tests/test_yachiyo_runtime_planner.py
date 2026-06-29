@@ -2650,6 +2650,33 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "browser.open_url_and_extract_text"
     )
 
+    chrome_search_screenshot = RuntimePlanner().decision(
+        "在 Chrome 打开 OpenAI pricing 并截图",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "browser.open_url",
+            "browser.open_url_and_screenshot",
+        ],
+    )
+    assert chrome_search_screenshot.selected_intent.kind == "web_research"
+    assert chrome_search_screenshot.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+pricing",
+        "browser_action": "open_url_screenshot",
+        "query": "OpenAI pricing",
+        "reason": "user asked to capture the browser page after opening a URL",
+        "app_name": "Google Chrome",
+        "app_mode": "focus",
+    }
+    assert [step.step_id for step in chrome_search_screenshot.plan.tool_plan.steps] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "capture-web-url",
+    ]
+    assert _step_by_id(chrome_search_screenshot, "capture-web-url").tool_name == (
+        "browser.open_url_and_screenshot"
+    )
+
     chrome_first_result_summary = RuntimePlanner().decision(
         "打开 Chrome 搜索 OpenAI pricing，打开第一个结果并总结",
         allowed_tools=[
@@ -13778,6 +13805,72 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
             "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "打开 Safari 搜索 Hanako Hermes 对比并做总结",
+        allowed_tools=[*allowed, "app.open", "desktop.list_apps"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Safari"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {
+                "url": "https://www.google.com/search?q=Hanako+Hermes+%E5%AF%B9%E6%AF%94"
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "在 Chrome 打开 OpenAI pricing 并截图",
+        allowed_tools=[*allowed, "browser.open_url_and_screenshot", "app.focus", "desktop.list_apps"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_screenshot",
+            "input": {
+                "url": "https://www.google.com/search?q=OpenAI+pricing",
+                "reason": "user asked to capture the browser page after opening a URL",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert planner_tool_requests(
+        "打开 Chrome 搜索 OpenAI pricing 并截图",
+        allowed_tools=[*allowed, "browser.open_url_and_screenshot", "app.open", "desktop.list_apps"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_screenshot",
+            "input": {
+                "url": "https://www.google.com/search?q=OpenAI+pricing",
+                "reason": "user asked to capture the browser page after opening a URL",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
         },
     ]
     assert planner_tool_requests("百度 open hanako", allowed_tools=allowed) == [

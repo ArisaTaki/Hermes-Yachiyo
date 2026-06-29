@@ -910,6 +910,8 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         if _explicit_hotkey_request(text):
             return _empty_intent("web_research", text)
+        if _browser_internal_page_hint(text):
+            return _empty_intent("web_research", text)
         if _foreground_app_search_hint(text):
             return _empty_intent("web_research", text)
         if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
@@ -13266,7 +13268,13 @@ def _web_search_query(text: str) -> str:
     if search_surface and not _is_browser_or_search_app_name(search_surface):
         return ""
     app_name = _app_name_hint(text)
-    if app_name and not search_surface and not _is_browser_or_search_app_name(app_name):
+    explicit_browser_app = _explicit_browser_app_name_hint(text)
+    if (
+        app_name
+        and not search_surface
+        and not explicit_browser_app
+        and not _is_browser_or_search_app_name(app_name)
+    ):
         return ""
     research_report_query = _external_research_report_query(text)
     if research_report_query:
@@ -13350,6 +13358,12 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:打开|新建|开)\s*(?:一个|个)?\s*(?:新标签页?|新标签|new\s+tab)\s*"
         r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:(?:在|用|通过|打开|启动|开启)\s*)?"
+        r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
+        r"(?:里|中|上|内)?\s*"
+        r"(?:打开|访问|浏览|搜索|查找|检索)\s*"
+        r"(?!新标签页?|新标签|new\s+tab)(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)?\s*"
         r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
         r"(?:里|中|上|内)?\s*"
@@ -13361,6 +13375,11 @@ def _direct_web_search_query(text: str) -> str:
         r"(?P<query>[^。！？!?]+)$",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
         r"search\s+"
+        r"(?P<query>[^.!?]+)$",
+        r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+        r"(?:(?:open|launch|start|in|with|using)\s+)?"
+        r"(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave|browser)\s+"
+        r"(?:and\s+)?(?:open|visit|browse|search|find|look\s+up)\s+(?:for\s+)?"
         r"(?P<query>[^.!?]+)$",
         r"\b(?:google|baidu)\s+(?P<query>[^.!?,]+)$",
     )
@@ -13646,14 +13665,14 @@ def _clean_web_search_query(query: str) -> str:
     ).strip()
     value = re.sub(
         r"\s*(?:并|然后|并且|再|接着|之后|后|\b(?:and|then)\b)?\s*"
-        r"(?:读|读取|看看|看一下|看下|概括|总结|摘要)(?:一下|下)?"
+        r"(?:读|读取|看看|看一下|看下|概括|总结|摘要|做总结|做摘要)(?:一下|下)?"
         r"(?:搜索)?(?:结果|内容|当前页面|当前网页|网页|页面|current\s+page)?$",
         "",
         value,
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
-        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
+        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|做总结|汇总)(?:一份|一下|成)?"
         r"[^。；;！!？?]{0,24}(?:报告|总结|文档|结果|表格|清单|table)$",
         "",
         value,
