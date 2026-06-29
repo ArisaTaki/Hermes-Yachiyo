@@ -337,6 +337,11 @@ class TaskIntentRouter:
         safe_shortcut_sequence = safe_shortcut_sequence_hint(text)
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
+        creative_canvas = _creative_canvas_create_hint(text)
+        if creative_canvas and safe_shortcut is None:
+            safe_shortcut = {"action": "new_document"}
+        if creative_canvas and ui_inspection is None and screen_capture is None:
+            ui_inspection = {"role_filter": "text", "limit": 80}
         safe_key = safe_key_hint(text)
         safe_scroll = safe_scroll_hint(text)
         hotkey = hotkey_hint(text)
@@ -829,6 +834,8 @@ class TaskIntentRouter:
             inputs["safe_shortcut_sequence_hint"] = safe_shortcut_sequence
         if safe_shortcut is not None:
             inputs["safe_shortcut_hint"] = safe_shortcut
+        if creative_canvas:
+            inputs["creative_canvas_hint"] = creative_canvas
         if safe_key is not None:
             inputs["safe_key_hint"] = safe_key
         if safe_scroll is not None:
@@ -2111,6 +2118,15 @@ class RuntimePlanner:
         intent_safe_shortcut = intent.inputs.get("safe_shortcut_hint")
         if isinstance(intent_safe_shortcut, Mapping):
             safe_shortcut = dict(intent_safe_shortcut)
+        creative_canvas = (
+            dict(intent.inputs.get("creative_canvas_hint"))
+            if isinstance(intent.inputs.get("creative_canvas_hint"), Mapping)
+            else {}
+        )
+        if creative_canvas and safe_shortcut is None:
+            safe_shortcut = {"action": "new_document"}
+        if creative_canvas and ui_inspection is None and screen_capture is None:
+            ui_inspection = {"role_filter": "text", "limit": 80}
         safe_shortcut_sequence = safe_shortcut_sequence_hint(intent.user_goal)
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
@@ -2786,10 +2802,13 @@ class RuntimePlanner:
         ).strip()
         if (
             app_name
-            and screen_capture is not None
+            and (screen_capture is not None or creative_canvas)
             and observe_then_create_action in {"new_note", "new_document"}
             and not any(item for item in (click_target, type_target, safe_type_text) if item)
         ):
+            observe_payload = {"limit": 80}
+            if creative_canvas:
+                observe_payload["role_filter"] = "text"
             inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
             operation_tool = _first_allowed(
                 app_foreground_tool_candidates(mode, "safe_shortcut"),
@@ -2810,7 +2829,7 @@ class RuntimePlanner:
                         inspect_tool,
                         input_preview=_desktop_inspect_app_input_preview(
                             app_name,
-                            {"limit": 80},
+                            observe_payload,
                             open_if_needed=True,
                             focus=True,
                         ),
@@ -2857,6 +2876,13 @@ class RuntimePlanner:
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
                 allowed,
             )
+            verify_input_preview = _desktop_verify_input_preview(
+                verify_tool,
+                app_name=app_name,
+                operation_preview=operation_preview,
+            )
+            if creative_canvas and verify_tool == "desktop.ui_elements":
+                verify_input_preview = {"role_filter": "text", "limit": 80}
             steps.append(
                 _step(
                     intent,
@@ -2864,11 +2890,7 @@ class RuntimePlanner:
                     "Verify desktop result",
                     "desktop.app_discovery",
                     verify_tool,
-                    input_preview=_desktop_verify_input_preview(
-                        verify_tool,
-                        app_name=app_name,
-                        operation_preview=operation_preview,
-                    ),
+                    input_preview=verify_input_preview,
                     depends_on=["operate-foreground-ui"],
                     reason="Observe the app after the create action.",
                 )
@@ -16461,6 +16483,43 @@ def _desktop_discovery_hint(text: str) -> dict[str, Any] | None:
     if _looks_like_installed_apps_request(value, lowered):
         return {"action": "discover_apps"}
     return None
+
+
+def _creative_canvas_create_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if not value:
+        return {}
+    if not (
+        re.search(
+            r"(?:新建|创建|新增|建立)\s*(?:一个|一张|一幅|一份|新的|新)?"
+            r"[^。！？!?，,]{0,40}?(?:图片|图像|画布)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:make|create|open)?\s*(?:a\s+)?new\s+"
+            r"(?:image|picture|canvas)\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:make|create|open)\s+"
+            r"(?:an?\s+)?(?:image|picture|canvas)\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    ):
+        return {}
+    hint: dict[str, Any] = {"kind": "image_canvas"}
+    dimension = re.search(
+        r"(?<!\d)(?P<width>\d{2,5})\s*(?:x|×|X|\*)\s*(?P<height>\d{2,5})(?!\d)",
+        value,
+    )
+    if dimension:
+        hint["width"] = int(dimension.group("width"))
+        hint["height"] = int(dimension.group("height"))
+    return hint
 
 
 def _app_capability_discovery_hint(text: str) -> dict[str, str]:

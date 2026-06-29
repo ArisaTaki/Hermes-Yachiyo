@@ -3668,6 +3668,84 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "action": "new_note",
     }
 
+    creative_canvas = RuntimePlanner().decision(
+        "打开 Pixelmator Pro 新建一张 1024x1024 图片",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert creative_canvas.selected_intent.kind == "desktop_operation"
+    assert creative_canvas.selected_intent.inputs["app_name_hint"] == "Pixelmator Pro"
+    assert creative_canvas.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_document"
+    }
+    assert creative_canvas.selected_intent.inputs["creative_canvas_hint"] == {
+        "kind": "image_canvas",
+        "width": 1024,
+        "height": 1024,
+    }
+    assert [step.step_id for step in creative_canvas.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(creative_canvas, "inspect-app").input_preview == {
+        "app_name": "Pixelmator Pro",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(creative_canvas, "operate-foreground-ui").input_preview == {
+        "app_name": "Pixelmator Pro",
+        "action": "new_document",
+    }
+    assert _step_by_id(creative_canvas, "verify-desktop-result").input_preview == {
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert planner_tool_requests(
+        "打开 Pixelmator Pro 新建一张 1024x1024 图片",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "text",
+                "limit": 80,
+                "app_name": "Pixelmator Pro",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Pixelmator Pro", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+    ]
+
     observe_then_create_with_text = RuntimePlanner().decision(
         "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记，内容写本周业绩不错",
         allowed_tools=[

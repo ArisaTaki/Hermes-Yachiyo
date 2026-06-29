@@ -757,6 +757,13 @@ def _desktop_observation_step_needs_model_followup(
     prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
     if not prompt:
         return False
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if (
+        step_id == "verify-desktop-result"
+        and isinstance(inputs, Mapping)
+        and isinstance(inputs.get("creative_canvas_hint"), Mapping)
+    ):
+        return True
     return bool(
         re.search(
             r"(?:判断|决定|分析|识别|告诉|说明|总结|摘要|下一步|该点哪里|该点哪个|"
