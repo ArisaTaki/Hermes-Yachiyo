@@ -332,6 +332,7 @@ class RuntimeCustomApiAgentLoop:
                     auto_followup_request = self._auto_data_analysis_request_from_discovery(
                         planned_tool_requests,
                         allowed_tools,
+                        direct_tool_selection_payload,
                         timeline,
                     )
                     if auto_followup_request:
@@ -563,6 +564,7 @@ class RuntimeCustomApiAgentLoop:
     def _auto_data_analysis_request_from_discovery(
         planned_tool_requests: list[dict[str, Any]],
         allowed_tools: list[str],
+        selection_payload: dict[str, Any],
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         allowed = {str(tool or "").strip() for tool in allowed_tools}
@@ -575,6 +577,13 @@ class RuntimeCustomApiAgentLoop:
             if isinstance(request, dict)
         ):
             return None
+        captured_request = _auto_data_analysis_request_from_captured_content(
+            planned_tool_requests,
+            selection_payload,
+            timeline,
+        )
+        if captured_request:
+            return captured_request
         latest_list = _latest_workspace_list_event(timeline)
         if latest_list is None:
             return None
@@ -3365,6 +3374,120 @@ def _followup_content_snapshot_body(value: dict[str, Any]) -> str:
     if value.get("ok") is False:
         return str(value.get("summary") or value.get("error") or "").strip()
     return ""
+
+
+def _auto_data_analysis_request_from_captured_content(
+    planned_tool_requests: list[dict[str, Any]],
+    selection_payload: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    observation_tools = _ordered_text_list(
+        [
+            str(request.get("tool") or "").strip()
+            for request in planned_tool_requests
+            if isinstance(request, dict)
+            and bool(request.get("continue_to_model"))
+            and str(request.get("tool") or "").strip()
+        ]
+    )
+    snapshots = followup_content_snapshots(timeline, observation_tools)
+    snapshot = snapshots[-1] if snapshots else latest_followup_content_snapshot(timeline, observation_tools)
+    if not snapshot or snapshot.get("ok") is False:
+        return None
+    source_tool = str(snapshot.get("source_tool") or "").strip()
+    if source_tool == "data.analyze":
+        return None
+    content = str(snapshot.get("text") or "").strip()
+    if not content:
+        return None
+    artifact_paths = _string_list(selection_payload.get("artifacts_expected"))
+    if not artifact_paths:
+        artifact_paths = ["analysis-report.md"]
+    artifact_path = artifact_paths[0]
+    input_payload: dict[str, Any] = {
+        "content": content,
+        "display_path": _captured_data_display_path(snapshot),
+        "artifact_path": artifact_path,
+        "source_kind": _captured_data_source_kind(content),
+        "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
+        "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
+    }
+    if len(artifact_paths) > 1:
+        input_payload["artifact_paths"] = artifact_paths
+    return {
+        "protocol": "json_fallback",
+        "tool": "data.analyze",
+        "input": input_payload,
+        "source": "runtime_planner",
+        "planning_reason": "planner_builtin_data_analysis",
+    }
+
+
+def _captured_data_display_path(snapshot: dict[str, Any]) -> str:
+    for key in ("path", "url", "title", "app_name", "source_tool"):
+        value = str(snapshot.get(key) or "").strip()
+        if value:
+            if key == "source_tool":
+                return f"captured:{value}"
+            return value
+    return "captured:data"
+
+
+def _captured_data_source_kind(content: str) -> str:
+    text = str(content or "").strip()
+    if not text:
+        return "text_table"
+    if text.startswith("[") or text.startswith("{"):
+        return "json"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if lines and all(line.startswith("{") and line.endswith("}") for line in lines[:5]):
+        return "jsonl"
+    sample = "\n".join(lines[:5])
+    if "\t" in sample:
+        return "tsv"
+    if "|" in sample:
+        return "text_table"
+    if "," in sample:
+        return "csv"
+    return "text_table"
+
+
+def _requested_outputs_from_artifact_paths(paths: list[str]) -> list[str]:
+    outputs: list[str] = []
+    for path in paths:
+        suffix = _artifact_path_suffix(path)
+        output = {
+            ".md": "report",
+            ".markdown": "report",
+            ".csv": "table",
+            ".tsv": "table",
+            ".html": "report",
+            ".png": "chart",
+        }.get(suffix)
+        if output and output not in outputs:
+            outputs.append(output)
+    return outputs or ["report"]
+
+
+def _artifact_manifest_from_paths(paths: list[str]) -> list[dict[str, str]]:
+    manifest: list[dict[str, str]] = []
+    for path in paths:
+        kind = {
+            ".md": "markdown",
+            ".markdown": "markdown",
+            ".csv": "csv",
+            ".tsv": "csv",
+            ".html": "html",
+            ".png": "chart",
+        }.get(_artifact_path_suffix(path), "artifact")
+        manifest.append({"path": path, "kind": kind})
+    return manifest
+
+
+def _artifact_path_suffix(path: str) -> str:
+    clean = str(path or "").strip().lower()
+    index = clean.rfind(".")
+    return clean[index:] if index >= 0 else ""
 
 
 def _visible_daily_desktop_completed_steps(

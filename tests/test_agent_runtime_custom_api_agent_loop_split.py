@@ -907,6 +907,147 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     assert "region,revenue\nEast,10\nWest,20" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "分析桌面上这个表格并输出报告"}]
+
+    def fake_run_tool_requests(tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        request = tool_requests[0]
+        tool = str(request.get("tool") or "")
+        input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if tool == "desktop.ui_elements":
+            result = {
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {"value": "| region | revenue |"},
+                        {"value": "| --- | ---: |"},
+                        {"value": "| East | 10 |"},
+                        {"value": "| West | 20 |"},
+                    ],
+                    "count": 4,
+                },
+            }
+        elif tool == "data.analyze":
+            result = {
+                "ok": True,
+                "path": str(input_preview.get("display_path") or ""),
+                "source_kind": str(input_preview.get("source_kind") or ""),
+                "rows": 2,
+                "analyzed_rows": 2,
+                "columns": ["region", "revenue"],
+                "artifact_path": "analysis-report.md",
+                "artifact_paths": ["analysis-report.md"],
+                "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+                "summary": "Analyzed captured UI table.",
+            }
+        else:
+            result = {"ok": True}
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                tool,
+                input_preview=input_preview,
+                result=result,
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["desktop.ui_elements", "data.analyze", "artifact.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for captured data analysis.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "model should not be needed"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-visible-table-analysis",
+    )
+
+    assert "已分析" in str(result)
+    assert model_calls == []
+    assert [run["tool_requests"][0]["tool"] for run in tool_runs] == [
+        "desktop.ui_elements",
+        "data.analyze",
+    ]
+    assert tool_runs[0]["tool_requests"][0] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "text", "limit": 80},
+        "source": "runtime_planner",
+        "planning_reason": "planner_prefetch_data_source",
+        "continue_to_model": True,
+    }
+    assert tool_runs[1]["tool_requests"][0] == {
+        "protocol": "json_fallback",
+        "tool": "data.analyze",
+        "input": {
+            "content": (
+                "| region | revenue |\n"
+                "| --- | ---: |\n"
+                "| East | 10 |\n"
+                "| West | 20 |"
+            ),
+            "display_path": "captured:desktop.ui_elements",
+            "artifact_path": "analysis-report.md",
+            "source_kind": "text_table",
+            "requested_outputs": ["report"],
+            "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_builtin_data_analysis",
+    }
+    auto_plan_event = [
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_planned"
+        and event["detail"] == "data.analyze"
+    ][0]
+    assert auto_plan_event["planning_reason"] == "planner_builtin_data_analysis"
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+
+
 def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
