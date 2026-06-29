@@ -62,6 +62,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
   }
+  if (name === 'agent.desktop.readiness_recovered') {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `桌面就绪已恢复 · ${toolLabel}` : '桌面就绪已恢复';
+  }
   if (name === 'agent.desktop.intent_unavailable') {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
@@ -159,6 +163,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'agent.desktop.intent_planned') return 'tool';
   if (name === 'agent.desktop.intent_approval_required') return 'approval';
   if (name === 'agent.desktop.permission_recovery') return 'approval';
+  if (name === 'agent.desktop.readiness_recovered') return 'ready';
   if (name === 'agent.desktop.intent_completed') return 'ready';
   if (name === 'agent.desktop.intent_unavailable') return 'danger';
   if (name === 'agent.model.followup_context') return 'model';

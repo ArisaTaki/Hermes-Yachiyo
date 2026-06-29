@@ -586,12 +586,34 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 tool_result,
             )
-            foreground_readiness_blocker = _updated_foreground_readiness_blocker(
+            previous_readiness_blocker = foreground_readiness_blocker
+            next_readiness_blocker = _updated_foreground_readiness_blocker(
                 foreground_readiness_blocker,
                 tool_name,
                 raw_input,
                 tool_result,
             )
+            if previous_readiness_blocker is not None and next_readiness_blocker is None:
+                recovered_payload = _foreground_readiness_recovered_payload(
+                    previous_readiness_blocker,
+                    tool_name,
+                    input_preview,
+                    tool_result,
+                )
+                timeline.append(
+                    self._timeline(
+                        "agent.desktop.readiness_recovered",
+                        tool_name,
+                        **recovered_payload,
+                    )
+                )
+                if run_id:
+                    self._append_run_event(
+                        run_id,
+                        "agent.desktop.readiness_recovered",
+                        recovered_payload,
+                    )
+            foreground_readiness_blocker = next_readiness_blocker
 
 
 _FOREGROUND_READINESS_GATED_TOOLS = {
@@ -726,6 +748,26 @@ def _updated_foreground_readiness_blocker(
     if not _clears_foreground_readiness_blocker(blocker, tool_name, raw_input, tool_result):
         return blocker
     return None
+
+
+def _foreground_readiness_recovered_payload(
+    blocker: dict[str, Any],
+    tool_name: str,
+    input_preview: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "tool": tool_name,
+        "recovery_tool": tool_name,
+        "input_preview": input_preview,
+        "status": "recovered",
+        "app_name": str(blocker.get("app_name") or "").strip(),
+        "requested_app_name": str(blocker.get("requested_app_name") or "").strip(),
+        "blocking_conditions": _string_list(blocker.get("blocking_conditions")),
+        "source_tool": str(blocker.get("source_tool") or "desktop.inspect_app").strip(),
+        "source_summary": str(blocker.get("summary") or "").strip(),
+        "result_summary": str(tool_result.get("summary") or "").strip(),
+    }
 
 
 def _clears_foreground_readiness_blocker(

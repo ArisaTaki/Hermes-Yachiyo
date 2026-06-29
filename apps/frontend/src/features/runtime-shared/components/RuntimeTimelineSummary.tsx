@@ -71,6 +71,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
   }
+  if (type === 'agent.desktop.readiness_recovered') {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `桌面就绪已恢复 · ${toolLabel}` : '桌面就绪已恢复';
+  }
   if (type === 'agent.desktop.intent_unavailable') {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';

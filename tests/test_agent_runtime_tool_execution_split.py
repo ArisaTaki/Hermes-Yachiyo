@@ -856,6 +856,7 @@ def test_runtime_tool_request_runner_keeps_readiness_blocker_after_failed_recove
 
 def test_runtime_tool_request_runner_clears_app_not_found_blocker_after_discovery() -> None:
     calls: list[str] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
 
     def call_agent_tool(
@@ -912,7 +913,7 @@ def test_runtime_tool_request_runner_clears_app_not_found_blocker_after_discover
         )
         return result
 
-    runner = _runner(call_agent_tool=call_agent_tool)
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
     messages = [{"role": "user", "content": "打开 PixelForge 并点击登录"}]
 
     runner.run(
@@ -942,8 +943,22 @@ def test_runtime_tool_request_runner_clears_app_not_found_blocker_after_discover
     assert [event["event"] for event in timeline] == [
         "agent.tool.call",
         "agent.tool.call",
+        "agent.desktop.readiness_recovered",
         "agent.tool.call",
     ]
+    recovered = timeline[2]
+    assert recovered["detail"] == "desktop.list_apps"
+    assert recovered["tool"] == "desktop.list_apps"
+    assert recovered["recovery_tool"] == "desktop.list_apps"
+    assert recovered["status"] == "recovered"
+    assert recovered["app_name"] == "PixelForge"
+    assert recovered["blocking_conditions"] == [
+        "app_not_found",
+        "app_not_running",
+        "foreground_not_ready",
+    ]
+    assert run_events[-1][1] == "agent.desktop.readiness_recovered"
+    assert run_events[-1][2]["recovery_tool"] == "desktop.list_apps"
     assert "blocked_by_runtime_readiness" not in messages[-1]["content"]
 
 
