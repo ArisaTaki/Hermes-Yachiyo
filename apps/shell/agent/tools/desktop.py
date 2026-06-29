@@ -2664,23 +2664,26 @@ def _contains_non_ascii(value: str) -> bool:
     return any(ord(char) > 127 for char in str(value or ""))
 
 
-def app_focus(app_name: str) -> dict[str, Any]:
-    if _desktop_platform() != "macos":
-        return _unsupported("app.focus")
-    clean_name = _clean_required(app_name, "app_name")
-    resolved_name = _resolve_installed_app_name(clean_name) or clean_name
-    focus_attempts: list[dict[str, Any]] = []
-    result = _run_osascript(
+def _system_events_focus_app(app_name: str) -> dict[str, Any]:
+    return _run_osascript(
         """
         on run argv
             set appName to item 1 of argv
             tell application appName to activate
+            try
+                tell application appName to reopen
+            end try
             delay 0.2
             set targetFrontmost to false
+            set targetVisible to ""
+            set targetWindowCount to ""
             set frontName to ""
             tell application "System Events"
                 try
                     set targetProc to first application process whose name is appName
+                    try
+                        set visible of targetProc to true
+                    end try
                     try
                         set frontmost of targetProc to true
                         delay 0.1
@@ -2688,16 +2691,141 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     try
                         set targetFrontmost to frontmost of targetProc
                     end try
+                    try
+                        set targetVisible to visible of targetProc
+                    end try
+                    try
+                        set targetWindowCount to count of windows of targetProc
+                    end try
                 end try
                 try
                     set frontName to name of first application process whose frontmost is true
                 end try
             end tell
-            return "focused|" & appName & "|" & (targetFrontmost as text) & "|" & frontName
+            return "focused|" & appName & "|" & (targetFrontmost as text) & "|" & frontName & "|" & (targetVisible as text) & "|" & (targetWindowCount as text)
         end run
         """,
-        [resolved_name],
+        [app_name],
     )
+
+
+def _launchservices_focus_app(app_name: str) -> dict[str, Any]:
+    try:
+        open_result = _run_open_app(app_name)
+    except Exception as exc:
+        return _error("open -a", exc)
+    if open_result.returncode != 0:
+        return _failed("open -a", open_result)
+    verify_result = _system_events_focus_app(app_name)
+    verify_result["launchservices_returncode"] = open_result.returncode
+    return verify_result
+
+
+def _dock_focus_app(app_name: str) -> dict[str, Any]:
+    candidates = _app_display_name_candidates(app_name)
+    if not candidates:
+        candidates = [app_name]
+    return _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            set candidateText to item 2 of argv
+            set dockStatus to "missing"
+            set dockName to ""
+            set targetFrontmost to false
+            set targetVisible to ""
+            set targetWindowCount to ""
+            set frontName to ""
+            tell application "System Events"
+                try
+                    tell process "Dock"
+                        repeat with candidateName in paragraphs of candidateText
+                            set cleanCandidateName to candidateName as text
+                            if cleanCandidateName is not "" then
+                                try
+                                    click UI element cleanCandidateName of list 1
+                                    set dockName to cleanCandidateName
+                                    set dockStatus to "clicked"
+                                    exit repeat
+                                end try
+                            end if
+                        end repeat
+                    end tell
+                    delay 0.2
+                end try
+                try
+                    set targetProc to first application process whose name is appName
+                    try
+                        set targetFrontmost to frontmost of targetProc
+                    end try
+                    try
+                        set targetVisible to visible of targetProc
+                    end try
+                    try
+                        set targetWindowCount to count of windows of targetProc
+                    end try
+                end try
+                try
+                    set frontName to name of first application process whose frontmost is true
+                end try
+            end tell
+            return "dock|" & appName & "|" & dockStatus & "|" & (targetFrontmost as text) & "|" & frontName & "|" & (targetVisible as text) & "|" & (targetWindowCount as text) & "|" & dockName
+        end run
+        """,
+        [app_name, "\n".join(candidates)],
+    )
+
+
+def _app_display_name_candidates(app_name: str) -> list[str]:
+    candidates: list[str] = []
+    for candidate in (app_name, _resolve_installed_app_name(app_name)):
+        clean_candidate = str(candidate or "").strip()
+        if clean_candidate and clean_candidate not in candidates:
+            candidates.append(clean_candidate)
+    bundle_path = _installed_app_bundle_path(app_name)
+    localized_name = _localized_app_display_name(bundle_path) if bundle_path is not None else ""
+    if localized_name and localized_name not in candidates:
+        candidates.append(localized_name)
+    return candidates
+
+
+def _installed_app_bundle_path(app_name: str) -> Path | None:
+    matches: list[tuple[int, int, Path]] = []
+    for bundle in _iter_installed_app_bundles():
+        score = _installed_app_match_score(app_name, bundle.stem)
+        if score <= 0:
+            continue
+        matches.append((score, -len(bundle.stem), bundle))
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    return matches[0][2]
+
+
+def _localized_app_display_name(bundle_path: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["mdls", "-name", "kMDItemDisplayName", "-raw", str(bundle_path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    value = str(result.stdout or "").strip()
+    return "" if value in {"", "(null)", "null"} else value
+
+
+def app_focus(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.focus")
+    clean_name = _clean_required(app_name, "app_name")
+    resolved_name = _resolve_installed_app_name(clean_name) or clean_name
+    focus_attempts: list[dict[str, Any]] = []
+    result = _system_events_focus_app(resolved_name)
     if not result["ok"]:
         focus_attempts.append(_app_focus_attempt("applescript_system_events", result))
         fallback = app_open(clean_name)
@@ -2806,9 +2934,71 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": True,
         }
+    launchservices_result: dict[str, Any] | None = None
+    launchservices_data: dict[str, Any] = {}
+    dock_result: dict[str, Any] | None = None
+    dock_data: dict[str, Any] = {}
+    if _focus_surface_retry_needed(data, appkit_data):
+        launchservices_result = _launchservices_focus_app(resolved_name)
+        if launchservices_result.get("ok"):
+            launchservices_data = _parse_app_focus_output(
+                launchservices_result.get("stdout"),
+                resolved_name,
+            )
+        focus_attempts.append(
+            _app_focus_attempt(
+                "launchservices_open_a",
+                launchservices_result,
+                launchservices_data,
+            )
+        )
+        if launchservices_data.get("focus_verified") is True:
+            return {
+                "ok": True,
+                "action": "app.focus",
+                "summary": f"Focused {resolved_name} via LaunchServices",
+                "data": {
+                    **data,
+                    **launchservices_data,
+                    "focus_fallback": "launchservices_open_a",
+                    "focus_attempts": focus_attempts,
+                },
+                "permission_error": False,
+                "fallback_used": True,
+            }
+        dock_result = _dock_focus_app(resolved_name)
+        if dock_result.get("ok"):
+            dock_data = _parse_dock_focus_output(dock_result.get("stdout"), resolved_name)
+        focus_attempts.append(_app_focus_attempt("dock", dock_result, dock_data))
+        if dock_data.get("focus_verified") is True:
+            return {
+                "ok": True,
+                "action": "app.focus",
+                "summary": f"Focused {resolved_name} via Dock",
+                "data": {
+                    **data,
+                    **dock_data,
+                    "focus_fallback": "dock",
+                    "focus_attempts": focus_attempts,
+                },
+                "permission_error": False,
+                "fallback_used": True,
+            }
+    latest_observation = _latest_focus_observation(data, appkit_data, launchservices_data, dock_data)
+    fallback_result: dict[str, Any] = {"appkit": appkit_result}
+    if launchservices_result is not None:
+        fallback_result["launchservices"] = launchservices_result
+    if dock_result is not None:
+        fallback_result["dock"] = dock_result
     failed_data = {
         **data,
-        "frontmost_app": appkit_data.get("frontmost_app") or data.get("frontmost_app") or "",
+        **latest_observation,
+        "focus_verified": False,
+        "focus_status": "not_frontmost",
+        "frontmost_app": latest_observation.get("frontmost_app")
+        or appkit_data.get("frontmost_app")
+        or data.get("frontmost_app")
+        or "",
         "focus_attempts": focus_attempts,
         "recommended_tools": [
             "desktop.running_apps",
@@ -2824,7 +3014,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
             "app.focus",
             app_name=resolved_name,
             data=failed_data,
-            fallback_result={"appkit": appkit_result},
+            fallback_result=fallback_result,
         )
     return {
         "ok": False,
@@ -2838,7 +3028,8 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "recovery_hints": _permission_recovery_hints_for_targets(["foreground_focus"]),
         "recovery_actions": _app_focus_recovery_actions(resolved_name),
         "permission_error": False,
-        "fallback_used": resolved_name != clean_name,
+        "fallback_used": bool(launchservices_result or dock_result or resolved_name != clean_name),
+        "fallback_result": fallback_result,
     }
 
 
@@ -5099,21 +5290,112 @@ def _app_running_verification(app_name: str) -> dict[str, Any]:
 
 
 def _parse_app_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any]:
-    parts = str(value or "").strip().split("|", 3)
+    parts = str(value or "").strip().split("|", 5)
     app_name = parts[1] if len(parts) > 1 and parts[1] else fallback_app_name
     frontmost_text = parts[2] if len(parts) > 2 else ""
     frontmost_app = parts[3] if len(parts) > 3 else ""
+    visible_text = parts[4] if len(parts) > 4 else ""
+    window_count_text = parts[5] if len(parts) > 5 else ""
     focus_verified = frontmost_text.strip().lower() == "true" or (
         bool(app_name)
         and bool(frontmost_app)
         and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
     )
-    return {
+    data: dict[str, Any] = {
         "app_name": app_name,
         "focus_verified": focus_verified,
         "focus_status": "frontmost" if focus_verified else "not_frontmost",
         "frontmost_app": frontmost_app,
     }
+    process_visible = _parse_optional_bool(visible_text)
+    if process_visible is not None:
+        data["process_visible"] = process_visible
+    window_count = _parse_optional_int(window_count_text)
+    if window_count is not None:
+        data["window_count"] = window_count
+    return data
+
+
+def _parse_dock_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any]:
+    parts = str(value or "").strip().split("|", 7)
+    app_name = parts[1] if len(parts) > 1 and parts[1] else fallback_app_name
+    dock_status = parts[2] if len(parts) > 2 else ""
+    frontmost_text = parts[3] if len(parts) > 3 else ""
+    frontmost_app = parts[4] if len(parts) > 4 else ""
+    visible_text = parts[5] if len(parts) > 5 else ""
+    window_count_text = parts[6] if len(parts) > 6 else ""
+    dock_item_name = parts[7] if len(parts) > 7 else ""
+    focus_verified = frontmost_text.strip().lower() == "true" or (
+        bool(app_name)
+        and bool(frontmost_app)
+        and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
+    )
+    data: dict[str, Any] = {
+        "app_name": app_name,
+        "focus_verified": focus_verified,
+        "focus_status": "frontmost" if focus_verified else "not_frontmost",
+        "frontmost_app": frontmost_app,
+        "dock_status": dock_status,
+    }
+    if dock_item_name:
+        data["dock_item_name"] = dock_item_name
+    process_visible = _parse_optional_bool(visible_text)
+    if process_visible is not None:
+        data["process_visible"] = process_visible
+    window_count = _parse_optional_int(window_count_text)
+    if window_count is not None:
+        data["window_count"] = window_count
+    return data
+
+
+def _parse_optional_bool(value: Any) -> bool | None:
+    text = str(value or "").strip().casefold()
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    return None
+
+
+def _parse_optional_int(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _focus_surface_retry_needed(*snapshots: dict[str, Any]) -> bool:
+    for snapshot in snapshots:
+        if not snapshot or snapshot.get("focus_verified") is True:
+            continue
+        if snapshot.get("process_visible") is False:
+            return True
+        if snapshot.get("window_count") == 0:
+            return True
+    return False
+
+
+def _latest_focus_observation(*snapshots: dict[str, Any]) -> dict[str, Any]:
+    latest: dict[str, Any] = {}
+    for snapshot in snapshots:
+        if not snapshot:
+            continue
+        for key in (
+            "focus_verified",
+            "focus_status",
+            "frontmost_app",
+            "process_visible",
+            "window_count",
+            "dock_status",
+            "dock_item_name",
+            "launchservices_returncode",
+        ):
+            if key in snapshot and snapshot[key] not in (None, ""):
+                latest[key] = snapshot[key]
+    return latest
 
 
 def _app_bundle_id(app_name: str) -> str:
@@ -5288,7 +5570,12 @@ def _app_focus_attempt(
                     "focus_verified",
                     "focus_status",
                     "frontmost_app",
+                    "process_visible",
+                    "window_count",
                     "appkit_activate_result",
+                    "dock_status",
+                    "dock_item_name",
+                    "launchservices_returncode",
                 )
                 if key in data
             }

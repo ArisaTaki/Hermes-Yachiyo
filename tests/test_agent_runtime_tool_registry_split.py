@@ -3844,6 +3844,96 @@ def test_app_focus_verifies_frontmost_process(monkeypatch) -> None:
     assert osascript_calls == [["Slack"]]
 
 
+def test_app_focus_reports_process_visibility_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, args=None: {
+            "ok": True,
+            "stdout": "focused|Slack|true|Slack|true|2",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Slack")
+
+    assert result["ok"] is True
+    assert result["data"] == {
+        "app_name": "Slack",
+        "focus_verified": True,
+        "focus_status": "frontmost",
+        "frontmost_app": "Slack",
+        "process_visible": True,
+        "window_count": 2,
+    }
+
+
+def test_app_focus_uses_dock_fallback_when_process_has_no_visible_surface(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_system_events_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"focused|{app_name}|false|Codex|false|0",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_activate_app",
+        lambda app_name, *, bundle_id="": {
+            "ok": True,
+            "stdout": f"appkit|{app_name}|true|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_launchservices_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"focused|{app_name}|false|Codex|true|0",
+            "stderr": "",
+            "launchservices_returncode": 0,
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_dock_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"dock|{app_name}|clicked|true|{app_name}|true|1|计算器",
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Focused Calculator via Dock"
+    assert result["fallback_used"] is True
+    assert result["data"]["focus_verified"] is True
+    assert result["data"]["focus_fallback"] == "dock"
+    assert result["data"]["frontmost_app"] == "Calculator"
+    assert result["data"]["process_visible"] is True
+    assert result["data"]["window_count"] == 1
+    assert result["data"]["dock_status"] == "clicked"
+    assert result["data"]["dock_item_name"] == "计算器"
+    assert [attempt["strategy"] for attempt in result["data"]["focus_attempts"]] == [
+        "applescript_system_events",
+        "appkit_nsrunningapplication",
+        "launchservices_open_a",
+        "dock",
+    ]
+
+
 def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)

@@ -131,6 +131,14 @@ was actually verified and how many menu-level or control-like UI roles were
 observed, so current environment limits remain visible instead of being hidden
 behind a passing smoke.
 
+Current foreground focus diagnostics also record each low-risk activation
+strategy attempted by `app.focus`: AppleScript/System Events, AppKit,
+LaunchServices `open -a`, and localized Dock item activation. When the target
+process is launched but still cannot become frontmost, the evidence preserves
+`process_visible`, `window_count`, `frontmost_app`, `dock_status`, and
+`dock_item_name`. This distinguishes "app discovery/open works" from the
+remaining host-level foreground limitation.
+
 Current opt-in real desktop interaction evidence is reproducible with:
 
 ```bash
@@ -346,6 +354,10 @@ Exit evidence:
 - Generic app discovery normalizes user-provided app names.
 - Desktop operations use inspect/operate/verify events.
 - High-risk operations still go through approval and policy gates.
+- Real macOS smoke evidence proves whether the Python subprocess path can
+  foreground a target app; if it cannot, the next implementation step is an
+  Electron/native foreground bridge that owns the granted desktop permissions
+  instead of hiding the failure behind app-specific rules.
 
 ## Phase 6 - Data Analysis Capability
 
