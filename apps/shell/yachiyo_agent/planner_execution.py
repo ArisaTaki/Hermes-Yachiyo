@@ -1396,22 +1396,31 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if presentation:
         request["presentation"] = presentation
     if (
-        (
-            _web_request_needs_model_followup(decision.selected_intent.user_goal)
-            or str(decision.selected_intent.inputs.get("output_target_hint") or "").strip()
-            == "clipboard"
-        )
-        and (
-            not browser_action
-            or any(
-                str(getattr(item, "tool_name", "") or "").strip()
-                in {"artifact.write", "clipboard.write"}
-                for item in decision.plan.tool_plan.steps
-            )
+        _web_request_needs_model_followup(decision.selected_intent.user_goal)
+        or str(decision.selected_intent.inputs.get("output_target_hint") or "").strip()
+        == "clipboard"
+        or presentation
+    ) and (
+        not browser_action
+        or _browser_tool_result_can_feed_model(tool_name)
+        or any(
+            str(getattr(item, "tool_name", "") or "").strip()
+            in {"artifact.write", "clipboard.write"}
+            for item in decision.plan.tool_plan.steps
         )
     ):
         request["continue_to_model"] = True
     return [*prepare_requests, request]
+
+
+def _browser_tool_result_can_feed_model(tool_name: str) -> bool:
+    return tool_name in {
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.screenshot",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+    }
 
 
 def _web_browser_prepare_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

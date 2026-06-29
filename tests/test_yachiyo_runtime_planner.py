@@ -2231,6 +2231,34 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         step.approval_required for step in chrome_new_tab_search.plan.tool_plan.steps
     )
 
+    chrome_search_report = RuntimePlanner().decision(
+        "在 Chrome 打开新标签页搜索 Oha Yachiyo 并输出报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "artifact.write",
+        ],
+    )
+    assert chrome_search_report.selected_intent.kind == "web_research"
+    assert chrome_search_report.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=Oha+Yachiyo",
+        "browser_action": "open_url_extract",
+        "query": "Oha Yachiyo",
+        "app_name": "Google Chrome",
+        "app_mode": "focus",
+    }
+    assert [step.step_id for step in chrome_search_report.plan.tool_plan.steps] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "extract-web-url-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(chrome_search_report, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
+
     chinese = RuntimePlanner().decision(
         "搜索天气",
         allowed_tools=["browser.open_url"],
@@ -4698,6 +4726,39 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "path": "desktop-content-report.md",
         "body_source": "desktop_content",
     }
+
+    app_search_screenshot = RuntimePlanner().decision(
+        "打开 Linear 搜索 BUG-123 并截图",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "screen.capture",
+            "artifact.write",
+        ],
+    )
+    assert app_search_screenshot.selected_intent.kind == "desktop_operation"
+    assert app_search_screenshot.selected_intent.inputs["app_name_hint"] == "Linear"
+    assert app_search_screenshot.selected_intent.inputs["app_search_hint"] == {
+        "query": "BUG-123",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in app_search_screenshot.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "capture-screen",
+    ]
+    assert _step_by_id(app_search_screenshot, "type-app-search-query").input_preview == {
+        "text": "BUG-123"
+    }
+    assert _step_by_id(app_search_screenshot, "capture-screen").tool_name == "screen.capture"
 
     called_app_search = RuntimePlanner().decision(
         "帮我打开一个叫 AtlasLab 的应用并搜索 revenue",
@@ -10084,6 +10145,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert legacy_calls == []
@@ -10909,6 +10971,65 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_desktop_content",
             "continue_to_model": True,
+        },
+    ]
+
+    screenshot_requests = planner_desktop_tool_requests(
+        "打开 Linear 搜索 BUG-123 并截图",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "screen.capture",
+        ],
+    )
+
+    assert screenshot_requests == [
+        _app_discovery_request("Linear"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "BUG-123"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
         },
     ]
 
@@ -11967,6 +12088,7 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("根据当前网页写一份竞品调研报告", allowed_tools=allowed) == [
@@ -11976,6 +12098,7 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("research current page and write a report", allowed_tools=allowed) == [
@@ -11985,6 +12108,7 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("what is this page about", allowed_tools=allowed) == [
@@ -11995,6 +12119,7 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("读取当前网页内容", allowed_tools=allowed) == [
@@ -12111,6 +12236,47 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "input": {"selector": "search-result=1", "click_count": 1},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert planner_tool_requests(
+        "在 Chrome 打开新标签页搜索 Oha Yachiyo 并输出报告",
+        allowed_tools=[*allowed, "app.focus", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=Oha+Yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "打开 Safari 搜索 Oha Yachiyo，然后总结当前页面",
+        allowed_tools=[*allowed, "app.open", "desktop.list_apps"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Safari"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=Oha+Yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
+            "continue_to_model": True,
         },
     ]
     assert planner_tool_requests("百度 open hanako", allowed_tools=allowed) == [
@@ -12262,6 +12428,7 @@ def test_planner_tool_requests_maps_explicit_browser_url_open_actions() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests("请调研 https://example.com 并截图", allowed_tools=allowed) == [
@@ -12274,6 +12441,7 @@ def test_planner_tool_requests_maps_explicit_browser_url_open_actions() -> None:
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
         }
     ]
     assert planner_tool_requests(

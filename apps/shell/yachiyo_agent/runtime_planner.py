@@ -527,6 +527,13 @@ class TaskIntentRouter:
             or _app_name_hint(text)
             or ""
         ).strip()
+        direct_app_name_hint = _app_name_hint(text)
+        if (
+            direct_app_name_hint
+            and screen_capture is not None
+            and _contains_any(app_name_hint, ("搜索", "查找", "检索", "search", "find", "look up"))
+        ):
+            app_name_hint = direct_app_name_hint
         if not app_type_scope and _target_first_foreground_type_hint(text):
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -899,9 +906,13 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if app_scoped_desktop_operation and not web_search and not browser_interaction:
             return _empty_intent("web_research", text)
+        web_search_action = str(web_search.get("browser_action") or "").strip()
         browser_action = (
             web_search
-            if str(web_search.get("followup_action") or "").strip()
+            if (
+                str(web_search.get("followup_action") or "").strip()
+                or web_search_action in {"open_url_extract", "open_url_screenshot"}
+            )
             else browser_interaction
             or _browser_current_page_find_hint(text, dynamic_source)
             or _browser_current_page_hint(text)
@@ -1102,6 +1113,13 @@ class TaskIntentRouter:
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _app_command_palette_hint(text):
+            return _empty_intent("code_task", text)
+        app_hint = _app_name_hint(text)
+        if app_hint and (
+            _app_search_hint(text, app_hint)
+            or screen_capture_hint(text)
+            or _looks_like_ui_operation(text)
+        ):
             return _empty_intent("code_task", text)
         if _looks_like_app_scoped_ticket_or_creation_request(text):
             return _empty_intent("code_task", text)
@@ -1911,6 +1929,13 @@ class RuntimePlanner:
             or _foreground_compose_app_name_hint(intent.user_goal)
             or ""
         ).strip()
+        direct_app_name = _app_name_hint(intent.user_goal)
+        if (
+            direct_app_name
+            and screen_capture is not None
+            and _contains_any(app_name, ("搜索", "查找", "检索", "search", "find", "look up"))
+        ):
+            app_name = direct_app_name
         if not _app_first_type_scope_hint(intent.user_goal) and _target_first_foreground_type_hint(intent.user_goal):
             app_name = ""
         if _standalone_hotkey_request(intent.user_goal):
@@ -3090,6 +3115,25 @@ class RuntimePlanner:
                     app_name=app_name,
                     artifact_hint=desktop_content_artifact,
                 )
+            if screen_capture is not None:
+                capture_payload = {
+                    key: screen_capture[key]
+                    for key in ("reason",)
+                    if key in screen_capture and screen_capture[key] not in (None, "")
+                }
+                steps.append(
+                    _step(
+                        intent,
+                        "capture-screen",
+                        "Capture screen",
+                        "desktop.app_discovery",
+                        _first_allowed(("screen.capture",), allowed),
+                        input_preview=capture_payload,
+                        depends_on=[search_terminal_step_id],
+                        reason="Capture the visible app state after submitting the requested app search.",
+                    )
+                )
+                return steps
             if not app_search_needs_verify or not app_name:
                 return steps
             verify_tool = _first_allowed(
@@ -6579,6 +6623,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         intent.kind == "web_research"
         and _desktop_content_artifact_requested(text)
         and _app_name_hint(text)
+        and not _is_browser_or_search_app_name(_app_name_hint(text))
     ):
         score -= 0.28
     if (
@@ -9222,7 +9267,12 @@ def _is_generic_browser_app_label(app_name: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
     return normalized in {
         "browser",
+        "any browser",
+        "default browser",
         "浏览器",
+        "任意浏览器",
+        "任何浏览器",
+        "默认浏览器",
         "网页",
         "页面",
         "当前网页",
@@ -11146,6 +11196,7 @@ def _clean_app_search_query(query: str) -> str:
         r"(?:选择|选中|点击|点按|打开|按|"
         r"(?:把|将)?(?:当前|前台|这份|这个|这些|搜索结果|结果|内容|文本)?"
         r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成)|"
+        r"截图|截屏|screen\s*capture|screenshot|"
         r"choose|select|click|open|press|summari[sz]e|write|generate|output)(?:\b)?",
         value,
         maxsplit=1,
@@ -11671,7 +11722,17 @@ def _web_search_results_output_hint(text: str) -> dict[str, Any]:
         value,
         flags=re.IGNORECASE,
     ) or re.search(
+        r"(?:并|然后|并且|再|接着|之后|后).{0,4}"
+        r"(?:读|读取|看看|看一下|看下|概括|总结|摘要).{0,8}"
+        r"(?:当前|这个|该)?(?:网页|页面|页|current\s+page)$",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
         r"\b(?:and|then)\s+(?:read|extract|summari[sz]e)\s+results?\b",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:and|then)\s+(?:read|extract|summari[sz]e)\s+(?:the\s+)?(?:current\s+)?page\b",
         value,
         flags=re.IGNORECASE,
     ):
@@ -11679,7 +11740,19 @@ def _web_search_results_output_hint(text: str) -> dict[str, Any]:
         if _looks_like_url_summary_request(value):
             hint["presentation"] = "summary"
         return hint
+    if _browser_search_deliverable_extract_requested(value):
+        return {"browser_action": "open_url_extract"}
     return {}
+
+
+def _browser_search_deliverable_extract_requested(text: str) -> bool:
+    surface = _web_search_surface_hint(text)
+    return bool(
+        surface
+        and _is_browser_or_search_app_name(surface)
+        and not _is_generic_browser_app_label(surface)
+        and _desktop_content_artifact_requested(text)
+    )
 
 
 def _web_search_query(text: str) -> str:
@@ -11781,6 +11854,13 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:google|谷歌)\s*(?:搜索|搜一下|搜|查一下|查查|检索|一下)?\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|新建|开)\s*(?:一个|个)?\s*(?:新标签页?|新标签|new\s+tab)\s*"
+        r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过)?\s*"
+        r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
+        r"(?:里|中|上|内)?\s*"
+        r"(?:(?:打开|启动|开启|新建|开)\s*(?:一个|个)?\s*"
+        r"(?:新标签页?|新标签|new\s+tab)?\s*)?"
         r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
         r"\b(?:google|baidu)\s+(?P<query>[^.!?,]+)$",
     )
@@ -11903,8 +11983,29 @@ def _web_search_surface_hint(text: str) -> str:
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            return str(match.group("surface") or "").strip()
+            return _clean_web_search_surface_hint(str(match.group("surface") or ""))
     return ""
+
+
+def _clean_web_search_surface_hint(surface: str) -> str:
+    value = _clean_prompt(surface)
+    if not value:
+        return ""
+    value = re.split(
+        r"\s*(?:打开|启动|开启|新建|开|"
+        r"\b(?:open|launch|start|new\s+tab)\b)\s*",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
+    value = _clean_app_name_hint(value)
+    if not value:
+        return ""
+    if _is_generic_browser_app_label(value):
+        return value
+    if _is_browser_or_search_app_name(value):
+        return value
+    return legacy_app_name_hint(value)
 
 
 def _is_browser_or_search_app_name(app_name: str) -> bool:
@@ -12016,7 +12117,7 @@ def _clean_web_search_query(query: str) -> str:
     value = re.sub(
         r"\s*(?:并|然后|并且|再|接着|之后|后|\b(?:and|then)\b)?\s*"
         r"(?:读|读取|看看|看一下|看下|概括|总结|摘要)(?:一下|下)?"
-        r"(?:搜索)?(?:结果|内容)?$",
+        r"(?:搜索)?(?:结果|内容|当前页面|当前网页|网页|页面|current\s+page)?$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -12315,6 +12416,8 @@ def _browser_app_prepare_needed(text: str, browser_action: str) -> bool:
     if browser_action in {"open_search", "open_url", "open_url_extract", "open_url_screenshot"}:
         if browser_action == "open_search" and not _web_search_followup_hint(text):
             return False
+        if browser_action in {"open_url_extract", "open_url_screenshot"} and _explicit_browser_app_name_hint(text):
+            return True
         if browser_action != "open_search":
             return False
         value = str(text or "")
