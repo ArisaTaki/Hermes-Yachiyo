@@ -586,11 +586,12 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 tool_result,
             )
-            inspect_blocker = _foreground_readiness_blocker(tool_name, raw_input, tool_result)
-            if inspect_blocker is not None:
-                foreground_readiness_blocker = inspect_blocker
-            elif tool_name in _FOREGROUND_READINESS_RESET_TOOLS:
-                foreground_readiness_blocker = None
+            foreground_readiness_blocker = _updated_foreground_readiness_blocker(
+                foreground_readiness_blocker,
+                tool_name,
+                raw_input,
+                tool_result,
+            )
 
 
 _FOREGROUND_READINESS_GATED_TOOLS = {
@@ -628,6 +629,7 @@ _FOREGROUND_READINESS_RESET_TOOLS = {
     "app.focus",
     "app.focus_window",
     "app.show",
+    "desktop.list_apps",
     "desktop.active_window",
     "desktop.inspect_app",
 }
@@ -708,6 +710,90 @@ def _foreground_readiness_blocker(
             else data.get("recovery_actions")
         ),
     }
+
+
+def _updated_foreground_readiness_blocker(
+    blocker: dict[str, Any] | None,
+    tool_name: str,
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    inspect_blocker = _foreground_readiness_blocker(tool_name, raw_input, tool_result)
+    if inspect_blocker is not None:
+        return inspect_blocker
+    if tool_name == "desktop.inspect_app":
+        return None
+    if not _clears_foreground_readiness_blocker(blocker, tool_name, raw_input, tool_result):
+        return blocker
+    return None
+
+
+def _clears_foreground_readiness_blocker(
+    blocker: dict[str, Any] | None,
+    tool_name: str,
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> bool:
+    if blocker is None or tool_name not in _FOREGROUND_READINESS_RESET_TOOLS:
+        return False
+    if tool_result.get("ok") is not True:
+        return False
+    if tool_name == "desktop.list_apps":
+        return _list_apps_result_resolves_blocker(blocker, raw_input, tool_result)
+    if tool_name == "desktop.active_window":
+        return _active_window_result_resolves_blocker(blocker, tool_result)
+    return _tool_app_name_matches_blocker(blocker, raw_input, tool_result)
+
+
+def _list_apps_result_resolves_blocker(
+    blocker: dict[str, Any],
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> bool:
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    apps = data.get("apps") if isinstance(data.get("apps"), list) else []
+    if not apps:
+        return False
+    query = str(data.get("query") or raw_input.get("query") or "").strip()
+    return _name_matches_blocked_app(blocker, query)
+
+
+def _active_window_result_resolves_blocker(
+    blocker: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> bool:
+    conditions = set(_string_list(blocker.get("blocking_conditions")))
+    if conditions - {"foreground_focus_unverified", "foreground_not_ready"}:
+        return False
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    active_name = str(data.get("app_name") or data.get("frontmost_app") or "").strip()
+    return _name_matches_blocked_app(blocker, active_name)
+
+
+def _tool_app_name_matches_blocker(
+    blocker: dict[str, Any],
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> bool:
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    app_name = str(
+        data.get("app_name")
+        or data.get("discovered_app_name")
+        or raw_input.get("app_name")
+        or ""
+    ).strip()
+    return _name_matches_blocked_app(blocker, app_name)
+
+
+def _name_matches_blocked_app(blocker: dict[str, Any], app_name: str) -> bool:
+    clean_name = str(app_name or "").strip().casefold()
+    if not clean_name:
+        return False
+    blocked_names = {
+        str(blocker.get("app_name") or "").strip().casefold(),
+        str(blocker.get("requested_app_name") or "").strip().casefold(),
+    }
+    return clean_name in {name for name in blocked_names if name}
 
 
 def _inspect_app_blocking_conditions(
