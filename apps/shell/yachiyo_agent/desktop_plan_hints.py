@@ -39,12 +39,17 @@ _GENERIC_MUSIC_QUERIES = {
     "呢",
     "么",
     "some music",
+    "youtube music",
     "something",
     "anything",
     "a song",
     "song",
     "songs",
 }
+
+_MEDIA_APP_NAME_PATTERN = (
+    r"apple\s*music|苹果音乐|youtube\s*music|spotify|网易云|qq\s*音乐|qq music"
+)
 
 _FINDER_SAFE_SHORTCUT_PHRASES: tuple[tuple[str, str], ...] = (
     ("finder_quick_look", "快速查看"),
@@ -790,12 +795,15 @@ def safe_click_hint(text: str) -> dict[str, int | float] | None:
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
     app_name = music_app_name_hint(text)
+    query = media_query_hint(text) if action == "play" else ""
+    if not app_name and action == "play" and query:
+        app_name = media_app_scope_hint(text)
     if not app_name and _implicit_apple_music_control_hint(text, action=action):
         app_name = "Music"
     return {
         "action": action,
         "app_name": app_name,
-        "query": media_query_hint(text) if action == "play" else "",
+        "query": query,
         "control_only": "true" if media_control_only_hint(text, action=action) else "",
     }
 
@@ -960,7 +968,7 @@ def media_action_hint(text: str) -> str:
 def media_control_only_hint(text: str, *, action: str = "") -> bool:
     lowered = str(text or "").lower()
     if action in {"next", "previous", "pause"}:
-        return not re.search(r"apple\s*music|苹果音乐|spotify|网易云|qq\s*音乐|qq music", lowered)
+        return not re.search(_MEDIA_APP_NAME_PATTERN, lowered)
     if action == "play":
         return _media_resume_play_hint(str(text or "")) or bool(
             re.fullmatch(r"\s*(?:播放|播|放)(?:一下|下)?\s*", str(text or ""), flags=re.IGNORECASE)
@@ -998,6 +1006,39 @@ def music_app_name_hint(text: str) -> str:
     return legacy_music_app_name_hint(text)
 
 
+def media_app_scope_hint(text: str) -> str:
+    value = clean(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过|打开|启动)\s*"
+        r"(?P<app_zh>[^。！？!?，,]{1,60}?)\s*"
+        r"(?:里|中|上|内|里面)?\s*"
+        r"(?:搜索|搜一下|搜|查找|找|检索)?\s*"
+        r"(?:并|然后|再|接着|之后)?\s*"
+        r"(?:播放|播|放|play|start\s+playing)",
+        r"^(?:open|launch|start|use|using|with|in|on)\s+"
+        r"(?P<app_en>[A-Za-z0-9][\w .+&'-]{1,60}?)\s+"
+        r"(?:and\s+)?(?:search|find|play|start\s+playing)\b",
+        r"^(?:play|start\s+playing)\s+.+?\s+"
+        r"(?:on|in|with|using)\s+"
+        r"(?P<app_en_suffix>[A-Za-z0-9][\w .+&'-]{1,60}?)(?:\s+app)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = (
+            match.groupdict().get("app_zh")
+            or match.groupdict().get("app_en")
+            or match.groupdict().get("app_en_suffix")
+            or ""
+        )
+        app_name = _clean_media_app_scope(app_name)
+        if app_name:
+            return app_name
+    return ""
+
+
 def media_query_hint(text: str) -> str:
     value = clean(text)
     if re.fullmatch(r"(?:播放|播|放)(?:一下|下)?", value, flags=re.IGNORECASE):
@@ -1013,6 +1054,9 @@ def media_query_hint(text: str) -> str:
         r"(?:apple\s*music|music)(?:\s+app)?\s+(?:search|find|look\s+up)\s+"
         r"(?:for\s+)?(?P<query_app_search>.+?)\s+(?:and\s+)?(?:play|start)",
         r"(?:open|launch|start)\s+(?:apple\s*music|music)\s+(?:and\s+)?(?:search|find)\s+(?P<query_open_search>.+?)\s+(?:and\s+)?(?:play|start)",
+        r"(?:play|start playing)\s+(?P<query_en_scoped_app>.+?)\s+"
+        r"(?:on|in|with|using)\s+"
+        r"(?:[A-Za-z0-9][\w .+&'-]{1,60}?)(?:\s+app)?$",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过|打开|启动)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)?)"
         r"(?:里|中|上|内|里面)?\s*"
@@ -1036,6 +1080,7 @@ def media_query_hint(text: str) -> str:
             or groups.get("query_search_in")
             or groups.get("query_app_search")
             or groups.get("query_open_search")
+            or groups.get("query_en_scoped_app")
             or groups.get("query_zh_scoped_search")
             or groups.get("query_zh_search")
             or groups.get("query_zh_suffix")
@@ -1050,12 +1095,32 @@ def media_query_hint(text: str) -> str:
     return ""
 
 
+def _clean_media_app_scope(value: str) -> str:
+    app_name = clean(value)
+    app_name = re.sub(r"^(?:the|a|an)\s+", "", app_name, flags=re.IGNORECASE).strip()
+    app_name = re.sub(
+        r"\s*(?:app|application|客户端|桌面客户端)$",
+        "",
+        app_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not app_name:
+        return ""
+    normalized = legacy_music_app_name_hint(app_name)
+    if normalized:
+        return normalized
+    if clean(app_name).lower() in _GENERIC_MUSIC_QUERIES:
+        return ""
+    return app_name
+
+
 def _clean_media_query(value: str) -> str:
     query = clean(value)
     query = re.sub(r"^some\s+(?=[a-z])", "", query)
     query = re.sub(r"^(?:in|on|with|using)\s+", "", query, flags=re.IGNORECASE)
     query = re.sub(
-        r"(?:用|在|打开|启动|通过)?\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)|spotify|网易云音乐?|qq\s*音乐|qq music)",
+        r"(?:用|在|打开|启动|通过)?\s*"
+        rf"(?:{_MEDIA_APP_NAME_PATTERN}|音乐(?:应用|app)|网易云音乐?)",
         "",
         query,
         flags=re.IGNORECASE,

@@ -10,6 +10,7 @@ MUSIC_APP_ALIASES: dict[str, str] = {
     "music": "Music",
     "musicapp": "Music",
     "musicplayer": "Music",
+    "youtubemusic": "YouTube Music",
     "qqmusic": "QQ音乐",
     "qq音乐": "QQ音乐",
     "spotify": "Spotify",
@@ -36,6 +37,8 @@ def music_app_name_from_text(text: str) -> str:
     lowered = str(text or "").lower()
     if re.search(r"spotify", lowered):
         return "Spotify"
+    if re.search(r"youtube\s*music", lowered):
+        return "YouTube Music"
     if re.search(r"网易云|netease", lowered):
         return "网易云音乐"
     if re.search(r"qq\s*音乐|qq\s*music", lowered):

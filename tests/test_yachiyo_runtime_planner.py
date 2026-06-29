@@ -106,6 +106,7 @@ def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() ->
     assert supports_new_message_app_hint("一个我没提过的新应用") is False
     assert legacy_music_app_name_hint("网易云音乐") == "网易云音乐"
     assert legacy_music_app_name_hint("Apple Music") == "Music"
+    assert legacy_music_app_name_hint("YouTube Music") == "YouTube Music"
 
 
 def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() -> None:
@@ -9120,6 +9121,59 @@ def test_runtime_planner_routes_named_music_app_query_through_app_search() -> No
         submit_foreground_decision,
         "submit-media-search",
     ).input_preview == {"action": "confirm"}
+
+
+def test_runtime_planner_routes_unknown_named_music_app_query_through_app_search() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "media.apple_music_play",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        ("打开 YouTube Music 播放 lo-fi", "YouTube Music", "lo-fi"),
+        ("用 Vox 播放 jazz", "Vox", "jazz"),
+        ("play jazz in Doppler", "Doppler", "jazz"),
+    )
+
+    for prompt, app_name, query in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs == {
+            "action": "play",
+            "app_name": app_name,
+            "query": query,
+            "control_only": "",
+        }
+        assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ]
+        assert _step_by_id(decision, "discover-media-app").input_preview == {
+            "query": app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+            "app_name": app_name,
+            "action": "find",
+        }
+        assert _step_by_id(decision, "type-media-search-query").input_preview == {
+            "text": query
+        }
+        assert _step_by_id(decision, "play-media-search-result").input_preview == {
+            "app_name": app_name
+        }
+        assert "media.apple_music_play" not in [
+            step.tool_name for step in decision.plan.tool_plan.steps
+        ]
 
 
 def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
