@@ -456,6 +456,7 @@ _EXECUTION_VERIFICATION_TOOLS = {
     "desktop.running_apps",
     "desktop.windows",
     "desktop.ui_elements",
+    "desktop.inspect_app",
     "screen.capture",
 }
 
@@ -567,6 +568,8 @@ def _keep_post_mutation_verification_request(
 def _later_verification_supersedes(current_tool: str, later_tool: str) -> bool:
     if current_tool == later_tool:
         return False
+    if later_tool == "desktop.inspect_app":
+        return True
     if current_tool == "screen.capture" and later_tool in {"desktop.ui_elements", "desktop.windows"}:
         return True
     if current_tool in {"desktop.running_apps", "desktop.active_window"} and later_tool in {
@@ -709,6 +712,16 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
             return payload
         canonical = _canonical_app_name(query) if not query.isascii() else query
         return {**payload, "query": canonical}
+    if tool_name == "desktop.inspect_app":
+        app_name = str(payload.get("app_name") or "").strip()
+        request_payload = {
+            key: payload[key]
+            for key in ("open_if_needed", "focus", "role_filter", "limit")
+            if key in payload and payload[key] not in (None, "")
+        }
+        if app_name:
+            request_payload["app_name"] = _canonical_app_name(app_name)
+        return request_payload
     if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
     if tool_name == "screen.capture":

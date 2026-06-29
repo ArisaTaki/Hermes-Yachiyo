@@ -478,6 +478,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.search_submit",
         "desktop.submit_foreground",
         "desktop.active_window",
+        "desktop.inspect_app",
         "desktop.list_apps",
         "desktop.running_apps",
         "desktop.ui_elements",
@@ -519,6 +520,8 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return True
     if tool_name in {"app.status", "app.show", "app.hide", "app.minimize", "app.quit"}:
         return True
+    if tool_name == "desktop.inspect_app":
+        return _runtime_app_name_is_specific(str(request_input.get("app_name") or ""))
     if tool_name in {
         "desktop.hide_app",
         "desktop.show_all_apps",

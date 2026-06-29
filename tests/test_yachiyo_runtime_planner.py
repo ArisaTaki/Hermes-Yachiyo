@@ -3380,6 +3380,60 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     }
 
 
+def test_runtime_planner_prefers_inspect_app_for_app_scoped_ui_inspection() -> None:
+    allowed_tools = [
+        "desktop.inspect_app",
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision("Slack 有哪些按钮", allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == "Slack"
+    assert decision.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert decision.plan.route_to_studio is True
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == ["inspect-app"]
+    inspect = _step_by_id(decision, "inspect-app")
+    assert inspect.tool_name == "desktop.inspect_app"
+    assert inspect.action == "inspect_app"
+    assert inspect.approval_required is False
+    assert inspect.input_preview == {
+        "app_name": "Slack",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+
+    assert planner_tool_requests("Slack 有哪些按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "open_if_needed": True,
+                "focus": True,
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "Slack",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+
+    english = RuntimePlanner().decision("PixelForge show buttons", allowed_tools=allowed_tools)
+    assert _step_by_id(english, "inspect-app").input_preview == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+    }
+
+
 def test_runtime_planner_focuses_arbitrary_app_before_surface_inspection() -> None:
     for prompt in (
         "读取 Acme Studio 当前界面",

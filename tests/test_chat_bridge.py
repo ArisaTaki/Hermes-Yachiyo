@@ -1666,42 +1666,48 @@ def test_chat_bridge_quick_message_executes_named_windows_list_without_model(
     assert "model.requested" not in event_types
 
 
-def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
+def test_chat_bridge_quick_message_inspects_app_for_visible_ui_elements(
     tmp_path,
     monkeypatch,
 ):
-    calls: list[tuple[str, object, object]] = []
+    calls: list[tuple[str, object, object, object, object, object]] = []
 
-    def fake_app_focus(app_name: str) -> dict:
-        calls.append(("focus", app_name, None))
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        calls.append(("inspect", app_name, open_if_needed, focus, role_filter, limit))
         return {
             "ok": True,
-            "action": "app.focus",
-            "summary": f"Focused {app_name}",
-            "data": {"app_name": app_name},
-        }
-
-    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
-        calls.append(("ui", role_filter, limit))
-        return {
-            "ok": True,
-            "action": "desktop.ui_elements",
-            "summary": "Read Slack buttons",
+            "action": "desktop.inspect_app",
+            "summary": "Slack is ready for foreground actions",
             "data": {
                 "app_name": "Slack",
-                "title": "general",
-                "elements": [
-                    {
-                        "role": "AXButton",
-                        "name": "Send",
-                        "center": {"x": 640, "y": 720},
+                "focus_verified": True,
+                "focus_result": {"ok": True, "data": {"app_name": "Slack", "focus_verified": True}},
+                "ui_elements": {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "app_name": "Slack",
+                        "title": "general",
+                        "elements": [
+                            {
+                                "role": "AXButton",
+                                "name": "Send",
+                                "center": {"x": 640, "y": 720},
+                            },
+                        ],
                     },
-                ],
+                },
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -1709,20 +1715,20 @@ def test_chat_bridge_quick_message_focuses_app_then_reads_ui_elements(
     )
 
     assert result["ok"] is True
-    assert calls == [("focus", "Slack", None), ("ui", "button", 80)]
+    assert calls == [("inspect", "Slack", True, True, "button", 80)]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == (
         "已切换到 Slack。 当前 Slack 界面控件：Button Send（640, 720）。"
     )
-    assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
-        "app.focus",
-        "desktop.ui_elements",
-    ]
+    assert [call["tool_name"] for call in agent_task["tool_calls"][-1:]] == ["desktop.inspect_app"]
     assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "open_if_needed": True,
+        "focus": True,
         "role_filter": "button",
         "limit": 80,
+        "app_name": "Slack",
     }
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
@@ -2026,38 +2032,47 @@ def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_
     tmp_path,
     monkeypatch,
 ):
-    calls: list[tuple[str, object, object]] = []
+    calls: list[tuple[str, object, object, object, object, object]] = []
 
-    def fake_app_open(app_name: str) -> dict:
-        calls.append(("open", app_name, None))
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        calls.append(("inspect", app_name, open_if_needed, focus, role_filter, limit))
         return {
             "ok": True,
-            "action": "app.open",
-            "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name, "launch_verified": True},
-        }
-
-    def fake_ui_elements(role_filter: str = "", limit: int = 80, app_name: str = "") -> dict:
-        calls.append(("ui", role_filter, limit))
-        return {
-            "ok": True,
-            "action": "desktop.ui_elements",
-            "summary": "Read WeChat buttons",
+            "action": "desktop.inspect_app",
+            "summary": "WeChat is ready for foreground actions",
             "data": {
                 "app_name": "WeChat",
-                "title": "Chats",
-                "elements": [
-                    {
-                        "role": "AXButton",
-                        "name": "搜索",
-                        "center": {"x": 120, "y": 88},
+                "open_result": {
+                    "ok": True,
+                    "data": {"app_name": "WeChat", "launch_verified": True},
+                },
+                "focus_verified": True,
+                "ui_elements": {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "app_name": "WeChat",
+                        "title": "Chats",
+                        "elements": [
+                            {
+                                "role": "AXButton",
+                                "name": "搜索",
+                                "center": {"x": 120, "y": 88},
+                            },
+                        ],
                     },
-                ],
+                },
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
@@ -2065,24 +2080,24 @@ def test_chat_bridge_quick_message_opens_app_then_reads_ui_elements_for_chinese_
     )
 
     assert result["ok"] is True
-    assert calls == [("open", "WeChat", None), ("ui", "button", 80)]
+    assert calls == [("inspect", "WeChat", True, True, "button", 80)]
     assert agent_task["status"] == "completed"
     assert agent_task["needs_user_action"] is False
     assert agent_task["pending_approvals"] == []
     assert agent_task["summary"] == (
         "已打开 WeChat。 当前 WeChat 界面控件：Button 搜索（120, 88）。"
     )
-    assert [call["tool_name"] for call in agent_task["tool_calls"][-2:]] == [
-        "app.open",
-        "desktop.ui_elements",
-    ]
+    assert [call["tool_name"] for call in agent_task["tool_calls"][-1:]] == ["desktop.inspect_app"]
     assert agent_task["tool_calls"][-1]["input_preview"] == {
+        "open_if_needed": True,
+        "focus": True,
         "role_filter": "button",
         "limit": 80,
+        "app_name": "WeChat",
     }
     assert run["status"] == "completed"
     assert run["pending_approval"] == {}
-    assert event_types.count("agent.desktop.intent_planned") == 3
+    assert event_types.count("agent.desktop.intent_planned") == 1
     assert "agent.tool.call" in event_types
     assert "agent.desktop.intent_completed" in event_types
     assert "agent.desktop.intent_approval_required" not in event_types

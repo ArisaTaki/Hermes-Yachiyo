@@ -36,17 +36,18 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
     {
         "id": "generic_app_read_buttons",
         "prompt": "打开 Linear 并读取按钮",
-        "allowed_tools": ["desktop.list_apps", "app.open", "desktop.ui_elements"],
-        "expected_app": "Linear",
-        "expected_steps": [
-            "discover-desktop-state",
-            "open-or-focus-app",
-            "read-foreground-ui",
-        ],
-        "expected_request_tools": [
+        "allowed_tools": [
+            "desktop.inspect_app",
             "desktop.list_apps",
             "app.open",
             "desktop.ui_elements",
+        ],
+        "expected_app": "Linear",
+        "expected_steps": [
+            "inspect-app",
+        ],
+        "expected_request_tools": [
+            "desktop.inspect_app",
         ],
     },
     {
@@ -122,20 +123,25 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     expected_request_tools = [str(tool) for tool in case["expected_request_tools"]]
     discovery_request = requests[0] if requests else {}
     operation_request = requests[1] if len(requests) > 1 else {}
+    discovery_input = discovery_request.get("input") if isinstance(discovery_request, dict) else {}
     operation_input = operation_request.get("input") if isinstance(operation_request, dict) else {}
+    expected_discovery_tool = expected_request_tools[0] if expected_request_tools else ""
     checks = {
         "intent_is_desktop_operation": decision.selected_intent.kind == "desktop_operation",
         "route_to_studio": decision.plan.route_to_studio is True,
         "steps_match": [step["id"] for step in steps] == expected_steps,
         "request_tools_match": request_tools == expected_request_tools,
-        "starts_with_discovery": request_tools[:1] == ["desktop.list_apps"],
+        "starts_with_discovery": request_tools[:1] == [expected_discovery_tool],
         "discovery_query_matches": (
-            isinstance(discovery_request.get("input"), dict)
-            and discovery_request["input"].get("query") == expected_app
+            isinstance(discovery_input, dict)
+            and (
+                discovery_input.get("query") == expected_app
+                or discovery_input.get("app_name") == expected_app
+            )
         ),
         "operation_app_matches": (
-            isinstance(operation_input, dict)
-            and operation_input.get("app_name") == expected_app
+            expected_discovery_tool == "desktop.inspect_app"
+            or (isinstance(operation_input, dict) and operation_input.get("app_name") == expected_app)
         ),
         "uses_no_browser_tool": not any(tool.startswith("browser.") for tool in request_tools),
         "missing_capabilities_empty": decision.plan.tool_plan.missing_capabilities == [],

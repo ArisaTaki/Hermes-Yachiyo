@@ -1436,6 +1436,8 @@ class RuntimeCustomApiAgentLoop:
                 return _windows_summary(result, planned_input) or result_summary or "已读取窗口列表。"
             if tool_name == "desktop.ui_elements":
                 return _ui_elements_summary(result) or result_summary or "已读取当前界面控件。"
+            if tool_name == "desktop.inspect_app":
+                return _inspect_app_result_summary(result) or result_summary or "已检查应用。"
             if tool_name == "app.status":
                 return _app_status_summary(result, planned_input) or result_summary or "已检查应用状态。"
             if tool_name == "desktop.reveal_path":
@@ -2577,6 +2579,34 @@ def _ui_elements_summary(result: dict[str, Any]) -> str:
     suffix = f" 等 {len(raw_elements)} 个控件" if len(raw_elements) > len(items) else ""
     prefix = f"当前 {app_name} 界面控件" if app_name else "当前界面控件"
     return f"{prefix}：{'; '.join(items)}{suffix}。"
+
+
+def _inspect_app_result_summary(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if not data:
+        return ""
+    app_name = str(
+        data.get("app_name")
+        or data.get("discovered_app_name")
+        or data.get("requested_app_name")
+        or ""
+    ).strip()
+    ui_result = data.get("ui_elements") if isinstance(data.get("ui_elements"), dict) else {}
+    ui_summary = _ui_elements_summary(ui_result) if ui_result else ""
+    open_result = data.get("open_result") if isinstance(data.get("open_result"), dict) else {}
+    focus_result = data.get("focus_result") if isinstance(data.get("focus_result"), dict) else {}
+    if open_result.get("ok") is True and app_name:
+        prefix = f"已打开 {app_name}。"
+    elif (
+        focus_result.get("ok") is True
+        or data.get("focus_verified") is True
+    ) and app_name:
+        prefix = f"已切换到 {app_name}。"
+    elif app_name:
+        prefix = f"已检查 {app_name}。"
+    else:
+        prefix = "已检查应用。"
+    return f"{prefix} {ui_summary}".strip() if ui_summary else prefix
 
 
 def _app_status_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

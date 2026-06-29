@@ -2289,6 +2289,27 @@ class RuntimePlanner:
                 for key in ("role_filter", "limit")
                 if key in ui_inspection and ui_inspection[key] not in (None, "")
             }
+            inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
+            if app_name and not focus_step_added and inspect_tool:
+                return [
+                    _step(
+                        intent,
+                        "inspect-app",
+                        "Inspect app",
+                        "desktop.app_discovery",
+                        inspect_tool,
+                        input_preview=_desktop_inspect_app_input_preview(
+                            app_name,
+                            ui_payload,
+                            open_if_needed=True,
+                            focus=True,
+                        ),
+                        reason=(
+                            "Inspect the requested app with discovery, optional open/focus, "
+                            "windows, and named-app UI readiness in one observable step."
+                        ),
+                    )
+                ]
             if app_name and not focus_step_added:
                 steps.append(
                     _step(
@@ -5171,6 +5192,8 @@ def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any
 def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> str:
     if step_key == "discover-desktop-state":
         return "list_apps"
+    if step_key == "inspect-app":
+        return "inspect_app"
     if step_key == "open-or-focus-app":
         return "focus_app" if tool_name == "app.focus" else "open_app"
     if step_key == "list-app-windows":
@@ -5385,6 +5408,24 @@ def _desktop_verify_input_preview(
     return preview
 
 
+def _desktop_inspect_app_input_preview(
+    app_name: str,
+    ui_payload: Mapping[str, Any],
+    *,
+    open_if_needed: bool,
+    focus: bool,
+) -> dict[str, Any]:
+    preview: dict[str, Any] = {
+        "app_name": app_name,
+        "open_if_needed": open_if_needed,
+        "focus": focus,
+    }
+    for key in ("role_filter", "limit"):
+        if key in ui_payload and ui_payload[key] not in (None, ""):
+            preview[key] = ui_payload[key]
+    return preview
+
+
 def _media_playback_verify_step(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -5445,6 +5486,8 @@ def _desktop_discovery_action(tool_name: str | None) -> str:
         return "read_running_apps"
     if clean_tool == "desktop.list_apps":
         return "list_apps"
+    if clean_tool == "desktop.inspect_app":
+        return "inspect_app"
     if clean_tool == "desktop.windows":
         return "list_windows"
     if clean_tool == "desktop.ui_elements":
@@ -5869,6 +5912,7 @@ def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapsho
     return (
         intent.kind in {"workflow_orchestration", "multi_agent", "data_analysis", "code_task"}
         or any(step.approval_required for step in steps)
+        or any(step.tool_name == "desktop.inspect_app" for step in steps)
         or len(steps) >= 3
     )
 
